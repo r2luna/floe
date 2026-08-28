@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fleet — agents</title>
+<style>
+/* Tokens copied from src/renderer/src/index.css — the prototype is standalone on purpose. */
+:root {
+  color-scheme: dark;
+  --canvas:#0d0d0f; --bg:#131315; --panel:#161618; --panel-2:#1d1d20;
+  --border:#2a2a2d; --border-soft:#242427; --tab-active:#28282c;
+  --text:#e7e7ea; --text-bright:#fff; --muted:#8a8a90; --muted-2:#6b6b70;
+  --accent:#4ade80; --accent-red:#e06c75; --accent-cyan:#56b6c2; --accent-yellow:#e5c07b;
+  --radius:6px;
+  /* Card surface opacity — the single knob for how much board shows through.
+     Graph cards sit on top of the wires, so they get a denser variant. */
+  --card-bg: color-mix(in srgb, var(--panel) 55%, transparent);
+  --card-bg-sel: color-mix(in srgb, var(--panel-2) 78%, transparent);
+  --card-bg-graph: color-mix(in srgb, var(--panel) 80%, transparent);
+  --mono:"CommitMonoPinguim","Maple Mono NF",ui-monospace,SFMono-Regular,Menlo,monospace;
+  /* canonical mode-chip tones (dark) */
+  --run-fg:#93b8a1; --run-bd:#283129; --run-bg:#1b201d;
+  --wait-fg:#f0b96b; --wait-bd:#4a3620; --wait-bg:#211c15;
+  --err-fg:#c49495;  --err-bd:#352829;  --err-bg:#221b1c;
+  --idle-fg:#8a8a90; --idle-bd:#2a2a2d; --idle-bg:#17171a;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas:#f4f4f5; --bg:#fafafa; --panel:#fff; --panel-2:#f1f1f3;
+  --border:#dedee2; --border-soft:#e7e7ea; --tab-active:#e4e4e8;
+  --text:#1c1c1f; --text-bright:#000; --muted:#6b6b70; --muted-2:#8a8a90;
+  --run-fg:#2f7d52; --run-bd:#b6d9c3; --run-bg:#eef6f1;
+  --wait-fg:#9a6a12; --wait-bd:#e8d3a8; --wait-bg:#fbf5e9;
+  --err-fg:#b1454a;  --err-bd:#e3bdbf;  --err-bg:#f9eef0;
+  --idle-fg:#6b6b70; --idle-bd:#dedee2; --idle-bg:#f4f4f5;
+  /* Light mode needs a denser card: pale text on a pale see-through surface goes
+     illegible far faster than light-on-dark does. */
+  --card-bg: color-mix(in srgb, var(--panel) 72%, transparent);
+  --card-bg-sel: color-mix(in srgb, var(--panel-2) 88%, transparent);
+  --card-bg-graph: color-mix(in srgb, var(--panel) 90%, transparent);
+}
+* { box-sizing:border-box; }
+html,body { height:100%; margin:0; }
+body {
+  background:var(--canvas); color:var(--text); font-family:var(--mono);
+  font-size:13px; display:flex; flex-direction:column;
+  -webkit-user-select:none; user-select:none; overflow:hidden;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ---- chip: the app-wide outline pattern (never a solid fill) ---- */
+.chip {
+  display:inline-flex; align-items:center; gap:6px;
+  font:inherit; font-size:11px; line-height:1; padding:4px 10px;
+  border:1px solid var(--border); border-radius:1px;
+  background:var(--panel-2); color:var(--muted); white-space:nowrap;
+}
+button.chip { cursor:pointer; min-height:34px; }
+button.chip:focus-visible { outline:2px solid var(--accent-cyan); outline-offset:2px; }
+.chip[data-on="1"] { color:var(--text-bright); border-color:var(--tab-active); background:var(--tab-active); }
+.chip.run  { color:var(--run-fg);  border-color:var(--run-bd);  background:var(--run-bg); }
+.chip.wait { color:var(--wait-fg); border-color:var(--wait-bd); background:var(--wait-bg); }
+.chip.err  { color:var(--err-fg);  border-color:var(--err-bd);  background:var(--err-bg); }
+.chip.idle { color:var(--idle-fg); border-color:var(--idle-bd); background:var(--idle-bg); }
+.dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.15} }
+
+/* ---- attention ----
+   Blinking means exactly ONE thing: this agent needs you (waiting on an answer,
+   or stalled). Working agents deliberately do NOT blink — they have the pulse
+   bar. If everything moves, nothing calls you. */
+.chip.err .dot, .chip.wait .dot { animation:blink 1.2s ease-in-out infinite; }
+@keyframes attn-wait { 50% { background:color-mix(in srgb, var(--wait-bg) 78%, transparent); } }
+@keyframes attn-err  { 50% { background:color-mix(in srgb, var(--err-bg) 78%, transparent); } }
+.card[data-st="wait"] { animation:attn-wait 1.6s ease-in-out infinite; }
+.card[data-st="err"]  { animation:attn-err  1.6s ease-in-out infinite; }
+.card[data-st="wait"] .state .dot, .card[data-st="err"] .state .dot { animation:blink 1.2s ease-in-out infinite; }
+/* Reduced motion: no blink, but the tone must still shout — a solid tinted wash. */
+@media (prefers-reduced-motion:reduce) {
+  .card[data-st="wait"], .card[data-st="err"] { animation:none; }
+  .card[data-st="wait"] { background:var(--wait-bg); }
+  .card[data-st="err"]  { background:var(--err-bg); }
+  .card, .cluster, .gnode, .pill { transition:none !important; }
+  .dot { animation:none !important; }
+}
+
+/* ---- header ---- */
+header {
+  display:flex; align-items:center; gap:10px; flex:none;
+  padding:8px 12px; border-bottom:1px solid var(--border-soft); background:var(--bg);
+}
+.brand { font-size:12px; letter-spacing:.18em; color:var(--muted-2); margin-right:4px; }
+.spacer { flex:1; }
+#clock { font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.src-off { opacity:.45; }
+
+/* ---- body ---- */
+main { flex:1; display:flex; min-height:0; }
+#grid {
+  --gap:22px;
+  flex:1; min-width:0; overflow:auto; padding:14px;
+  display:grid; gap:var(--gap); align-content:start; align-items:start;
+  grid-template-columns:repeat(auto-fill,minmax(230px,1fr));
+  background:radial-gradient(circle, var(--border-soft) 1px, transparent 1px) 0 0 / 22px 22px;
+}
+/* An author `display` beats the UA's [hidden]{display:none}, so the hidden pane
+   would keep eating half the width as an empty flex child. */
+[hidden] { display:none !important; }
+
+/* ---- card ----
+   HUD treatment: corner brackets frame the agent instead of boxing it in, over a
+   translucent surface so the board grid reads through. Same card in the grid, in
+   the grid and in the graph — one object, one look. */
+.card {
+  text-align:left; font:inherit; cursor:pointer;
+  background:var(--card-bg);
+  /* Always 1px, usually invisible: with border-box the colour can appear later
+     without moving a single pixel. */
+  border:1px solid transparent; border-radius:0;
+  padding:10px 12px; min-height:78px;
+  display:flex; flex-direction:column; gap:6px; position:relative; overflow:hidden;
+  transition:background .15s, transform .08s, opacity .35s ease;
+}
+/* Brackets sit at 0, not outside: the card clips its overflow (for the pulse bar
+   and the ellipsised text), so anything past the box would simply be cut off. */
+.card::before, .card::after { content:""; position:absolute; width:11px; height:11px;
+  border:1px solid var(--muted-2); pointer-events:none; }
+.card::before { top:0; left:0; border-right:0; border-bottom:0; }
+.card::after  { bottom:0; right:0; border-left:0; border-top:0; }
+.card[data-st="run"]::before,  .card[data-st="run"]::after  { border-color:var(--run-fg); }
+.card[data-st="wait"]::before, .card[data-st="wait"]::after { border-color:var(--wait-fg); }
+.card[data-st="err"]::before,  .card[data-st="err"]::after  { border-color:var(--err-fg); }
+/* Enter/exit via @starting-style + transition instead of an @keyframes: the
+   `animation` slot is spoken for by the attention blink, and a card must be able
+   to arrive AND blink at the same time. */
+@starting-style { .card { opacity:0; } }
+[data-leaving] { opacity:0 !important; transform:scale(.96); pointer-events:none; }
+/* A session that just opened gets one ring pulse, so you see it land. It uses the
+   `animation` slot rather than a pseudo-element (both are brackets now) — safe,
+   because a session that just opened is by definition `running`, never blinking. */
+.card[data-fresh] { animation:ring 1.8s ease-out; }
+@keyframes ring {
+  0%   { box-shadow:inset 0 0 0 1px var(--accent-cyan); }
+  100% { box-shadow:inset 0 0 0 1px transparent; }
+}
+.card:focus-visible { outline:2px solid var(--accent-cyan); outline-offset:2px; }
+.card:active { transform:scale(.985); }
+.card[data-sel="1"] { background:var(--card-bg-sel); }
+.card[data-dim="1"] { opacity:.3; }
+.card-top { display:flex; align-items:center; gap:6px; font-size:10px; color:var(--muted-2); }
+.card-top .path { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.card-top .path b { font-weight:400; color:var(--accent-cyan); }
+.card-top .key { margin-left:auto; opacity:.4; font-variant-numeric:tabular-nums; }
+/* State: tone + elapsed, no word. Driven off the card's data-st so a live update
+   is one attribute write instead of re-rendering the element. */
+.card-top .state { display:inline-flex; align-items:center; gap:4px;
+  font-variant-numeric:tabular-nums; color:var(--muted-2); }
+.card-top .state b { font-weight:400; }
+.card[data-st="run"]  .state { color:var(--run-fg); }
+.card[data-st="wait"] .state { color:var(--wait-fg); }
+.card[data-st="err"]  .state { color:var(--err-fg); }
+.card .pulse { display:none; }
+.card[data-st="run"] .pulse { display:block; }
+.card h2 {
+  margin:0; font-size:13px; font-weight:400; color:var(--text-bright);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.card .last {
+  font-size:11px; color:var(--muted); line-height:1.45; flex:1;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.pulse { position:absolute; left:0; right:0; bottom:0; height:2px; overflow:hidden; }
+.pulse i { position:absolute; inset:0; width:34%; background:var(--run-fg); opacity:.55; animation:slide 1.9s linear infinite; }
+@keyframes slide { from{transform:translateX(-100%)} to{transform:translateX(320%)} }
+
+/* ---- talking: the pair sits in one block, and the cards stay exactly the size
+   they are anywhere else ----
+   The first attempt gave the block padding and a border, so the two cards inside
+   came out narrower than a lone card and the grid went ragged. The fix is that the
+   block costs no layout at all: it spans two columns, splits them 1fr/1fr with the
+   SAME gap as the outer grid — which lands each card on exactly one column — and
+   the box itself is drawn by a pseudo-element outside the flow. */
+.cluster {
+  grid-column:span 2; position:relative;
+  display:grid; grid-template-columns:1fr 1fr; gap:var(--gap);
+}
+.cluster::before {
+  content:""; position:absolute; inset:-9px; pointer-events:none;
+  border:1px solid var(--accent-cyan); border-radius:var(--radius);
+  background:color-mix(in srgb, var(--accent-cyan) 4%, transparent);
+}
+.cluster[data-scope="cross"]::before,
+.cluster[data-scope="remote"]::before { border-style:dashed; }
+.cluster[data-dim="1"] { opacity:.3; }
+.cluster[data-scope="same"] .x-hdr { display:none; }
+.x-hdr {
+  grid-column:1/-1; display:flex; align-items:center; gap:6px;
+  font-size:9.5px; letter-spacing:.16em; color:var(--muted-2); padding-bottom:2px;
+}
+.x-hdr .tag { display:inline-flex; align-items:center; gap:4px; color:var(--muted); }
+.x-hdr .arrow { color:var(--accent-cyan); letter-spacing:0; }
+.cluster-last {
+  grid-column:1/-1; font-size:10.5px; color:var(--muted); padding-top:2px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.cluster-last b { font-weight:400; color:var(--accent-cyan); }
+/* Absolutely positioned, so it rides the gap between the cards instead of taking
+   width from them. Smaller than the 44px touch minimum — deliberate: the thread
+   also opens from the right-hand column and with `c`, and stealing 44px here would
+   steal it from the cards, which are the primary target. */
+.bond {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:var(--gap); height:64px; padding:0;
+  font:inherit; cursor:pointer; background:none; border:0; color:var(--accent-cyan);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px;
+}
+.bond:focus-visible { outline:2px solid var(--accent-cyan); outline-offset:2px; }
+.bond .line { flex:1; width:var(--w,1px); background:var(--accent-cyan); opacity:.35; }
+.bond .sym { font-size:13px; animation:beat 2.2s ease-in-out infinite; }
+@keyframes beat { 0%,100%{opacity:.45} 50%{opacity:1} }
+/* The ⇄ marker on a lone card's header is a span, never a button: the card itself
+   is a <button> and nesting interactive content inside one is invalid. */
+.card-top .bond { position:static; transform:none; width:auto; height:auto;
+  display:inline; color:var(--accent-cyan); font-size:11px; line-height:1; }
+
+/* ---- graph view: for conversations with 3+ agents, where the paired block
+   stops working. Deterministic circular layout per connected component — no
+   physics, so nothing jitters between renders on an always-on screen. ---- */
+/* `safe` center: centred while it fits, falls back to start once it overflows —
+   plain centring would push the first row out of reach of the scrollbar. */
+#graph { flex:1; min-width:0; overflow:auto; padding:10px; display:flex; flex-wrap:wrap;
+  gap:18px; align-content:safe center; justify-content:safe center; align-items:center;
+  /* Board, not empty black — the dot grid gives the traffic a surface to run on. */
+  background:radial-gradient(circle, var(--border-soft) 1px, transparent 1px) 0 0 / 22px 22px; }
+.comp { position:relative; flex:none; }
+.comp svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+/* The rail the traffic runs on — dim, static, just so the pair reads as connected
+   even when nothing is moving. */
+.comp .rail { stroke:var(--muted-2); opacity:.28; fill:none; }
+.comp .pkt { fill:var(--accent-cyan); }
+@media (prefers-reduced-motion:reduce) { .comp .pkt { display:none; } }
+/* Traffic. Drawn sender → receiver, so the dashes travel toward whoever received
+   the message. Arrowhead carries the same fact when it isn't moving (old edge,
+   reduced motion, a screenshot). */
+.comp .flow { stroke:var(--accent-cyan); fill:none; stroke-dasharray:5 11; stroke-linecap:round;
+  animation:flow 1.1s linear infinite; }
+@keyframes flow { from { stroke-dashoffset:16 } to { stroke-dashoffset:0 } }
+.comp .flow[data-live="0"] { stroke:var(--muted-2); opacity:.55; animation:none; }
+.comp .hit { stroke:transparent; stroke-width:20; pointer-events:stroke; cursor:pointer; }
+@media (prefers-reduced-motion:reduce) { .comp .flow { animation:none; } }
+/* The node IS the card from the other view — same markup, same states, same blink.
+   Two vocabularies for the same object was the mistake. */
+/* Nodes keep their identity across renders, so when an island's layout shifts
+   they glide to the new spot instead of teleporting. */
+.gnode { position:absolute; transform:translate(-50%,-50%); width:230px;
+  transition:left .55s cubic-bezier(.2,.8,.2,1), top .55s cubic-bezier(.2,.8,.2,1), opacity .35s; }
+/* The graph card is the same card, just denser — it sits on top of the wires. */
+.gnode .card { width:100%; background:var(--card-bg-graph); }
+.gnodes { position:absolute; inset:0; }
+@starting-style { .gnode { opacity:0; } }
+.gnode .card { width:100%; }
+
+/* ---- thread ----
+   The permanent CONVERSATIONS column is gone: the pair list, the direction, the
+   cross-project mark and the last line were all already on the cards and in the
+   graph, and it cost 300px of a panel meant to be read from across the room. What
+   was NOT anywhere else is the message text itself, so that survives as an overlay
+   you open on purpose. */
+#thread {
+  position:fixed; inset:0; z-index:15; display:flex; align-items:center; justify-content:center;
+  background:color-mix(in srgb, var(--canvas) 55%, transparent);
+}
+.thread-box {
+  position:relative; width:min(560px, 92vw); max-height:74vh;
+  display:flex; flex-direction:column; gap:6px; padding:16px 18px;
+  background:color-mix(in srgb, var(--panel) 92%, transparent); overflow:auto;
+}
+.thread-box::before, .thread-box::after { content:""; position:absolute; width:13px; height:13px;
+  border:1px solid var(--accent-cyan); pointer-events:none; }
+.thread-box::before { top:0; left:0; border-right:0; border-bottom:0; }
+.thread-box::after  { bottom:0; right:0; border-left:0; border-top:0; }
+
+/* ---- the bubbles ---- */
+.thread-hdr { font-size:11px; color:var(--text-bright); padding:0 4px 6px; }
+.thread-hdr .arrow { color:var(--accent-cyan); }
+.msg { max-width:88%; border:1px solid var(--border-soft); border-radius:4px; padding:6px 9px; }
+.msg[data-side="a"] { align-self:flex-start; background:var(--panel); border-bottom-left-radius:1px; }
+.msg[data-side="b"] { align-self:flex-end; background:var(--panel-2); border-bottom-right-radius:1px; }
+.msg .hdr { font-size:9.5px; color:var(--muted-2); display:flex; gap:6px; margin-bottom:3px; }
+.msg .hdr .kind { color:var(--accent-cyan); }
+.msg .hdr .when { margin-left:auto; }
+.msg .body { font-size:11px; color:var(--text); line-height:1.5; }
+#back { align-self:flex-start; margin:2px 0 4px; }
+
+/* ---- toast (stands in for the focus the real Rookery would receive) ---- */
+#toast {
+  position:fixed; left:50%; bottom:16px; transform:translateX(-50%) translateY(8px);
+  background:var(--panel-2); border:1px solid var(--tab-active); border-radius:var(--radius);
+  padding:8px 14px; font-size:11.5px; color:var(--text-bright);
+  opacity:0; pointer-events:none; transition:opacity .18s, transform .18s;
+  box-shadow:0 18px 44px rgba(0,0,0,.5);
+}
+#toast[data-on="1"] { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ---- footer: usage limits (the real data already lives in claudeInfo.ts) ---- */
+footer {
+  flex:none; display:flex; gap:10px; align-items:stretch;
+  padding:7px 12px; border-top:1px solid var(--border-soft); background:var(--bg);
+}
+.meter { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.meter-top { display:flex; align-items:baseline; gap:6px; font-size:10px; color:var(--muted-2); }
+.meter-top b { font-weight:400; color:var(--muted); letter-spacing:.14em; }
+.meter-top .pct { margin-left:auto; color:var(--muted); font-variant-numeric:tabular-nums; }
+.bar { height:3px; background:var(--panel-2); border:1px solid var(--border-soft); position:relative; }
+.bar i { position:absolute; inset:0 auto 0 0; background:var(--muted-2); }
+.bar[data-hot="1"] i { background:var(--wait-fg); }
+.bar[data-hot="2"] i { background:var(--err-fg); }
+
+/* ---- ambient mode: the panel is on all day, so it gets to rest ----
+   Same board as the other two views. The concentric rings are gone: they were the
+   only circle left in the app and they were drawing more attention than the agents
+   orbiting on them. */
+#ambient {
+  position:fixed; inset:0; background:var(--canvas); z-index:20;
+  background-image:radial-gradient(circle, var(--border-soft) 1px, transparent 1px);
+  background-size:22px 22px;
+  display:flex; align-items:center; justify-content:center;
+  opacity:0; pointer-events:none; transition:opacity .5s;
+}
+#ambient[data-on="1"] { opacity:1; pointer-events:auto; }
+.core { text-align:center; z-index:2; }
+.core h1 { margin:0; font-size:26px; font-weight:400; letter-spacing:.42em; color:var(--text-bright); }
+.core p { margin:8px 0 0; font-size:11px; letter-spacing:.2em; color:var(--muted-2); }
+#pills { position:absolute; inset:0; }
+/* Traces: circuit routing between agents that are actually talking. They are not
+   decoration — a line appearing means a conversation just started, and it draws
+   itself on rather than blinking into existence. */
+#wires { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+#wires .trace {
+  fill:none; stroke:var(--accent-cyan); stroke-width:1; opacity:.55;
+  /* pathLength="1" in the markup normalises the length, so the draw-on works
+     without measuring anything in JS. */
+  stroke-dasharray:1; stroke-dashoffset:1;
+  animation:draw 1.6s ease-out forwards;
+}
+#wires .trace[data-live="0"] { stroke:var(--muted-2); opacity:.3; }
+@keyframes draw { to { stroke-dashoffset:0; } }
+#wires .via { fill:var(--canvas); stroke:var(--accent-cyan); stroke-width:1; }
+#wires .via[data-live="0"] { stroke:var(--muted-2); opacity:.4; }
+#wires .pkt { fill:var(--accent-cyan); }
+@media (prefers-reduced-motion:reduce) {
+  #wires .trace { animation:none; stroke-dashoffset:0; }
+  #wires .pkt { display:none; }
+}
+/* HUD pill: brackets and a translucent surface, same language as the cards.
+   Nothing here rotates. The orbit is driven by moving each pill's left/top on the
+   3s tick, with a 3s LINEAR transition — tick period and transition length match,
+   so the motion is continuous while every label stays perfectly upright. Rotating
+   the container and counter-rotating the labels was the previous attempt, and it
+   only holds while every element's animation is in phase: a session that opened
+   later joined mid-turn and came out tilted. */
+.pill {
+  position:absolute; transform:translate(-50%,-50%);
+  font-size:10px; padding:5px 10px; white-space:nowrap;
+  background:var(--card-bg); color:var(--muted);
+  transition:left 3s linear, top 3s linear, opacity .4s;
+}
+.pill::before, .pill::after { content:""; position:absolute; width:7px; height:7px;
+  border:1px solid var(--muted-2); pointer-events:none; }
+.pill::before { top:0; left:0; border-right:0; border-bottom:0; }
+.pill::after  { bottom:0; right:0; border-left:0; border-top:0; }
+.pill .pjd { display:inline-block; width:6px; height:6px; border-radius:50%; margin-right:6px; }
+.pill b { font-weight:400; }
+@starting-style { .pill { opacity:0; } }
+.pill.run  { color:var(--run-fg); }
+.pill.wait { color:var(--wait-fg); }
+.pill.err  { color:var(--err-fg); }
+.pill.run::before,  .pill.run::after  { border-color:var(--run-fg); }
+.pill.wait::before, .pill.wait::after { border-color:var(--wait-fg); }
+.pill.err::before,  .pill.err::after  { border-color:var(--err-fg); }
+/* Same rule in ambient: only the ones that need you blink. It's the whole point of
+   leaving the panel on — you glance over and something is flashing at you. The
+   blink rides the brackets and the dot, because the pill's own animation slot is
+   busy holding the label upright. */
+.pill.wait::before, .pill.wait::after, .pill.err::before, .pill.err::after,
+.pill.wait .pjd, .pill.err .pjd { animation:blink 1.2s ease-in-out infinite; }
+
+.wake { position:absolute; bottom:22px; left:0; right:0; text-align:center;
+  font-size:10px; letter-spacing:.28em; color:var(--muted-2); animation:blink 3.5s ease-in-out infinite; }
+@media (prefers-reduced-motion:reduce) {
+  #pills, .pill, .pulse i, .wake { animation:none; }
+  .pill { transition:opacity .4s; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand">FLEET</span>
+  <span id="sources"></span>
+  <span class="spacer"></span>
+  <span id="filters"></span>
+  <span id="views"></span>
+  <button class="chip" id="ambient-btn" title="ambient mode">◌</button>
+  <button class="chip" id="theme" title="toggle theme">◐</button>
+  <span id="clock"></span>
+</header>
+
+<main>
+  <div id="grid"></div>
+  <div id="graph" hidden></div>
+</main>
+
+<div id="thread" hidden tabindex="-1"></div>
+
+<footer id="usage"></footer>
+
+<div id="ambient">
+  <svg id="wires"></svg>
+  <div id="pills"></div>
+  <div class="core"><h1>FLEET</h1><p id="ambient-sub"></p></div>
+  <div class="wake">TOUCH TO WAKE</div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── fake data ─────────────────────────────────────────────────────────────────
+// Mirrors what GET /fleet/snapshot would return per source (see docs/fleet.md).
+const SOURCES = [
+  { id:'mac',  label:'mac',  up:true },
+  { id:'link', label:'link', up:true },
+];
+
+// Seeded from the real store (72 sessions across the registered projects,
+// filtered to worktrees that still exist on disk). The STATES are synthetic —
+// the store has no live/idle flag, that comes from agent.ts at runtime.
+const SESSIONS = [
+  { id:'r0', src:'mac', project:"pingg", branch:"master", title:"Session 1", state:'idle', since:Date.now()-60000, last:'Turn finished' },
+  { id:'r1', src:'mac', project:"os", branch:"feature-dos-219", title:"Session 1", state:'idle', since:Date.now()-2880000, last:'Turn finished' },
+  { id:'r2', src:'mac', project:"os", branch:"feat-DOS-230", title:"Session 1", state:'idle', since:Date.now()-300000, last:'Turn finished' },
+  { id:'r3', src:'mac', project:"os", branch:"feat-DOS-236", title:"Session 1", state:'running', since:Date.now()-3120000, last:'Working the current turn' },
+  { id:'r4', src:'mac', project:"os", branch:"feat-DOS-237", title:"Session 1", state:'idle', since:Date.now()-540000, last:'Turn finished' },
+  { id:'r5', src:'mac', project:"ims", branch:"master", title:"Session 1", state:'idle', since:Date.now()-3360000, last:'Turn finished' },
+  { id:'r6', src:'mac', project:"panini-copa-2026", branch:"master", title:"Sync data.js + deploy Panini", state:'idle', since:Date.now()-780000, last:'Turn finished' },
+  { id:'r7', src:'mac', project:"pulse", branch:"master", title:"Session 1", state:'idle', since:Date.now()-3600000, last:'Turn finished' },
+  { id:'r8', src:'mac', project:"pingg", branch:"feat-1", title:"Session 1", state:'idle', since:Date.now()-1020000, last:'Turn finished' },
+  { id:'r9', src:'mac', project:"pingg", branch:"feat-2", title:"Session 1", state:'running', since:Date.now()-3840000, last:'Working the current turn' },
+  { id:'r10', src:'mac', project:"rookery", branch:"feat-server-rookery", title:"Seguinte, eu quero revisar como vamos leva", state:'idle', since:Date.now()-1260000, last:'Turn finished' },
+  { id:'r11', src:'mac', project:"rookery", branch:"feat-server-rookery", title:"So explain to Codex what this branch is ab", state:'idle', since:Date.now()-4080000, last:'Turn finished' },
+  { id:'r12', src:'mac', project:"brain", branch:"master", title:"vamos revisar os pr's abertos de chore(dep", state:'waiting', since:Date.now()-1500000, last:'Blocked on a question' },
+  { id:'r13', src:'mac', project:"adelie", branch:"master", title:"o nosso iso n\u00e3o funcionou, coloquei pra in", state:'idle', since:Date.now()-4320000, last:'Turn finished' },
+  { id:'r14', src:'mac', project:"rookery", branch:"feat-server-rookery", title:"Commit these files (and only these) in thi", state:'running', since:Date.now()-1740000, last:'Working the current turn' },
+  { id:'r15', src:'mac', project:"brain", branch:"master", title:"Session 1", state:'idle', since:Date.now()-4560000, last:'Turn finished' },
+  { id:'r16', src:'mac', project:"adelie", branch:"master", title:"estamos com uma maquina de testes .. para ", state:'idle', since:Date.now()-1980000, last:'Turn finished' },
+  { id:'r17', src:'mac', project:"adelie", branch:"master", title:"adelie \u2014 instalar AUR (tools + apps)", state:'idle', since:Date.now()-4800000, last:'Turn finished' },
+  { id:'r18', src:'mac', project:"adelie", branch:"master", title:"https://github.com/xCaptaiN09/pixie-sddm p", state:'idle', since:Date.now()-2220000, last:'Turn finished' },
+  { id:'r19', src:'mac', project:"adelie", branch:"master", title:"vamos ver o que omarchy tem de app tui e t", state:'idle', since:Date.now()-5040000, last:'Turn finished' },
+  { id:'r20', src:'mac', project:"adelie", branch:"master", title:"vamos modularizar o @hypr/hyprland.conf em", state:'idle', since:Date.now()-2460000, last:'Turn finished' },
+  { id:'r21', src:'mac', project:"rookery", branch:"feat-server-rookery", title:"Session 1", state:'idle', since:Date.now()-5280000, last:'Turn finished' },
+  { id:'r22', src:'mac', project:"adelie", branch:"caelestia", title:"Session 1", state:'running', since:Date.now()-2700000, last:'Working the current turn' },
+  { id:'r23', src:'mac', project:"adelie", branch:"waybar-caelestia-look", title:"waybar caelestia-look", state:'idle', since:Date.now()-120000, last:'Turn finished' },
+  { id:'r24', src:'mac', project:"pulse", branch:"master", title:"me explica como/quando as notifica\u00e7\u00f5es s\u00e3o", state:'idle', since:Date.now()-2940000, last:'Turn finished' },
+  { id:'r25', src:'mac', project:"pinguim.academy", branch:"master", title:"vamos atualizar o projeto para php 8.5", state:'idle', since:Date.now()-360000, last:'Turn finished' },
+  { id:'r26', src:'mac', project:"pinguim.academy", branch:"master", title:"uso o laravel/boost aqui no projeto ent\u00e3o ", state:'error', since:Date.now()-3180000, last:'Turn stalled (watchdog)' },
+  { id:'r27', src:'mac', project:"pinguim.academy", branch:"master", title:"d\u00e1 uma olhada nas aulas de php em produ\u00e7\u00e3o", state:'idle', since:Date.now()-600000, last:'Turn finished' },
+  { id:'r28', src:'mac', project:"adelie", branch:"master", title:"Session 1", state:'idle', since:Date.now()-3420000, last:'Turn finished' },
+  { id:'r29', src:'mac', project:"adelie", branch:"master", title:"setup", state:'idle', since:Date.now()-840000, last:'Turn finished' },
+  { id:'r30', src:'mac', project:"os", branch:"feat-DOS-257", title:"n\u00e3o estou conectado co notion aqui?", state:'idle', since:Date.now()-3660000, last:'Turn finished' },
+  { id:'r31', src:'mac', project:"adelie", branch:"master", title:"instalamos o adelie numa maquina `ssh link", state:'running', since:Date.now()-1080000, last:'Working the current turn' },
+  { id:'r32', src:'mac', project:"adelie", branch:"master", title:"eu queria atualizar as cores do ghostty e ", state:'idle', since:Date.now()-3900000, last:'Turn finished' },
+  { id:'r33', src:'mac', project:"rookery", branch:"server", title:"Session 1", state:'idle', since:Date.now()-1320000, last:'Turn finished' },
+  { id:'r34', src:'mac', project:"rookery", branch:"server", title:"pega as ultimas mudan\u00e7as nas master por fa", state:'idle', since:Date.now()-4140000, last:'Turn finished' },
+  { id:'r35', src:'mac', project:"rookery", branch:"server", title:"Aplique DOIS patches pequenos pra corrigir", state:'idle', since:Date.now()-1560000, last:'Turn finished' },
+  { id:'r36', src:'mac', project:"adelie", branch:"master", title:"seguinte.. eu lembro de estar configurando", state:'idle', since:Date.now()-4380000, last:'Turn finished' },
+  { id:'r37', src:'mac', project:"cw", branch:"master", title:"NewRelic JavaScript user tracking", state:'idle', since:Date.now()-1800000, last:'Turn finished' },
+  { id:'r38', src:'mac', project:"os", branch:"update-pest-v5", title:"Pest v5 Upgrade", state:'idle', since:Date.now()-4620000, last:'Turn finished' },
+  { id:'r39', src:'mac', project:"elevaris", branch:"master", title:"Pull Request Review", state:'idle', since:Date.now()-2040000, last:'Turn finished' },
+  { id:'r40', src:'mac', project:"spec-kit", branch:"master", title:"Your message seems incomplete \u2014 it cuts of", state:'idle', since:Date.now()-4860000, last:'Turn finished' },
+  { id:'r41', src:'mac', project:"config", branch:"master", title:"Remove --remote-control from cc", state:'idle', since:Date.now()-2280000, last:'Turn finished' },
+  { id:'r42', src:'mac', project:"os", branch:"fix-dos-294", title:"Fix DOS-294 issue", state:'idle', since:Date.now()-5100000, last:'Turn finished' },
+  { id:'r43', src:'mac', project:"os", branch:"fix-dos-300", title:"Fix DOS-300 issue", state:'idle', since:Date.now()-2520000, last:'Turn finished' },
+  { id:'r44', src:'mac', project:"os", branch:"feat-dos-311", title:"refactor", state:'idle', since:Date.now()-5340000, last:'Turn finished' },
+  { id:'r45', src:'mac', project:"spec-kit", branch:"master", title:"Session 1", state:'idle', since:Date.now()-2760000, last:'Turn finished' },
+  { id:'r46', src:'mac', project:"spec-kit", branch:"master", title:"Session 2", state:'idle', since:Date.now()-180000, last:'Turn finished' },
+  { id:'r47', src:'mac', project:"hln-web", branch:"master", title:"Setup local do projeto", state:'running', since:Date.now()-3000000, last:'Working the current turn' },
+  { id:'r48', src:'mac', project:"spec-kit", branch:"master", title:"Add new refactor command", state:'idle', since:Date.now()-420000, last:'Turn finished' },
+  { id:'r49', src:'mac', project:"spec-kit", branch:"master", title:"Post SDD update to #general_devs", state:'idle', since:Date.now()-3240000, last:'Turn finished' },
+  { id:'r50', src:'mac', project:"spec-kit", branch:"master", title:"Add hooks for DS CLI", state:'idle', since:Date.now()-660000, last:'Turn finished' },
+  { id:'r51', src:'mac', project:"os", branch:"seguranca", title:"Your message got cut off. Could you comple", state:'idle', since:Date.now()-3480000, last:'Turn finished' },
+  { id:'r52', src:'mac', project:"os", branch:"master", title:"Review OS feature requests", state:'idle', since:Date.now()-900000, last:'Turn finished' },
+  { id:'r53', src:'mac', project:"os", branch:"master", title:"Jobs route not opening", state:'idle', since:Date.now()-3720000, last:'Turn finished' },
+  { id:'r54', src:'mac', project:"os", branch:"master", title:"Feature requests MCP exploration", state:'idle', since:Date.now()-1140000, last:'Turn finished' },
+  { id:'r55', src:'mac', project:"os", branch:"master", title:"Session 1", state:'idle', since:Date.now()-3960000, last:'Turn finished' },
+  { id:'r56', src:'mac', project:"os", branch:"master", title:"Criar issues Jira dos Feature Requests", state:'idle', since:Date.now()-1380000, last:'Turn finished' },
+  { id:'r57', src:'mac', project:"homelab", branch:"master", title:"Your message appears incomplete. Could you", state:'idle', since:Date.now()-4200000, last:'Turn finished' },
+  { id:'r58', src:'mac', project:"os", branch:"master", title:"Session 2", state:'running', since:Date.now()-1620000, last:'Working the current turn' },
+  { id:'r59', src:'mac', project:"os", branch:"master", title:"NavMenu organize by sections", state:'idle', since:Date.now()-4440000, last:'Turn finished' },
+  { id:'r60', src:'mac', project:"rookery", branch:"master", title:"Show context usage on click", state:'idle', since:Date.now()-1860000, last:'Turn finished' },
+  { id:'r61', src:'mac', project:"rookery", branch:"master", title:"Split CLAUDE.md into docs", state:'idle', since:Date.now()-4680000, last:'Turn finished' },
+  { id:'r62', src:'mac', project:"rookery", branch:"master", title:"Uncommitted changes indicator", state:'idle', since:Date.now()-2100000, last:'Turn finished' },
+  { id:'r63', src:'mac', project:"rookery", branch:"master", title:"Session 1", state:'idle', since:Date.now()-4920000, last:'Turn finished' },
+  { id:'r64', src:'mac', project:"rookery", branch:"master", title:"Rookery attach terminal issue", state:'idle', since:Date.now()-2340000, last:'Turn finished' },
+  { id:'r65', src:'mac', project:"rookery", branch:"master", title:"commit", state:'idle', since:Date.now()-5160000, last:'Turn finished' },
+  { id:'r66', src:'mac', project:"rookery", branch:"master", title:"Deploy Rookery Release", state:'idle', since:Date.now()-2580000, last:'Turn finished' },
+  { id:'r67', src:'mac', project:"os", branch:"master", title:"Cadastrar novas permiss\u00f5es", state:'idle', since:Date.now()-5400000, last:'Turn finished' },
+  { id:'r68', src:'mac', project:"rookery", branch:"master", title:"Message queue sends too early", state:'idle', since:Date.now()-2820000, last:'Turn finished' },
+  { id:'r69', src:'mac', project:"os", branch:"master", title:"QA Share Link Redirect", state:'idle', since:Date.now()-240000, last:'Turn finished' },
+  { id:'r70', src:'mac', project:"rookery", branch:"master", title:"Your message appears incomplete. Could you", state:'idle', since:Date.now()-3060000, last:'Turn finished' },
+  { id:'r71', src:'mac', project:"rookery", branch:"ghostty-assembly", title:"Ghostty WASM terminal exploration", state:'idle', since:Date.now()-480000, last:'Turn finished' },
+];
+
+// Edges between a few of the working ones.
+const TALKS = [
+  { at:Date.now()-40000, from:'r3', to:'r9', kind:'send_message', preview:"the proxy is 502-ing on the new worktree \u2014 did mysql accept the connection?" },
+  { at:Date.now()-540000, from:'r9', to:'r3', kind:'send_message', preview:"buffer pool is up to 4G, restart the container whenever you can" },
+  { at:Date.now()-90000, from:'r14', to:'r22', kind:'send_message', preview:"the 500s started right after the cert renewal \u2014 can you check the webhook?" },
+  { at:Date.now()-55000, from:'r22', to:'r31', kind:'send_message', preview:"the webhook is timing out on a write \u2014 is the pool still saturated?" },
+  { at:Date.now()-180000, from:'r47', to:'r58', kind:'send_message', preview:"schedule is generated; go ahead and post the summary to the deploy channel" },
+];
+
+// Lines the simulation draws from, so it feels alive without being an event engine.
+const CHATTER = [
+  'confirm the migration ran in the worktree before I ship',
+  'I need the tailscale token to hit the internal endpoint',
+  'integration tests passed on my side, you can go',
+  'I held the deploy — there is a slow query in billing',
+  'container is provisioned, the app answers on :8080',
+  'send me the last error from the log and I will open the trace',
+];
+
+// ── state ─────────────────────────────────────────────────────────────────────
+let filter = 'all';         // all | running | talking | cross | stuck
+// `?view=graph` so the kiosk can boot straight into a view without a tap.
+let view = new URLSearchParams(location.search).get('view') === 'graph' ? 'graph' : 'cards';
+let selected = SESSIONS[0].id;
+let selectedPair = null;    // [idA, idB] — thread open in the right column
+
+const byId = id => SESSIONS.find(s => s.id === id);
+const $ = id => document.getElementById(id);
+
+function elapsed(ms) {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  return Math.floor(s / 3600) + 'h' + String(Math.floor(s % 3600 / 60)).padStart(2, '0');
+}
+
+// Pairs that exchanged a message in the last 5min = "talking right now".
+function livePairs() {
+  const cut = Date.now() - 5 * 60e3;
+  return TALKS.filter(t => t.at >= cut);
+}
+function peersOf(id) {
+  const set = new Set();
+  for (const t of livePairs()) {
+    if (t.from === id) set.add(t.to);
+    if (t.to === id) set.add(t.from);
+  }
+  return [...set];
+}
+
+function visible(s) {
+  if (filter === 'running') return s.state === 'running';
+  if (filter === 'stuck') return s.state === 'error' || s.state === 'waiting';
+  if (filter === 'talking') return peersOf(s.id).length > 0;
+  if (filter === 'cross') return peersOf(s.id).some(p => scopeOf(s.id, p) !== 'same');
+  return true;
+}
+
+// ── render ────────────────────────────────────────────────────────────────────
+const STATE_LABEL = { running:'working', waiting:'waiting on you', idle:'idle', error:'stalled' };
+const STATE_CLASS = { running:'run', waiting:'wait', idle:'idle', error:'err' };
+
+// Stable hue per project: tells the "space" apart at a glance without inventing a
+// colour per card. It only tints a dot and the label — never fills the card.
+function hue(project) {
+  let h = 0;
+  for (const c of project) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
+function projColor(project) {
+  const l = document.documentElement.dataset.theme === 'light' ? 38 : 68;
+  return `hsl(${hue(project)} 32% ${l}%)`;
+}
+
+function counts() {
+  const c = { running:0, waiting:0, idle:0, error:0 };
+  for (const s of SESSIONS) c[s.state]++;
+  return c;
+}
+
+function renderHeader() {
+  // No tally line: the source chips already carry `working·needs-you` per box.
+  $('sources').innerHTML = SOURCES.map(src => {
+    const list = SESSIONS.filter(s => s.src === src.id);
+    const run = list.filter(s => s.state === 'running').length;
+    const bad = list.filter(s => s.state === 'error' || s.state === 'waiting').length;
+    const cls = !src.up ? 'idle src-off' : bad ? 'err' : run ? 'run' : 'idle';
+    return `<span class="chip ${cls}"><i class="dot"></i>${src.label} <em style="font-style:normal;opacity:.7">${run}·${bad}</em></span>`;
+  }).join(' ');
+
+  const xn = livePairs().filter(t => scopeOf(t.from, t.to) !== 'same').length;
+  $('filters').innerHTML = [['all','all'],['running','working'],['talking','talking'],
+                            ['cross', `cross-project${xn ? ' ' + xn : ''}`],['stuck','needs you']]
+    .map(([k,l]) => `<button class="chip" data-filter="${k}" data-on="${filter===k?1:0}">${l}</button>`).join(' ');
+
+  $('views').innerHTML = [['cards','▦'],['graph','⁙']]
+    .map(([k,l]) => `<button class="chip" data-view="${k}" data-on="${view===k?1:0}"
+                       title="${k} view">${l}</button>`).join(' ');
+}
+
+// "Needs you" = blocked on a question/permission, or the watchdog gave up. These
+// are the only two states that blink.
+const needsYou = s => s.state === 'waiting' || s.state === 'error';
+
+// ── keyed DOM patch ───────────────────────────────────────────────────────────
+// Rebuilding innerHTML every tick is why nothing could animate: every element was
+// brand new every 3s, so "entering" had no meaning, the attention blink restarted
+// mid-cycle, and a node could never glide anywhere. Keep the elements, write only
+// the fields that changed, and let the browser animate the difference.
+function patch(host, items) {
+  const cur = new Map();
+  for (const el of [...host.children]) {
+    if (el.dataset.key && !el.dataset.leaving) cur.set(el.dataset.key, el);
+  }
+  let anchor = null;
+  for (const it of items) {
+    let el = cur.get(it.key);
+    if (el) cur.delete(it.key);
+    else {
+      el = it.ns ? document.createElementNS(it.ns, it.tag) : document.createElement(it.tag || 'div');
+      el.dataset.key = it.key;
+      // setAttribute, not .className: on an SVG element className is a read-only
+      // SVGAnimatedString and assigning to it silently does nothing.
+      if (it.cls) el.setAttribute('class', it.cls);
+      el.innerHTML = it.html || '';
+    }
+    it.update(el);
+    const next = anchor ? anchor.nextSibling : host.firstChild;
+    if (el !== next) host.insertBefore(el, next);
+    anchor = el;
+  }
+  // Leave, then go — the element sticks around long enough to fade out.
+  for (const el of cur.values()) {
+    el.dataset.leaving = '1';
+    setTimeout(() => el.remove(), 360);
+  }
+}
+
+// Built once per element; only the fields are rewritten after that.
+const CARD_HTML = `
+  <div class="card-top">
+    <span class="dot pj"></span>
+    <span class="path"></span>
+    <span class="bond" hidden>⇄</span>
+    <span class="key"></span>
+    <span class="state"><i class="dot"></i><b class="age"></b></span>
+  </div>
+  <h2></h2>
+  <div class="last"></div>
+  <div class="pulse"><i></i></div>`;
+
+// One state marker, not a sentence: the tone says WHAT, the number says HOW LONG.
+// The word only survives as the accessible name / tooltip.
+function fillCard(el, s, n, dim, talk) {
+  const q = el.__q || (el.__q = {
+    pj:el.querySelector('.pj'), path:el.querySelector('.path'), key:el.querySelector('.key'),
+    age:el.querySelector('.age'), ttl:el.querySelector('h2'), last:el.querySelector('.last'),
+    bond:el.querySelector('.bond')
+  });
+  if (talk) {
+    el.dataset.talk = talk.scope;
+    q.bond.hidden = false;
+    q.bond.title = `${talk.count} messages with ${talk.peer.title}`;
+  } else {
+    delete el.dataset.talk;
+    q.bond.hidden = true;
+  }
+  el.dataset.id = s.id;
+  el.dataset.st = STATE_CLASS[s.state];
+  el.dataset.sel = s.id === selected ? 1 : 0;
+  el.dataset.dim = dim ? 1 : 0;
+  if (s.fresh && Date.now() - s.fresh < 2400) el.dataset.fresh = '1';
+  else delete el.dataset.fresh;
+  el.title = `${s.project}/${s.branch} — ${STATE_LABEL[s.state]}`;
+  el.setAttribute('aria-label', `${s.title} — ${STATE_LABEL[s.state]} ${elapsed(s.since)}`);
+  q.pj.style.background = projColor(s.project);
+  const path = `<b>${s.src}</b> ${s.project}/${s.branch}`;
+  if (q.path.innerHTML !== path) q.path.innerHTML = path;
+  q.key.textContent = n && n <= 9 ? n : '';
+  q.age.textContent = elapsed(s.since);
+  q.ttl.textContent = s.title;
+  q.last.textContent = s.last;
+}
+
+const CLUSTER_HTML = `
+  <div class="x-hdr"></div>
+  <button class="card">${CARD_HTML}</button>
+  <button class="card">${CARD_HTML}</button>
+  <button class="bond"><span class="line"></span><span class="sym">⇄</span><span class="line"></span></button>
+  <div class="cluster-last"></div>`;
+
+// The strip names the two sides and stops. Two different project names IS the
+// "cross-project" message — spelling it out again is noise.
+function clusterItem(s, peer, n, dim) {
+  return {
+    key:'x:' + [s.id, peer.id].sort().join('|'), cls:'cluster', html:CLUSTER_HTML,
+    update(el) {
+      const msgs = between(s.id, peer.id);
+      const last = msgs[msgs.length - 1];
+      const scope = scopeOf(s.id, peer.id);
+      el.dataset.scope = scope;
+      el.dataset.dim = dim ? 1 : 0;
+      el.title = SCOPE_LABEL[scope] || 'same project';
+      const cards = el.querySelectorAll(':scope > .card');
+      // No per-card talk marker in here: the block already says it, twice would be
+      // shouting.
+      fillCard(cards[0], s, n, false, null);
+      fillCard(cards[1], peer, n + 1, false, null);
+      const tag = t => `<span class="tag"><i class="dot" style="background:${projColor(t.project)}"></i>${
+        scope === 'remote' ? t.src + '/' : ''}${t.project}</span>`;
+      const hdr = scope === 'same' ? '' : `${tag(s)}<span class="arrow">⇄</span>${tag(peer)}`;
+      const hEl = el.querySelector('.x-hdr');
+      if (hEl.innerHTML !== hdr) hEl.innerHTML = hdr;
+      const bond = el.querySelector('.bond');
+      bond.dataset.pair = `${s.id}|${peer.id}`;
+      bond.title = `${msgs.length} messages — open the conversation`;
+      bond.style.setProperty('--w', Math.min(4, 1 + msgs.length * 0.5) + 'px');
+      el.querySelector('.cluster-last').innerHTML =
+        `<b>${byId(last.from).title} →</b> ${last.preview}`;
+    }
+  };
+}
+
+const cardItem = (s, n, dim, talk) => ({
+  key:'c:' + s.id, tag:'button', cls:'card', html:CARD_HTML,
+  update: el => fillCard(el, s, n, dim, talk)
+});
+
+// Scope of an edge. `remote` (different sources) can't happen today — each Rookery
+// is an island — but the model already covers it for when it can.
+function scopeOf(a, b) {
+  const x = byId(a), y = byId(b);
+  if (x.src !== y.src) return 'remote';
+  return x.project !== y.project ? 'cross' : 'same';
+}
+const SCOPE_LABEL = { cross:'CROSS-PROJECT', remote:'CROSS-MACHINE', same:'' };
+
+function renderGrid() {
+  const list = SESSIONS.filter(visible);
+  const inView = new Set(list.map(s => s.id));
+  const highlight = selectedPair ? new Set(selectedPair) : null;
+  const placed = new Set();
+  const groups = [];
+
+  for (const s of list) {
+    if (placed.has(s.id)) continue;
+    // A live pair (a message in the last 5min) renders as one block: both cards
+    // glued together with the bond between them. Only the first free peer — a trio
+    // becomes two blocks, and that's fine: the most recent pair is what matters.
+    const peer = peersOf(s.id).map(byId).find(p => p && inView.has(p.id) && !placed.has(p.id));
+    placed.add(s.id);
+    if (peer) {
+      placed.add(peer.id);
+      // Canonical order: the key is sorted, so the display has to be too, or the
+      // same pair would render with its two cards swapped between ticks.
+      const [a, b] = s.id < peer.id ? [s, peer] : [peer, s];
+      groups.push({ s:a, peer:b, scope:scopeOf(a.id, b.id) });
+    } else groups.push({ s, scope:null });
+  }
+
+  // Anything that needs you first — a blinking card scrolled off the bottom calls
+  // nobody. Then cross-machine > cross-project > same project > alone: the rare
+  // thing floats up.
+  const rank = { remote:0, cross:1, same:2 };
+  const key = g => needsYou(g.s) || (g.peer && needsYou(g.peer)) ? -1
+                 : g.scope ? rank[g.scope] : 3;
+  groups.sort((a, b) => key(a) - key(b));
+
+  let n = 0;
+  patch($('grid'), groups.map(g => {
+    const dim = highlight && !highlight.has(g.s.id) && !(g.peer && highlight.has(g.peer.id));
+    if (g.peer) { const it = clusterItem(g.s, g.peer, n + 1, dim); n += 2; return it; }
+    return cardItem(g.s, ++n, dim, null);
+  }));
+}
+
+// ── graph view ────────────────────────────────────────────────────────────────
+// Two agents fit in a paired block; three or more don't. The graph is the fallback
+// for exactly that case, so it looks back further than the 5min "live" window —
+// otherwise a chain that took 20 minutes to play out shows up as disconnected bits.
+const GRAPH_MS = 30 * 60e3;
+
+// Collapse the message log into one edge per pair — but keep the two directions
+// apart, because "who sent to whom" is the whole point of the graph.
+function edges(withinMs) {
+  const cut = Date.now() - withinMs;
+  const map = new Map();
+  for (const t of TALKS) {
+    if (t.at < cut) continue;
+    const [a, b] = [t.from, t.to].sort();
+    const k = a + '|' + b;
+    const e = map.get(k) || { key:k, a, b, n:0, at:0, ab:{ n:0, at:0 }, ba:{ n:0, at:0 } };
+    const d = t.from === a ? e.ab : e.ba;
+    d.n++;
+    if (t.at > d.at) d.at = t.at;
+    e.n++;
+    if (t.at > e.at) e.at = t.at;
+    map.set(k, e);
+  }
+  return [...map.values()];
+}
+
+// Connected components — a "conversation" is however many agents are linked,
+// not just a pair. BFS over the adjacency; 2 nodes and 5 nodes take the same path.
+function components(list) {
+  const adj = new Map();
+  for (const e of list) {
+    if (!adj.has(e.a)) adj.set(e.a, []);
+    if (!adj.has(e.b)) adj.set(e.b, []);
+    adj.get(e.a).push(e.b);
+    adj.get(e.b).push(e.a);
+  }
+  const seen = new Set(), out = [];
+  for (const start of adj.keys()) {
+    if (seen.has(start)) continue;
+    const nodes = [], queue = [start];
+    seen.add(start);
+    while (queue.length) {
+      const id = queue.shift();
+      nodes.push(id);
+      for (const next of adj.get(id)) if (!seen.has(next)) { seen.add(next); queue.push(next); }
+    }
+    // Ring order from a depth-first walk instead of by id: neighbours land next to
+    // each other, which is what stops the wires from crossing the middle once an
+    // island grows past three. Deterministic (start at the lowest id, visit
+    // neighbours sorted), so it still never jitters between renders.
+    const order = [], walked = new Set();
+    (function walk(id) {
+      walked.add(id); order.push(id);
+      for (const nb of [...new Set(adj.get(id))].sort()) if (!walked.has(nb)) walk(nb);
+    })(nodes.slice().sort()[0]);
+    nodes.length = 0;
+    nodes.push(...order);
+    out.push({ nodes, edges: list.filter(e => nodes.includes(e.a)) });
+  }
+  // Busiest conversation first.
+  return out.sort((x, y) => y.nodes.length - x.nodes.length);
+}
+
+function renderGraph() {
+  const comps = components(edges(GRAPH_MS));
+  if (!comps.length) {
+    patch($('graph'), [{ key:'empty', cls:'empty',
+      html:'no conversations in the last 30 minutes', update() {} }]);
+    return;
+  }
+  const NODE_W = 230, NODE_H = 86, PAD = 14;
+  patch($('graph'), comps.map((c, ci) => {
+    const n = c.nodes.length;
+    // A flat ellipse, not a circle: the panel is wide and short, so height is the
+    // scarce axis. A pair collapses to ry=0 — side by side, one row tall.
+    // Spacing has to leave a visible run of line between the boxes — that gap is
+    // where the traffic is read, so it's sized for the flow, not just to avoid
+    // collisions.
+    const rx = n === 2 ? 180 : Math.max(180, (NODE_W + 120) * n / (2 * Math.PI));
+    // Height is the scarce axis on this panel, so the vertical radius is capped by
+    // what the pane actually has — otherwise a five-agent island grows past the
+    // bottom edge and the last card is simply not there.
+    const maxRy = Math.max(70, ($('graph').clientHeight - NODE_H - PAD * 2 - 24) / 2);
+    const ry = n === 2 ? 0 : Math.min(maxRy, Math.max(80, rx * 0.62));
+    const start = n === 2 ? 0 : -Math.PI / 2;
+    const raw = c.nodes.map((id, i) => {
+      const a = start + (i / n) * Math.PI * 2;
+      return { id, x: Math.cos(a) * rx, y: Math.sin(a) * ry };
+    });
+    // Size the box from where the nodes actually landed, instead of assuming the
+    // full ring — that's what pushed a partner off the bottom of the screen.
+    const xs = raw.map(p => p.x), ys = raw.map(p => p.y);
+    const minX = Math.min(...xs), minY = Math.min(...ys);
+    const box = Math.max(...xs) - minX + NODE_W + PAD * 2;
+    const h = Math.max(...ys) - minY + NODE_H + PAD * 2;
+    const at = new Map(raw.map(p => [p.id,
+      { x: p.x - minX + NODE_W / 2 + PAD, y: p.y - minY + NODE_H / 2 + PAD }]));
+    const pos = id => at.get(id);
+    // Pull the ends back to roughly the node's box edge, so the arrowhead lands on
+    // the card instead of disappearing under it.
+    // The boxes are content-sized, so this is an approximation of the half-extent
+    // in the line's direction. It's deliberately under-cut: the node is opaque, so
+    // a line slipping a few px beneath it costs nothing, while over-cutting leaves
+    // a diagonal edge as a stub floating at the midpoint. The cap guarantees a
+    // readable run of line no matter how close two nodes sit.
+    // Ray/box intersection, NOT |cos|*halfW + |sin|*halfH. The additive version
+    // overestimates wildly on a diagonal — it adds both half-extents instead of
+    // taking whichever edge the ray actually crosses first — and ate the whole line.
+    const trim = (p, q) => {
+      const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
+      const cx = Math.abs(dx / len), cy = Math.abs(dy / len);
+      const t = Math.min(cx ? 115 / cx : Infinity, cy ? 43 / cy : Infinity) + 8;
+      const k = Math.min(t, Math.max(8, len / 2 - 16)) / len;
+      return { x: p.x + dx * k, y: p.y + dy * k };
+    };
+    const lines = c.edges.map(e => {
+      const P = pos(e.a), Q = pos(e.b);
+      // One flow line per direction that actually carried a message. When both did,
+      // nudge them onto opposite sides of the rail so the two streams don't overlap.
+      const dirs = [];
+      if (e.ab.n) dirs.push({ from:e.a, to:e.b, ...e.ab });
+      if (e.ba.n) dirs.push({ from:e.b, to:e.a, ...e.ba });
+      const dx = Q.x - P.x, dy = Q.y - P.y, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len * 3.5, ny = dx / len * 3.5;
+
+      const flows = dirs.map((d, i) => {
+        const off = dirs.length === 2 ? (i === 0 ? 1 : -1) : 0;
+        const from = pos(d.from), to = pos(d.to);
+        const a = trim(from, to), b = trim(to, from);
+        const live = Date.now() - d.at < 5 * 60e3;
+        // Thickness = how much this direction carried. No number to read.
+        const w = Math.min(4, 1 + d.n * 0.5);
+        // A <path>, not a <line>, so a packet can ride it via <mpath>. The packet
+        // is the literal "data moving from A to B" — the dashes give the direction,
+        // the square gives it a body.
+        const id = `f-${ci}-${i}-${d.from}`;
+        const D = `M${a.x + nx*off},${a.y + ny*off} L${b.x + nx*off},${b.y + ny*off}`;
+        return `<path id="${id}" class="flow" data-live="${live?1:0}" stroke-width="${w}"
+                  marker-end="url(#ar-${ci})" d="${D}" />` + (live
+          ? `<rect class="pkt" x="-3" y="-3" width="6" height="6">
+               <animateMotion dur="${1.5 + i * 0.3}s" repeatCount="indefinite">
+                 <mpath href="#${id}" /></animateMotion></rect>`
+          : '');
+      }).join('');
+
+      return `<line class="hit" data-pair="${e.a}|${e.b}" x1="${P.x}" y1="${P.y}" x2="${Q.x}" y2="${Q.y}" />
+        <path class="rail" stroke-width="1" d="M${P.x},${P.y} L${Q.x},${Q.y}" />
+        ${flows}`;
+    }).join('');
+    // `context-stroke` makes the arrowhead inherit its line's colour, so live and
+    // stale flows keep their tone without a second marker def.
+    const defs = `<defs><marker id="ar-${ci}" viewBox="0 0 8 8" refX="7" refY="4"
+      markerWidth="5" markerHeight="5" orient="auto">
+      <path d="M0 0 L8 4 L0 8 z" fill="context-stroke" /></marker></defs>`;
+
+    // Keyed on the participants: same conversation → same island → the node cards
+    // survive the tick and glide if the layout shifted. Someone joining changes the
+    // key, which is honest — that IS a different conversation.
+    return {
+      key:'k:' + c.nodes.join('|'), cls:'comp', html:'<svg></svg><div class="gnodes"></div>',
+      update(el) {
+        el.style.width = box + 'px';
+        el.style.height = h + 'px';
+        const svg = el.querySelector('svg');
+        svg.setAttribute('viewBox', `0 0 ${box} ${h}`);
+        // Only touch the SVG when the traffic actually changed — reassigning it
+        // every tick restarts the dash animation and the flow visibly stutters.
+        const inner = defs + lines;
+        if (svg._html !== inner) { svg.innerHTML = inner; svg._html = inner; }
+        // No shortcut digit on graph nodes: the 1..9 keys follow the card grid's
+        // order, which isn't this one, and a wrong number is worse than none.
+        patch(el.querySelector('.gnodes'), c.nodes.map(id => {
+          const p = at.get(id), s = byId(id);
+          return {
+            key:'g:' + id, cls:'gnode', html:`<button class="card">${CARD_HTML}</button>`,
+            update(g) {
+              g.style.left = p.x + 'px';
+              g.style.top = p.y + 'px';
+              g.dataset.st = STATE_CLASS[s.state]; // the brackets take their tone from here
+              fillCard(g.firstElementChild, s, 0, false);
+            }
+          };
+        }));
+      }
+    };
+  }));
+}
+
+// Every message exchanged between two agents, in order — the "thread".
+function between(a, b) {
+  return TALKS.filter(t => (t.from === a && t.to === b) || (t.from === b && t.to === a))
+              .sort((x, y) => x.at - y.at);
+}
+
+function renderThread() {
+  const host = $('thread');
+  if (!selectedPair) {
+    if (!host.hidden) { host.hidden = true; host.innerHTML = ''; }
+    return;
+  }
+  const [a, b] = selectedPair;
+  if (!byId(a) || !byId(b)) { selectedPair = null; return renderThread(); }
+  // Rebuilt wholesale: it only exists while it's open, and a conversation you are
+  // reading isn't a 3s-tick surface.
+  host.innerHTML = `<div class="thread-box">
+    <button class="chip" id="back">← close</button>
+    <div class="thread-hdr">${byId(a).title} <span class="arrow">⇄</span> ${byId(b).title}</div>
+    ${between(a, b).map(t => `<div class="msg" data-side="${t.from === a ? 'a' : 'b'}">
+      <div class="hdr">
+        <span>${byId(t.from).title}</span>
+        ${t.kind === 'ask_codex' ? '<span class="kind">codex</span>'
+          : t.waited ? '<span class="kind" title="caller blocked on the reply">⧗</span>' : ''}
+        <span class="when">${elapsed(t.at)}</span>
+      </div>
+      <div class="body">${t.preview}</div>
+    </div>`).join('')}
+  </div>`;
+  if (host.hidden) { host.hidden = false; host.focus(); }
+  const box = host.querySelector('.thread-box');
+  box.scrollTop = box.scrollHeight;
+}
+
+// Usage limits. In the real app these come from claudeInfo.ts (`ClaudeInfo.codexUsage`
+// already carries Codex) — Fleet just re-exposes them on /fleet/snapshot.
+const USAGE = [
+  { label:'CLAUDE', rows:[['session (5h)', 31, 'resets in 4h47'], ['week (7d)', 68, 'resets in 4d14']] },
+  { label:'CODEX',  rows:[['week (7d)', 72, 'resets in 6d40']] },
+];
+function renderUsage() {
+  $('usage').innerHTML = USAGE.map(u => `<div class="meter">
+    ${u.rows.map(([name, pct, note]) => `
+      <div class="meter-top"><b>${u.label}</b> <span>${name}</span> <span class="pct">${pct}% · ${note}</span></div>
+      <div class="bar" data-hot="${pct >= 85 ? 2 : pct >= 65 ? 1 : 0}"><i style="width:${pct}%"></i></div>`).join('')}
+  </div>`).join('');
+}
+
+function render() {
+  renderHeader();
+  $('grid').hidden = view === 'graph';
+  $('graph').hidden = view !== 'graph';
+  if (view === 'graph') renderGraph(); else renderGrid();
+  renderThread(); renderUsage();
+  if (ambientOn) renderAmbient();
+}
+
+// ── ambient mode ──────────────────────────────────────────────────────────────
+// The panel is on all day under the desk. After a while without a touch it turns
+// into a fleet clock: pills in slow orbit, readable across the room, easy on the
+// display.
+let ambientOn = false, idleTimer;
+const T0 = Date.now(); // when the orbit's rotation started
+const IDLE_MS = 45e3; // short on purpose in the prototype; ~5min in the app
+
+function renderAmbient() {
+  const c = counts();
+  $('ambient-sub').textContent =
+    c.error || c.waiting ? `${c.running} WORKING · ${c.waiting + c.error} NEED YOU` : `${c.running} WORKING`;
+  const list = SESSIONS;
+  patch($('pills'), list.map((s, i) => {
+    // One lap per 5 agents, each ring a bit wider — keeps them from stacking up.
+    // The offset comes off the wall clock, so the drift is continuous across
+    // renders instead of restarting from zero each tick.
+    const ring = Math.floor(i / 5);
+    const drift = ((Date.now() - T0) / 240000) * Math.PI * 2; // one turn every 4min
+    const a = (i / Math.min(5, list.length)) * Math.PI * 2 + ring * 0.6 + drift;
+    const rx = 22 + ring * 9, ry = 26 + ring * 10;
+    const left = 50 + Math.cos(a) * rx, top = 50 + Math.sin(a) * ry;
+    return {
+      key:'p:' + s.id, tag:'span', cls:'pill', html:'<i class="pjd"></i><b class="t"></b>',
+      update(el) {
+        el.className = 'pill ' + STATE_CLASS[s.state];
+        el.style.left = left + '%';
+        el.style.top = top + '%';
+        el.querySelector('.pjd').style.background = projColor(s.project);
+        el.querySelector('.t').textContent = s.title;
+      }
+    };
+  }));
+  renderWires();
+}
+
+// Circuit traces between the agents that are talking. Orthogonal routing with a
+// via at each corner — the same language as the board they sit on.
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+// The geometry is read back off the pills every frame instead of being computed
+// alongside them. The pills glide over 3s; when the traces were positioned from
+// the same tick's numbers they jumped straight to the destination, so every wire
+// spent three seconds ending in empty space. One source of truth: wherever the
+// pill actually IS right now.
+function pillPositions() {
+  const box = $('ambient').getBoundingClientRect();
+  const m = new Map();
+  for (const el of $('pills').children) {
+    const r = el.getBoundingClientRect();
+    m.set(el.dataset.key.slice(2), {
+      x: r.left + r.width / 2 - box.left,
+      y: r.top + r.height / 2 - box.top
+    });
+  }
+  return m;
+}
+
+function syncWires() {
+  // The viewBox has to be re-stated here, not once at build time. The pill
+  // positions are read in real viewport pixels, so a stale viewBox silently scales
+  // every trace — which is exactly what a window resize (or a kiosk that lays out
+  // at one size and then gets its real size) used to do.
+  const host = $('wires');
+  const w = $('ambient').clientWidth, h = $('ambient').clientHeight;
+  const vb = `0 0 ${w} ${h}`;
+  if (host.getAttribute('viewBox') !== vb) host.setAttribute('viewBox', vb);
+  const at = pillPositions();
+  for (const g of $('wires').children) {
+    const A = at.get(g.dataset.a), B = at.get(g.dataset.b);
+    if (!A || !B) continue;
+    const mx = A.x + (B.x - A.x) * Number(g.dataset.r);
+    g.querySelector('.trace').setAttribute('d',
+      `M${A.x},${A.y} L${mx},${A.y} L${mx},${B.y} L${B.x},${B.y}`);
+    const [via1, via2] = g.querySelectorAll('.via');
+    via1.setAttribute('cx', mx); via1.setAttribute('cy', A.y);
+    via2.setAttribute('cx', mx); via2.setAttribute('cy', B.y);
+  }
+}
+
+let wireRaf = 0;
+function wireLoop() {
+  if (!ambientOn) { wireRaf = 0; return; }
+  syncWires();
+  wireRaf = requestAnimationFrame(wireLoop);
+}
+
+function renderWires() {
+  const host = $('wires');
+  const live5 = Date.now() - 5 * 60e3;
+  patch(host, edges(GRAPH_MS).filter(e => byId(e.a) && byId(e.b)).map(e => {
+    const live = e.at >= live5 ? 1 : 0;
+    const id = 'w-' + e.key.replace('|', '-');
+    // Not the midpoint: pairs sit roughly symmetric around the centre, so every
+    // vertical leg landed on the same x and the traces fused into one spine down
+    // the middle of the screen. A deterministic per-edge ratio spreads them out —
+    // deterministic because a corner that jumps sideways each tick reads as noise.
+    let hash = 0;
+    for (const c of e.key) hash = (hash * 31 + c.charCodeAt(0)) % 997;
+    return {
+      key:'w:' + e.key, ns:SVGNS, tag:'g',
+      html:`<path class="trace" pathLength="1" id="${id}" />
+            <circle class="via" r="2.5" /><circle class="via" r="2.5" />`,
+      update(g) {
+        g.dataset.a = e.a; g.dataset.b = e.b;
+        g.dataset.r = (0.28 + (hash % 45) / 100).toFixed(3);
+        g.querySelector('.trace').dataset.live = live;
+        for (const v of g.querySelectorAll('.via')) v.dataset.live = live;
+        // Added once and left alone: re-creating it every tick would restart its
+        // run down the wire every three seconds.
+        const has = !!g.querySelector('.pkt');
+        if (live && !has) {
+          g.insertAdjacentHTML('beforeend',
+            `<rect class="pkt" x="-3" y="-3" width="6" height="6">
+               <animateMotion dur="2.4s" repeatCount="indefinite">
+                 <mpath href="#${id}" /></animateMotion></rect>`);
+        } else if (!live && has) g.querySelector('.pkt').remove();
+      }
+    };
+  }));
+  syncWires();
+}
+
+function setAmbient(on) {
+  ambientOn = on;
+  if (on) { renderAmbient(); if (!wireRaf) wireRaf = requestAnimationFrame(wireLoop); }
+  $('ambient').dataset.on = on ? '1' : '0';
+}
+function poke() {
+  clearTimeout(idleTimer);
+  if (ambientOn) setAmbient(false);
+  idleTimer = setTimeout(() => setAmbient(true), IDLE_MS);
+}
+
+// ── actions ───────────────────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.dataset.on = '1';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.dataset.on = '0'), 2200);
+}
+
+// In the real app: POST {source}/fleet/focus {sessionId} → select_session → that
+// source's Rookery window jumps to this session.
+function focusSession(id) {
+  const s = byId(id);
+  selected = id;
+  render();
+  toast(`→ ${s.src} · ${s.project}/${s.branch} · ${s.title}`);
+}
+
+document.addEventListener('click', e => {
+  // Waking never activates whatever is underneath — the first touch only wakes.
+  if (ambientOn) return poke();
+
+  if (e.target.closest('#ambient-btn')) return setAmbient(true);
+  poke();
+
+  const v = e.target.closest('[data-view]');
+  if (v) { view = v.dataset.view; return render(); }
+
+  const f = e.target.closest('[data-filter]');
+  if (f) { filter = f.dataset.filter; selectedPair = null; return render(); }
+
+  // The chip, or the scrim around the box — both mean "close".
+  if (e.target.closest('#back') || e.target.id === 'thread') {
+    selectedPair = null;
+    return render();
+  }
+
+  // The cluster bond, the list row and the graph's edges open the same thread.
+  const link = e.target.closest('[data-pair]');
+  if (link) {
+    const p = link.dataset.pair.split('|');
+    selectedPair = selectedPair && selectedPair.join('|') === link.dataset.pair ? null : p;
+    return render();
+  }
+
+  const card = e.target.closest('.card');
+  if (card) return focusSession(card.dataset.id);
+
+  if (e.target.closest('#theme')) {
+    const root = document.documentElement;
+    root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+    render(); // project hues shift lightness with the theme
+  }
+});
+
+// Keyboard-first here too: arrows + Enter + 1..9, even though touch is the target.
+document.addEventListener('keydown', e => {
+  if (ambientOn) return poke();
+  poke();
+  const list = SESSIONS.filter(visible);
+  if (!list.length) return;
+  const i = Math.max(0, list.findIndex(s => s.id === selected));
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { selected = list[(i + 1) % list.length].id; render(); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { selected = list[(i - 1 + list.length) % list.length].id; render(); e.preventDefault(); }
+  else if (e.key === 'Enter') focusSession(selected);
+  else if (e.key === 'Escape') { selectedPair = null; render(); }
+  // `g` flips cards ⇄ graph.
+  else if (e.key === 'g') { view = view === 'graph' ? 'cards' : 'graph'; render(); }
+  // `c` opens the selected card's conversation — no touch required.
+  else if (e.key === 'c') {
+    const peer = peersOf(selected)[0];
+    if (peer) { selectedPair = [selected, peer]; render(); }
+  }
+  else if (/^[1-9]$/.test(e.key) && list[+e.key - 1]) focusSession(list[+e.key - 1].id);
+});
+
+// ── sessions coming and going ────────────────────────────────────────────────
+// The panel is meant to be watched, not reloaded. A session opening somewhere
+// should arrive on screen by itself, animate in, and often already be talking —
+// because that's how it happens: another agent spun it up.
+const POOL = [
+  { src:'link', project:'homelab', branches:['redis-cache', 'backup-cron', 'grafana-alerts'] },
+  { src:'link', project:'pinguim', branches:['invoice-pdf', 'webhook-retry', 'signup-flow'] },
+  { src:'link', project:'life-os', branches:['weekly-review', 'inbox-zero'] },
+  { src:'mac',  project:'rookery', branches:['fleet-backend', 'graph-view', 'kiosk-mode'] },
+  { src:'mac',  project:'devsquad', branches:['okr-import', 'payroll-sync'] },
+];
+const OPENED_BY = [
+  'spun you up — take the %s work from here',
+  'handing %s over to you, I am blocked on the review',
+  'you own %s now; ping me when the tests are green',
+];
+const pick = a => a[Math.floor(Math.random() * a.length)];
+let seq = 100;
+
+function openSession() {
+  if (SESSIONS.length >= 12) return;
+  const p = pick(POOL), branch = pick(p.branches);
+  if (SESSIONS.some(s => s.project === p.project && s.branch === branch)) return;
+  const s = {
+    id:'n' + (++seq), src:p.src, project:p.project, branch,
+    title: branch.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase()),
+    state:'running', since:Date.now(), last:'Session opened', fresh:Date.now()
+  };
+  SESSIONS.push(s);
+  // Half the time another agent is the one who opened it, so the new card lands
+  // already wired into a conversation instead of appearing alone.
+  const openers = SESSIONS.filter(o => o.id !== s.id && o.src === s.src && o.state === 'running');
+  if (openers.length && Math.random() < 0.5) {
+    TALKS.push({ at:Date.now(), from:pick(openers).id, to:s.id, kind:'send_message',
+                 preview:pick(OPENED_BY).replace('%s', branch) });
+  }
+  render();
+}
+
+function closeSession() {
+  const done = SESSIONS.filter(s => s.state === 'idle' && s.id !== selected);
+  if (SESSIONS.length <= 6 || !done.length) return;
+  const s = pick(done);
+  SESSIONS.splice(SESSIONS.indexOf(s), 1);
+  // Its edges have to go with it, or byId() starts handing back undefined.
+  for (let i = TALKS.length - 1; i >= 0; i--) {
+    if (TALKS[i].from === s.id || TALKS[i].to === s.id) TALKS.splice(i, 1);
+  }
+  if (selectedPair && selectedPair.includes(s.id)) selectedPair = null;
+  render();
+}
+
+setInterval(() => { if (Math.random() < 0.55) openSession(); else closeSession(); }, 8000);
+
+// ── simulation (prototype only; in the real app this is the /fleet/stream SSE) ─
+setInterval(() => {
+  const live = SESSIONS.filter(s => s.state === 'running');
+  if (live.length && Math.random() < 0.45) {
+    const from = live[Math.floor(Math.random() * live.length)];
+    const others = SESSIONS.filter(s => s.id !== from.id && s.src === from.src);
+    const to = others[Math.floor(Math.random() * others.length)];
+    TALKS.push({ at:Date.now(), from:from.id, to:to.id, kind:'send_message',
+                 waited:Math.random() < 0.3,
+                 preview:CHATTER[Math.floor(Math.random() * CHATTER.length)] });
+    if (TALKS.length > 60) TALKS.shift();
+    if (to.state === 'idle') { to.state = 'running'; to.since = Date.now(); to.last = 'Replying to ' + from.title; }
+  }
+  if (Math.random() < 0.25) {
+    const s = SESSIONS[Math.floor(Math.random() * SESSIONS.length)];
+    if (s.state === 'running') { s.state = 'idle'; s.since = Date.now(); s.last = 'Turn finished'; }
+    else if (s.state === 'idle') { s.state = 'running'; s.since = Date.now(); s.last = 'Picking the work back up'; }
+  }
+  render();
+}, 3000);
+
+// Only the clock on the 1s tick — a full render() every second would eat the
+// grid's scroll position and keyboard focus. The "Xm ago" labels ride the 3s tick.
+const tickClock = () => {
+  $('clock').textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+};
+setInterval(tickClock, 1000);
+
+// Geometry is measured, not assumed, so a resize has to re-measure: the graph's
+// vertical radius and the ambient traces both read the pane's real size.
+addEventListener('resize', () => render());
+
+document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+tickClock();
+render();
+poke();
+// `?ambient=1` — boots straight into the resting screen (and makes it testable
+// without waiting out the idle timer).
+if (new URLSearchParams(location.search).get('ambient') === '1') setAmbient(true);
+</script>
+</body>
+</html>

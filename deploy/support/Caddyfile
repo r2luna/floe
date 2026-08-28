@@ -1,0 +1,18 @@
+# Valid TLS for every *.{$DOMAIN} via Let's Encrypt + Cloudflare DNS-01.
+# The token only needs Zone:DNS:Edit + Zone:Zone:Read on the domain.
+{
+	email {$ACME_EMAIL}
+	acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+}
+
+# The IDE (Rookery UI) runs on the host under systemd, not a container — so it
+# can't carry a docker label; it's the one route defined statically here.
+# `ide.` is tech-agnostic: the domain stays even if the app behind it changes.
+ide.{$DOMAIN} {
+	reverse_proxy {$ROOKERY_UPSTREAM}
+}
+
+# Everything else is discovered from container labels by caddy-docker-proxy:
+#   • db.{$DOMAIN}            — web DB admin (support stack)
+#   • <slug>.link.{$DOMAIN}   — per-worktree app containers
+# Routes appear/disappear with the containers; nothing to hardcode here.

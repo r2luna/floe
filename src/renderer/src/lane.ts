@@ -1,0 +1,281 @@
+import type { ModelChoice } from './models'
+
+// The lane is the whole navigation model: panels side by side, in a fixed
+// left-to-right order — projects, then its worktrees, then the session, then
+// whatever that session opened. Position carries meaning here, so a panel goes
+// where its `order` says rather than wherever it was opened from, and a second
+// panel of the same kind replaces the first instead of stacking.
+//
+// Any panel can be closed, including the first; the lane may end up empty.
+
+export type Panel = {
+  /** Stable identity — reopening the same thing focuses it instead of duplicating. */
+  id: string
+  kind: string
+  title: string
+  /** Dimmed secondary label in the panel header (file path, chat topic, …). */
+  sub?: string
+  /**
+   * Where this panel belongs in the lane, left to right. The lane reads the
+   * number and knows nothing about kinds; the kind table assigns it.
+   *
+   * Position is part of what a panel MEANS here — projects, then its worktrees,
+   * then the session, then whatever that session opened. A panel that reappears
+   * wherever it happened to be reopened would break that reading.
+   */
+  order?: number
+  /**
+   * Panels sharing a slot replace each other, even across kinds. The branch
+   * launcher and the chat are one slot: the launcher IS the empty state of a
+   * session, so having both open would be showing a session and its own absence
+   * side by side. Defaults to the kind, which is why most panels never set it.
+   */
+  slot?: string
+  /**
+   * A size the user dragged to, in px, overriding the kind's default. Which
+   * dimension it means depends on how the panel sits: a docked panel is sized
+   * by height (its column already fixes the width), everything else by width.
+   */
+  width?: number
+  height?: number
+  /**
+   * Docked under the panel to its left instead of standing beside it — the
+   * terminal below the chat rather than next to it. A property of the panel,
+   * not of the lane, so it travels with the panel through save and restore.
+   */
+  dock?: 'below'
+  /** For a chat panel: the session it shows. */
+  session?: { id: string; worktreePath: string }
+  /** A brand-new chat's opening message, sent once when it mounts. */
+  firstPrompt?: string
+  /** The model that opening message was addressed to. */
+  firstChoice?: ModelChoice
+  /**
+   * Where the cursor sits inside this panel, as an index into its rows.
+   *
+   * The cursor has to be state, not DOM focus: focus belongs to one element in
+   * the whole window, so leaving a panel would forget where you were and drop
+   * you back at the top. Persisting it per panel is what makes moving away and
+   * returning land you exactly where you left.
+   *
+   * ponytail: an index, so a row inserted above the cursor shifts it. Rows would
+   * need stable ids to fix that, which every panel body would have to declare —
+   * worth it once a list can change under you, not before.
+   */
+  cursor?: number
+  /**
+   * An open visual-line selection, in the same row indices as `cursor`. Panel
+   * state rather than DOM state for the same reason the cursor is: it has to
+   * survive leaving the panel and coming back.
+   */
+  selection?: { anchor: number; head: number } | null
+}
+
+export type Lane = {
+  panels: Panel[]
+  focus: number
+}
+
+const clamp = (n: number, max: number) => Math.min(Math.max(n, 0), max)
+
+export function laneOf(root: Panel): Lane {
+  return { panels: [root], focus: 0 }
+}
+
+/**
+ * The parts of a panel that describe its box rather than its contents: how wide
+ * or tall you dragged it, and whether you stacked it. These survive a change of
+ * content; the cursor and the selection do not, because they are indexes into a
+ * list that is about to be a different list.
+ */
+function layoutOf(panel: Panel): Partial<Panel> {
+  const layout: Partial<Panel> = {}
+  if (panel.width !== undefined) layout.width = panel.width
+  if (panel.height !== undefined) layout.height = panel.height
+  if (panel.dock !== undefined) layout.dock = panel.dock
+  return layout
+}
+
+/**
+ * Put `panel` in the lane and focus it.
+ *
+ * Two rules, both about keeping the lane readable rather than merely correct:
+ *
+ *  - It lands at its `order`, not at the end. The lane reads left to right as
+ *    projects → worktrees → chat → what the session opened, and reopening a
+ *    panel must restore that reading, not append to it.
+ *  - A panel taking the same SLOT is replaced. Usually that means the same kind
+ *    — picking a second session swaps the chat instead of stacking two, which
+ *    is what stops the lane growing a column per click — but two kinds can
+ *    share a slot when they are two states of one thing (see Panel.slot).
+ *
+ * A replacement inherits the OUTGOING panel's layout. Panels are identified by
+ * what they show (`kind:sub`), so switching project hands the worktrees slot a
+ * different panel object — and without this it would arrive at its kind's
+ * default width, undocked, throwing away a layout you arranged by hand. What
+ * changes is the content; where it sits and how big it is are yours.
+ *
+ * Already open, same id: just focus it.
+ */
+export function open(lane: Lane, panel: Panel): Lane {
+  const existing = lane.panels.findIndex((p) => p.id === panel.id)
+  if (existing !== -1) return { ...lane, focus: existing }
+
+  const panels = [...lane.panels]
+  const slot = panel.slot ?? panel.kind
+  const taken = panels.findIndex((p) => (p.slot ?? p.kind) === slot)
+  if (taken !== -1) {
+    panels[taken] = { ...panel, ...layoutOf(panels[taken]) }
+    return { panels, focus: taken }
+  }
+
+  const rank = panel.order ?? 0
+  const before = panels.findIndex((p) => (p.order ?? 0) > rank)
+  const at = before === -1 ? panels.length : before
+  panels.splice(at, 0, panel)
+  return { panels, focus: at }
+}
+
+/**
+ * Close one panel. Not its neighbours: every panel in the lane is a thing you
+ * asked for, and closing the leftmost to reclaim room must not take the work to
+ * its right with it. Accumulation is prevented in `open`, by replacing a panel
+ * of the same kind — not here.
+ *
+ * The lane may end up empty; the rail and the goto bindings are how you get
+ * back, so it is a state you can leave, not a dead end.
+ */
+export function close(lane: Lane, index: number): Lane {
+  if (index < 0 || index >= lane.panels.length) return lane
+  const panels = lane.panels.filter((_, i) => i !== index)
+  // Closing a panel to the LEFT of the focused one shifts every index after it,
+  // so the focus has to follow or it would silently jump to a different panel.
+  const focus = lane.focus > index ? lane.focus - 1 : lane.focus
+  // max(0, …) because an emptied lane has no last index to clamp against.
+  return { panels, focus: clamp(focus, Math.max(0, panels.length - 1)) }
+}
+
+/**
+ * What a "go to this kind" binding does, in one place:
+ *   closed        → open it and focus it
+ *   open, elsewhere → focus it
+ *   open, focused → close it
+ *
+ * The third case is what makes the binding a toggle: the same keystroke that
+ * summoned a panel dismisses it, so you never need a second one to put it away.
+ */
+export function toggleKind(lane: Lane, kind: string, create: () => Panel): Lane {
+  const at = lane.panels.findIndex((p) => p.kind === kind)
+  if (at === -1) return open(lane, create())
+  return at === lane.focus ? close(lane, at) : focusAt(lane, at)
+}
+
+/** Replace one panel, keeping the rest of the lane identical. */
+export function patchPanel(lane: Lane, index: number, patch: Partial<Panel>): Lane {
+  const panel = lane.panels[index]
+  if (!panel) return lane
+  const panels = [...lane.panels]
+  panels[index] = { ...panel, ...patch }
+  return { ...lane, panels }
+}
+
+/** Remember where the cursor is inside panel `index`. */
+export function setCursor(lane: Lane, index: number, cursor: number): Lane {
+  const panel = lane.panels[index]
+  if (!panel || panel.cursor === cursor) return lane
+  const panels = [...lane.panels]
+  panels[index] = { ...panel, cursor }
+  return { ...lane, panels }
+}
+
+export function focusAt(lane: Lane, index: number): Lane {
+  return { ...lane, focus: clamp(index, lane.panels.length - 1) }
+}
+
+export function focusBy(lane: Lane, delta: number): Lane {
+  return focusAt(lane, lane.focus + delta)
+}
+
+/**
+ * Move focus by grid position rather than by flat panel index.
+ *
+ * Stacking means the lane is no longer one line — a column can hold two panels
+ * standing on top of each other. ⌃H/⌃L cross columns (left/right); ⌃J/⌃K move
+ * within one (down/up). Neither ever does the other's job: ⌃L from the top of a
+ * stack must land beside it, not on the panel docked underneath, or the two axes
+ * would tangle into a single ambiguous "next".
+ *
+ * Crossing INTO a column keeps your row when the column is tall enough, and
+ * clamps to its last panel when it isn't — so leaving a two-tall stack for a
+ * single panel doesn't overshoot into nothing.
+ */
+export function focusDir(lane: Lane, dx: -1 | 0 | 1, dy: -1 | 0 | 1): Lane {
+  const columns = columnsOf(lane)
+  const at = lane.panels[lane.focus]
+  if (!at) return lane
+  const c = columns.findIndex((col) => col.some((p) => p.index === lane.focus))
+  if (c === -1) return lane
+  const r = columns[c].findIndex((p) => p.index === lane.focus)
+
+  if (dx !== 0) {
+    const col = columns[c + dx]
+    if (!col) return lane // already the edge column — no wrap
+    return focusAt(lane, col[Math.min(r, col.length - 1)].index)
+  }
+
+  const row = columns[c][r + dy]
+  return row ? focusAt(lane, row.index) : lane // already the edge of the stack
+}
+
+/**
+ * Put a panel under its left-hand neighbour, or back beside it.
+ *
+ * The leftmost panel has nothing to go under, so it stays where it is: the
+ * alternative would be a panel docked to the edge of the window, which is just
+ * the lane again with extra rules.
+ */
+export function toggleDock(lane: Lane, index: number): Lane {
+  const panel = lane.panels[index]
+  if (!panel || index === 0) return lane
+  return patchPanel(lane, index, { dock: panel.dock === 'below' ? undefined : 'below' })
+}
+
+/**
+ * The lane as columns: each panel starts one, and a docked panel joins the
+ * column on its left instead of opening its own.
+ *
+ * Rendering reads this rather than the flat list, so "below" and "beside" are
+ * the same lane in two shapes — nothing is moved, reordered or reparented when
+ * you flip one.
+ */
+export function columnsOf(lane: Lane): { panel: Panel; index: number }[][] {
+  const columns: { panel: Panel; index: number }[][] = []
+  lane.panels.forEach((panel, index) => {
+    const last = columns[columns.length - 1]
+    if (panel.dock === 'below' && last) last.push({ panel, index })
+    else columns.push([{ panel, index }])
+  })
+  return columns
+}
+
+/**
+ * Record a size the user dragged to.
+ *
+ * One function for both axes because a panel only ever has one to give: docked,
+ * it shares its column's width and can only change height; otherwise it sets
+ * the width of the column it heads. The floor is passed in — how narrow a
+ * particular kind may get is the kind table's business, not the lane's.
+ */
+export function resizePanel(lane: Lane, index: number, size: number, min = 120): Lane {
+  const panel = lane.panels[index]
+  if (!panel) return lane
+  const value = Math.max(min, Math.round(size))
+  return patchPanel(lane, index, panel.dock === 'below' ? { height: value } : { width: value })
+}
+
+/** Give a panel its default size back — the undo for a drag that went wrong. */
+export function clearSize(lane: Lane, index: number): Lane {
+  const panel = lane.panels[index]
+  if (!panel || (panel.width === undefined && panel.height === undefined)) return lane
+  return patchPanel(lane, index, { width: undefined, height: undefined })
+}

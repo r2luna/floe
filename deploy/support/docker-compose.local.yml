@@ -1,0 +1,22 @@
+# Local/demo override: `rookery server support up --local` (or
+# `docker compose -f docker-compose.yml -f docker-compose.local.yml ...`).
+# Self-signed HTTPS on :8443 (Caddy internal CA, no Cloudflare token), and DB
+# host ports dropped so it never collides with a MySQL/Postgres already on
+# 3306/5432.
+services:
+  caddy:
+    ports: !override
+      - "8443:443"
+    volumes: !override
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      DOMAIN: rookery.localhost
+
+  mysql:
+    ports: !reset []
+
+  postgres:
+    ports: !reset []

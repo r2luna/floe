@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fleet — graph variants A/B/C/D</title>
+<style>
+/* Comparison sheet: the SAME conversation drawn four ways, so the choice is about
+   the treatment and nothing else. Same three agents, same four directed edges,
+   same flow-toward-the-receiver rule. Only the skin and the routing differ. */
+:root {
+  color-scheme: dark;
+  --canvas:#0d0d0f; --bg:#131315; --panel:#161618; --panel-2:#1d1d20;
+  --border:#2a2a2d; --border-soft:#242427; --tab-active:#28282c;
+  --text:#e7e7ea; --text-bright:#fff; --muted:#8a8a90; --muted-2:#6b6b70;
+  --accent-cyan:#56b6c2; --radius:6px;
+  --mono:"CommitMonoPinguim","Maple Mono NF",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --run-fg:#93b8a1; --run-bd:#283129; --run-bg:#1b201d;
+  --err-fg:#c49495;  --err-bd:#352829;  --err-bg:#221b1c;
+  --wait-fg:#f0b96b; --wait-bd:#4a3620; --wait-bg:#211c15;
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas:#f4f4f5; --bg:#fafafa; --panel:#fff; --panel-2:#f1f1f3;
+  --border:#dedee2; --border-soft:#e7e7ea; --tab-active:#e4e4e8;
+  --text:#1c1c1f; --text-bright:#000; --muted:#6b6b70; --muted-2:#8a8a90;
+  --run-fg:#2f7d52; --run-bd:#b6d9c3; --run-bg:#eef6f1;
+  --err-fg:#b1454a;  --err-bd:#e3bdbf;  --err-bg:#f9eef0;
+  --wait-fg:#9a6a12; --wait-bd:#e8d3a8; --wait-bg:#fbf5e9;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--canvas); color:var(--text); font-family:var(--mono);
+  font-size:13px; -webkit-user-select:none; user-select:none; }
+
+header { display:flex; align-items:center; gap:10px; padding:10px 14px;
+  border-bottom:1px solid var(--border-soft); background:var(--bg); position:sticky; top:0; z-index:5; }
+header .brand { font-size:12px; letter-spacing:.18em; color:var(--muted-2); }
+header .hint { font-size:11px; color:var(--muted-2); }
+header .sp { flex:1; }
+.chip { font:inherit; font-size:11px; padding:5px 10px; border:1px solid var(--border);
+  border-radius:1px; background:var(--panel-2); color:var(--muted); cursor:pointer; }
+
+#sheet { display:grid; grid-template-columns:repeat(2, minmax(660px, 1fr)); gap:14px; padding:14px; }
+@media (max-width:1400px) { #sheet { grid-template-columns:1fr; } }
+
+.panel { border:1px solid var(--border-soft); border-radius:var(--radius); background:var(--bg);
+  overflow:hidden; }
+.panel > h2 { margin:0; padding:9px 12px; font-size:11px; font-weight:400;
+  border-bottom:1px solid var(--border-soft); display:flex; gap:10px; align-items:baseline; }
+.panel > h2 b { font-weight:400; letter-spacing:.2em; color:var(--text-bright); }
+.panel > h2 span { color:var(--muted-2); font-size:10.5px; }
+/* Fixed stage: the SVG then maps 1:1 to the % positions of the HTML nodes.
+   Scaling the viewBox instead would squash the arrowheads and the vias. */
+.stage { position:relative; width:640px; height:320px; margin:0 auto; }
+.stage svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+
+/* ---- the node, shared markup, four skins ---- */
+.node { position:absolute; transform:translate(-50%,-50%); width:196px;
+  font:inherit; text-align:left; cursor:pointer; padding:8px 10px;
+  background:var(--panel); border:1px solid var(--border-soft);
+  border-left:3px solid var(--border); border-radius:var(--radius); }
+.node .meta { font-size:9.5px; color:var(--muted-2); display:flex; gap:6px; align-items:center; }
+.node .meta .age { margin-left:auto; font-variant-numeric:tabular-nums; }
+.node .ttl { font-size:12.5px; color:var(--text-bright); margin-top:3px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.node[data-st="run"] { border-left-color:var(--run-fg); }
+.node[data-st="err"] { border-left-color:var(--err-fg); }
+.dot { display:inline-block; width:6px; height:6px; border-radius:50%; flex:none; }
+
+/* Flow, identical in all four: dashes travel sender → receiver. */
+@keyframes flow { from { stroke-dashoffset:16 } to { stroke-dashoffset:0 } }
+.edge { fill:none; stroke:var(--accent-cyan); stroke-dasharray:5 11; stroke-linecap:round;
+  animation:flow 1.1s linear infinite; }
+.edge[data-live="0"] { stroke:var(--muted-2); opacity:.5; animation:none; }
+.rail { fill:none; stroke:var(--muted-2); opacity:.22; }
+
+/* ══ A — HUD / reticle ══════════════════════════════════════════════════════
+   No boxes: corner brackets frame each agent like a targeting overlay. Faint
+   grid under everything, straight edges, a square packet running the wire. */
+.v-a .stage { background-image:linear-gradient(var(--border-soft) 1px, transparent 1px),
+  linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
+  background-size:26px 26px; background-position:-1px -1px; }
+.v-a .node { background:color-mix(in srgb, var(--canvas) 80%, transparent);
+  border:0; border-radius:0; padding:9px 11px; }
+.v-a .node::before, .v-a .node::after { content:""; position:absolute; width:10px; height:10px;
+  border:1px solid var(--accent-cyan); }
+.v-a .node::before { top:-1px; left:-1px; border-right:0; border-bottom:0; }
+.v-a .node::after { bottom:-1px; right:-1px; border-left:0; border-top:0; }
+.v-a .node[data-st="err"]::before, .v-a .node[data-st="err"]::after { border-color:var(--err-fg); }
+.v-a .node .ttl { letter-spacing:.06em; }
+.v-a .pkt { fill:var(--accent-cyan); }
+
+/* ══ B — Orbital ════════════════════════════════════════════════════════════
+   The reference look: concentric rings with a hub, agents parked on the orbits,
+   edges as arcs that follow the curvature instead of cutting across. */
+.v-b .ring { fill:none; stroke:var(--border-soft); }
+.v-b .hub { fill:none; stroke:var(--border); }
+.v-b .hub-t { fill:var(--muted-2); font-size:9px; letter-spacing:.3em; text-anchor:middle; }
+.v-b .node { width:180px; border-radius:999px; padding:7px 14px; border-left-width:1px;
+  border-color:var(--border); }
+.v-b .node[data-st="run"] { border-color:var(--run-bd); background:var(--run-bg); }
+.v-b .node[data-st="err"] { border-color:var(--err-bd); background:var(--err-bg); }
+
+/* ══ C — Circuit ════════════════════════════════════════════════════════════
+   Traces, not lines: orthogonal routing with vias at the corners. Agents read as
+   chips on a board. Densest of the four — it wastes the least space. */
+.v-c .stage { background:
+  radial-gradient(circle, var(--border-soft) 1px, transparent 1px) 0 0 / 22px 22px; }
+.v-c .node { border-radius:2px; border-left-width:1px; border-top:2px solid var(--border); }
+.v-c .node[data-st="run"] { border-top-color:var(--run-fg); }
+.v-c .node[data-st="err"] { border-top-color:var(--err-fg); }
+.v-c .via { fill:var(--canvas); stroke:var(--accent-cyan); }
+.v-c .via[data-live="0"] { stroke:var(--muted-2); opacity:.5; }
+
+/* ══ D — Neon ═══════════════════════════════════════════════════════════════
+   The video's aesthetic: bloom on the wires, luminous edges, glowing packets.
+   Loudest and least Rookery-ish — breaks the no-solid-fill rule on purpose so
+   there's something at the far end of the scale to compare against. */
+.v-d .stage { background:radial-gradient(120% 90% at 50% 40%, #14161d 0%, var(--canvas) 70%); }
+.v-d .node { border:1px solid var(--accent-cyan); border-left-width:1px;
+  background:color-mix(in srgb, var(--accent-cyan) 8%, var(--panel));
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--accent-cyan) 20%, transparent),
+             0 0 22px color-mix(in srgb, var(--accent-cyan) 22%, transparent); }
+.v-d .node[data-st="err"] { border-color:var(--err-fg);
+  background:color-mix(in srgb, var(--err-fg) 10%, var(--panel));
+  box-shadow:0 0 0 1px color-mix(in srgb, var(--err-fg) 24%, transparent),
+             0 0 22px color-mix(in srgb, var(--err-fg) 26%, transparent); }
+.v-d .node .ttl { text-shadow:0 0 12px color-mix(in srgb, var(--accent-cyan) 55%, transparent); }
+.v-d .glow { fill:none; stroke:var(--accent-cyan); opacity:.35; filter:blur(4px); }
+.v-d .glow[data-live="0"] { stroke:var(--muted-2); opacity:.15; }
+.v-d .pkt { fill:#dffbff; filter:drop-shadow(0 0 5px var(--accent-cyan)); }
+
+/* ══ E — HUD + CIRCUIT ══════════════════════════════════════════════════════
+   A's corner brackets and straight wires on C's board background. No hub: with
+   three agents the rings were decoration competing with the traffic, and the
+   centre of an island is exactly where the edges need to be legible. */
+.v-e .stage { background:
+  radial-gradient(circle, var(--border-soft) 1px, transparent 1px) 0 0 / 22px 22px; }
+.v-e .node { background:color-mix(in srgb, var(--canvas) 82%, transparent);
+  border:0; border-radius:0; padding:9px 11px; }
+.v-e .node::before, .v-e .node::after { content:""; position:absolute; width:10px; height:10px;
+  border:1px solid var(--accent-cyan); }
+.v-e .node::before { top:-1px; left:-1px; border-right:0; border-bottom:0; }
+.v-e .node::after { bottom:-1px; right:-1px; border-left:0; border-top:0; }
+.v-e .node[data-st="err"]::before, .v-e .node[data-st="err"]::after { border-color:var(--err-fg); }
+.v-e .node .ttl { letter-spacing:.06em; }
+.v-e .pkt { fill:var(--accent-cyan); }
+
+@media (prefers-reduced-motion:reduce) { .edge { animation:none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand">FLEET</span>
+  <span class="hint">same conversation, four treatments — Caddy → Billing, Caddy ⇄ MySQL, Billing → MySQL</span>
+  <span class="sp"></span>
+  <button class="chip" id="theme">◐ theme</button>
+</header>
+
+<div id="sheet"></div>
+
+<script>
+// Three agents and four DIRECTED edges — the trio the paired block can't draw.
+const N = {
+  caddy: { ttl:'Caddy / TLS',     meta:'link homelab/caddy-tls',   st:'run', age:'2m',  hue:200 },
+  bill:  { ttl:'Billing — 500',   meta:'link pinguim/billing-fix', st:'err', age:'24m', hue:340 },
+  sql:   { ttl:'Shared MySQL',    meta:'link homelab/mysql-tune',  st:'run', age:'6m',  hue:200 },
+};
+
+const E = [
+  { f:'caddy', t:'bill', live:1, w:2 },
+  { f:'caddy', t:'sql',  live:1, w:3 },
+  { f:'sql',   t:'caddy',live:1, w:2 },  // the reply — draws on the other side of the rail
+  { f:'bill',  t:'sql',  live:0, w:1 },
+];
+
+// Positions as % of the stage. B parks them on orbits, so it gets its own set.
+const TRI    = { caddy:[50,22], bill:[22,74], sql:[78,74] };
+const ORBIT  = { caddy:[50,18], bill:[19,66], sql:[81,66] };
+
+const VARIANTS = [
+  { id:'a', name:'A · HUD',     note:'corner brackets, grid, straight wires + packets' },
+  { id:'b', name:'B · ORBITAL', note:'rings + hub, agents on orbits, curved arcs' },
+  { id:'c', name:'C · CIRCUIT', note:'orthogonal traces with vias, chip-like nodes' },
+  { id:'d', name:'D · NEON',    note:'bloom and glow — the video\'s look, loudest' },
+  { id:'e', name:'E · HUD + CIRCUIT', note:'A brackets and wires on C\'s board — no hub' },
+];
+
+const W = 640, H = 320; // stage coordinate space; the SVG scales, the nodes use %
+const px = (p, k) => ({ x: p[k][0] / 100 * W, y: p[k][1] / 100 * H });
+
+// Pull the ends back so the arrowhead lands on the node instead of under it.
+// Ray/box intersection, NOT |cos|*halfW + |sin|*halfH. The additive version
+// overestimates wildly on a diagonal (it adds both half-extents instead of taking
+// whichever edge the ray actually crosses first) and eats the whole line.
+function trim(p, q, halfW = 98, halfH = 25) {
+  const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy) || 1;
+  const cx = Math.abs(dx / len), cy = Math.abs(dy / len);
+  const t = Math.min(cx ? halfW / cx : Infinity, cy ? halfH / cy : Infinity) + 6;
+  const k = Math.min(t, Math.max(8, len / 2 - 16)) / len;
+  return { x: p.x + dx * k, y: p.y + dy * k };
+}
+// Offset perpendicular, so a reply doesn't sit on top of the message it answers.
+function shift(a, b, off) {
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
+  return [ -dy / len * off, dx / len * off ];
+}
+
+// Per-variant routing. Everything else about an edge is shared.
+const ROUTE = {
+  a: (a, b) => `M${a.x},${a.y} L${b.x},${b.y}`,
+  // Bow the arc away from the centre of the stage, so arcs follow the orbits.
+  b: (a, b) => {
+    const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    const cx = mx + (mx - W / 2) * 0.34, cy = my + (my - H / 2) * 0.34;
+    return `M${a.x},${a.y} Q${cx},${cy} ${b.x},${b.y}`;
+  },
+  // Z-route: out horizontally, across, back in. Corners get vias.
+  c: (a, b) => {
+    const mx = (a.x + b.x) / 2;
+    return Math.abs(a.y - b.y) < 12
+      ? `M${a.x},${a.y} L${b.x},${b.y}`
+      : `M${a.x},${a.y} L${mx},${a.y} L${mx},${b.y} L${b.x},${b.y}`;
+  },
+  d: (a, b) => `M${a.x},${a.y} L${b.x},${b.y}`,
+};
+ROUTE.e = ROUTE.a; // straight wires: with no hub in the middle there is nothing to bow around
+
+const CORNERS = {
+  c: (a, b) => Math.abs(a.y - b.y) < 12 ? [] : [{ x:(a.x+b.x)/2, y:a.y }, { x:(a.x+b.x)/2, y:b.y }],
+};
+
+function panel(v) {
+  const POS = v.id === 'b' ? ORBIT : TRI;
+  // Pair up the two directions of the same link so they can be offset apart.
+  const seen = new Map();
+  for (const e of E) {
+    const k = [e.f, e.t].sort().join('|');
+    seen.set(k, (seen.get(k) || 0) + 1);
+  }
+  const used = new Map();
+
+  const paths = E.map((e, i) => {
+    const k = [e.f, e.t].sort().join('|');
+    const twoWay = seen.get(k) === 2;
+    const nth = used.get(k) || 0; used.set(k, nth + 1);
+    const off = twoWay ? (nth === 0 ? 4 : -4) : 0;
+
+    const P = px(POS, e.f), Q = px(POS, e.t);
+    const a = trim(P, Q), b = trim(Q, P);
+    const [ox, oy] = shift(a, b, off);
+    const A = { x:a.x + ox, y:a.y + oy }, B = { x:b.x + ox, y:b.y + oy };
+    const d = ROUTE[v.id](A, B);
+    const id = `p-${v.id}-${i}`;
+
+    const vias = (CORNERS[v.id]?.(A, B) || [])
+      .map(c => `<circle class="via" data-live="${e.live}" cx="${c.x + ox}" cy="${c.y + oy}" r="3" stroke-width="1.5" />`).join('');
+
+    // A and D also send a discrete packet down the wire; B and C rely on the dashes.
+    const pkt = (v.id === 'a' || v.id === 'd' || v.id === 'e') && e.live
+      ? `<${v.id === 'd' ? 'circle class="pkt" r="3"' : 'rect class="pkt" x="-2.5" y="-2.5" width="5" height="5"'} >
+           <animateMotion dur="${1.6 + i * 0.25}s" repeatCount="indefinite">
+             <mpath href="#${id}" /></animateMotion>
+         </${v.id === 'd' ? 'circle' : 'rect'}>`
+      : '';
+
+    const glow = v.id === 'd'
+      ? `<path class="glow" data-live="${e.live}" d="${d}" stroke-width="${e.w + 5}" />` : '';
+
+    return `<path class="rail" d="${d}" stroke-width="1" />
+      ${glow}
+      <path id="${id}" class="edge" data-live="${e.live}" d="${d}" stroke-width="${e.w}"
+            marker-end="url(#ar-${v.id})" />
+      ${vias}${pkt}`;
+  }).join('');
+
+  const decor = v.id === 'b'
+    ? `<circle class="ring" cx="${W/2}" cy="${H/2}" r="70" />
+       <circle class="ring" cx="${W/2}" cy="${H/2}" r="118" />
+       <circle class="ring" cx="${W/2}" cy="${H/2}" r="168" />
+       <circle class="hub"  cx="${W/2}" cy="${H/2}" r="44" />
+       <text class="hub-t" x="${W/2}" y="${H/2+3}">FLEET</text>` : '';
+
+  const nodes = Object.entries(N).map(([id, s]) => {
+    const [l, t] = POS[id];
+    return `<div class="node" data-st="${s.st}" style="left:${l}%; top:${t}%">
+      <div class="meta"><i class="dot" style="background:hsl(${s.hue} 32% 68%)"></i>
+        ${s.meta}<span class="age">${s.age}</span></div>
+      <div class="ttl">${s.ttl}</div>
+    </div>`;
+  }).join('');
+
+  return `<section class="panel v-${v.id}">
+    <h2><b>${v.name}</b><span>${v.note}</span></h2>
+    <div class="stage">
+      <svg viewBox="0 0 ${W} ${H}">
+        <defs><marker id="ar-${v.id}" viewBox="0 0 8 8" refX="7" refY="4"
+          markerWidth="5" markerHeight="5" orient="auto">
+          <path d="M0 0 L8 4 L0 8 z" fill="context-stroke" /></marker></defs>
+        ${decor}${paths}
+      </svg>
+      ${nodes}
+    </div>
+  </section>`;
+}
+
+document.getElementById('sheet').innerHTML = VARIANTS.map(panel).join('');
+
+document.getElementById('theme').onclick = () => {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light';
+};
+document.documentElement.dataset.theme =
+  matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+</script>
+</body>
+</html>

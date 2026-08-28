@@ -1,0 +1,139 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+:root{
+  --canvas:#191B20; --island:#262A32; --panel:#21252B; --elevated:#1B1E24;
+  --hover:#2C313A; --input:#16181D; --bright:#E6F2F5; --primary:#9CDEF2;
+  --muted:#6B8A94; --faint:#4A5A62; --bsoft:#2B3138;
+  --green:#98C379; --red:#E06C75; --yellow:#E5C07B; --purple:#C678DD; --cyan:#56B6C2;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0f12;padding:32px;display:flex;flex-direction:column;gap:34px}
+.label{color:#cfd6da;font:600 14px ui-monospace,monospace;letter-spacing:.5px;padding-left:4px}
+.label small{color:#7b8790;font-weight:400}
+.app{width:1360px;height:812px;background:var(--canvas);border-radius:10px;overflow:hidden;
+  display:flex;flex-direction:column;color:var(--primary);font-size:13px;line-height:1.5}
+.top{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;color:var(--muted)}
+.top .crumb{display:flex;gap:8px;align-items:center}
+.top b{color:var(--bright);font-weight:700}.top .cy{color:var(--primary)}.top .rd{color:var(--red)}.sep{color:var(--faint)}
+.body{flex:1;display:flex;gap:10px;padding:0 10px 10px}
+.col{width:274px;display:flex;flex-direction:column;gap:10px}
+.island{background:var(--island);border-radius:12px;overflow:hidden}
+.wt{padding:12px 0}
+.wthead{display:flex;align-items:center;justify-content:space-between;padding:4px 16px;color:var(--bright);font-weight:700}
+.wthead .l{display:flex;align-items:center;gap:8px}.wthead .sc{color:var(--faint);font-weight:400;font-size:12px}
+.sec{color:var(--faint);font-size:11px;font-weight:600;letter-spacing:1px;display:flex;justify-content:space-between;padding:10px 16px 4px}
+.it{display:flex;align-items:center;gap:10px;height:31px;padding:0 16px;color:var(--muted)}
+.it.act{background:var(--hover);color:var(--bright);font-weight:600}
+.dot{width:7px;height:7px;border-radius:50%}.ring{width:12px;height:12px;border:1.4px solid currentColor;border-radius:50%}
+.filler{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--faint)}
+.center{flex:1;background:var(--island);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+.phead{height:52px;display:flex;align-items:center;gap:14px;padding:0 26px;border-bottom:1px solid var(--bsoft)}
+.phead .bar{width:2px;height:22px;background:var(--cyan)}.phead .q{color:var(--muted)}
+.chat{flex:1;padding:22px 26px;display:flex;flex-direction:column;gap:15px;overflow:hidden}
+.meta{color:var(--faint);font-size:12px}
+.h{color:var(--bright);font-weight:700;font-size:15px}
+.p{color:var(--primary);line-height:1.6}
+.li{color:var(--primary);padding-left:8px}.li .b{color:var(--cyan)}
+.code{background:var(--elevated);border-radius:4px;padding:1px 6px;color:var(--bright)}
+.bub{align-self:flex-end;max-width:560px;background:var(--hover);border-radius:10px;padding:11px 15px;color:var(--primary)}
+.comp{border-top:1px solid var(--bsoft);padding:13px 26px 18px;display:flex;flex-direction:column;gap:12px}
+.chips{display:flex;align-items:center;justify-content:space-between}
+.cl{display:flex;gap:8px}.cr{display:flex;gap:10px;align-items:center;color:var(--faint);font-size:12px}
+.chip{border:1px solid var(--bsoft);background:var(--elevated);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted)}
+.chip.y{color:var(--yellow);border-color:#3C3A2E;background:#2C2A23}
+.chip.p{color:var(--purple);border-color:#363141;background:#28262F}
+.input{background:var(--input);border:1px solid var(--bsoft);border-radius:8px;padding:14px 16px;
+  display:flex;align-items:flex-end;justify-content:space-between;height:80px;color:var(--faint)}
+.send{width:34px;height:34px;border:1px solid var(--border,#355A66);border-radius:8px;background:var(--elevated);
+  display:flex;align-items:center;justify-content:center;color:var(--primary)}
+.tree{width:290px;background:var(--island);border-radius:12px;display:flex;flex-direction:column;overflow:hidden}
+.tree .row{display:flex;align-items:center;gap:8px;height:27px;padding:0 16px;color:var(--muted);font-size:13px}
+.tree .row.act{background:var(--hover);color:var(--bright)}
+.tree .foot{margin-top:auto;border-top:1px solid var(--bsoft);padding:9px 16px;color:var(--faint);font-size:11px}
+.abar{width:40px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 0}
+.acell{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--faint)}
+.acell.act{background:var(--island);color:var(--primary)}
+svg{display:block}
+</style></head><body>
+<script>
+const I={
+ branch:'<svg width=14 height=14 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=6 cy=6 r=3/><circle cx=6 cy=18 r=3/><circle cx=18 cy=6 r=3/><path d="M18 9v1a2 2 0 0 1-2 2H6"/></svg>',
+ chev:'<svg width=13 height=13 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M6 9l6 6 6-6"/></svg>',
+ chevr:'<svg width=13 height=13 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M9 6l6 6-6 6"/></svg>',
+ file:'<svg width=13 height=13 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M14 3v5h5"/><path d="M14 3H6v18h12V8z"/></svg>',
+ edit:'<svg width=17 height=17 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 20h9"/><path d="M16 4l4 4L8 20l-4 1 1-4z"/></svg>',
+ spark:'<svg width=17 height=17 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 3l2 5 5 2-5 2-2 5-2-5-5-2 5-2z"/></svg>',
+ layers:'<svg width=17 height=17 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
+ git:'<svg width=17 height=17 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><circle cx=6 cy=6 r=3/><circle cx=6 cy=18 r=3/><circle cx=18 cy=6 r=3/><path d="M18 9v1a2 2 0 0 1-2 2H6"/></svg>',
+ doc:'<svg width=17 height=17 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M14 3v5h5"/><path d="M14 3H6v18h12V8z"/></svg>',
+ gear:'<svg width=13 height=13 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.7><circle cx=12 cy=12 r=3/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+ send:'<svg width=16 height=16 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+};
+function screen(font){
+ const files=[['.claude','chevr'],['.rookery','chevr'],['.worktrees','chevr'],['docs','chevr'],['src','chevr'],
+  ['.gitignore','gear'],['CLAUDE.md','file'],['electron.vite.config.ts','file'],['package.json','file','act'],
+  ['pnpm-lock.yaml','gear'],['README.md','file'],['tsconfig.json','file'],['tsconfig.web.json','file']];
+ const acts=['doc','edit','spark','layers','git'];
+ return `<div class=app style="font-family:'${font}'">
+  <div class=top>
+   <div class=crumb>r2luna <span class=sep>›</span> <b>rookery</b> <span class=sep>›</span> ${I.branch} <span class=cy>main</span> <span class=sep>›</span> <span class=rd>✦</span> <span class=cy>Session 2</span> <span class=sep>…</span></div>
+   <div>5% 5h · 7% wk &nbsp; ⊞ 1003 MB</div>
+  </div>
+  <div class=body>
+   <div class=col>
+    <div class="island wt">
+     <div class=wthead><span class=l>${I.chev}${I.branch} main</span><span class=sc>⌘1</span></div>
+     <div class=sec><span>SESSIONS</span><span>0/2</span></div>
+     <div class=it><span class=ring></span>Session 1</div>
+     <div class="it act"><span class=ring></span>Session 2</div>
+     <div class=sec><span>TERMINALS</span><span>0/1</span></div>
+     <div class=it><span class=dot style="background:var(--green)"></span>Terminal 1</div>
+     <div class=sec><span>COMMANDS</span><span>0/1</span></div>
+     <div class=it><span class=dot style="background:var(--muted)"></span>npm</div>
+    </div>
+    <div class="island wt">
+     <div class=wthead><span class=l>${I.chev}${I.branch} themes</span><span class=sc>⌘2</span></div>
+     <div class=sec><span>SESSIONS</span><span>1/1</span></div>
+     <div class="it act"><span class=ring></span>Theme work</div>
+     <div class=sec><span>TERMINALS</span><span>1/1</span></div>
+     <div class=it><span class=dot style="background:var(--green)"></span>Terminal 1</div>
+    </div>
+    <div class="island filler">+ new worktree</div>
+   </div>
+   <div class=center>
+    <div class=phead><span class=bar></span><span class=q>que versao é essa ? "version": "0.9.0" .. olha o @package.json</span></div>
+    <div class=chat>
+     <div class=meta>· 1 action  Bash</div>
+     <div class=p>Build assinado. Agora instalar:</div>
+     <div class=meta>· 1 action  Bash</div>
+     <div class=p>Tudo pronto. ✅</div>
+     <div class=h>Resumo</div>
+     <div class=p>Commit <span class=code>f704381</span> — "Tipografia mais legível no terminal e no chat" (sobre o <span class=code>b8e5476 wip</span> que já tinha a assinatura).</div>
+     <div class=p>Versão <b>0.3.1</b> buildada, assinada e instalada:</div>
+     <div class=li><span class=b>•</span> <span class=code>dist/Rookery-0.3.1-arm64.dmg</span> (103 MB, assinado com seu cert local)</div>
+     <div class=li><span class=b>•</span> <span class=code>/Applications/Rookery.app</span> — versão <b>0.3.1</b>, sem quarentena</div>
+     <div class=bub>que versao é essa ?  "version": "0.9.0" .. olha o @package.json</div>
+     <div class=meta>· 2 actions  Bash ×2</div>
+    </div>
+    <div class=comp>
+     <div class=chips>
+      <div class=cl><span class=chip>▢ rookery</span><span class=chip>⑂ main</span></div>
+      <div class=cr>0k/1M (0%) <span style="color:var(--red)">⚠</span> <span class="chip y">high ⌄</span> <span class="chip p">opus 4.8 ⌄</span></div>
+     </div>
+     <div class=input><span>Describe what you'd like the agent to do… Type / for commands, @ for files.</span><span class=send>${I.send}</span></div>
+    </div>
+   </div>
+   <div class=tree>
+    <div style="flex:1;padding:10px 0;overflow:hidden">
+     ${files.map(([n,ic,act])=>`<div class="row ${act||''}">${I[ic]} ${n}</div>`).join('')}
+    </div>
+    <div class=foot>a new · r rename · d delete · x/c → p move/copy · = apply</div>
+   </div>
+   <div class=abar>${acts.map((a,i)=>`<div class="acell ${i==0?'act':''}">${I[a]}</div>`).join('')}</div>
+  </div>
+ </div>`;
+}
+const fonts=[['Maple Mono NF','sua fonte atual (Nerd Font)'],['Dank Mono','com ligaturas + itálico cursivo'],['CommitMonoPinguim','seu Commit Mono custom']];
+document.body.innerHTML=fonts.map(([f,d])=>`<div class=label>${f} &nbsp;<small>— ${d}</small></div>`+screen(f)).join('');
+</script>
+</body></html>

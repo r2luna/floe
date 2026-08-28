@@ -1,0 +1,47 @@
+appId: me.lunardelli.rookery
+productName: Rookery
+directories:
+  buildResources: resources
+  output: dist
+files:
+  - out/**/*
+  - resources/**/*
+  - package.json
+  # node-pty is a native dependency required at runtime (not bundled by Vite).
+  - node_modules/node-pty/**/*
+# Native .node binaries can't be loaded from inside the asar archive.
+asarUnpack:
+  - node_modules/node-pty/**/*
+mac:
+  icon: resources/icon.icns
+  target:
+    # dmg = first-install image. zip = the artifact Squirrel.Mac swaps in for
+    # auto-updates; without it electron-updater has nothing to download.
+    - target: dmg
+      arch: arm64
+    - target: zip
+      arch: arm64
+  category: public.app-category.developer-tools
+  # Personal/local build — signed with a self-signed cert trusted on this machine.
+  # The same identity must sign every build: Squirrel only applies an update whose
+  # signature satisfies the installed app's designated requirement.
+  identity: "Rookery Local Signing"
+  # Hardened runtime is only needed for Apple notarization (Developer ID cert).
+  # With a self-signed cert it blocks Keychain access, so safeStorage reports
+  # "encryption unavailable" and Jira/Bitbucket tokens can't be saved.
+  hardenedRuntime: false
+dmg:
+  title: Rookery ${version}
+linux:
+  # Usa resources/icon.png (512px) automaticamente.
+  # ponytail: AppImage é o formato portátil sem dependências de distro. Adicione deb/rpm se precisar de repos.
+  target:
+    - AppImage
+  category: Development
+# Releases live in the homelab Forgejo generic package registry (GitHub repo is
+# archived/read-only). Generic has no uploader — `pnpm release` only produces
+# dist/latest-mac.yml + .zip; scripts/publish-update.mjs PUTs them to this fixed
+# URL. The package is public, so the updater downloads with no auth.
+publish:
+  provider: generic
+  url: https://git.pinguim.io/api/packages/r2luna/generic/rookery-updates/latest

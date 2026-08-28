@@ -1,0 +1,33 @@
+# Build the server bundle on every push to `server` and publish it as a GitHub release.
+# The server pulls it in with `rookery server update` (gh release download → swap → restart).
+name: build-server
+on:
+  push:
+    branches: [server]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create releases
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # pnpm 11 needs node:sqlite (Node 22+); Node 20 crashes on install
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/build-server.mjs
+      - run: pnpm exec electron-vite build
+      - name: package
+        run: tar czf "rookery-server-${GITHUB_SHA}.tgz" out bin package.json
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="server-$(git rev-parse --short HEAD)"
+          gh release create "$tag" rookery-server-*.tgz \
+            --title "$tag" --notes "Server build de $GITHUB_SHA" --target "$GITHUB_SHA" \
+          || gh release upload "$tag" rookery-server-*.tgz --clobber

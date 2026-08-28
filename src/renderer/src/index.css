@@ -1,0 +1,2906 @@
+/* CommitMonoPinguim is the whole UI face — this app is mono end to end. Maple
+   Mono NF trails it so Nerd-font glyphs (eza/ls icons in the terminal) resolve. */
+@font-face {
+  font-family: "CommitMonoPinguim";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "CommitMonoPinguim";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Maple Mono NF";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/MapleMono-NF-Regular.woff2") format("woff2");
+}
+/* The bold face matters as much as the regular: per-glyph fallback is
+   weight-aware, so without it a BOLD Nerd Font glyph — fish's prompt, eza's
+   icons — has no face to fall back to and draws tofu. */
+@font-face {
+  font-family: "Maple Mono NF";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./assets/fonts/MapleMono-NF-Bold.woff2") format("woff2");
+}
+
+:root {
+  /* Prose leading — looser than the app's 1.55, which is set for rows and code.
+     One value, because a message and a .md file are the same kind of reading
+     and letting them drift makes the file panel feel like another app. */
+  --prose-line: 1.65;
+
+  /* CommitMonoPinguim is the app's face everywhere, terminal included. Maple
+     Mono NF trails it purely as PER-GLYPH fallback for the Nerd Font icons a
+     non-patched font lacks — it is never the primary face. */
+  --mono:
+    "CommitMonoPinguim", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo,
+    "Cascadia Code", monospace;
+
+  --bg: #0d0e11;
+  --panel: #141519;
+  --panel-focused: #17181d;
+  --line: #23252b;
+  --line-soft: #1c1e23;
+
+  --text: #c9ccd2;
+  --text-strong: #e8eaee;
+  --dim: #6d7280;
+  --live: #6ea86e;
+  /* A turn in flight. Its own hue on purpose: green already means "the session
+     you are in" and the accent means "a reply you have not read", so working
+     had to be a third thing or it would read as one of those two. */
+  --working: #6d93c9;
+  /* The penguin's own colour, and the app's only accent. Selected chips, the
+     recording prompt and live palette actions all tint from here — three rules
+     already asked for it, which without a value made `color-mix` invalid and
+     fell back to a hard white outline. */
+  --accent: #d3956d;
+
+  /* Every corner in the app comes from here. One knob: turn it and panels,
+     popovers, rows, chips, buttons and inputs all follow together, because
+     nothing sets a radius of its own. The only exceptions are the round dot
+     (50%) and the diff row (square, so lines stack flush). */
+  --radius: 5px;
+  /* Hairline bars — meters, pipeline segments, the cursor tick. They are 3–5px
+     tall, so the box radius would round them into pills. Derived, not typed,
+     so they stay in proportion when --radius moves. */
+  --radius-sm: calc(var(--radius) / 2);
+  --head-h: 34px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 12.5px/1.55 var(--mono);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* --- titlebar ------------------------------------------------------------ */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  /* No traffic lights (the window is frameless) — the breadcrumb starts at the
+     same 8px gutter the lane uses, so the two left edges line up. */
+  /* 20px = the lane's 8px gutter + the panel's 1px border + its 11px head
+     padding, so the breadcrumb sits on the same vertical line as panel names. */
+  padding-inline: 20px 14px;
+  -webkit-app-region: drag;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--dim);
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.crumb[data-last] {
+  color: var(--text-strong);
+}
+
+.crumb-sep {
+  color: #40444d;
+}
+
+/* --- lane ---------------------------------------------------------------- */
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.lane {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0 8px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-padding-inline: 8px;
+  /* The lane's position is communicated by the panels themselves; a scrollbar
+     across the bottom of the window would just eat a row of every panel. */
+  scrollbar-width: none;
+}
+
+.lane::-webkit-scrollbar {
+  display: none;
+}
+
+/* One scrollbar for the whole app. Overlay-thin and untinted so a panel that
+   overflows doesn't suddenly grow a bright native bar down its edge. */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #ffffff14;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #ffffff26;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-corner,
+::-webkit-scrollbar-track {
+  background: none;
+}
+
+/* A column is what the lane actually lays out. Usually it holds one panel;
+   when something is docked below, it holds the stack and sizes it as one. */
+.lane-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  /* A column shrinks only as far as its own floor, then the lane scrolls. Lists
+     declare no floor and so never shrink; panels holding prose or code give up
+     width first, because the alternative is pushing something off the screen
+     entirely. */
+  flex: 0 1 var(--panel-w, 380px);
+  min-width: var(--panel-min, var(--panel-w, 380px));
+}
+
+/* A width you dragged to is a width you keep. Without this the column is still
+   shrinkable, so the moment the lane runs out of room it collapses back to its
+   kind's default and the drag looks like it was ignored — the lane scrolls
+   instead, which is what it is for. */
+.lane-col[data-sized] {
+  flex: 0 0 var(--panel-w);
+  min-width: var(--panel-w);
+}
+
+/* Takes the lane's leftover width, never shrinking below its own base. Two of
+   these open at once simply split what is left. */
+.lane-col[data-grow] {
+  flex: 1 1 var(--panel-w, 380px);
+  min-width: var(--panel-w, 380px);
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  /* Height, not width: the column owns the width now. A stack splits the
+     available height between its panels. */
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  outline: none;
+}
+
+.panel[data-focused] {
+  background: var(--panel-focused);
+  border-color: var(--line);
+}
+
+/* A bare panel keeps its slot in the lane but drops the card: no fill, no
+   border, no header. It still scrolls and focuses like any other panel. */
+.panel[data-bare],
+.panel[data-bare][data-focused] {
+  background: none;
+  border-color: transparent;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: var(--head-h);
+  padding-inline: 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.panel-icon {
+  color: var(--dim);
+  flex: none;
+}
+
+.panel-name {
+  color: var(--text-strong);
+  flex: none;
+}
+
+.panel-sub {
+  color: var(--dim);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- context meter -------------------------------------------------------- */
+
+.ctx-wrap {
+  position: relative;
+  margin-left: auto;
+  flex: none;
+}
+
+.ctx-meter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 5px;
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+
+
+.ctx-bar {
+  width: 54px;
+  height: 3px;
+  border-radius: var(--radius-sm);
+  background: #ffffff14;
+  overflow: hidden;
+}
+
+.ctx-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: #5c6472;
+}
+
+.ctx-meter[data-level="warn"] {
+  color: #c9a05f;
+}
+
+.ctx-meter[data-level="warn"] .ctx-fill {
+  background: #c9a05f;
+}
+
+.ctx-meter[data-level="high"] {
+  color: #c07a72;
+}
+
+.ctx-meter[data-level="high"] .ctx-fill {
+  background: #c07a72;
+}
+
+/* --- context breakdown ---------------------------------------------------- */
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Only the FIRST action claims the free space. A second auto margin would split
+   what is left and open a gap between the buttons. */
+.ctx-wrap + .panel-act,
+.panel-act + .panel-act {
+  margin-left: 0;
+}
+
+.panel-act {
+  /* pins the close button right whether or not the panel has a subtitle */
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 3px;
+  border-radius: var(--radius);
+  color: var(--dim);
+}
+
+.panel-act:hover,
+.panel-act:focus-visible {
+  color: var(--text-strong);
+  background: #ffffff0d;
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.empty {
+  margin: 0;
+  padding: 6px;
+  color: var(--dim);
+}
+
+/* --- rail ---------------------------------------------------------------- */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: none;
+  padding: 0 8px 8px 0;
+}
+
+.rail-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  color: var(--dim);
+}
+
+.rail-btn:hover,
+.rail-btn:focus-visible {
+  color: var(--text-strong);
+  background: #ffffff0d;
+}
+
+/* --- rows ---------------------------------------------------------------- */
+
+.group + .group {
+  margin-top: 14px;
+}
+
+.group-label {
+  padding: 4px 8px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+/* No hover on list rows. The cursor already says where you are, and a second
+   highlight that follows the pointer means every pass across a list lights up
+   half of it — reading as flicker rather than as feedback. Clicking still
+   responds: focus moves the cursor to the row you hit.
+
+   Controls keep their hover (the rail, header buttons, dialog buttons): they
+   are single targets, not a column of them under a moving pointer. */
+
+
+
+/* What the lane is actually SHOWING. Only the session is marked: the current
+   project and worktree are already the ones this panel is listing, so tinting
+   them says nothing you didn't know. */
+.row-session[data-active] {
+  color: var(--text-strong);
+}
+
+.row[data-active] .dot {
+  background: var(--live);
+  border-color: var(--live);
+}
+
+.row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-session {
+  padding-left: 24px;
+}
+
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #4a4f59;
+  border-radius: 50%;
+}
+
+.dot-live {
+  background: var(--live);
+  border-color: var(--live);
+}
+
+/* An answer you have not read: filled, in the accent — the only warm mark in
+   the list, so it is found without looking for it. */
+.dot-unread {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The row itself reads as unread too: the title comes up to full strength,
+   which is what makes the mark legible from across the sidebar. */
+.row-session[data-unread] .row-name {
+  color: var(--text-strong);
+}
+
+/* A turn in flight: the row's own dot, filled, with a ring breathing out of
+   it. Nothing else in a session row moves, so the pulse is the whole message —
+   and it stays a dot, so the column of them never jitters as one starts. */
+.dot-working {
+  position: relative;
+  background: var(--working);
+  border-color: var(--working);
+}
+
+.dot-working::after {
+  content: '';
+  position: absolute;
+  /* Outside the dot's own box, so the ring does not shrink it. */
+  inset: -3px;
+  border: 1px solid var(--working);
+  border-radius: 50%;
+  animation: halo 1.4s ease-out infinite;
+}
+
+@keyframes halo {
+  from {
+    opacity: 0.6;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still marked, still its own colour — just a steady ring instead of a
+     breathing one. */
+  .dot-working::after {
+    animation: none;
+    opacity: 0.4;
+  }
+}
+
+.badge {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--dim);
+}
+
+/* --- launcher ------------------------------------------------------------ */
+
+.launcher {
+  display: flex;
+  flex-direction: column;
+  /* Upper third, not dead centre — the recent list grows downward and a truly
+     centred box would drift as it fills. */
+  justify-content: flex-start;
+  gap: 26px;
+  /* min-height, not height: once the input has grown the column must be able to
+     get taller than the panel and let the panel body scroll it. */
+  min-height: 100%;
+  max-width: 720px;
+  margin-inline: auto;
+  padding-top: 14vh;
+}
+
+.greet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin: 0;
+  font-size: 21px;
+  font-weight: 400;
+  color: var(--text-strong);
+}
+
+.greet-mark {
+  color: var(--accent);
+}
+
+/* --- composer ------------------------------------------------------------ */
+
+.composer {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+}
+
+.composer:focus-within {
+  border-color: #343a45;
+}
+
+/* --- drop target --------------------------------------------------------- */
+
+.composer {
+  position: relative;
+}
+
+.composer[data-dropping] {
+  border-color: var(--live);
+  border-style: dashed;
+}
+
+.drop-hint {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: #16181dd9;
+  color: var(--live);
+  /* The overlay must never become the drop target itself, or crossing into it
+     fires dragleave on the composer and cancels the drag. */
+  pointer-events: none;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 10px 0;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.chip:hover {
+  color: var(--text-strong);
+  border-color: #3f4652;
+}
+
+.chip-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-image {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+
+.chip-image img {
+  display: block;
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+}
+
+.chip-image .chip-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  border-radius: var(--radius);
+  background: #000000a6;
+  opacity: 0;
+}
+
+.chip-image:hover .chip-x {
+  opacity: 1;
+}
+
+.chip-rejected {
+  border-style: dashed;
+  border-color: #6b4a4a;
+  color: #b98686;
+}
+
+.composer-stack {
+  display: grid;
+}
+
+/* The mirror and the input share one grid cell and overlap exactly. Every
+   property below that can affect glyph position or line wrapping MUST be
+   identical on both rules — a 1px difference slides the colours off the text. */
+.composer-mirror,
+.composer-input {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 14px 14px 4px;
+  border: none;
+  font: inherit;
+  font-family: var(--mono);
+  line-height: inherit;
+  letter-spacing: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 2;
+}
+
+.composer-mirror {
+  /* Painted behind the input; never interactive, never a scroll target of its
+     own — its scrollTop is driven by the textarea's. */
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  color: var(--text-strong);
+}
+
+.composer-input {
+  background: none;
+  resize: none;
+  outline: none;
+  /* The glyphs are invisible; the mirror behind supplies every colour. The
+     caret and the selection stay native and must be re-tinted by hand. */
+  color: transparent;
+  caret-color: var(--text-strong);
+  /* Grows with its content natively — no ref, no scrollHeight measuring, no
+     re-render per keystroke. `rows` is the floor, max-height the ceiling. */
+  field-sizing: content;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.composer-input::selection {
+  background: #3a4f6a80;
+}
+
+.composer-input::placeholder {
+  color: var(--dim);
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+
+/* --- markdown source colours --------------------------------------------- */
+
+.md-marker {
+  color: #6f7bd0;
+}
+
+.md-head {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.md-quote {
+  color: #8f96a4;
+}
+
+.md-code {
+  color: #c8a06a;
+}
+
+.md-bold {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.md-em {
+  color: #cdd1d8;
+  font-style: italic;
+}
+
+.md-link {
+  color: #6fa8c9;
+}
+
+.tool {
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border-radius: var(--radius);
+  color: var(--dim);
+}
+
+.tool:hover,
+.tool:focus-visible {
+  color: var(--text-strong);
+  background: #ffffff0d;
+}
+
+.model {
+  anchor-name: --model-button;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 11px;
+  transition: opacity 0.12s ease;
+}
+
+/* Until the chat's own model is read, the chip still holds the last chat's —
+   fade it out rather than let a wrong (and wider) label flash and snap. */
+.model[data-pending] {
+  opacity: 0;
+}
+
+.model:hover,
+.model:focus-visible {
+  background: #ffffff0d;
+}
+
+.model:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.model:disabled:hover,
+.model:disabled:focus-visible {
+  background: transparent;
+}
+
+/* Locked once the chat is open — nothing left to pick. */
+.model:disabled .model-harness,
+.model:disabled svg {
+  display: none;
+}
+
+.model-effort {
+  color: var(--dim);
+  text-transform: capitalize;
+}
+
+/* The model picker. Anchored to the composer's bottom-right, above the tools
+   row, because that is where the button that opens it sits. */
+.model-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.model-menu {
+  /* Anchored to the button rather than to the composer box: with a few local
+     runtimes listed the menu is taller than the room above it, and it was
+     running off the top of the window with the first groups unreachable.
+     Fixed + anchor lets it flip below the button when it doesn't fit above,
+     and scroll when it fits neither way. */
+  position: fixed;
+  position-anchor: --model-button;
+  position-try-fallbacks: flip-block;
+  right: anchor(right);
+  bottom: anchor(top);
+  z-index: 41;
+  display: flex;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 6px;
+  /* 42vh, because one side of the button always has at least half the window:
+     whichever side flip-block picks, the menu fits and scrolls the rest. */
+  max-height: 42vh;
+  /* The efforts row is sticky over the list, so j/k's scrollIntoView must stop
+     short of it or the row it lands on ends up behind the chips. */
+  scroll-padding-bottom: 42px;
+  /* Wide enough that the five efforts sit as a row of chips rather than as one
+     run-on word — the narrower box was what made this look broken. */
+  min-width: 216px;
+  margin-block: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 12px 32px #00000059;
+}
+
+.model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-efforts {
+  /* Pinned to the bottom edge while the models scroll behind it: effort applies
+     to whichever model you pick, so it must stay reachable at any scroll
+     position. The negative offsets let it sit flush against the menu's own
+     padding instead of floating 6px above it. */
+  position: sticky;
+  bottom: -6px;
+  z-index: 1;
+  flex-direction: row;
+  flex-shrink: 0;
+  gap: 3px;
+  margin-top: 2px;
+  margin-bottom: -6px;
+  padding-top: 7px;
+  padding-bottom: 6px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--panel);
+}
+
+.model-option {
+  padding: 5px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+  text-align: left;
+  text-transform: capitalize;
+}
+
+.model-efforts .model-option {
+  flex: 1;
+  padding: 3px 2px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.model-option:hover {
+  color: var(--text);
+}
+
+/* Outline, never a fill — same as every other selected chip in the app. The
+   wash is barely there on purpose: it marks the row without turning it into a
+   button that shouts louder than the four beside it. */
+.model-option[data-at] {
+  background: #ffffff12;
+}
+
+.model-option[data-on] {
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+}
+
+/* The accent reads at 2.4:1 on a pale surface, which is fine for a border and
+   not for text — so light gets a darkened version of the same hue. (There is no
+   light token block in this stylesheet yet; when there is, this becomes a
+   `--accent` value and this rule goes away.) */
+:root[data-theme='light'] .model-option[data-on] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: #a2603a;
+}
+
+:root[data-theme='light'] .model-menu {
+  box-shadow: 0 12px 32px #0000001f;
+}
+
+:root[data-theme='light'] .model:hover,
+:root[data-theme='light'] .model:focus-visible {
+  background: #0000000d;
+}
+
+.recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 6px 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.fold-plain {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.fold-plain:hover {
+  color: var(--text-strong);
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 6px;
+  border-radius: var(--radius);
+  color: var(--dim);
+  text-align: left;
+}
+
+
+
+.recent-row .row-name {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-strong);
+}
+
+/* --- pipeline ------------------------------------------------------------ */
+
+.pipe {
+  padding: 2px 8px 6px 24px;
+}
+
+.pipe-bar {
+  display: flex;
+  gap: 2px;
+}
+
+.pipe-seg {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--radius-sm);
+  background: #ffffff12;
+}
+
+.pipe-seg[data-state="done"] {
+  background: #4d5f4d;
+}
+
+.pipe-seg[data-state="running"] {
+  background: var(--live);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.pipe-seg[data-state="failed"] {
+  background: #8a4b4b;
+}
+
+/* skipped stays at the base fill: it never ran, and colouring it would read as
+   progress the pipeline did not actually make. */
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pipe-seg[data-state="running"] {
+    animation: none;
+  }
+}
+
+.pipe-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.pipe-label {
+  color: #8f96a4;
+}
+
+.pipe-step {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--live);
+}
+
+/* --- subagents ----------------------------------------------------------- */
+
+.sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.sub[data-state="running"] .sub-icon,
+.sub[data-state="running"] .row-name {
+  color: var(--live);
+}
+
+.sub-icon {
+  flex: none;
+}
+
+.sub-note,
+.when {
+  flex: none;
+  font-size: 10px;
+  opacity: 0.4;
+}
+
+/* --- chat ---------------------------------------------------------------- */
+
+/* Transcript scrolls, composer stays pinned at the bottom of the panel. */
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+/* --- transcript: IRC-style log -------------------------------------------- */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 4px;
+  font-variant-ligatures: none;
+}
+
+/* A run of entries from one speaker is separated from the next run, not from
+   its own continuation lines — that spacing is what marks the grouping. */
+.irc-entry:not([data-cont]) {
+  margin-top: 12px;
+}
+
+.chat > .irc-entry:first-child {
+  margin-top: 0;
+}
+
+.irc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.irc-nick {
+  font-weight: 700;
+}
+
+.irc-time {
+  color: #4e5460;
+  font-size: 11px;
+}
+
+.irc-body {
+  overflow-wrap: break-word;
+  /* The text fills the panel. A narrow column inside a wide panel leaves dead
+     space that reads as a mistake — if a line is too long, the panel is too
+     wide, and the panel is what should shrink. */
+  line-height: var(--prose-line);
+  /* Plain text — the user's own messages — keeps the line breaks they typed.
+     Rendered markdown turns this off again below, because there the block
+     elements carry the structure and raw whitespace would double the gaps. */
+  white-space: pre-wrap;
+}
+
+.irc-body b {
+  color: var(--text-strong);
+}
+
+/* Inline code only — `.md-code`, never a bare `code`. The fenced block is a
+   `<pre><code>` holding block-level lines, so a blanket rule here painted its
+   padding as two little pills above and below the code. */
+.irc-body .md-code,
+.irc-sys code {
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  background: #ffffff12;
+  font: inherit;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+/* Queued: written, not sent. Dimmer than a real message and marked, so the
+   difference between "said" and "waiting" is never in doubt. */
+.irc-queued {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  color: var(--dim);
+}
+
+.irc-queued-mark {
+  flex: none;
+  color: #7f86d8;
+  font-size: 11px;
+}
+
+.irc-queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  opacity: 0.75;
+}
+
+.irc-queued-drop {
+  flex: none;
+  order: 3;
+  display: grid;
+  place-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  color: var(--dim);
+  opacity: 0;
+}
+
+.irc-queued:hover .irc-queued-drop,
+.irc-queued-drop:focus-visible {
+  opacity: 1;
+}
+
+.irc-stop {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, #c98177 45%, transparent);
+  border-radius: 5px;
+  color: #c98177;
+  font-size: 10.5px;
+}
+
+/* Armed ⌘L: outline only, like every other selected chip in the app. */
+.tool-link[data-on] {
+  border: 1px solid color-mix(in srgb, #7f86d8 55%, transparent);
+  color: #9aa1e8;
+}
+
+.irc-dim {
+  color: var(--dim);
+}
+
+.irc-star {
+  color: #4e5460;
+}
+
+.irc-sys {
+  margin-top: 12px;
+  color: #7f8797;
+}
+
+/* --- AskUserQuestion: options as numbered lines in the model's entry.
+   The number takes the queued-mark purple — both mean "waiting on you". All
+   other tones are theme variables, so light needs no override. */
+.irc-q-title {
+  color: var(--dim);
+}
+
+.irc-q-title b {
+  color: #9aa1e8;
+}
+
+.irc-q-title[data-waiting] {
+  opacity: 0.55;
+}
+
+.irc-q-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.irc-q-answer {
+  color: #9aa1e8;
+}
+
+.irc-q-line {
+  display: flex;
+  gap: 8px;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.irc-q-line:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.irc-q-n {
+  flex: none;
+  color: #7f86d8;
+}
+
+.irc-q-line[data-picked] .irc-q-n::after {
+  content: ' ✓';
+}
+
+.irc-q-lbl {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.irc-q-desc {
+  color: var(--dim);
+}
+
+.irc-sys[data-error] {
+  color: #c08c86;
+}
+
+/* "Show earlier" — pages the transcript window backwards. Outline-chip like
+   every other button; theme variables only, so light needs no override. */
+.irc-earlier {
+  display: block;
+  margin: 12px auto 0;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.irc-earlier:hover,
+.irc-earlier:focus-visible {
+  color: var(--text);
+}
+
+.irc-act {
+  color: var(--dim);
+}
+
+.irc-act[data-live] {
+  color: var(--live);
+}
+
+/* "claude is typing" — the other side of the conversation, so it sits on the
+   same left margin as a real entry and carries their nick colour. */
+.irc-typing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  color: var(--dim);
+}
+
+.irc-typing .irc-nick {
+  font-weight: 700;
+}
+
+.irc-dots {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  /* Sits on the text baseline rather than the line box, so the dots read as
+     part of the sentence instead of a separate widget. */
+  margin-bottom: 2px;
+}
+
+.irc-dots i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: irc-dot 1.2s ease-in-out infinite;
+}
+
+.irc-dots i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.irc-dots i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes irc-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* The dots are decoration; a steady line says the same thing without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .irc-dots i {
+    animation: none;
+    opacity: 0.55;
+  }
+}
+
+.agent {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  margin-bottom: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.agent[data-state="running"] {
+  border-color: #3a4a3a;
+  color: var(--text);
+}
+
+.agent[data-state="running"] > svg {
+  color: var(--live);
+}
+
+.agent-nested {
+  margin-left: 16px;
+}
+
+.agent-note {
+  flex: none;
+}
+
+.live-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px !important;
+  color: var(--live);
+}
+
+.irc-by {
+  font-weight: 700;
+}
+
+/* --- expanded tool calls -------------------------------------------------- */
+
+.irc-fold {
+  width: 100%;
+  text-align: left;
+}
+
+/* Indented under the `* ` marker and hung off a rule, so an expanded block
+   reads as belonging to its action line and not as new chat. */
+.calls {
+  margin: 2px 0 4px 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.call {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 0 10px;
+  padding: 1px 0;
+  color: var(--dim);
+}
+
+.call-tool {
+  color: #7f8797;
+}
+
+.call-arg {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.call-result {
+  color: #5c6472;
+  white-space: nowrap;
+}
+
+.call[data-failed] .call-tool,
+.call[data-failed] .call-result {
+  color: #c08c86;
+}
+
+/* stdout tail: spans the arg + result columns so it lines up under the command */
+.call-out {
+  grid-column: 2 / -1;
+  margin: 2px 0 4px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: #ffffff08;
+  color: #7f8797;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.call[data-failed] .call-out {
+  background: #3a24240f;
+  color: #b98686;
+}
+
+/* --- changes + diff ------------------------------------------------------- */
+
+.changes-head {
+  display: flex;
+  gap: 8px;
+  padding: 4px 8px 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.stat-add {
+  color: #6ea86e;
+}
+
+.stat-del {
+  color: #c07a72;
+}
+
+.change-row {
+  gap: 9px;
+}
+
+.change-status {
+  flex: none;
+  width: 11px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.change-status[data-status="A"] {
+  color: #6ea86e;
+}
+
+.change-status[data-status="M"] {
+  color: #c9a05f;
+}
+
+.change-status[data-status="D"] {
+  color: #c07a72;
+}
+
+.change-status[data-status="R"] {
+  color: #79b2cf;
+}
+
+/* Every path in the list starts with the same prefix, so the directory is the
+   part carrying no information — dim it and let the basename read. */
+.change-dir {
+  color: #575d6a;
+}
+
+.change-stat {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  font-size: 11px;
+}
+
+/* --- diff ----------------------------------------------------------------- */
+
+.diff {
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+
+.diff-hunk {
+  margin: 10px 0 2px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: #ffffff08;
+  color: #7f86d8;
+  overflow-x: auto;
+}
+
+.diff-hunk:first-child {
+  margin-top: 0;
+}
+
+.diff-row {
+  display: grid;
+  grid-template-columns: 44px 44px 14px minmax(0, 1fr);
+  align-items: baseline;
+}
+
+/* One number column, not the diff's two — a file has no old and new side. */
+.file-line {
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+
+/* Where a dir's chevron goes; kept for files too, so names stay in one column. */
+.file-mark {
+  flex: none;
+  width: 13px;
+  color: var(--dim);
+}
+
+.file-image {
+  max-width: 100%;
+}
+
+.diff-no {
+  padding-right: 8px;
+  text-align: right;
+  color: #454b57;
+  font-size: 11px;
+  user-select: none;
+}
+
+.diff-mark,
+.diff-code {
+  color: var(--text);
+}
+
+.diff-mark {
+  user-select: none;
+  text-align: center;
+}
+
+.diff-code {
+  min-width: 0;
+  overflow-x: auto;
+  /* the row's own scrollbar would be per-line; let the panel body scroll */
+  scrollbar-width: none;
+}
+
+.diff-row[data-kind="add"] {
+  background: #22371f4d;
+}
+
+.diff-row[data-kind="add"] .diff-mark,
+.diff-row[data-kind="add"] .diff-code {
+  color: #a7cfa0;
+}
+
+.diff-row[data-kind="del"] {
+  background: #3b23234d;
+}
+
+.diff-row[data-kind="del"] .diff-mark,
+.diff-row[data-kind="del"] .diff-code {
+  color: #d2a09a;
+}
+
+.diff-row[data-kind="ctx"] .diff-code {
+  color: #9aa0ac;
+}
+
+/* --- titlebar stats -------------------------------------------------------- */
+
+
+
+.stat > svg {
+  color: var(--dim);
+}
+
+.stat-unit,
+
+/* Shiki emits the LIGHT colour as an inline style and the dark one as the
+   --shiki-dark custom property. An inline style outranks any stylesheet rule,
+   so without !important the light palette wins and the code renders near-black
+   on a near-black panel. This is Shiki's own documented dual-theme override —
+   it stays until a light theme exists to switch against. */
+.diff-code span {
+  color: var(--shiki-dark, currentColor) !important;
+}
+
+.diff-hunk[data-nav] {
+  cursor: default;
+}
+
+.change-row[data-active] {
+  background: #ffffff12;
+}
+
+.change-row[data-active] .row-name {
+  color: var(--text-strong);
+}
+
+/* The shared directory, shown once instead of on every row. */
+.changes-base {
+  padding: 0 8px 6px;
+  color: #575d6a;
+  font-size: 11px;
+}
+
+/* --- turn summary --------------------------------------------------------- */
+
+/* Hung off the same rule as an expanded action block: the file list belongs to
+   the turn above it, not to whatever gets said next. */
+.sum {
+  margin: 6px 0 4px 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.sum-head {
+  color: var(--dim);
+  margin-bottom: 2px;
+}
+
+.sum-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 1px 0;
+  color: var(--dim);
+  text-align: left;
+}
+
+.sum-row:focus-visible {
+  color: var(--text);
+}
+
+.sum-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sum-more {
+  padding-left: 20px;
+}
+
+/* Pinned to the lane's left edge: it stays put while everything opened from it
+   scrolls past. `left` matches the lane's own padding so it lands flush, and
+   the z-index puts it over the panels sliding underneath rather than under
+   them. Sticky needs a scroll container with room to scroll — with a short
+   lane it simply sits where it is. */
+.lane-col[data-sticky] {
+  position: sticky;
+  left: 8px;
+  z-index: 3;
+  box-shadow: 6px 0 16px #0000004d;
+}
+
+/* Navigable rows suppress the UA focus ring — the browser draws its own on top
+   of ours, in the OS accent colour, which is neither ours nor consistent. The
+   cursor below replaces it, and unlike a focus ring it survives leaving the
+   panel, which is the whole reason it exists. Controls OUTSIDE the cursor
+   system (the rail, the composer, panel actions) keep their native ring. */
+.panel-body button:focus,
+.panel-body button:focus-visible,
+.panel-body [data-nav]:focus,
+.panel-body [data-nav]:focus-visible {
+  outline: none;
+}
+
+/* The find bar, at the foot of the panel it searches. Sits over the content
+   rather than resizing it: a search that reflowed the rows you are reading
+   would move the match out from under the cursor as you typed. */
+.find {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  left: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+
+.find-mark {
+  color: var(--dim);
+}
+
+.find-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--text-strong);
+  font: inherit;
+  outline: none;
+}
+
+/* Where you are in the matches. Dim, because it is a readout and not a target;
+   red when nothing matched, which is the one time it has news. */
+.find-count {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.find-count[data-empty] {
+  color: #c08c86;
+}
+
+/* --- a markdown file, as numbered lines ----------------------------------- */
+
+/* Prose wraps; code does not. Both keep the number column, so the two views of
+   a file read as the same view. The wrapped continuation hangs under the text
+   rather than under the number — a wrapped line must never look like a new
+   one. */
+.md-row .md-text {
+  min-width: 0;
+  /* A gutter between the number and the text. The code view gets one from
+     .diff-no's padding; prose needs its own because a bullet or a quote bar
+     starts at the very edge of the column. */
+  padding-left: 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--prose-line);
+  color: var(--text);
+}
+
+/* Headings are one step from the body, never four: this is a document in a
+   panel, not a landing page. The level shows in the colour of its marker
+   instead — see .md-row[data-md="heading"] .md-bullet. */
+.md-row[data-md="heading"] .md-text {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+/* A top-level heading is the only one that gets a rule under it, which is what
+   separates sections when every heading is the same size. */
+.md-row[data-md="heading"][data-level="1"] .md-text {
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* Inline code gets its pill here, the same one a chat message gets. The bare
+   .md-code above is the composer's SOURCE colour, where a pill would be drawn
+   around the backticks you are still typing. */
+.md-row .md-code {
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  background: #ffffff12;
+}
+
+.md-bullet {
+  display: inline-block;
+  min-width: 2ch;
+  color: #6f7bd0;
+}
+
+.md-row[data-md="quote"] .md-text {
+  padding-left: 16px;
+  border-left: 2px solid #3c4457;
+  color: #8f96a4;
+}
+
+/* A fenced block reads as one slab: the fence rows carry the same background as
+   the code between them, so the block has a top and a bottom without borrowing
+   a border. */
+.md-row[data-md="fence"] .md-text,
+.md-row[data-md="code"] .md-text {
+  background: #ffffff08;
+  white-space: pre;
+  color: #c8c9cd;
+}
+
+.md-row[data-md="fence"] .md-text {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.md-row[data-md="table"] .md-text {
+  white-space: pre;
+  color: #b9bcc4;
+}
+
+.md-rule {
+  display: inline-block;
+  width: 100%;
+  border-top: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+
+/* The cursor: where this panel will act, visible whether or not the panel holds
+   DOM focus. Dimmer while the panel is away so it reads as "where I was", full
+   strength when you come back to it. */
+[data-cursor] {
+  position: relative;
+  background: #ffffff05;
+  border-radius: var(--radius);
+}
+
+[data-cursor]::before {
+  content: "";
+  position: absolute;
+  inset-block: 2px;
+  left: 0;
+  width: 2px;
+  border-radius: var(--radius-sm);
+  background: #333b49;
+}
+
+.panel[data-focused] [data-cursor] {
+  background: #ffffff0a;
+}
+
+.panel[data-focused] [data-cursor]::before {
+  background: #55688f;
+}
+
+.panel[data-focused] [data-cursor] .row-name,
+.panel[data-focused] [data-cursor].diff-hunk,
+.panel[data-focused] [data-cursor].irc-fold {
+  color: var(--text-strong);
+}
+
+/* --- line selection ------------------------------------------------------- */
+
+/* The selected range. Tinted rather than outlined so a fifty-line selection
+   reads as one block instead of fifty boxes; the cursor's left bar still shows
+   which end you're moving. */
+[data-sel] {
+  background: #2b3a5540;
+}
+
+.panel[data-focused] [data-sel] {
+  background: #35496e5c;
+}
+
+/* An added or removed line keeps its own tint underneath — losing it would hide
+   what kind of line you picked, which is the thing you're commenting on. */
+.diff-row[data-sel][data-kind="add"] {
+  background: #2c4a3a80;
+}
+
+.diff-row[data-sel][data-kind="del"] {
+  background: #4a2f3480;
+}
+
+.diff-row[data-cursor] {
+  border-radius: 0;
+}
+
+.diff-row[data-cursor]::before {
+  inset-block: 0;
+}
+
+/* --- terminal ------------------------------------------------------------- */
+
+/* The padding goes HERE, never on the host xterm measures. FitAddon computes
+   rows from the host's box and ignores its padding, so padding the host makes
+   it count one row too many and the prompt is clipped off the bottom. */
+.terminal-panel {
+  height: 100%;
+  padding: 4px 2px 4px 8px;
+  margin: -8px;
+  background: var(--panel);
+}
+
+.panel[data-focused] .terminal-panel {
+  background: var(--panel-focused);
+}
+
+.terminal-host {
+  height: 100%;
+}
+
+/* xterm ships its own scrollbar styling; match the app's. */
+.terminal-panel .xterm-viewport {
+  background: transparent !important;
+}
+
+/* --- command palette ------------------------------------------------------ */
+
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  /* flex-start, not the default stretch: stretch made the box as tall as the
+     screen no matter how few results it held. The palette must be the size of
+     its list. */
+  align-items: flex-start;
+  /* Just below the titlebar, and a fixed offset rather than a percentage: the
+     modal should sit against the app's chrome, not drift down as the window
+     grows. The list grows downward from there, so the box never moves as it
+     fills. */
+  padding-top: 56px;
+  background: #05060899;
+}
+
+.palette {
+  width: min(580px, calc(100vw - 32px));
+  /* A ceiling, not a height — the box ends where the list ends. */
+  max-height: 52vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #1b1d23;
+  box-shadow: 0 18px 48px #00000080;
+  overflow: hidden;
+}
+
+.palette-input {
+  padding: 13px 15px;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  background: none;
+  color: var(--text-strong);
+  font: inherit;
+  outline: none;
+}
+
+.palette-input::placeholder {
+  color: var(--dim);
+}
+
+.palette-list {
+  overflow-y: auto;
+  padding: 5px;
+}
+
+.palette-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+}
+
+.palette-row[data-at] {
+  background: #ffffff12;
+}
+
+.palette-title {
+  flex: none;
+}
+
+/* The characters you typed, so a row explains why it is in the list. */
+.palette-hit {
+  color: #9db8e4;
+  font-weight: 700;
+}
+
+.palette-keys {
+  /* Pushed to the right edge, where every palette that shows shortcuts puts
+     them — the column reads as one list of bindings you can scan. */
+  margin-left: auto;
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.palette-row[data-at] .palette-keys {
+  color: var(--text);
+}
+
+/* The actions available on the highlighted row, named with the key that
+   performs them: the palette teaches its own shortcuts instead of hiding
+   them behind a menu you have to find first. */
+.palette-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line-soft);
+  background: #00000026;
+}
+
+.palette-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.palette-action-live {
+  color: var(--accent);
+}
+
+.palette-action kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+  font-size: 10.5px;
+}
+
+/* Recording: the input is a prompt, not a field, so it stops looking typeable. */
+.palette-input[data-recording]::placeholder {
+  color: var(--accent);
+}
+
+:root[data-theme='light'] .palette-foot {
+  background: #0000000a;
+}
+
+.palette-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.palette-empty {
+  padding: 14px 10px;
+  color: var(--dim);
+}
+
+.empty.error {
+  color: #c08c86;
+}
+
+kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 11px;
+}
+
+/* --- dialog --------------------------------------------------------------- */
+
+.dialog {
+  width: min(620px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #1b1d23;
+  box-shadow: 0 18px 48px #00000080;
+  overflow: hidden;
+}
+
+.dialog-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-strong);
+}
+
+.dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.chips-label {
+  margin-bottom: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.chips-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Outline chips, never solid fills — see docs/ui-conventions.md. The radio
+   inside is the real control; hiding it would take the arrow keys with it, so
+   it is sized away instead. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chip input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.chip:hover {
+  color: var(--text);
+  border-color: #343a45;
+}
+
+.chip[data-on] {
+  color: var(--text-strong);
+  border-color: #4a5568;
+  background: #ffffff10;
+}
+
+.chip:focus-within {
+  outline: 1px solid #6d84b4;
+  outline-offset: 1px;
+}
+
+.dialog-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dialog-input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  color: var(--text-strong);
+  font: inherit;
+  outline: none;
+}
+
+.dialog-input:focus {
+  border-color: #343a45;
+}
+
+.dialog-input::placeholder {
+  color: var(--dim);
+}
+
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dialog-hint {
+  flex: 1;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.btn {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.btn:hover:not(:disabled) {
+  color: var(--text-strong);
+  border-color: #3f4652;
+}
+
+.btn:disabled {
+  color: #4a4f59;
+  cursor: default;
+}
+
+.btn-primary:not(:disabled) {
+  color: var(--text-strong);
+  border-color: #4a5a7a;
+}
+
+/* --- composer menus (/ and @) --------------------------------------------- */
+
+/* Above the composer, not below: the composer sits at the bottom of its panel,
+   so a menu underneath would open off-screen. */
+.composer-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #1b1d23;
+  box-shadow: 0 12px 32px #00000066;
+}
+
+.composer-menu-group {
+  padding: 6px 10px 3px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composer-menu-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+}
+
+.composer-menu-row[data-at] {
+  background: #ffffff12;
+}
+
+.composer-menu-title {
+  flex: none;
+}
+
+.composer-menu-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+
+/* --- rendered messages ---------------------------------------------------- */
+
+.md {
+  white-space: normal;
+}
+
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+
+.md p {
+  /* Paragraphs need a gap you can find with your eye while scanning, not just
+     one that technically separates them. */
+  margin: 0 0 13px;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 20px 0 8px;
+  color: var(--text-strong);
+  /* One step, not four: a chat message is not a document, and a heading here
+     only needs to read as a heading. */
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.md ul,
+.md ol {
+  margin: 0 0 13px;
+  padding-left: 20px;
+}
+
+.md li {
+  margin: 4px 0;
+}
+
+.md li::marker {
+  color: var(--dim);
+}
+
+.md blockquote {
+  margin: 0 0 13px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  color: var(--dim);
+}
+
+.md hr {
+  margin: 14px 0;
+  border: none;
+  border-top: 1px solid var(--line-soft);
+}
+
+.md a {
+  color: #79b2cf;
+  text-decoration: none;
+}
+
+.md a:hover {
+  text-decoration: underline;
+}
+
+.md strong {
+  color: var(--text-strong);
+}
+
+/* Scoped to rendered markdown on purpose: the composer's mirror uses the same
+   class for the SOURCE, and padding there would shift its glyphs off the
+   textarea's — the one thing that file's header says must never happen. */
+.md .md-code {
+  padding: 1px 5px;
+  border-radius: var(--radius);
+  background: #ffffff12;
+  font: inherit;
+  color: var(--text-strong);
+  overflow-wrap: anywhere;
+}
+
+.md table {
+  width: 100%;
+  margin: 0 0 10px;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.md th,
+.md td {
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
+  text-align: left;
+}
+
+.md th {
+  color: var(--text-strong);
+}
+
+/* --- fenced code ---------------------------------------------------------- */
+
+.md-block {
+  margin: 0 0 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #0f1114;
+}
+
+.md-block-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px 4px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* Pushes the buttons to the right edge, whether there is one of them or two. */
+.md-lang {
+  margin-right: auto;
+}
+
+/* The copy button is always there, not on hover: a control that appears only
+   when the pointer is over it does not exist for the keyboard, and you cannot
+   look for something you have never seen. */
+.md-copy {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.md-copy:hover,
+.md-copy:focus-visible {
+  color: var(--text-strong);
+  background: #ffffff0d;
+}
+
+/* Run and Copy are actions, not list rows. Clicking one focuses it, which moves
+   the lane's cursor onto it — and the cursor mark then sits there for good,
+   reading as a hover that never lets go. Hover and keyboard focus still say
+   where you are; the persistent mark has no business on a button you pressed. */
+.md-block-head [data-cursor],
+.panel[data-focused] .md-block-head [data-cursor] {
+  background: none;
+}
+
+.md-block-head [data-cursor]::before,
+.panel[data-focused] .md-block-head [data-cursor]::before {
+  display: none;
+}
+
+.md-pre {
+  margin: 0;
+  padding: 9px 10px;
+  overflow-x: auto;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.md-line {
+  display: block;
+  white-space: pre;
+}
+
+/* Shiki emits the light colour inline and the dark one as --shiki-dark; an
+   inline style outranks any rule, so without !important the light palette wins
+   and the code renders near-black on a near-black block. */
+.md-pre span[style] {
+  color: var(--shiki-dark, currentColor) !important;
+}
+
+/* --- account -------------------------------------------------------------- */
+
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+/* The panel owns its own rhythm through `gap`; a paragraph's default margin
+   would stack on top of it and open a hole between every line. */
+.account p {
+  margin: 0;
+}
+
+
+/* Reads as a link, not a control: it re-opens a page the browser already has. */
+.account-link {
+  align-self: flex-start;
+  padding: 0;
+  color: var(--dim);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.account-link:hover {
+  color: var(--text);
+}
+
+.account-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* --- account stats -------------------------------------------------------- */
+
+.stats-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* 52 columns of one week each. The columns are declared once and shared with
+   the month strip above, so a label can never drift off its month. */
+.heat,
+.heat-months {
+  display: grid;
+  grid-template-columns: repeat(52, 1fr);
+  gap: 2px;
+  font-size: 9px;
+  color: var(--dim);
+}
+
+.heat {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 1fr);
+}
+
+.heat-cell {
+  aspect-ratio: 1;
+  border-radius: 1px;
+  background: #ffffff0a;
+}
+
+/* One ramp, four steps. Tinted from the live green rather than a new hue: the
+   app already means "something happened here" with that colour. */
+.heat-cell[data-level="1"] {
+  background: #6ea86e40;
+}
+
+.heat-cell[data-level="2"] {
+  background: #6ea86e73;
+}
+
+.heat-cell[data-level="3"] {
+  background: #6ea86ea6;
+}
+
+.heat-cell[data-level="4"] {
+  background: #6ea86e;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: 0;
+}
+
+.stat-grid dt {
+  color: var(--dim);
+}
+
+.stat-grid dd {
+  margin: 0;
+  color: var(--text-strong);
+  text-align: right;
+}
+
+.stat-of {
+  color: var(--dim);
+}
+
+/* Docked below its neighbour: a companion, not a peer. It takes a share of the
+   column's height rather than all of it, so the panel it sits under keeps the
+   room it was opened for.
+   ponytail: a fixed 40%. A draggable split is the obvious next step, and it
+   changes this line and nothing else. */
+.panel[data-docked] {
+  flex: 0 0 40%;
+}
+
+/* --- splitters ------------------------------------------------------------ */
+
+/* An overlay on the edge, not a flex child: adding a handle must not change the
+   layout it is there to adjust. The strip is wider than it looks, because an
+   8px target is the difference between grabbing it and missing it. */
+.splitter {
+  position: absolute;
+  z-index: 4;
+  touch-action: none;
+}
+
+.splitter[data-axis="x"] {
+  top: 0;
+  bottom: 0;
+  right: -5px;
+  width: 9px;
+  cursor: col-resize;
+}
+
+.splitter[data-axis="y"] {
+  left: 0;
+  right: 0;
+  top: -5px;
+  height: 9px;
+  cursor: row-resize;
+}
+
+/* Invisible until wanted. A line down every edge would be a grid; this only
+   shows the one you are reaching for. */
+.splitter::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  transition: background 90ms ease-out;
+}
+
+.splitter[data-axis="x"]::after {
+  inset: 8px 4px;
+}
+
+.splitter[data-axis="y"]::after {
+  inset: 4px 8px;
+}
+
+.splitter:hover::after,
+.splitter:active::after {
+  background: #ffffff2e;
+}
+
+/* The handles are positioned against these two. */
+.lane-col,
+.panel {
+  position: relative;
+}
+
+/* --- other AI runtimes in the model picker -------------------------------- */
+
+.model-agent {
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.model-agent-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 9px 3px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Installed but with nothing we can enumerate — the row says so rather than
+   leaving an empty group that reads as a bug. */
+.model-agent-note {
+  color: #575d6a;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Listed, not yet selectable: sending still goes through the claude CLI. Dim
+   rather than hidden — knowing the model is there is the point. */
+.model-option:disabled {
+  color: #575d6a;
+  cursor: default;
+}
+
+.model-option:disabled:hover {
+  color: #575d6a;
+}
+
+/* The IRC host: which model the nick is speaking from. Dim and unbolded, so
+   `claude@opus-5` reads as one address with the name carrying the weight. */
+.irc-host {
+  color: #575d6a;
+  font-weight: 400;
+}
+
+/* --- harness accounts ------------------------------------------------------ */
+
+
+
+
+/* The harness carries the weight: it is the one part of `harness · model ·
+   effort` that changes what you are talking to. */
+.model-harness {
+  color: var(--text-strong);
+}
+
+.model-name {
+  color: var(--text);
+}
+
+/* --- accounts ------------------------------------------------------------- */
+
+.accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A grid so the names line up in a column and the list reads downward. The
+   detail column is the only elastic one: it absorbs the leftover and truncates,
+   which is what stops four opencode providers from squeezing "opencode" itself
+   down to an ellipsis. */
+.account-row {
+  display: grid;
+  /* Two rows: the account on top, its allowance underneath spanning the width.
+     The allowance is about the account, not another column of it. */
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 4px 0;
+}
+
+.account-name {
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.account-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* Signed out is a fact, not an error: it says so in the same quiet tone, and
+   the button beside it is what draws the eye. */
+.account-detail[data-out] {
+  color: #575d6a;
+}
+
+.account-do {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* The allowance line: one chip per rolling window, plus the plan it counts
+   against. Spans every column so the bars line up down the list. */
+.account-usage {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.account-plan {
+  color: #575d6a;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.account-window {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The same warm-as-it-fills bands as the context gauge. */
+.account-window[data-level="warn"] {
+  color: #c9a05f;
+}
+
+.account-window[data-level="warn"] .ctx-fill {
+  background: #c9a05f;
+}
+
+.account-window[data-level="high"] {
+  color: #c07a72;
+}
+
+.account-window[data-level="high"] .ctx-fill {
+  background: #c07a72;
+}
+
+/* Shorter than the header's gauge: two of these share one line, and the number
+   beside each is what you actually read — the bar is the glance. */
+.account-window .ctx-bar {
+  width: 34px;
+}
+
+/* A second list needs to read as a second list, not as more rows of the first. */
+.accounts-others {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.account-head {
+  padding-bottom: 2px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* --- context breakdown ----------------------------------------------------- */
+
+.ctx-meter[data-open] {
+  color: var(--text);
+  background: #ffffff0d;
+}
+
+/* Anchored under the gauge in the panel header, where the button that opens it
+   sits. Right-aligned so it never runs off the panel's own edge. */
+.ctx-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  width: 280px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 12px 32px #00000059;
+}
+
+.ctx-pop-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 2px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11px;
+}
+
+.ctx-pct {
+  color: var(--text-strong);
+}
+
+.ctx-total {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ctx-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ctx-list li {
+  display: flex;
+  gap: 10px;
+  padding: 1px 2px;
+  font-size: 11px;
+}
+
+.ctx-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+.ctx-count {
+  flex: none;
+  color: var(--text);
+}
+
+/* Waiting, or nothing to say — the probe takes a moment and silence would read
+   as a broken panel. */
+.ctx-empty {
+  margin: 8px 2px 2px;
+  color: var(--dim);
+  font-size: 11px;
+}

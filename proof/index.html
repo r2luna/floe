@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pipeline — implement phases proof</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: var(--bg, #131315);
+      }
+      .proof-shell {
+        width: 360px;
+        padding: 16px 8px 22px;
+        background: var(--sidebar, #161618);
+        font-family:
+          ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      }
+      .proof-session {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px 8px 14px;
+      }
+      .proof-session__dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #8ab4f8;
+        box-shadow: 0 0 6px #8ab4f8;
+        flex: none;
+      }
+      .proof-session__title {
+        font-size: 12px;
+        color: var(--text, #e7e7ea);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
