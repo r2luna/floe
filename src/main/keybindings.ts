@@ -116,6 +116,7 @@ The conditions:
 
   typing              focus is in a text field (the composer, a search box)
   selecting           a line selection is open in the focused panel
+  moving              a project is being moved between groups (\`m\`)
   stack-below         the focused panel has a neighbour docked below it
   stack-above         the focused panel has a neighbour docked above it
   panel == "diff"     the focused panel is of that kind
@@ -269,55 +270,12 @@ export function parseKeybindings(text: string): { binds: Keybind[]; errors: Keyb
 // The file on disk
 // ---------------------------------------------------------------------------
 
-/**
- * Write the file if it isn't there, folding in the old plain-text overrides.
- *
- * The pre-TOML format only ever recorded what the user changed, so a migration
- * is: generate the full table, then append their overrides at the end — where,
- * as the last entries, they lose to an earlier default on the same chord. That
- * is wrong for a rebind, so they go in a section of their own that says to move
- * them up, rather than being silently merged into the table above.
- */
+/** Write the file if it isn't there. */
 export function ensureKeybindings(): void {
   const path = keybindingsPath()
   if (existsSync(path)) return
   mkdirSync(dirname(path), { recursive: true })
-  let text = generateKeybindings()
-  const legacy = join(configDir(), 'keybindings')
-  if (existsSync(legacy)) {
-    const migrated = migrateLegacy(readFileSync(legacy, 'utf8'))
-    if (migrated) text += migrated
-    renameSync(legacy, `${legacy}.migrated`)
-  }
-  writeTomlFile(path, text)
-}
-
-/** `keybind = cmd+t = session.new` lines from the old format, as TOML entries. */
-function migrateLegacy(text: string): string {
-  const binds: Keybind[] = []
-  for (const line of text.split('\n')) {
-    const stripped = line.replace(/#.*$/, '').trim()
-    if (!stripped) continue
-    const parts = stripped.split('=').map((p) => p.trim())
-    if (parts.length !== 3 || parts[0].toLowerCase() !== 'keybind') continue
-    if (parts[2].toLowerCase() === 'unbind') continue // the entry it removed is simply absent now
-    if (!COMMAND_ID_SET.has(parts[2])) continue
-    binds.push({ key: normalizeChord(parts[1]), command: parts[2] })
-  }
-  if (!binds.length) return ''
-  return (
-    '\n\n' +
-    block(
-      'Migrated From Your Old Keybindings File',
-      `These came from the plain-text \`keybindings\` file this replaced, which only
-recorded your changes. They are at the bottom, so a default above with the
-same chord still wins — move an entry up past that default to make it take
-effect, and delete the default if you no longer want it.`
-    ) +
-    '\n\n' +
-    binds.map((b) => renderBind(b)).join('\n\n') +
-    '\n'
-  )
+  writeTomlFile(path, generateKeybindings())
 }
 
 export function loadKeybindings(): KeybindingsConfig {

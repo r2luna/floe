@@ -12,15 +12,13 @@ import { basename, join } from 'node:path'
 import { configDir } from '../dataDir'
 import type { ConfigError } from './errors'
 import { ensureFloeConfig, floeConfigPath, floeConfigResult, invalidateFloeConfig } from './floe'
-import { invalidateProjects, migrateLegacyProjectsFile, projectScan } from './projectStore'
+import { invalidateProjects, projectScan } from './projectStore'
 import { readCommands } from './commandStore'
 import { ensureKeybindings } from '../keybindings'
 
 /** Create anything missing. Never throws: a read-only home is not a crash. */
 export function initConfig(): void {
-  // The projects migration goes FIRST: the old format was a file named
-  // `projects`, exactly where the new directory has to go.
-  for (const step of [migrateLegacyProjectsFile, ensureFloeConfig, ensureKeybindings]) {
+  for (const step of [ensureFloeConfig, ensureKeybindings]) {
     try {
       step()
     } catch (err) {

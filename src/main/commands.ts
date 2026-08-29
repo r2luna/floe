@@ -1,14 +1,12 @@
 // A worktree's named processes, as the rest of the app sees them.
 //
-// Storage moved out of `commands.json` and into each project's own
-// `commands.toml` (config/commandStore.ts) — one file per project, documented in
-// place, editable by hand and by agents. This module keeps the shape the app
-// already speaks: a flat list per worktree, project-scope commands first, with
-// the container rewrites applied at read time.
+// Stored in each project's own `commands.toml` (config/commandStore.ts) — one
+// file per project, documented in place, editable by hand and by agents. This
+// module keeps the shape the app already speaks: a flat list per worktree,
+// project-scope commands first, with the container rewrites applied at read time.
 
-import { existsSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { configDir, dataDir } from './dataDir'
 import { worktreeComposePath } from './compose'
 import { detectPackageManager } from './devServer'
 import {
@@ -127,7 +125,6 @@ export function containerizeViteCommand(command: string, projectPath: string, wo
 // The merged command list for a worktree: the project's shared commands first,
 // then this worktree's local ones.
 export function listCommands(projectPath: string, worktreePath: string): ProjectCommand[] {
-  migrateLegacyStore()
   seedDefaults(projectPath)
   const { commands } = readCommands(projectPath)
   return commands
@@ -186,57 +183,4 @@ export function setCommandScope(
 ): ProjectCommand[] {
   setCommandWorktree(projectPath, id, scope === 'local' ? worktreePath : null)
   return listCommands(projectPath, worktreePath)
-}
-
-/**
- * Fold the old `commands.json` into the per-project files, once.
- *
- * Runs from the first listing rather than at boot so it can't delay startup, and
- * is a one-way trip: the JSON is renamed rather than deleted, so a bad migration
- * is recoverable, and never read again.
- */
-let migrated = false
-export function migrateLegacyStore(): void {
-  if (migrated) return
-  migrated = true
-  const candidates = [join(configDir(), 'commands.json'), join(dataDir(), 'commands.json')]
-  const legacy = candidates.find((f) => existsSync(f))
-  if (!legacy) return
-  try {
-    const data = JSON.parse(readFileSync(legacy, 'utf8')) as {
-      projects?: Record<string, StoredCommand[]>
-      worktrees?: Record<string, StoredCommand[]>
-      seeded?: string[]
-    }
-    for (const [projectPath, list] of Object.entries(data.projects ?? {})) {
-      for (const c of list) storeAdd(projectPath, { ...c, worktree: undefined })
-    }
-    for (const [worktreePath, list] of Object.entries(data.worktrees ?? {})) {
-      // A local command names its worktree; the project it belongs to is the one
-      // whose path the worktree sits under, or the worktree itself when it is the
-      // main checkout.
-      const owner = projectForWorktree(worktreePath)
-      for (const c of list) storeAdd(owner, { ...c, worktree: worktreePath })
-    }
-    for (const projectPath of data.seeded ?? []) {
-      if (projectScan().byPath.has(projectPath)) setProjectValue(projectPath, 'seeded', true)
-    }
-  } catch {
-    // A corrupt legacy file is not worth failing the app over — it is renamed
-    // below either way, so this runs once and stops.
-  }
-  renameSync(legacy, `${legacy}.migrated`)
-}
-
-/** The configured project a worktree path belongs to; the path itself if none matches. */
-function projectForWorktree(worktreePath: string): string {
-  let best = worktreePath
-  let bestLength = -1
-  for (const path of projectScan().byPath.keys()) {
-    if ((worktreePath === path || worktreePath.startsWith(`${path}/`)) && path.length > bestLength) {
-      best = path
-      bestLength = path.length
-    }
-  }
-  return best
 }

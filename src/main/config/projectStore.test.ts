@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './hook.test-helper.ts'
@@ -170,32 +170,4 @@ test('removeProject deletes the directory and only that one', () => {
 test('directoryNameFor never returns a name already taken', () => {
   const taken = new Set(['os', 'projects-os', 'projects-os-2'])
   assert.equal(store.directoryNameFor('/code/projects/os', taken), 'projects-os-3')
-})
-
-test('the pre-TOML `projects` FILE becomes one directory per project', () => {
-  const home = reset()
-  // The old format lived at exactly the path the new directory needs, which is
-  // why this migration has to run before anything creates that directory.
-  mkdirSync(join(home, 'floe'), { recursive: true })
-  writeFileSync(
-    join(home, 'floe', 'projects'),
-    '# floe — projects\n\n[DEVSQUAD]\n/code/hln-web\n\n[PROJECTS]\n/code/os\n'
-  )
-  store.migrateLegacyProjectsFile()
-  const { projects, errors } = store.scanProjects()
-  assert.deepEqual(errors, [])
-  assert.deepEqual(
-    projects.map((p) => `${p.group}:${p.path}`).sort(),
-    ['DEVSQUAD:/code/hln-web', 'PROJECTS:/code/os']
-  )
-  assert.ok(existsSync(join(home, 'floe', 'projects.migrated')), 'the old file is kept, not deleted')
-})
-
-test('migrating twice is a no-op — the file is gone after the first run', () => {
-  const home = reset()
-  mkdirSync(join(home, 'floe'), { recursive: true })
-  writeFileSync(join(home, 'floe', 'projects'), '/code/a\n')
-  store.migrateLegacyProjectsFile()
-  store.migrateLegacyProjectsFile()
-  assert.equal(store.scanProjects().projects.length, 1)
 })

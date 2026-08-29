@@ -1,14 +1,12 @@
 import { dialog } from 'electron'
-import { existsSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
-import { dataDir } from './dataDir'
+import { basename } from 'node:path'
 import { DEFAULT_GROUP, type Project, type ProjectEnvConfig, type Worktree } from '../shared/types'
 import { isGitRepo, repoRoot } from './git'
 import { floeConfig, setFloeValue } from './config/floe'
 import {
   createProject,
-  invalidateProjects,
   projectScan,
   removeProject as removeProjectDir,
   setProjectEnvValue,
@@ -19,9 +17,9 @@ import {
 
 // Storage lives in `~/.config/floe/projects/<dir>/config.toml`, one directory per
 // project (config/projectStore.ts). This module is the app's view of that: it
-// maps a stored project onto the `Project` the renderer speaks, owns the group
-// list (which needs a home of its own, since an empty group has no directory),
-// and carries the one-way migration off the old `projects.json`.
+// maps a stored project onto the `Project` the renderer speaks, and owns the
+// group list, which needs a home of its own since an empty group has no
+// directory to live in.
 
 // The synthetic "Home" workspace. It isn't stored in projects.json — it's a
 // constant the renderer injects at the top of the project/group lists so the app
@@ -62,7 +60,6 @@ function stored(path: string): ProjectConfig | undefined {
 }
 
 function all(): Project[] {
-  migrateLegacyProjects()
   return projectScan().projects.map(toProject)
 }
 
@@ -118,7 +115,6 @@ function writeGroups(groups: string[]): string[] {
 }
 
 export function listGroups(): string[] {
-  migrateLegacyProjects()
   return currentGroups()
 }
 
@@ -166,7 +162,6 @@ export async function addProjectByPath(
   }
 
   const root = (await repoRoot(picked)) ?? picked
-  migrateLegacyProjects()
   const existing = stored(root)
   if (existing) return { project: toProject(existing) }
 
@@ -236,60 +231,4 @@ export function setProjectPinned(path: string, value: boolean): Project[] {
 export function removeProject(path: string): Project[] {
   removeProjectDir(path)
   return all()
-}
-
-/**
- * Fold the old `projects.json` into one directory per project, once.
- *
- * One way: the JSON is renamed rather than deleted, so a migration that went
- * wrong is still recoverable by hand, and is never read again either way.
- */
-let migrated = false
-export function migrateLegacyProjects(): void {
-  if (migrated) return
-  migrated = true
-  const legacy = join(dataDir(), 'projects.json')
-  if (!existsSync(legacy)) return
-  try {
-    const data = JSON.parse(readFileSync(legacy, 'utf8')) as {
-      groups?: unknown
-      projects?: unknown
-    }
-    const groups = Array.isArray(data.groups) ? (data.groups as string[]).filter((g) => typeof g === 'string') : []
-    if (groups.length) writeGroups(groups)
-    const raw = Array.isArray(data.projects) ? data.projects : []
-    for (const entry of raw) {
-      // The oldest shape was a bare array of paths.
-      const p = typeof entry === 'string' ? { path: entry } : (entry as Record<string, unknown>)
-      if (!p || typeof p.path !== 'string') continue
-      const project = createProject(p.path, {
-        group: typeof p.group === 'string' ? p.group : DEFAULT_GROUP,
-        name: typeof p.name === 'string' ? p.name : undefined,
-        pinned: p.pinned === true
-      })
-      if (p.readOnly === true) setProjectValue(project.path, 'read-only', true)
-      if (isEnvConfig(p.env)) {
-        setProjectEnv(project.path, p.env)
-      }
-    }
-  } catch {
-    // A corrupt legacy store is not worth failing the app over; it is renamed
-    // either way so this runs once.
-  }
-  renameSync(legacy, `${legacy}.migrated`)
-  invalidateProjects()
-}
-
-// A stored `env` blob is valid only if it names the container mode with the
-// required fields; anything else is dropped (falls back to host-native).
-function isEnvConfig(v: unknown): v is ProjectEnvConfig {
-  if (!v || typeof v !== 'object') return false
-  const e = v as Record<string, unknown>
-  return (
-    e.mode === 'container' &&
-    e.runtime === 'laravel' &&
-    typeof e.php === 'string' &&
-    typeof e.packageManager === 'string' &&
-    (e.db === 'mysql' || e.db === 'postgres')
-  )
 }

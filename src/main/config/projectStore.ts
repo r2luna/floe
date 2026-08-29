@@ -12,7 +12,7 @@
 // into a `path → directory` map, which is also where the three ways this can go
 // wrong get reported: a duplicate path, a missing path, a path that isn't a repo.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { configDir } from '../dataDir'
 import { ErrorSink, type ConfigError } from './errors'
@@ -173,42 +173,6 @@ export interface ProjectScan {
  * directory has no order of its own and inventing an `order` key would be one
  * more thing to keep correct on every add and remove.
  */
-/**
- * Fold the pre-TOML `projects` file into one directory per project.
- *
- * This has to run before anything creates `projects/`, because the old format
- * was a FILE with that exact name — `mkdir` over it fails, and the whole config
- * directory would come up broken on the first launch after upgrading. It is
- * renamed rather than deleted, so a migration that read something wrong is still
- * recoverable by hand.
- *
- * The format was a flat list with `[GROUP]` headers:
- *
- *   [DEVSQUAD]
- *   ~/code/clients/hln-web
- */
-export function migrateLegacyProjectsFile(): void {
-  const legacy = join(configDir(), 'projects')
-  if (!existsSync(legacy) || statSync(legacy).isDirectory()) return
-  const text = readFileSync(legacy, 'utf8')
-  renameSync(legacy, `${legacy}.migrated`)
-  invalidateProjects()
-
-  let group = 'Projects'
-  const entries: Array<{ path: string; group: string }> = []
-  for (const line of text.split(/\r?\n/)) {
-    const trimmed = line.replace(/#.*$/, '').trim()
-    if (!trimmed) continue
-    const header = /^\[(.+)\]$/.exec(trimmed)
-    if (header) {
-      group = header[1].trim() || 'Projects'
-      continue
-    }
-    entries.push({ path: expandHome(trimmed), group })
-  }
-  for (const entry of entries) createProject(entry.path, { group: entry.group })
-}
-
 export function scanProjects(): ProjectScan {
   const root = projectsDir()
   const projects: ProjectConfig[] = []

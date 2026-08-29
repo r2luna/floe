@@ -9,12 +9,12 @@
 // default and lands in `errors`, which Settings shows. That is the whole reason
 // the app can let agents edit this file.
 
-import { existsSync, readFileSync, renameSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configDir } from '../dataDir'
 import { ErrorSink, type ConfigError } from './errors'
 import { TableReader, subTable } from './read'
-import { editToml, parseToml, type TomlEdit, type TomlValue } from './toml'
+import { editToml, parseToml, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
 import { FLOE_TOML } from './template'
 import { DEFAULT_GROUP } from '../../shared/types'
@@ -54,7 +54,7 @@ export const DEFAULTS: FloeConfig = {
 export const floeConfigPath = (): string => join(configDir(), 'floe.toml')
 
 /**
- * Create the file if it isn't there, carrying over the pre-TOML `config` file.
+ * Create the file if it isn't there.
  *
  * Generated on every boot rather than on first edit (see the note in
  * keybindings.ts): a config you can't see is a config you don't know you can
@@ -63,36 +63,7 @@ export const floeConfigPath = (): string => join(configDir(), 'floe.toml')
 export function ensureFloeConfig(): void {
   const path = floeConfigPath()
   if (existsSync(path)) return
-  let text = FLOE_TOML
-  const legacy = join(configDir(), 'config')
-  if (existsSync(legacy)) {
-    text = applyLegacy(text, legacy)
-    renameSync(legacy, `${legacy}.migrated`)
-  }
-  writeTomlFile(path, text)
-}
-
-/**
- * Fold the old `key = value` file into the generated TOML.
- *
- * The old format was flat and untyped (`font-size   = 13`), so this reads the
- * three keys it ever had and writes them through the normal editor — which
- * means the migrated file keeps every comment the template ships with.
- */
-function applyLegacy(text: string, legacyPath: string): string {
-  const edits: TomlEdit[] = []
-  for (const line of readFileSync(legacyPath, 'utf8').split(/\r?\n/)) {
-    const m = /^\s*([a-z-]+)\s*=\s*(.+?)\s*(?:#.*)?$/.exec(line)
-    if (!m || line.trim().startsWith('#')) continue
-    const [, key, rawValue] = m
-    const value = rawValue.replace(/^["']|["']$/g, '')
-    if (key === 'font-family') edits.push({ op: 'set', table: 'appearance', key, value })
-    if (key === 'theme') edits.push({ op: 'set', table: 'appearance', key, value })
-    if (key === 'font-size' && /^\d+$/.test(value)) {
-      edits.push({ op: 'set', table: 'appearance', key, value: Number(value) })
-    }
-  }
-  return edits.length ? editToml(text, edits) : text
+  writeTomlFile(path, FLOE_TOML)
 }
 
 /**
