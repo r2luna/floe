@@ -8,7 +8,7 @@ import { readImplementPhases, findSpecSummarySource } from './plans.ts'
 // Build a throwaway worktree with `specs/<dir>/tasks.md` files, run the body,
 // then clean up. Keeps each case isolated from the real filesystem.
 function withWorktree(files: Record<string, string>, body: (worktreePath: string) => void): void {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-plans-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-plans-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
       const abs = join(root, rel)

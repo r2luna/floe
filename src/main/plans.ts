@@ -3,21 +3,21 @@ import { join, resolve, sep } from 'node:path'
 import type { WebContents } from 'electron'
 import type { ImplementPhase, PlanFile } from '../shared/types'
 
-// Lists the plan files Claude Code writes under a worktree's .rookery/plans/
+// Lists the plan files Claude Code writes under a worktree's .floe/plans/
 // directory (configured via the `plansDirectory` setting). Those plans are
 // gitignored, so listFiles() never surfaces them — this reads the directory
 // directly so the Plans tab can show them. Newest first; a missing directory
 // (no plans written yet) just yields an empty list.
 
-const PLANS_DIR = '.rookery/plans'
+const PLANS_DIR = '.floe/plans'
 // Spec-driven pipelines (e.g. the "ds" pipeline) write their docs — spec.md,
 // plan.md, tasks.md, contracts/*, … — under `specs/<branch-ish>/` in the repo
 // itself (tracked, not gitignored). The Plans panel surfaces the folder matching
-// the active branch alongside the gitignored .rookery/plans/ plans.
+// the active branch alongside the gitignored .floe/plans/ plans.
 const SPECS_DIR = 'specs'
 
 // The plans the Plans panel shows for a worktree: the spec-pipeline docs for the
-// active `branch` (if any match), followed by the gitignored .rookery/plans/
+// active `branch` (if any match), followed by the gitignored .floe/plans/
 // plans. `branch` is optional so callers that only care about the latter (the
 // "a new plan was written → reveal Plans" baseline) can omit it.
 export function listPlans(worktreePath: string, branch?: string): PlanFile[] {
@@ -279,7 +279,7 @@ export function readImplementPhases(worktreePath: string, branch?: string): Impl
 // crafted path can't read arbitrary files.
 export function readPlan(worktreePath: string, relPath: string): string {
   const target = resolve(worktreePath, relPath)
-  // Plans live under .rookery/plans/; spec-pipeline docs under specs/. Allow both,
+  // Plans live under .floe/plans/; spec-pipeline docs under specs/. Allow both,
   // and refuse anything that escapes them so a crafted path can't read arbitrary files.
   const allowed = [resolve(worktreePath, PLANS_DIR), resolve(worktreePath, SPECS_DIR)]
   if (!allowed.some((dir) => target === dir || target.startsWith(dir + sep))) {
@@ -288,7 +288,7 @@ export function readPlan(worktreePath: string, relPath: string): string {
   return readFileSync(target, 'utf8')
 }
 
-// Copy a plan into another worktree's .rookery/plans/ so a worktree spun up from a
+// Copy a plan into another worktree's .floe/plans/ so a worktree spun up from a
 // plan carries its own copy (plans are gitignored, so they never come across with
 // the branch). Reads through readPlan() — which refuses anything outside the source
 // worktree's plans directory — then writes the same filename under the destination's
@@ -308,7 +308,7 @@ export function copyPlan(
 }
 
 // Single live watcher on the active worktree's plans directory, so a plan Claude
-// writes shows up in the Plans tab immediately (no refocus needed). Rookery is a
+// writes shows up in the Plans tab immediately (no refocus needed). Floe is a
 // single-window app, so one watcher — retargeted as the user switches worktree —
 // is enough. Each fire is debounced (fs.watch emits several events per write).
 let watcher: FSWatcher | null = null

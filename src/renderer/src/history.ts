@@ -3,7 +3,7 @@
 // One list for the whole app, not per session: you reach for the last thing you
 // typed, and where you typed it is rarely what you remember about it.
 
-const KEY = 'rookery.history'
+const KEY = 'floe.history'
 
 // ponytail: 100 entries in localStorage. Move it to the store if it ever has to
 // survive a cleared browser profile.

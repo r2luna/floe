@@ -36,7 +36,7 @@ export function dataDir(): string {
 // (safeStorage-encrypted tokens), none of which belong in a dotfiles repo.
 // Same dir the app already used for `keybindings`, now XDG-aware.
 export function configDir(): string {
-  const dir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'rookery')
+  const dir = join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'floe')
   mkdirSync(dir, { recursive: true })
   return dir
 }

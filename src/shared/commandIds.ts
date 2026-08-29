@@ -45,7 +45,12 @@ export const COMMAND_IDS: string[] = [
   'palette.open',
   'palette.commands',
   'project.add',
+  'project.move',
+  'group.create',
+  'group.delete',
   'auth.account',
+  'settings.open',
+  'keybindings.reset',
   // Sessions & worktrees
   'session.prev',
   'session.next',

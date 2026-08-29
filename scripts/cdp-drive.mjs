@@ -1,12 +1,12 @@
 // Dev-only CDP driver for GUI verification: eval JS in the running dev window,
-// send keys, or grab a screenshot. Launch the app with ROOKERY_CDP_PORT=9401.
+// send keys, or grab a screenshot. Launch the app with FLOE_CDP_PORT=9401.
 //   node scripts/cdp-drive.mjs eval "document.title"
 //   node scripts/cdp-drive.mjs key p 4        (4 = Meta)
 //   node scripts/cdp-drive.mjs shot /tmp/x.png
 import WebSocket from 'ws'
 import { writeFileSync } from 'node:fs'
 
-const PORT = process.env.ROOKERY_CDP_PORT || 9401
+const PORT = process.env.FLOE_CDP_PORT || 9401
 const list = await (await fetch(`http://127.0.0.1:${PORT}/json/list`)).json()
 const page = list.find((t) => t.type === 'page')
 const ws = new WebSocket(page.webSocketDebuggerUrl)

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from './dataDir'
 
-// Rookery-side persistence for the Pipeline so a run survives an app restart.
+// Floe-side persistence for the Pipeline so a run survives an app restart.
 // We store only the *serializable* slice of the runner's state, keyed by the
 // worktree the pipeline runs in (one pipeline per worktree at a time). The step
 // list itself is hardcoded in the renderer and reconstructed on load from the

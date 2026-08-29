@@ -70,13 +70,13 @@ const I={
  send:'<svg width=16 height=16 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=2><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
 };
 function screen(font){
- const files=[['.claude','chevr'],['.rookery','chevr'],['.worktrees','chevr'],['docs','chevr'],['src','chevr'],
+ const files=[['.claude','chevr'],['.floe','chevr'],['.worktrees','chevr'],['docs','chevr'],['src','chevr'],
   ['.gitignore','gear'],['CLAUDE.md','file'],['electron.vite.config.ts','file'],['package.json','file','act'],
   ['pnpm-lock.yaml','gear'],['README.md','file'],['tsconfig.json','file'],['tsconfig.web.json','file']];
  const acts=['doc','edit','spark','layers','git'];
  return `<div class=app style="font-family:'${font}'">
   <div class=top>
-   <div class=crumb>r2luna <span class=sep>›</span> <b>rookery</b> <span class=sep>›</span> ${I.branch} <span class=cy>main</span> <span class=sep>›</span> <span class=rd>✦</span> <span class=cy>Session 2</span> <span class=sep>…</span></div>
+   <div class=crumb>r2luna <span class=sep>›</span> <b>floe</b> <span class=sep>›</span> ${I.branch} <span class=cy>main</span> <span class=sep>›</span> <span class=rd>✦</span> <span class=cy>Session 2</span> <span class=sep>…</span></div>
    <div>5% 5h · 7% wk &nbsp; ⊞ 1003 MB</div>
   </div>
   <div class=body>
@@ -110,14 +110,14 @@ function screen(font){
      <div class=h>Resumo</div>
      <div class=p>Commit <span class=code>f704381</span> — "Tipografia mais legível no terminal e no chat" (sobre o <span class=code>b8e5476 wip</span> que já tinha a assinatura).</div>
      <div class=p>Versão <b>0.3.1</b> buildada, assinada e instalada:</div>
-     <div class=li><span class=b>•</span> <span class=code>dist/Rookery-0.3.1-arm64.dmg</span> (103 MB, assinado com seu cert local)</div>
-     <div class=li><span class=b>•</span> <span class=code>/Applications/Rookery.app</span> — versão <b>0.3.1</b>, sem quarentena</div>
+     <div class=li><span class=b>•</span> <span class=code>dist/Floe-0.3.1-arm64.dmg</span> (103 MB, assinado com seu cert local)</div>
+     <div class=li><span class=b>•</span> <span class=code>/Applications/Floe.app</span> — versão <b>0.3.1</b>, sem quarentena</div>
      <div class=bub>que versao é essa ?  "version": "0.9.0" .. olha o @package.json</div>
      <div class=meta>· 2 actions  Bash ×2</div>
     </div>
     <div class=comp>
      <div class=chips>
-      <div class=cl><span class=chip>▢ rookery</span><span class=chip>⑂ main</span></div>
+      <div class=cl><span class=chip>▢ floe</span><span class=chip>⑂ main</span></div>
       <div class=cr>0k/1M (0%) <span style="color:var(--red)">⚠</span> <span class="chip y">high ⌄</span> <span class="chip p">opus 4.8 ⌄</span></div>
      </div>
      <div class=input><span>Describe what you'd like the agent to do… Type / for commands, @ for files.</span><span class=send>${I.send}</span></div>

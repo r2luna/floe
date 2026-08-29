@@ -97,7 +97,7 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
 
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.loadAddon(new WebLinksAddon((_e, uri) => void window.rookery.openExternal(uri)))
+    term.loadAddon(new WebLinksAddon((_e, uri) => void window.floe.openExternal(uri)))
 
     // Copy explicitly rather than relying on the browser's copy event: there is
     // no Electron edit menu behind this window to fire it, so ⌘C over a
@@ -167,7 +167,7 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
     void Promise.all([document.fonts.ready, nerd]).then(() => {
       try {
         fit.fit()
-        void window.rookery.terminal.resize(termId, term.cols, term.rows)
+        void window.floe.terminal.resize(termId, term.cols, term.rows)
         // The canvas renderer caches glyph bitmaps; a face arriving after the
         // first paint needs the atlas thrown away or the tofu stays on screen.
         term.clearTextureAtlas()
@@ -189,7 +189,7 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
     // the replayed one. Held until the replay is queued, then released in order.
     let held: string[] | null = []
 
-    const off = window.rookery.terminal.onEvent((event) => {
+    const off = window.floe.terminal.onEvent((event) => {
       if (event.id !== termId) return
       if (event.kind === 'data') {
         if (held) held.push(event.data)
@@ -223,25 +223,25 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
     // settled prompt rather than mid-replay.
     const arm = () => {
       if (gone) return
-      const sink = (data: string) => void window.rookery.terminal.write(termId, data)
+      const sink = (data: string) => void window.floe.terminal.write(termId, data)
       sinks.set(termId, sink)
       for (const data of waiting.get(termId) ?? []) sink(data)
       waiting.delete(termId)
     }
 
-    void window.rookery.terminal
+    void window.floe.terminal
       .open(termId, cwd, branch, term.cols, term.rows)
       .then(release, () => release(null))
 
     const input = term.onData((data) => {
       if (replaying) return
-      void window.rookery.terminal.write(termId, data)
+      void window.floe.terminal.write(termId, data)
     })
 
     const resize = new ResizeObserver(() => {
       try {
         fit.fit()
-        void window.rookery.terminal.resize(termId, term.cols, term.rows)
+        void window.floe.terminal.resize(termId, term.cols, term.rows)
       } catch {
         /* not laid out yet */
       }

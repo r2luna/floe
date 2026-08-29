@@ -1,7 +1,0 @@
-# Local/demo Caddy config — no Cloudflare, no public ACME. Caddy's internal CA
-# issues a self-signed cert per host, so `<slug>.rookery.localhost` serves real
-# HTTPS on :443 (curl with -k). Same label-driven routing as production, just a
-# self-signed issuer instead of Let's Encrypt/DNS-01.
-{
-	local_certs
-}

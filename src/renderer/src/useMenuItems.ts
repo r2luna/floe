@@ -26,13 +26,13 @@ export function useMenuItems(
       return
     }
     let live = true
-    window.rookery.claude
+    window.floe.claude
       .info(worktreePath)
       .then((info) => live && setSkills(info.skills ?? []))
       // The probe spawns a CLI; a worktree where it fails should cost you an
       // empty menu, not an error in the middle of a sentence.
       .catch(() => live && setSkills([]))
-    window.rookery.files
+    window.floe.files
       .list(worktreePath)
       .then((tree) => live && setFiles(flatten(tree)))
       .catch(() => live && setFiles([]))

@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 // http.ts now imports ./projects, whose graph uses extensionless relative
 // imports (and touches `electron`), which raw Node ESM doesn't resolve. Register
-// the same in-memory hook git.test / mcpServer.test use: rewrite `./x` → `./x.ts`
+// the same in-memory hook git.test uses: rewrite `./x` → `./x.ts`
 // and stub `electron`.
 const hookSource = `
 import { existsSync } from 'node:fs'
@@ -92,7 +92,7 @@ test('parseHttp does not swallow a response-handler script into the body', () =>
 })
 
 test('loadEnv merges the private env over the public one', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-http-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-http-'))
   try {
     writeFileSync(join(root, 'http-client.env.json'), JSON.stringify({ dev: { host: 'http://pub', token: 'a' } }))
     writeFileSync(join(root, 'http-client.private.env.json'), JSON.stringify({ dev: { token: 'secret' } }))
@@ -111,7 +111,7 @@ test('parseHttp captures an inline response-handler script', () => {
 })
 
 test('runResponseScript persists client.global.set into the private env file', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-http-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-http-'))
   try {
     mkdirSync(join(root, 'docs'), { recursive: true })
     const resp = {
@@ -140,7 +140,7 @@ test('runResponseScript persists client.global.set into the private env file', (
 })
 
 test('loadEnv finds the env file next to the .http (deep folder overrides root)', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-http-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-http-'))
   try {
     mkdirSync(join(root, 'docs', 'apis'), { recursive: true })
     writeFileSync(join(root, 'http-client.env.json'), JSON.stringify({ dev: { host: 'root', token: 'r' } }))
@@ -155,7 +155,7 @@ test('loadEnv finds the env file next to the .http (deep folder overrides root)'
 })
 
 test('listHttpFiles groups by top-level dir and flags env files', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-http-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-http-'))
   try {
     mkdirSync(join(root, 'api'), { recursive: true })
     mkdirSync(join(root, 'node_modules', 'pkg'), { recursive: true })

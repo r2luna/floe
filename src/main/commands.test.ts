@@ -36,10 +36,10 @@ const { containerizeViteCommand, containerizeCommand } = await import('./command
 // A worktree that looks containerized: it has the generated vite wrapper, and its
 // project's `dev` script is plain vite.
 function worktree(opts: { wrapper?: boolean; dev?: string | null } = {}): string {
-  const dir = mkdtempSync(join(tmpdir(), 'rookery-cmd-'))
+  const dir = mkdtempSync(join(tmpdir(), 'floe-cmd-'))
   if (opts.wrapper !== false) {
-    mkdirSync(join(dir, '.rookery'), { recursive: true })
-    writeFileSync(join(dir, '.rookery', 'vite.config.mjs'), '')
+    mkdirSync(join(dir, '.floe'), { recursive: true })
+    writeFileSync(join(dir, '.floe', 'vite.config.mjs'), '')
   }
   const dev = opts.dev === undefined ? 'vite' : opts.dev
   writeFileSync(
@@ -51,21 +51,21 @@ function worktree(opts: { wrapper?: boolean; dev?: string | null } = {}): string
 
 test('points the seeded Dev command at the generated wrapper', () => {
   const d = worktree()
-  assert.equal(containerizeViteCommand('bun run dev', d, d), 'bun run dev -- --config .rookery/vite.config.mjs')
+  assert.equal(containerizeViteCommand('bun run dev', d, d), 'bun run dev -- --config .floe/vite.config.mjs')
 })
 
-test('handles the rookery-prefixed form the container router uses', () => {
+test('handles the floe-prefixed form the container router uses', () => {
   const d = worktree()
   assert.equal(
-    containerizeViteCommand('rookery bun run dev', d, d),
-    'rookery bun run dev -- --config .rookery/vite.config.mjs'
+    containerizeViteCommand('floe bun run dev', d, d),
+    'floe bun run dev -- --config .floe/vite.config.mjs'
   )
 })
 
 test('covers every package manager the seeder can pick', () => {
   const d = worktree()
   for (const pm of ['bun', 'pnpm', 'yarn', 'npm']) {
-    assert.match(containerizeViteCommand(`${pm} run dev`, d, d), /--config \.rookery\/vite\.config\.mjs$/)
+    assert.match(containerizeViteCommand(`${pm} run dev`, d, d), /--config \.floe\/vite\.config\.mjs$/)
   }
 })
 
@@ -78,7 +78,7 @@ test('leaves a non-vite dev script alone', () => {
 
 test('leaves other commands alone', () => {
   const d = worktree()
-  for (const cmd of ['php artisan queue:work', 'rookery artisan schedule:work', 'bun run build']) {
+  for (const cmd of ['php artisan queue:work', 'floe artisan schedule:work', 'bun run build']) {
     assert.equal(containerizeViteCommand(cmd, d, d), cmd)
   }
 })
@@ -99,15 +99,15 @@ test('is idempotent — an already-wrapped command is not appended to twice', ()
 
 function containerWorktree(): string {
   const dir = worktree()
-  writeFileSync(join(dir, '.rookery', 'docker-compose.yml'), '')
+  writeFileSync(join(dir, '.floe', 'docker-compose.yml'), '')
   return dir
 }
 
-test('routes container commands through the rookery CLI', () => {
+test('routes container commands through the floe CLI', () => {
   const d = containerWorktree()
-  assert.equal(containerizeCommand('php artisan queue:work', d), 'rookery php artisan queue:work')
-  assert.equal(containerizeCommand('bun run dev', d), 'rookery bun run dev')
-  assert.equal(containerizeCommand('composer install', d), 'rookery composer install')
+  assert.equal(containerizeCommand('php artisan queue:work', d), 'floe php artisan queue:work')
+  assert.equal(containerizeCommand('bun run dev', d), 'floe bun run dev')
+  assert.equal(containerizeCommand('composer install', d), 'floe composer install')
 })
 
 test('leaves host-native worktrees (no compose file) alone', () => {
@@ -117,14 +117,14 @@ test('leaves host-native worktrees (no compose file) alone', () => {
 
 test('does not double-prefix or touch unroutable commands', () => {
   const d = containerWorktree()
-  for (const cmd of ['rookery artisan schedule:work', 'tail -f storage/logs/laravel.log', 'php']) {
+  for (const cmd of ['floe artisan schedule:work', 'tail -f storage/logs/laravel.log', 'php']) {
     assert.equal(containerizeCommand(cmd, d), cmd)
   }
 })
 
 test('survives a project with no package.json', () => {
-  const d = mkdtempSync(join(tmpdir(), 'rookery-cmd-'))
-  mkdirSync(join(d, '.rookery'), { recursive: true })
-  writeFileSync(join(d, '.rookery', 'vite.config.mjs'), '')
+  const d = mkdtempSync(join(tmpdir(), 'floe-cmd-'))
+  mkdirSync(join(d, '.floe'), { recursive: true })
+  writeFileSync(join(d, '.floe', 'vite.config.mjs'), '')
   assert.equal(containerizeViteCommand('bun run dev', d, d), 'bun run dev')
 })

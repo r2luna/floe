@@ -23,7 +23,7 @@ export interface Worktrees {
  *
  * Sessions come from `claude.sessions` per worktree rather than the global
  * `sessions:all`. Two reasons: it is the call that carries `claudeId` — the id
- * the transcript file is named after, which is NOT Rookery's session id — and
+ * the transcript file is named after, which is NOT Floe's session id — and
  * it asks only about the project you are looking at.
  */
 export function useWorktrees(repoPath?: string): Worktrees {
@@ -38,12 +38,12 @@ export function useWorktrees(repoPath?: string): Worktrees {
       return
     }
     setLoading(true)
-    window.rookery.worktrees
+    window.floe.worktrees
       .list(repoPath)
       .then(async (worktrees) => {
         const rows = await Promise.all(
           worktrees.map(async (worktree) => {
-            const sessions = (await window.rookery.claude.sessions(worktree.path))
+            const sessions = (await window.floe.claude.sessions(worktree.path))
               // Most recently touched first: the session you were just in is the
               // one you are most likely coming back to.
               .slice()
@@ -67,7 +67,7 @@ export function useWorktrees(repoPath?: string): Worktrees {
   // The MCP create_worktree tool changes the set behind the UI's back; without
   // this the panel would keep showing a list that is already stale.
   useEffect(() => {
-    return window.rookery.worktrees.onUpdated((event) => {
+    return window.floe.worktrees.onUpdated((event) => {
       if (event.project === repoPath) reload()
     })
   }, [repoPath, reload])

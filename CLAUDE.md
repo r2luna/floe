@@ -1,7 +1,8 @@
-# Rookery
+# Floe
 
 An Electron app for managing git worktrees and Claude Code sessions across projects.
-Desktop and headless server are **one tree** (`master`), two build targets, guarded by `process.env.ROOKERY_SERVER`.
+Desktop only — the v1 headless server and in-app MCP control server were removed; both get
+rebuilt from scratch for v2.
 
 ## Core principle — keyboard first
 
@@ -19,10 +20,10 @@ When in doubt, ask: "could the user do this with the mouse unplugged?" If not, i
 
 ## Layout & commands
 
-- `src/main` — backend: sessions/agent (`agent.ts`, `sessionStore.ts`), git/worktrees, MCP server, hooks, PTY, DB, provisioning. Tests live beside the file (`*.test.ts`).
-- `src/renderer/src` — desktop + web UI (`App.tsx` + `app/hooks/use*.ts`, styles in `index.css`).
-- `src/preload` — the `buildRookeryApi`/`IpcLike` seam shared by desktop IPC and the WS transport.
-- `src/server` — headless shim + deploy tooling. `src/shared` — types used by both sides.
+- `src/main` — backend: sessions/agent (`agent.ts`, `sessionStore.ts`), git/worktrees, hooks, PTY, DB, provisioning. Tests live beside the file (`*.test.ts`).
+- `src/renderer/src` — the UI (`App.tsx` + `use*.ts` hooks, styles in `index.css`).
+- `src/preload` — the `buildFloeApi`/`IpcLike` seam over Electron IPC.
+- `src/shared` — types used by both sides.
 
 ```bash
 pnpm dev          # electron-vite dev
@@ -38,8 +39,5 @@ Buttons use the **outline-chip pattern** (never solid fills) and every tinted el
 
 ## More docs — read when the task touches them
 
-- [docs/server.md](docs/server.md) — headless server: build targets, deploying to `link`, systemd unit + env config.
-- [docs/attached.md](docs/attached.md) — attached mode (local window, remote backend over WS).
 - [docs/message-queue.md](docs/message-queue.md) — type-while-busy queue semantics.
 - [docs/http-client.md](docs/http-client.md) — embedded `.http` client.
-- [docs/domain-setup.md](docs/domain-setup.md) — custom domain / TLS runbook for the server.

@@ -3,8 +3,8 @@ import { existsSync, mkdirSync, readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// Destravar a passphrase de assinatura (GPG) ou a chave SSH pela UI do Rookery,
-// SEM o Rookery jamais tocar no segredo: a passphrase vai do teclado do usuário
+// Destravar a passphrase de assinatura (GPG) ou a chave SSH pela UI do Floe,
+// SEM o Floe jamais tocar no segredo: a passphrase vai do teclado do usuário
 // direto pro pinentry/ssh-add DENTRO de um PTY visível. Aqui só rodamos
 // verificações (que não carregam segredo) e montamos o comando de destravamento.
 
@@ -68,7 +68,7 @@ export async function isUnlocked(kind: UnlockKind, cwd: string): Promise<boolean
     const code = await exitCode(
       'gpg',
       ['--batch', '--no-tty', '--local-user', key, '--clearsign', '-o', '/dev/null'],
-      'rookery-unlock-probe\n'
+      'floe-unlock-probe\n'
     )
     return code === 0
   }
@@ -93,7 +93,7 @@ export async function unlockCommand(kind: UnlockKind, cwd: string): Promise<stri
   }
   // --clearsign (com tty, sem --batch) faz o gpg-agent chamar o pinentry-curses,
   // que desenha no PTY; a assinatura vai pro lixo — só primamos o cache.
-  return `sh -c 'echo rookery-unlock | gpg --local-user ${key} --clearsign -o /dev/null && printf "\\n  GPG destravado.\\n" || printf "\\n  falhou ou cancelado.\\n"'`
+  return `sh -c 'echo floe-unlock | gpg --local-user ${key} --clearsign -o /dev/null && printf "\\n  GPG destravado.\\n" || printf "\\n  falhou ou cancelado.\\n"'`
 }
 
 // Um `pinentry-program` já configurado (não uma linha comentada). O `[ \t]*` no

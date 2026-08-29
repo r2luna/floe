@@ -28,7 +28,7 @@ export const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 export const DEFAULT_CHOICE: ModelChoice = { model: 'opus', effort: 'high' }
 
-const KEY = 'rookery.model'
+const KEY = 'floe.model'
 
 /** The last choice made, or the default. Bad JSON falls back rather than throws. */
 export function loadChoice(): ModelChoice {

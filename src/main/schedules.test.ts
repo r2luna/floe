@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // schedules.ts pulls in projects.ts (a runtime `electron` import) via extensionless
 // relative imports — neither raw Node ESM resolves. Same in-memory hook as
-// git.test.ts/mcpServer.test.ts: rewrite `./x` -> `./x.ts`, stub `electron`.
+// git.test.ts: rewrite `./x` -> `./x.ts`, stub `electron`.
 const hookSource = `
 import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -82,7 +82,7 @@ test('assertValidCron: rejects malformed expressions', () => {
 })
 
 test('createSchedule/readSchedules/updateSchedule/deleteSchedule round-trip on disk', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-schedules-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-schedules-'))
   try {
     assert.deepEqual(readSchedules(root), [])
 

@@ -1,6 +1,6 @@
 // Composing the message a review turns into.
 //
-// Rookery has three review surfaces — a diff line range (ReviewComment), a plan
+// Floe has three review surfaces — a diff line range (ReviewComment), a plan
 // block (PlanComment), and a passage of the conversation (ThreadComment) — and
 // each one used to assemble its own markdown by hand. Four call sites, four
 // slightly different shapes for the same idea, drifting apart with every edit.

@@ -15,10 +15,12 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
+import { userInfo } from 'node:os'
 import { githubAuth } from './pr/github'
 import { getJira, setJira, testJira } from './integrations'
 import {
   addGroup,
+  deleteGroup,
   addProject,
   addProjectByPath,
   homeWorktree,
@@ -34,15 +36,6 @@ import {
   setProjectReadOnly
 } from './projects'
 import { setSharedDataDir } from './dataDir'
-import {
-  ensureTunnel,
-  closeTunnel,
-  getTunnel,
-  parseSshTarget,
-  isValidSshHost,
-  ensureReverseCdp,
-  closeReverseCdp
-} from './sshTunnel'
 import {
   openBrowser,
   openBrowserFile,
@@ -90,16 +83,6 @@ import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdCo
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion } from './codexServer'
 import { isCodexModel } from '../shared/types'
-import {
-  startMcpServer,
-  startBrowserCdpWatch,
-  setLocalBrowserCdp,
-  resolveCommandResult,
-  installGlobal,
-  installCli,
-  port as mcpPort
-} from './mcpServer'
-import { fleetToken, loadEdges, startFleetUsage } from './fleet'
 import { ensureAgentHookInstalled } from './hooks'
 import { initScheduler, readSchedules } from './schedules'
 import { initAutoUpdate } from './autoUpdate'
@@ -125,13 +108,6 @@ import {
   setWorktreeView,
   getVibrancy,
   setVibrancy,
-  getAttachedServer,
-  getBackends,
-  addBackend,
-  removeBackend,
-  getBackendHost,
-  setBackendHost,
-  getServerUrl,
   getRailVisible,
   setRailVisible,
   getHiddenProjects,
@@ -169,7 +145,11 @@ import {
   type CommandPatch
 } from './commands'
 import { buildAppMenu } from './menu'
-import { loadKeybindings, revealKeybindings, watchKeybindings } from './keybindings'
+import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
+import { configErrors, configPaths, initConfig, watchConfig } from './config'
+import { setSandboxEnabled } from './sandbox'
+import { floeConfig, setFloeValue } from './config/floe'
+import type { TomlValue } from './config/toml'
 import {
   openTerminal,
   openEditor,
@@ -214,7 +194,7 @@ import {
 import { bitbucketTestCreds } from './pr/bitbucket'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
-import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
+import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
 // wouldn't be found. Prepend the usual locations.
@@ -278,6 +258,7 @@ function registerIpc(): void {
   ipcMain.handle('projects:list', () => listProjects())
   ipcMain.handle('projects:groups', () => listGroups())
   ipcMain.handle('projects:addGroup', (_event, name: string) => addGroup(name))
+  ipcMain.handle('projects:deleteGroup', (_event, name: string) => deleteGroup(name))
   ipcMain.handle('projects:renameGroup', (_event, oldName: string, newName: string) =>
     renameGroup(oldName, newName)
   )
@@ -450,18 +431,7 @@ function registerIpc(): void {
 
   // The renderer's reply to a create_session command from the MCP server; resolves
   // the waiting tool with the new session id (or an error).
-  ipcMain.handle('mcp:command-result', (_event, result: McpCommandResult) => resolveCommandResult(result))
 
-  // Register Rookery's MCP server in the user's global Claude config.
-  ipcMain.handle('mcp:installGlobal', () => installGlobal())
-
-  // The token the Fleet dashboard needs to read this instance (docs/fleet.md).
-  // Handed to the renderer so the palette can copy it — there's no other way to
-  // get at it without a terminal, and adding a source is a keyboard-first flow.
-  ipcMain.handle('fleet:token', () => ({ token: fleetToken(), port: mcpPort() }))
-
-  // Install the `rookery` shell CLI (so `rookery .` opens a folder in the app).
-  ipcMain.handle('cli:install', () => installCli())
 
   ipcMain.handle('claude:sessions', (_event, worktreePath: string) =>
     listClaudeSessions(worktreePath).map((m) => ({ ...m, running: hasActiveTurn(m.id) }))
@@ -470,8 +440,8 @@ function registerIpc(): void {
   ipcMain.handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>
     resumeSession(s)
   )
-  // The JSONL is named after CLAUDE's session id, not Rookery's. Callers pass
-  // the Rookery id, so resolve it here — one place, rather than making every
+  // The JSONL is named after CLAUDE's session id, not Floe's. Callers pass
+  // the Floe id, so resolve it here — one place, rather than making every
   // caller carry both ids.
   ipcMain.handle('claude:transcript', (_event, worktreePath: string, sessionId: string) => {
     const claude = loadClaudeTranscript(worktreePath, getCreatedSessionClaudeId(sessionId) ?? sessionId)
@@ -491,7 +461,7 @@ function registerIpc(): void {
   )
   ipcMain.handle('sessions:renameCreated', (_event, id: string, title: string) => renameCreatedSession(id, title))
   // Give a session a short, smart title after a turn, unless manually renamed.
-  // Interactive sessions get Claude's own ai-title; the headless runs Rookery
+  // Interactive sessions get Claude's own ai-title; the headless runs Floe
   // drives have none, so we generate one with Haiku from the opening request —
   // but only while the title is still an auto placeholder ("Session N" or the raw
   // first-message fallback), so it's one Haiku call per session, not every turn.
@@ -864,7 +834,7 @@ function registerIpc(): void {
   })
 
   // Fire a native OS notification (the renderer decides when, and owns the
-  // session metadata). Clicking it surfaces Rookery — even from behind other
+  // session metadata). Clicking it surfaces Floe — even from behind other
   // apps or minimized — and tells the renderer which session to open.
   ipcMain.handle('notify:show', (event, payload: { title: string; body: string; sessionId: string }) => {
     if (!Notification.isSupported()) return
@@ -881,10 +851,7 @@ function registerIpc(): void {
     note.show()
   })
 
-  // Bring this window forward. Pinned to the local machine in the preload, so an
-  // attached window raises ITSELF on the user's desk when a remote backend (link)
-  // asks for a session — link's main process has no window to raise. Returns
-  // whether a window was actually raised.
+  // Bring this window forward. Returns whether a window was actually raised.
   ipcMain.handle('window:focus', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return false
@@ -895,18 +862,40 @@ function registerIpc(): void {
     return true
   })
 
-  // Send Rookery to the background — mirrors the native ⌘H (role: 'hide') so the
+  // Send Floe to the background — mirrors the native ⌘H (role: 'hide') so the
   // command palette can do it too. A notification click brings it back.
   ipcMain.handle('window:hide', (event) => {
     if (process.platform === 'darwin') return app.hide()
     BrowserWindow.fromWebContents(event.sender)?.hide()
   })
 
-  // User keybinding overrides parsed from ~/.config/rookery/keybindings. The
-  // renderer merges these onto its DEFAULT_KEYMAP; `reveal` opens the file for
-  // editing (keyboard-first: routed from the "Edit keybindings" command).
+  // The whole keymap, read from ~/.config/floe/keybindings.toml — which the app
+  // generates with every default written out, so the file is the keymap rather
+  // than a list of overrides on top of one. `reveal` opens it for editing
+  // (keyboard-first: routed from the "Edit keybindings" command) and `rebind`
+  // is what the command palette's rebind writes through.
   ipcMain.handle('keybindings:load', () => loadKeybindings())
   ipcMain.handle('keybindings:reveal', () => revealKeybindings())
+  ipcMain.handle('keybindings:rebind', (_event, command: string, chord: string) =>
+    rebindCommand(command, chord)
+  )
+  // Regenerate the file from the built-in table, keeping the old one as .bak.
+  // The way out when an update ships a binding an existing file has no entry for.
+  ipcMain.handle('keybindings:reset', () => resetKeybindings())
+
+  // Settings. The panel reads and writes the same `floe.toml` the user edits by
+  // hand — `set` goes through the surgical writer, so a toggle flipped in the UI
+  // comes back as one changed value in a file whose comments are all still there.
+  ipcMain.handle('config:get', () => floeConfig())
+  ipcMain.handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
+    setFloeValue(table, key, value)
+    return floeConfig()
+  })
+  // Every problem across every config file, so Settings has one place to show
+  // them instead of each file failing quietly on its own.
+  ipcMain.handle('config:errors', () => configErrors())
+  ipcMain.handle('config:paths', () => configPaths())
+  ipcMain.handle('config:reveal', (_event, path?: string) => shell.openPath(path ?? configPaths().floe))
 
   // Whether the OS is currently in dark mode. The renderer reads this once at
   // mount for the initial xterm palette.
@@ -922,113 +911,8 @@ function registerIpc(): void {
     if (win && !win.isDestroyed()) applyVibrancy(win, on)
   })
 
-  // Attach this window to a remote Rookery server (the link deploy) — VS Code
-  // Remote style: the window keeps the LOCAL renderer + preload, and the preload
-  // routes workspace IPC over a WebSocket to the server. The handshake below
-  // must succeed before we commit: it proves the URL is a live Rookery server
-  // and caches its homeDir/version for the preload. Several backends can be
-  // attached at once; which one a call rides is decided per project in the
-  // renderer (docs/attached.md). Detach: ⌘⌥D or the chip.
-  ipcMain.handle('server:getUrl', () => getServerUrl())
-  ipcMain.handle('server:getAttached', () => getAttachedServer())
-  // Pulled once by the renderer on mount (not pushed — a push on did-finish-load
-  // races the renderer registering its listener). Returns + clears the boot
-  // attach-fallback message, or null in the normal case.
-  ipcMain.handle('server:getAttachFallback', () => {
-    const m = bootAttachError
-    bootAttachError = null
-    return m
-  })
-  // No target = detach everything (⌘⌥D / the chip); a target detaches just that
-  // backend and leaves the others attached.
-  ipcMain.handle('server:detach', (_event, target?: string) => detachFromServer(target ?? null))
-  ipcMain.handle('server:attach', async (_event, target: string) => {
-    // Two ways to name a backend:
-    //  • an http(s):// URL      → WebSocket over that origin (public/PWA style)
-    //  • an SSH host (`link`,    → open an SSH tunnel to the remote Rookery port
-    //    `host:remotePort`,        and attach to the loopback end. Auth is your
-    //    `ssh://host[:port]`)      SSH key; no URL, no token, no public exposure.
-    // The endpoint we actually handshake against + the value we store differ per
-    // kind; both end at the same version check + applyAttachChange.
-    const raw = String(target ?? '').trim()
-    if (!raw) throw new Error('Enter a server URL or SSH host')
-
-    let handshakeOrigin: URL // where fetchServerHost reads __ROOKERY_HOST__
-    let stored: string // the attach target we persist (drives attach:info)
-
-    if (/^https?:\/\//i.test(raw)) {
-      let parsed: URL
-      try {
-        parsed = new URL(raw)
-      } catch {
-        throw new Error('Invalid server URL')
-      }
-      handshakeOrigin = parsed
-      stored = raw
-    } else {
-      // SSH target: [ssh://]host[:remotePort]. Open the tunnel first, then
-      // handshake against its loopback end (trusted → no token needed).
-      const spec = raw.replace(/^ssh:\/\//i, '')
-      const [host, portStr] = spec.split(':')
-      // Reject argv-smuggling hosts (leading `-` → ssh reads it as a flag) before
-      // anything reaches spawn. Same allowlist parseSshTarget enforces.
-      if (!host || !isValidSshHost(host)) throw new Error(`Invalid SSH host: ${host || '(empty)'}`)
-      const remotePort = portStr ? Number(portStr) : 41600
-      if (!Number.isInteger(remotePort) || remotePort < 1 || remotePort > 65535)
-        throw new Error(`Invalid remote port: ${portStr}`)
-      const localPort = await ensureTunnel(host, remotePort) // throws on failure
-      // The tunnel carries the token it read over SSH; pass it so the loopback
-      // handshake (whose Host header defeats the server's own loopback trust)
-      // still authenticates. fetchServerHost reads ?token= and sends the cookie.
-      const token = getTunnel(host, remotePort)?.token
-      handshakeOrigin = new URL(`http://127.0.0.1:${localPort}/${token ? `?token=${encodeURIComponent(token)}` : ''}`)
-      stored = `ssh://${host}:${remotePort}`
-    }
-
-    const info = await fetchServerHost(handshakeOrigin)
-    // Two installs now — warn (don't block) when they drift apart. The server is
-    // provisioned separately, so a mismatch is survivable but worth knowing.
-    if (info.appVersion !== app.getVersion() && info.appVersion !== '0.0.0') {
-      const { response } = await dialog.showMessageBox({
-        type: 'warning',
-        message: `Version mismatch`,
-        detail: `This app is v${app.getVersion()} but the server runs v${info.appVersion}. Some features may misbehave until they match.`,
-        buttons: ['Attach Anyway', 'Cancel'],
-        defaultId: 0,
-        cancelId: 1
-      })
-      if (response === 1) {
-        // Cancelled — don't leave the tunnel up (unless another backend shares it).
-        const ssh = parseSshTarget(stored)
-        if (ssh && !getBackends().includes(stored)) closeTunnel(ssh.host, ssh.remotePort)
-        return
-      }
-    }
-    setBackendHost(stored, info)
-    addBackend(stored)
-    applyAttachChange()
-  })
-
-  // Attached-mode handshake for the preload. Synchronous on purpose: the preload
-  // must build its transports (IPC + one socket per backend) before the page
-  // loads, so it blocks on this one read. Empty list when detached — the common
-  // case — which keeps local mode on the exact master path.
-  ipcMain.on('attach:info', (event) => {
-    // Per-window, not the global pref: a "New Local Window" (⌘⇧N) opened beside
-    // an attached one must come up local even though the store says attached.
-    // (`has`, not `??` — the map stores an explicit [] for local windows.)
-    const targets = windowAttachTarget.has(event.sender.id)
-      ? windowAttachTarget.get(event.sender.id)!
-      : getBackends()
-    event.returnValue = targets.flatMap((url) => {
-      const wsUrl = backendWsUrl(url)
-      return wsUrl ? [{ id: url, wsUrl, host: getBackendHost(url) }] : [] // tunnel gone — skip it
-    })
-  })
-
-  // Embedded browser pane (WebContentsView over the renderer's browser area).
-  // All local/UI-kind: the view lives in THIS window; remote worktree apps are
-  // reached through per-port SSH forwards resolved inside openBrowser.
+  // Embedded browser pane (WebContentsView over the renderer's browser area):
+  // the view lives in THIS window.
   ipcMain.handle('browser:open', (event, url: string) => openBrowser(event, url))
   ipcMain.handle('browser:openFile', (event, absPath: string) => openBrowserFile(event, absPath))
   ipcMain.handle('browser:navigate', (event, url: string) => navigateBrowser(event, url))
@@ -1041,8 +925,6 @@ function registerIpc(): void {
   )
   ipcMain.handle('browser:setVisible', (event, visible: boolean) => setBrowserVisible(event, visible))
   ipcMain.handle('browser:close', (event) => closeBrowser(event))
-  // Not pinned (unlike the view controls above): the worktree's .env lives
-  // wherever the worktree itself does, so this must follow the attach target.
   ipcMain.handle('browser:defaultUrl', (_event, worktreePath: string) => getAppUrl(worktreePath))
 
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
@@ -1055,6 +937,32 @@ function registerIpc(): void {
   // Settings → Advanced/Integrations read-only detection: the Claude CLI binary +
   // version and the current `gh` auth state. Best-effort; anything missing comes
   // back null so the UI shows a "not detected / not connected" state.
+  // Who to greet on the launcher. `git config user.name` first — it's the name
+  // the user already chose to be known by on this machine, and it's set on any
+  // box that commits. `id -F` is the macOS full name; the login name is the
+  // last resort because "r2luna" reads like a handle, not a greeting. Cached:
+  // it can't change without a relaunch mattering, and the launcher asks on every
+  // mount.
+  let userName: string | null = null
+  ipcMain.handle('user:name', async () => {
+    if (userName !== null) return userName
+    const pexec = promisify(execFile)
+    const tryRun = async (cmd: string, args: string[]): Promise<string> => {
+      try {
+        return (await pexec(cmd, args)).stdout.trim()
+      } catch {
+        return ''
+      }
+    }
+    const full =
+      (await tryRun('git', ['config', '--global', 'user.name'])) ||
+      (await tryRun('id', ['-F'])) ||
+      userInfo().username
+    // First name only: "Good evening, Rafael Lunardelli" reads like a form letter.
+    userName = full.split(/\s+/)[0] ?? ''
+    return userName
+  })
+
   ipcMain.handle('settings:probe', async () => {
     const pexec = promisify(execFile)
     let claude: { path: string | null; version: string | null } = { path: null, version: null }
@@ -1107,11 +1015,19 @@ function registerIpc(): void {
     }
   })
 
-  // Hot-reload bindings: when the user saves the keybindings file, tell the
-  // renderer to re-fetch and re-merge — no app restart needed.
-  watchKeybindings(() => {
+  // Hot-reload the whole config directory. Saving keybindings.toml, editing a
+  // project's config.toml by hand, or an agent adding a command all land here:
+  // the caches are dropped and the renderer re-fetches, with no app restart.
+  //
+  // One channel for the keymap and one for everything else, because reloading
+  // bindings is cheap and constant while re-reading projects touches the
+  // sidebar — telling them apart keeps a keybinding save from repainting the app.
+  watchConfig((file) => {
+    setSandboxEnabled(floeConfig().sandbox.enabled)
+    const keymap = file.endsWith('keybindings.toml')
     for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('keybindings:changed')
+      if (win.isDestroyed()) continue
+      win.webContents.send(keymap ? 'keybindings:changed' : 'config:changed')
     }
   })
 }
@@ -1126,7 +1042,7 @@ async function captureWindow(win: BrowserWindow): Promise<void> {
   if (process.platform === 'darwin' && getVibrancy()) return
   try {
     const image = await win.webContents.capturePage()
-    writeFileSync(join(app.getPath('userData'), 'rookery-shot.png'), image.toPNG())
+    writeFileSync(join(app.getPath('userData'), 'floe-shot.png'), image.toPNG())
   } catch {
     /* ignore capture failures */
   }
@@ -1165,112 +1081,30 @@ function applyVibrancy(win: BrowserWindow, on: boolean): void {
 // renderer driving the stores/PTYs.
 let localWindow: BrowserWindow | null = null
 
-// ⌘⇧N (Window → New Window): open a genuinely separate Rookery *process* — a
+// ⌘⇧N (Window → New Window): open a genuinely separate Floe *process* — a
 // second, fully independent app with its own IPC/PTYs/stores — rather than a
 // second window (the local IPC layer assumes a single renderer; see localWindow).
 // macOS packaged: `open -n` the .app bundle (LaunchServices would otherwise reuse
-// the running one). Everywhere else, relaunch the current argv detached. Always
-// with --rookery-local: a new instance is a fresh LOCAL app even when this one is
-// attached (see forceLocal in sessionStore) — attach from it explicitly if wanted.
+// the running one). Everywhere else, relaunch the current argv detached.
 function openNewInstance(): void {
   if (process.platform === 'darwin' && app.isPackaged) {
     const bundle = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '')
-    spawn('open', ['-n', bundle, '--args', '--rookery-local'], { detached: true, stdio: 'ignore' }).unref()
+    spawn('open', ['-n', bundle], { detached: true, stdio: 'ignore' }).unref()
     return
   }
   // Dev (electron argv[1] = app entry) and non-mac: re-run our own launch args.
   const args = app.isPackaged ? [] : process.argv.slice(1)
-  spawn(process.execPath, [...args, '--rookery-local'], { detached: true, stdio: 'ignore' }).unref()
+  spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref()
 }
 
-// Which backends each window was created against (webContents.id → target urls,
-// empty for local-only). attach:info answers from THIS map, not the store, so a
-// "New Local Window" opened beside an attached one really is local.
-const windowAttachTarget = new Map<number, string[]>()
-
-// The WebSocket endpoint for an attach target: the tunnel's loopback end for an
-// `ssh://` backend (the tunnel is opened before the window is, by the attach
-// flow or boot), the origin itself for a URL backend. Null when an SSH backend's
-// tunnel isn't up — the window then boots without it rather than dangling.
-function backendWsUrl(url: string): string | null {
-  const ssh = parseSshTarget(url)
-  if (ssh) {
-    const t = getTunnel(ssh.host, ssh.remotePort)
-    if (!t) return null
-    return `ws://127.0.0.1:${t.localPort}/ws${t.token ? `?token=${encodeURIComponent(t.token)}` : ''}`
-  }
-  const u = new URL(url)
-  const token = u.searchParams.get('token')
-  return `${u.protocol === 'https:' ? 'wss' : 'ws'}://${u.host}/ws${token ? `?token=${encodeURIComponent(token)}` : ''}`
-}
-
-// Set when a boot-time SSH attach falls back to local; shown as a toast once the
-// renderer loads, then cleared. Null in the normal (attached or plain-local) case.
-let bootAttachError: string | null = null
-
-// Adding/removing a backend rebuilds the window on the spot: the preload builds
-// one socket per backend at load time, so the set can only change on a fresh
-// preload. (Switching BETWEEN already-attached backends is live — the renderer
-// just points the router at another one; no rebuild.) Deliberately NOT
-// app.relaunch(): a relaunch would orphan the dev renderer (electron-vite dies
-// with the app process, so the relaunched window boots black on a dead
-// localhost:5173), and in prod it costs a full app boot for what is only a
-// renderer+preload swap.
-function applyAttachChange(): void {
-  buildAppMenu(openNewInstance, detachFromServer) // Detach item is gated on attach state
-  for (const win of BrowserWindow.getAllWindows()) win.close()
-  createWindow()
-}
-
-function detachFromServer(target: string | null = null): void {
-  const ssh = parseSshTarget(target)
-  if (ssh) closeTunnel(ssh.host, ssh.remotePort)
-  else closeTunnel() // detach-all: every tunnel + the per-app forwards
-  removeBackend(target)
-  if (!getBackends().length) closeReverseCdp() // nothing left to publish our CDP port to
-  applyAttachChange()
-}
-
-// Attach handshake: prove `url` is a live Rookery server and read its identity.
-// The server injects __ROOKERY_HOST__ (platform/homeDir/appVersion) into the
-// index.html it serves; a ?token= in the attach URL authenticates via the same
-// rk cookie the browser flow uses (no query round-trip, no 302).
-async function fetchServerHost(u: URL): Promise<{ platform: string; homeDir: string; appVersion: string }> {
-  const token = u.searchParams.get('token')
-  let res: Response
-  try {
-    res = await fetch(`${u.origin}/`, {
-      headers: token ? { cookie: `rk=${encodeURIComponent(token)}` } : {},
-      signal: AbortSignal.timeout(7000)
-    })
-  } catch {
-    throw new Error(`Can't reach ${u.origin} — is the Rookery server up?`)
-  }
-  if (res.status === 401) throw new Error('Server requires a token — attach with ?token=… (see ~/.rookery/rookery-token on the server)')
-  if (!res.ok) throw new Error(`Server answered ${res.status}`)
-  const html = await res.text()
-  const match = /__ROOKERY_HOST__\s*=\s*(\{[^<]*\})/.exec(html)
-  if (!match) throw new Error('Not a Rookery server (no host handshake in its page)')
-  try {
-    return JSON.parse(match[1])
-  } catch {
-    throw new Error('Not a Rookery server (bad host handshake)')
-  }
-}
-
-function createWindow(backends: string[] = getBackends()): void {
-  const attachedServer = backends[0] ?? null
+function createWindow(): void {
   const darwin = process.platform === 'darwin'
   // Non-opaque whenever the glass preference is on — NOT gated on the launch
   // theme. Constructing opaque in light would relock the window so a later
   // light→dark switch couldn't reveal the blur without a restart. Light still
   // reads solid because its CSS surfaces are opaque and cover the blur.
   const vibrancyOn = darwin && getVibrancy()
-  // When attached, this window still hosts the LOCAL renderer — the preload
-  // routes workspace IPC to the remote server over WebSocket (attach:info), so
-  // everything (projects, sessions, terminals) runs over there while the UI
-  // stays native. Cascade a second window slightly so it doesn't stack
-  // invisibly on the first.
+  // Cascade a second window slightly so it doesn't stack invisibly on the first.
   const cascade = BrowserWindow.getAllWindows().length * 28
   const mainWindow = new BrowserWindow({
     width: 1400,
@@ -1287,8 +1121,8 @@ function createWindow(backends: string[] = getBackends()): void {
     // live just by swapping the background fill. When off, the solid fill above
     // and the opaque [data-vibrancy='off'] surfaces keep it hidden.
     ...(darwin ? { vibrancy: 'fullscreen-ui' as const, visualEffectState: 'active' as const } : {}),
-    // No traffic lights. The window is driven from the keyboard (⌘W / ⌘M / ⌘Q
-    // still work through the app menu), so the chrome is pure titlebar.
+    // No chrome at all. The window is driven from the keyboard (⌘W / ⌘M / ⌘Q
+    // still work through the app menu).
     frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -1302,31 +1136,17 @@ function createWindow(backends: string[] = getBackends()): void {
   // Hide the macOS traffic-light buttons — the app is keyboard-first.
   if (process.platform === 'darwin') mainWindow.setWindowButtonVisibility(false)
 
-  // attach:info answers per-window from this map (see registerIpc). Capture the
-  // id now — webContents is already destroyed by the time 'closed' fires.
-  const wcId = mainWindow.webContents.id
-  windowAttachTarget.set(wcId, backends)
-  mainWindow.on('closed', () => windowAttachTarget.delete(wcId))
-
   mainWindow.on('ready-to-show', () => mainWindow.show())
 
   // Feed the topbar's memory widget. Claude usage is deliberately on-demand:
   // probing it starts a real `claude` process and can request Keychain access,
-  // so opening a Rookery window must not trigger it.
-  if (!attachedServer) {
-    localWindow = mainWindow
-    startMemoryStats(mainWindow)
-    // Codex's limits aren't polled by anything else (the info panel reads them on
-    // demand), so Fleet's footer needs its own slow timer.
-    startFleetUsage()
-    // The edge ring is process memory; recordEdge already journals to fleet.jsonl,
-    // so re-seed it or every restart wipes the conversation half of the board.
-    loadEdges()
-    mainWindow.on('closed', () => {
-      if (localWindow === mainWindow) localWindow = null
-      stopMemoryStats()
-    })
-  }
+  // so opening a Floe window must not trigger it.
+  localWindow = mainWindow
+  startMemoryStats(mainWindow)
+  mainWindow.on('closed', () => {
+    if (localWindow === mainWindow) localWindow = null
+    stopMemoryStats()
+  })
 
   // A boot that lands on a broken/half-written bundle (see autoUpdate.ts) shows
   // up here first. Log it, and retry the load once before leaving a dead window.
@@ -1340,10 +1160,6 @@ function createWindow(backends: string[] = getBackends()): void {
 
   mainWindow.webContents.on('did-finish-load', () => {
     setTimeout(() => void captureWindow(mainWindow), 400)
-    // The "which machine is this?" badge used to be injected from here, because
-    // the window as a whole was either local or attached. It isn't anymore — the
-    // answer changes per project — so the titlebar renders it (see .backend-tag
-    // and [data-backend] in index.css).
   })
   mainWindow.on('focus', () => {
     setTimeout(() => void captureWindow(mainWindow), 200)
@@ -1372,18 +1188,6 @@ function createWindow(backends: string[] = getBackends()): void {
     return { action: 'deny' }
   })
 
-  // Escape hatch for a wedged renderer: navigating to this sentinel URL detaches
-  // every backend without going through IPC. The Window menu's Detach (⌘⌥D) and
-  // the palette entry are the normal routes.
-  if (attachedServer) {
-    mainWindow.webContents.on('will-navigate', (e, url) => {
-      if (url.startsWith('rookery://detach')) {
-        e.preventDefault()
-        detachFromServer()
-      }
-    })
-  }
-
   // electron-vite injects ELECTRON_RENDERER_URL in dev; load the built file otherwise.
   if (process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
@@ -1408,12 +1212,12 @@ function createWindow(backends: string[] = getBackends()): void {
 
 isolateUserDataPerWorktree()
 
-// Dev-only escape hatch for GUI verification: opt in with ROOKERY_CDP_PORT to
+// Dev-only escape hatch for GUI verification: opt in with FLOE_CDP_PORT to
 // expose Chromium's own debugger and keyboard-drive the app over CDP. Never on
 // by default (the scoped relay in browserPane is what Claude sessions get, so a
 // session still can't reach this window).
-if (!app.isPackaged && process.env.ROOKERY_CDP_PORT)
-  app.commandLine.appendSwitch('remote-debugging-port', process.env.ROOKERY_CDP_PORT)
+if (!app.isPackaged && process.env.FLOE_CDP_PORT)
+  app.commandLine.appendSwitch('remote-debugging-port', process.env.FLOE_CDP_PORT)
 
 // "Claude drives the browser": each concurrently-running instance (⌘⇧N "New
 // Window" is a genuinely separate process, see openNewInstance) needs its own
@@ -1424,69 +1228,29 @@ let cdpPort = 0
 
 void app.whenReady().then(async () => {
   fixPath()
+  // Generate anything missing under ~/.config/floe before anything reads it, so
+  // the user (and any agent) has the documented files in front of them on the
+  // very first launch rather than after they go looking for a setting.
+  initConfig()
+  // sandbox.ts stays electron-free so its tests can load it directly, so the
+  // setting is pushed in rather than read there.
+  setSandboxEnabled(floeConfig().sandbox.enabled)
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
-  buildAppMenu(openNewInstance, detachFromServer)
+  buildAppMenu(openNewInstance)
   registerIpc()
-  // Boot the in-app MCP control server (loopback only). getWindow is lazy, so
-  // ordering vs createWindow doesn't matter; the port is ready before any spawn.
-  // Prefer the local window — an attached window has no preload listening.
-  startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])
-  // Install the global hook that blocks the native Task tool inside Rookery
-  // sessions (steers subagents to mcp__rookery lanes). Unguarded like the MCP
-  // auto-register above, so the headless server installs it too.
   ensureAgentHookInstalled()
   // Same lazy-getter pattern, for the cron-triggered scheduler (see schedules.ts).
   initScheduler(() => localWindow ?? BrowserWindow.getAllWindows()[0])
-  // Watch the reverse-forwarded browser CDP so Claude sessions gain/lose the
-  // Playwright tool as a Mac attaches/detaches (server-only; no-op on desktop).
-  startBrowserCdpWatch()
-  // Desktop: start the scoped CDP relay and hand local Claude sessions
-  // Playwright pointed at it so they can drive the embedded browser pane —
-  // never the app's own window. Server builds keep the reverse-forwarded 9333.
-  if (!process.env.ROOKERY_SERVER) {
-    // Non-critical: only browser-pane driving needs it. A port race (see
-    // startCdpRelay) must never block the window — guard it so createWindow below
-    // always runs. This is the boot step most likely to fail right after an
-    // update, when a previous instance may still be draining.
-    try {
-      cdpPort = await startCdpRelay(() => localWindow ?? BrowserWindow.getAllWindows()[0])
-      setLocalBrowserCdp(cdpPort)
-    } catch (err) {
-      log('cdp:relay-failed', { error: err instanceof Error ? err.message : String(err) })
-    }
+  // Start the scoped CDP relay so Claude sessions can drive the embedded browser
+  // pane — never the app's own window. Non-critical: a port race (see
+  // startCdpRelay) must never block the window, so guard it and carry on.
+  try {
+    cdpPort = await startCdpRelay(() => localWindow ?? BrowserWindow.getAllWindows()[0])
+  } catch (err) {
+    log('cdp:relay-failed', { error: err instanceof Error ? err.message : String(err) })
   }
-  // Booting already-attached over SSH: the tunnel must be up before the window's
-  // preload reads attach:info. If it fails (host down, key issue), fall back to
-  // local so the app still boots — the invariant is local mode can't break.
-  // Every attached SSH backend needs its tunnel up before the window's preload
-  // reads attach:info. A backend we can't reach is dropped for THIS boot only
-  // (the attach stays persisted, so it comes back when the host does) — the
-  // invariant is that local mode, and every other backend, still boots.
-  const unreachable: string[] = []
-  await Promise.all(
-    getBackends().map(async (target) => {
-      const ssh = parseSshTarget(target)
-      if (!ssh) return
-      try {
-        await ensureTunnel(ssh.host, ssh.remotePort)
-        // Publish this Mac's CDP relay port on the server's loopback (link:9333 →
-        // here), so the server's Claude can drive the embedded browser pane with
-        // Playwright. Best-effort: if it can't bind, only browser-control degrades.
-        ensureReverseCdp(ssh.host, cdpPort)
-      } catch (err) {
-        log('ssh:boot-tunnel-failed', { host: ssh.host, error: (err as Error).message })
-        unreachable.push(target)
-      }
-    })
-  )
-  if (unreachable.length) {
-    // Say so, or that backend's projects silently missing from the rail is baffling.
-    // Shown once the renderer is up (see did-finish-load).
-    const hosts = unreachable.map((t) => parseSshTarget(t)?.host ?? t).join(', ')
-    bootAttachError = `Couldn't reach ${hosts} over SSH — its projects are unavailable. Re-attach from ⌘K when it's back.`
-  }
-  createWindow(getBackends().filter((b) => !unreachable.includes(b)))
+  createWindow()
   // Background auto-update: polls the GitHub release feed, installs on next quit.
   initAutoUpdate(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Watchdog: log any turn that gets stuck "Thinking…" (never emits done) so a
@@ -1522,6 +1286,7 @@ app.on('window-all-closed', () => {
 // Confirm before quitting (⌘Q), then tear down every shell/command so nothing
 // (dev servers, queues, watchers) is left running after the app exits.
 let quitConfirmed = false
+
 app.on('before-quit', (event) => {
   if (quitConfirmed) return // confirmed pass — let the quit through
   event.preventDefault()
@@ -1531,7 +1296,7 @@ app.on('before-quit', (event) => {
     buttons: ['Cancel', 'Quit'],
     defaultId: 1,
     cancelId: 0,
-    message: 'Quit Rookery?',
+    message: 'Quit Floe?',
     detail: 'Running terminals and commands will be stopped.'
   }
   const choice = win ? dialog.showMessageBoxSync(win, opts) : dialog.showMessageBoxSync(opts)

@@ -111,41 +111,6 @@ button {
   height: 100%;
 }
 
-/* --- titlebar ------------------------------------------------------------ */
-
-.titlebar {
-  display: flex;
-  align-items: center;
-  height: 40px;
-  /* No traffic lights (the window is frameless) — the breadcrumb starts at the
-     same 8px gutter the lane uses, so the two left edges line up. */
-  /* 20px = the lane's 8px gutter + the panel's 1px border + its 11px head
-     padding, so the breadcrumb sits on the same vertical line as panel names. */
-  padding-inline: 20px 14px;
-  -webkit-app-region: drag;
-}
-
-.crumbs {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  color: var(--dim);
-}
-
-.crumb {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.crumb[data-last] {
-  color: var(--text-strong);
-}
-
-.crumb-sep {
-  color: #40444d;
-}
-
 /* --- lane ---------------------------------------------------------------- */
 
 .workspace {
@@ -159,7 +124,9 @@ button {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 0 8px 8px;
+  /* Even 8px all round: with no titlebar above, the top gutter is the lane's
+     own or the panels sit flush against the window edge. */
+  padding: 8px;
   overflow-x: auto;
   overflow-y: hidden;
   scroll-padding-inline: 8px;
@@ -391,7 +358,9 @@ button {
   flex-direction: column;
   gap: 2px;
   flex: none;
-  padding: 0 8px 8px 0;
+  /* Matches the lane's gutter on the three edges it touches; no left padding —
+     the lane's own right padding already separates them. */
+  padding: 8px 8px 8px 0;
 }
 
 .rail-btn {
@@ -407,6 +376,17 @@ button {
 .rail-btn:focus-visible {
   color: var(--text-strong);
   background: #ffffff0d;
+}
+
+/* Needs a worktree and there isn't one — visibly present, plainly unavailable. */
+.rail-btn[data-off] {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.rail-btn[data-off]:hover {
+  color: var(--dim);
+  background: none;
 }
 
 /* --- rows ---------------------------------------------------------------- */
@@ -578,6 +558,19 @@ button {
 
 .greet-mark {
   color: var(--accent);
+}
+
+/* The first-run line under the composer. Centred on the composer, not the
+   panel, so it reads as belonging to the box it sits under. `.chip` is the
+   app's neutral outline button — see docs/ui-conventions.md. */
+.launcher-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: -10px;
+  color: var(--dim);
+  font-size: 12px;
 }
 
 /* --- composer ------------------------------------------------------------ */
@@ -1634,16 +1627,6 @@ button {
   color: #9aa0ac;
 }
 
-/* --- titlebar stats -------------------------------------------------------- */
-
-
-
-.stat > svg {
-  color: var(--dim);
-}
-
-.stat-unit,
-
 /* Shiki emits the LIGHT colour as an inline style and the dark one as the
    --shiki-dark custom property. An inline style outranks any stylesheet rule,
    so without !important the light palette wins and the code renders near-black
@@ -1720,7 +1703,11 @@ button {
    lane it simply sits where it is. */
 .lane-col[data-sticky] {
   position: sticky;
-  left: 8px;
+  /* 0, not the gutter: Chromium measures the sticky offset from the lane's
+     CONTENT box, which the lane's own 8px padding has already inset. Repeating
+     it here pinned the column 8px further right — over the gap — so the chat and
+     whatever sat beside it looked welded together. */
+  left: 0;
   z-index: 3;
   box-shadow: 6px 0 16px #0000004d;
 }
@@ -1823,10 +1810,55 @@ button {
   background: #ffffff12;
 }
 
+/* Exactly the 2ch the hanging indent reserves. A wider number ("10.") pushes
+   its own text out, which is what a numbered list should do. */
 .md-bullet {
   display: inline-block;
   min-width: 2ch;
-  color: #6f7bd0;
+  color: #7f8ada;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The unordered marker is drawn, not typed: a disc centred in its column and on
+   the text's x-height. A font's bullet glyph is whatever size the face decided,
+   sits on the baseline, and is a hollow box when the face has no bullet. */
+.md-bullet[data-dot] {
+  text-align: center;
+}
+
+.md-bullet[data-dot]::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  /* middle = baseline + half the x-height, which is where a bullet belongs. */
+  vertical-align: middle;
+}
+
+/* One step in: the disc opens up. Two: it flattens to a dash. Depth reads from
+   the shape as well as the indent, which matters on a wrapped item. */
+.md-bullet[data-dot][data-depth="1"]::before {
+  background: none;
+  border: 1px solid currentColor;
+  color: #6b74ae;
+}
+
+.md-bullet[data-dot][data-depth="2"]::before {
+  width: 5px;
+  height: 1.5px;
+  border-radius: 1px;
+  vertical-align: 0.35em;
+  color: #6b74ae;
+}
+
+/* Items breathe: a gap above each one separates them without separating a
+   wrapped line from the item it belongs to, which lives in the same row. A
+   list that FOLLOWS a list keeps the gap; the first item after prose already
+   has the blank source line above it. */
+.md-row[data-md="list"] + .md-row[data-md="list"] {
+  margin-top: 3px;
 }
 
 .md-row[data-md="quote"] .md-text {
@@ -1850,9 +1882,37 @@ button {
   font-size: 11px;
 }
 
+/* A table row is a grid, not a line of pipes: every row of a block shares one
+   template (set inline from the block's widest cells), so the columns line up
+   while each row stays its own numbered, navigable line. */
 .md-row[data-md="table"] .md-text {
-  white-space: pre;
+  white-space: normal;
   color: #b9bcc4;
+}
+
+.md-cells {
+  display: grid;
+  gap: 0 14px;
+  padding: 1px 0;
+}
+
+.md-cell {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.md-cells[data-head] {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+/* The |---| row, which is the header's underline. It keeps its own numbered
+   line — the rule is what that line draws instead of cells. */
+.md-trule {
+  display: inline-block;
+  width: 100%;
+  border-top: 1px solid var(--line-soft);
+  vertical-align: middle;
 }
 
 .md-rule {
@@ -1963,10 +2023,8 @@ button {
      screen no matter how few results it held. The palette must be the size of
      its list. */
   align-items: flex-start;
-  /* Just below the titlebar, and a fixed offset rather than a percentage: the
-     modal should sit against the app's chrome, not drift down as the window
-     grows. The list grows downward from there, so the box never moves as it
-     fills. */
+  /* A fixed offset rather than a percentage: the list grows downward from
+     there, so the box never moves as it fills. */
   padding-top: 56px;
   background: #05060899;
 }
@@ -2139,9 +2197,31 @@ kbd {
 }
 
 .chips-label {
+  display: block;
   margin-bottom: 6px;
   color: var(--dim);
   font-size: 11px;
+}
+
+.dialog-field {
+  margin-bottom: 14px;
+}
+
+/* A native <select>: the OS popup already does keyboard navigation, type-ahead
+   and overflow, none of which a hand-rolled menu would get for free. Styled to
+   match .dialog-input so the two read as one row. */
+.dialog-select {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  color: var(--text-strong);
+  font: inherit;
+  outline: none;
+}
+
+.dialog-select:focus {
+  border-color: #343a45;
 }
 
 .chips-row {
@@ -2903,4 +2983,69 @@ kbd {
   margin: 8px 2px 2px;
   color: var(--dim);
   font-size: 11px;
+}
+
+/* --- settings ------------------------------------------------------------- */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 10px;
+}
+
+/* The label takes the room, the value sits at the right edge — so a column of
+   settings reads as two columns even though each row is one button. */
+.settings-row {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-value {
+  flex: none;
+  color: var(--text);
+  font-size: 11px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* Off is a state, not a warning: dimmed rather than tinted, so a column of
+   switches doesn't turn into a column of alarms. */
+.settings-off {
+  color: var(--dim);
+}
+
+/* The box replaces the value in place, so the row does not jump when it opens. */
+.settings-editing {
+  gap: 10px;
+}
+
+.settings-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+/* A problem is the one row that has to pull the eye — the muted danger outline
+   from the mode chips, never a fill. */
+.settings-problem .row-name {
+  color: #c49495;
+}
+
+.settings-problem .badge {
+  color: #c49495;
+  border-color: #352829;
+  background: #221b1c;
+}
+
+:root[data-theme='light'] .settings-problem .row-name {
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .settings-problem .badge {
+  color: #b1454a;
+  border-color: #e3bdbf;
+  background: #f9eef0;
 }

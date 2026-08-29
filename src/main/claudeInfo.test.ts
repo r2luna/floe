@@ -29,7 +29,7 @@ test('parseContextUsage: model, totals and the category table (free space droppe
     '### MCP Tools',
     '',
     '| Tool | Server | Tokens |',
-    '| mcp__rookery__list_projects | rookery | 415 |'
+    '| mcp__floe__list_projects | floe | 415 |'
   ].join('\n')
 
   const usage = parseContextUsage(report)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { Project } from '../../shared/types'
+import { DEFAULT_GROUP, type Project } from '../../shared/types'
 
 /**
  * The real project list from the main process.
@@ -23,6 +23,12 @@ export interface Projects {
   add: (group?: string) => Promise<string | undefined>
   /** Add by an explicit path, which is the only way on a remote machine. */
   addByPath: (path: string, group?: string) => Promise<string | undefined>
+  /** Create an empty group. A name that already exists is a no-op. */
+  addGroup: (name: string) => Promise<void>
+  /** Remove a group; its projects fall back to the default. */
+  deleteGroup: (name: string) => Promise<void>
+  /** Move a project into a group, creating the group if it is new. */
+  setGroup: (path: string, group: string) => Promise<void>
   reload: () => void
 }
 
@@ -33,7 +39,7 @@ export function useProjects(): Projects {
   const [currentPath, setCurrentPath] = useState<string>()
 
   const reload = useCallback(() => {
-    window.rookery.projects
+    window.floe.projects
       .list()
       .then((list) => {
         setAll(list)
@@ -51,7 +57,7 @@ export function useProjects(): Projects {
   const [groupNames, setGroupNames] = useState<string[]>([])
 
   useEffect(() => {
-    void window.rookery.projects.groups().then(setGroupNames).catch(() => {})
+    void window.floe.projects.groups().then(setGroupNames).catch(() => {})
   }, [])
 
   const landOn = useCallback(
@@ -70,25 +76,44 @@ export function useProjects(): Projects {
 
   const addByPath = useCallback(
     async (path: string, group?: string) =>
-      landOn(await window.rookery.projects.addByPath(path, group)),
+      landOn(await window.floe.projects.addByPath(path, group)),
     [landOn]
   )
 
   const add = useCallback(
-    async (group?: string) => landOn(await window.rookery.projects.add(group)),
+    async (group?: string) => landOn(await window.floe.projects.add(group)),
     [landOn]
   )
 
+  // Group edits all resolve the same way: main is the record, so take what it
+  // returns rather than patching the local copy and hoping the two agree.
+  const addGroup = useCallback(async (name: string) => {
+    setGroupNames(await window.floe.projects.addGroup(name))
+  }, [])
+
+  const deleteGroup = useCallback(async (name: string) => {
+    const { groups: g, projects: list } = await window.floe.projects.deleteGroup(name)
+    setGroupNames(g)
+    setAll(list)
+  }, [])
+
+  const setGroup = useCallback(async (path: string, group: string) => {
+    setAll(await window.floe.projects.setGroup(path, group))
+    setGroupNames(await window.floe.projects.groups())
+  }, [])
+
   // Grouped in first-seen order rather than alphabetically: the order in
   // projects.json is the user's own, and re-sorting it would move things they
-  // arranged.
+  // arranged. The default group is the one exception — it leads, always, so the
+  // ungrouped pile has a fixed home instead of drifting with the list.
   const groups: Projects['groups'] = []
   for (const p of all) {
-    const group = p.group || 'Ungrouped'
+    const group = p.group || DEFAULT_GROUP
     const found = groups.find((g) => g.name === group)
     if (found) found.projects.push(p)
     else groups.push({ name: group, projects: [p] })
   }
+  groups.sort((a, b) => Number(b.name === DEFAULT_GROUP) - Number(a.name === DEFAULT_GROUP))
 
   return {
     all,
@@ -102,6 +127,9 @@ export function useProjects(): Projects {
     groupNames: [...new Set([...groupNames, ...all.map((p) => p.group).filter(Boolean)])],
     add,
     addByPath,
+    addGroup,
+    deleteGroup,
+    setGroup,
     reload
   }
 }

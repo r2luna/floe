@@ -2,6 +2,8 @@ import { safeStorage } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from '../dataDir'
+import { floeConfig, setFloeValue } from '../config/floe'
+import { projectScan, updateProject } from '../config/projectStore'
 
 // Persistence for the Jira connection. The API token is the one secret here, so
 // it's encrypted at rest with Electron's safeStorage (backed by the OS keychain
@@ -11,11 +13,23 @@ import { dataDir } from '../dataDir'
 //
 // Credentials are global (connect once, use everywhere); only the project key is
 // per-repo, kept in `projectByRoot` so each worktree/repo maps to its Jira board.
+//
+// The split across two files is on purpose: `site` and `email` are not secret,
+// so they live in `floe.toml` where the user can read and edit them (and keep
+// them in a dotfiles repo), while the token never leaves this keychain-encrypted
+// store. The copies here are the fallback for a connection made before the TOML
+// existed.
 interface JiraStore {
   site?: string // base URL, e.g. "https://yourco.atlassian.net" (no trailing slash)
   email?: string // Atlassian account email — the Basic-auth username
   tokenEnc?: string // base64 of safeStorage.encryptString(token)
   projectByRoot: Record<string, string> // repo root → Jira project key (e.g. "PROJ")
+}
+
+/** The connection's non-secret half: floe.toml first, the legacy store second. */
+function identity(store: JiraStore): { site?: string; email?: string } {
+  const configured = floeConfig().integrations.jira
+  return { site: configured.site ?? store.site, email: configured.email ?? store.email }
 }
 
 const storeFile = (): string => join(dataDir(), 'jira.json')
@@ -66,8 +80,9 @@ export interface JiraConnection {
 
 export function getJiraConnection(): JiraConnection {
   const s = read()
-  const connected = Boolean(s.site && s.email && s.tokenEnc)
-  return { connected, site: s.site, email: s.email }
+  const { site, email } = identity(s)
+  const connected = Boolean(site && email && s.tokenEnc)
+  return { connected, site, email }
 }
 
 // The full credentials, decrypted — main-process only, for making requests.
@@ -85,13 +100,14 @@ let credsCache: { tokenEnc: string; creds: JiraCreds } | null = null
 
 export function getJiraCreds(): JiraCreds | null {
   const s = read()
-  if (!s.site || !s.email || !s.tokenEnc) return null
+  const { site, email } = identity(s)
+  if (!site || !email || !s.tokenEnc) return null
   if (credsCache?.tokenEnc === s.tokenEnc) return credsCache.creds
   if (!safeStorage.isEncryptionAvailable()) return null
   try {
     const token = safeStorage.decryptString(Buffer.from(s.tokenEnc, 'base64'))
     if (!token) return null
-    const creds = { site: s.site, email: s.email, token }
+    const creds = { site, email, token }
     credsCache = { tokenEnc: s.tokenEnc, creds }
     return creds
   } catch {
@@ -111,6 +127,10 @@ export function setJiraCreds(input: { site: string; email: string; token: string
   const tokenEnc = safeStorage.encryptString(token).toString('base64')
   const store = read()
   write({ ...store, site, email, tokenEnc })
+  // The non-secret half goes where the user can see it. Written second so a
+  // failure here leaves a working connection rather than a token with no site.
+  setFloeValue('integrations.jira', 'site', site)
+  setFloeValue('integrations.jira', 'email', email)
 }
 
 // Forget the connection (the per-repo project keys are kept — they're not secret
@@ -121,15 +141,25 @@ export function clearJiraCreds(): void {
   credsCache = null
 }
 
+// Which Jira board a repo maps to. Per-project, so it lives in that project's
+// own `config.toml` next to everything else about it — the legacy `projectByRoot`
+// map is still read for repos configured before that move.
 export function getProjectKey(root: string): string | undefined {
   if (!root) return undefined
-  return read().projectByRoot[root]
+  return projectScan().projects.find((p) => p.path === root)?.jiraProject ?? read().projectByRoot[root]
 }
 
 export function setProjectKey(root: string, key: string): void {
   if (!root) return
-  const store = read()
   const k = (key ?? '').trim().toUpperCase()
+  // Only for a tracked project: a worktree or a repo the user has not added has
+  // no config file to write into, so those keep using the legacy map.
+  if (projectScan().byPath.has(root)) {
+    if (k) updateProject(root, [{ op: 'set', table: 'integrations', key: 'jira-project', value: k }])
+    else updateProject(root, [{ op: 'unset', table: 'integrations', key: 'jira-project' }])
+    return
+  }
+  const store = read()
   if (!k) delete store.projectByRoot[root]
   else store.projectByRoot[root] = k
   write(store)

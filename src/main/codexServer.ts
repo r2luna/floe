@@ -107,7 +107,7 @@ function ensureServer(): Promise<void> {
       jsonrpc: '2.0',
       id,
       method: 'initialize',
-      params: { clientInfo: { name: 'rookery', version: '1.0.0' }, capabilities: { experimentalApi: true } }
+      params: { clientInfo: { name: 'floe', version: '1.0.0' }, capabilities: { experimentalApi: true } }
     })
   })
   return ready
@@ -255,7 +255,7 @@ function finishTurn(ctx: TurnCtx, error?: string): void {
   sendAgentEvent(ctx.win, ctx.key, { kind: 'done', ok: !error })
 }
 
-// Rookery's five effort levels → codex's three (same mapping as codex.ts).
+// Floe's five effort levels → codex's three (same mapping as codex.ts).
 function mapEffort(effort?: string): string | undefined {
   if (!effort) return undefined
   if (effort === 'low') return 'low'

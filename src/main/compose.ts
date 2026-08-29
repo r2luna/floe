@@ -4,21 +4,18 @@ import { join } from 'node:path'
 import type { ProjectEnvConfig } from '../shared/types'
 
 // Containerized per-worktree environments. Each worktree gets its own Compose
-// project (`rookery-<slug>`) running one serversideup/php app container, joined to
-// the shared `rookery` network the support stack owns (deploy/support). The app
-// publishes a loopback host port; the host Caddy (see ./caddy.ts) reverse-proxies
-// `<slug>.dev.<domain>` to it and manages TLS. Routes are written/removed by
-// Rookery as the container comes up / is torn down. (The IDE/Rookery UI lives at
-// `ide.<domain>`; worktree apps sit under `dev`.)
+// project (`floe-<slug>`) running one serversideup/php app container, joined to
+// the shared `floe` network the support stack owns (deploy/support). The app
+// publishes a loopback host port.
 //
 // The app talks to the shared DBs/Redis by service name (`mysql`/`postgres`/`redis`)
-// over the `rookery` network; the control plane (provisioning) creates/drops the
+// over the `floe` network; the control plane (provisioning) creates/drops the
 // per-worktree database by `docker exec`-ing the DB container, so the app never
 // needs root DB credentials.
 
-// The support stack's env, written by `rookery server support up` to ~/.rookery.
+// The support stack's env, written by `floe server support up` to ~/.floe.
 // Provisioning reads it for the domain and the DB root password (control plane).
-const SUPPORT_ENV = join(homedir(), '.rookery', 'support.env')
+const SUPPORT_ENV = join(homedir(), '.floe', 'support.env')
 
 export interface SupportConfig {
   domain: string
@@ -43,8 +40,8 @@ export function readSupportConfig(): SupportConfig {
   const env = existsSync(SUPPORT_ENV) ? parseEnv(readFileSync(SUPPORT_ENV, 'utf8')) : {}
   return {
     domain: env.DOMAIN || 'pinguim.io',
-    mysqlRootPassword: env.MYSQL_ROOT_PASSWORD || 'rookery',
-    postgresPassword: env.POSTGRES_PASSWORD || 'rookery',
+    mysqlRootPassword: env.MYSQL_ROOT_PASSWORD || 'floe',
+    postgresPassword: env.POSTGRES_PASSWORD || 'floe',
     edgeBind: env.EDGE_BIND || '100.72.153.33'
   }
 }
@@ -69,21 +66,21 @@ export const worktreeVitePort = (slug: string): number => worktreePort(slug) + 1
 
 // Compose project name / container names are derived from the slug and stable, so
 // teardown and `docker exec` can find them without a lookup.
-export const composeProject = (slug: string): string => `rookery-${slug}`
-// The shared support stack runs as compose project `rookery-support` (see the
+export const composeProject = (slug: string): string => `floe-${slug}`
+// The shared support stack runs as compose project `floe-support` (see the
 // `name:` in deploy/support/docker-compose.yml), so its DB containers are these.
 // ponytail: assumes the default replica index `-1`; fine for a single-instance stack.
-export const MYSQL_CONTAINER = 'rookery-support-mysql-1'
-export const POSTGRES_CONTAINER = 'rookery-support-postgres-1'
+export const MYSQL_CONTAINER = 'floe-support-mysql-1'
+export const POSTGRES_CONTAINER = 'floe-support-postgres-1'
 
 export const worktreeComposePath = (worktreePath: string): string =>
-  join(worktreePath, '.rookery', 'docker-compose.yml')
+  join(worktreePath, '.floe', 'docker-compose.yml')
 
 export const worktreeDockerfilePath = (worktreePath: string): string =>
-  join(worktreePath, '.rookery', 'App.Dockerfile')
+  join(worktreePath, '.floe', 'App.Dockerfile')
 
 export const worktreeViteConfigPath = (worktreePath: string): string =>
-  join(worktreePath, '.rookery', 'vite.config.mjs')
+  join(worktreePath, '.floe', 'vite.config.mjs')
 
 // Vite config files, in the order Vite itself resolves them.
 const VITE_CONFIG_NAMES = [
@@ -119,20 +116,20 @@ export const viteHost = (slug: string, cfg: SupportConfig): string => `${slug}-v
 // ponytail: patches serversideup's stock files in place; the `grep -q` guard fails
 // the build loudly if upstream renames them, rather than silently serving http URLs.
 const NGINX_FORWARDED_PROTO_LAYER = `RUN printf '%s\\n' \\
-      'map $http_x_forwarded_proto $rookery_https {' \\
+      'map $http_x_forwarded_proto $floe_https {' \\
       '    default $https;' \\
       '    https   on;' \\
-      '}' > /etc/nginx/conf.d/00-rookery-forwarded-proto.conf \\
+      '}' > /etc/nginx/conf.d/00-floe-forwarded-proto.conf \\
  && grep -q 'HTTPS              $https if_not_empty' /etc/nginx/fastcgi_params \\
- && sed -i 's|HTTPS              $https if_not_empty|HTTPS              $rookery_https if_not_empty|' /etc/nginx/fastcgi_params`
+ && sed -i 's|HTTPS              $https if_not_empty|HTTPS              $floe_https if_not_empty|' /etc/nginx/fastcgi_params`
 
 // The serversideup PHP image serves the app, but a Laravel worktree also needs a
 // JS runtime for vite/asset builds — so we build a thin image on top with Node +
-// bun baked in. Built once per PHP version (shared `rookery/app:<php>` tag) since
+// bun baked in. Built once per PHP version (shared `floe/app:<php>` tag) since
 // the layer is identical across worktrees. www-data is remapped to the host user's
 // uid/gid so bind-mounted files (vendor/, node_modules/, storage/) stay writable.
 export function worktreeDockerfile(): string {
-  return `# Generated by Rookery — do not edit by hand.
+  return `# Generated by Floe — do not edit by hand.
 ARG PHP=8.4
 FROM serversideup/php:\${PHP}-fpm-nginx
 USER root
@@ -157,7 +154,7 @@ USER www-data
 
 // The generated Compose file for one worktree. Absolute volume path so the file's
 // own location doesn't matter; `external: true` network so it consumes the shared
-// `rookery` net the support stack created; a loopback-published port so the host
+// `floe` net the support stack created; a loopback-published port so the host
 // Caddy can reach it (`127.0.0.1:<port>` → container's :8080).
 export function worktreeComposeYaml(
   slug: string,
@@ -171,7 +168,7 @@ export function worktreeComposeYaml(
   // writable. `process.getuid` is undefined on Windows — default to 1000 (the box).
   const uid = process.getuid?.() ?? 1000
   const gid = process.getgid?.() ?? 1000
-  return `# Generated by Rookery — do not edit by hand (rewritten on re-provision).
+  return `# Generated by Floe — do not edit by hand (rewritten on re-provision).
 name: ${composeProject(slug)}
 
 services:
@@ -183,7 +180,7 @@ services:
         PHP: "${env.php}"
         USER_ID: "${uid}"
         GROUP_ID: "${gid}"
-    image: rookery/app:${env.php}
+    image: floe/app:${env.php}
     restart: unless-stopped
     volumes:
       - ${worktreePath}:/var/www/html
@@ -199,12 +196,12 @@ services:
       - "127.0.0.1:${port}:8080"     # host Caddy reverse-proxies here
       - "127.0.0.1:${vitePort}:5173" # vite dev server → Caddy at ${viteHost(slug, cfg)}
     networks:
-      - rookery
+      - floe
 
 networks:
-  rookery:
+  floe:
     external: true
-    name: rookery
+    name: floe
 `
 }
 
@@ -225,7 +222,7 @@ export function worktreeViteConfig(slug: string, appUrl: string, cfg: SupportCon
   const base = projectConfig
     ? `import base from '../${projectConfig}'`
     : `const base = {} // project has no vite config of its own`
-  return `// Generated by Rookery — do not edit by hand (rewritten on re-provision).
+  return `// Generated by Floe — do not edit by hand (rewritten on re-provision).
 ${base}
 
 // TLS is terminated by the host Caddy in front of this container, so the browser
@@ -263,7 +260,7 @@ export function writeWorktreeCompose(
 ): string {
   const cfg = readSupportConfig()
   const path = worktreeComposePath(worktreePath)
-  mkdirSync(join(worktreePath, '.rookery'), { recursive: true })
+  mkdirSync(join(worktreePath, '.floe'), { recursive: true })
   writeFileSync(worktreeDockerfilePath(worktreePath), worktreeDockerfile())
   writeFileSync(path, worktreeComposeYaml(slug, worktreePath, env, cfg))
   writeFileSync(

@@ -11,10 +11,9 @@ import {
   CODEX_CONTEXT_WINDOW
 } from '../shared/types'
 import { sendAgentEvent } from './agent'
-import { port } from './mcpServer'
 import { logTurn } from './runtimeLog'
 
-// The Codex models Rookery offers, read from codex's own on-disk cache so the
+// The Codex models Floe offers, read from codex's own on-disk cache so the
 // picker matches exactly what `codex` can run — no hardcoded list to rot. Only
 // user-listable, API-supported entries. Falls back to codex's configured model
 // (or gpt-5.5) if the cache is missing, so there's always at least one option.
@@ -175,7 +174,7 @@ export async function askCodex(
   }
 }
 
-// Chat directly with Codex as the backend of a Rookery session (the user picked
+// Chat directly with Codex as the backend of a Floe session (the user picked
 // the "codex" model). Persists a thread per session key and streams the reply
 // into the transcript via the normal text/done AgentEvents — no exchange cap,
 // this is the user's own conversation. effort maps to codex's reasoning effort.
@@ -221,15 +220,6 @@ function codexArgs(
   effort?: string
 ): string[] {
   const cfg = effort ? ['-c', `model_reasoning_effort=${mapEffort(effort)}`] : []
-  // Point Codex at Rookery's in-process MCP over streamable HTTP, using the
-  // caller session's key as the /mcp/<token> path so Codex's tool calls
-  // attribute to the same session (same URL scheme as mcpConfigFor for Claude).
-  // The MCP client runs in codex's host process, not the sandboxed child, so
-  // the read-only sandbox doesn't block this localhost call. Skipped if the
-  // server isn't listening yet (port 0) so we never write a broken :0 url.
-  const mcp = port()
-    ? ['-c', `mcp_servers.rookery.url="http://127.0.0.1:${port()}/mcp/${encodeURIComponent(token)}"`]
-    : []
   // '--' terminates codex's option parsing so a prompt starting with '-' can't
   // smuggle a flag (e.g. `-c sandbox_mode=danger-full-access` to escape the
   // read-only sandbox). threadId comes from codex's own output, but guard its
@@ -240,11 +230,11 @@ function codexArgs(
   // never tells us which model ran, so we decide it (resolved to a real slug).
   const modelArg = ['-m', model]
   return safe
-    ? ['exec', 'resume', safe, '--json', '--skip-git-repo-check', ...modelArg, ...cfg, ...mcp, '--', prompt]
-    : ['exec', '--json', '--skip-git-repo-check', ...modelArg, '-s', SANDBOX, ...cfg, ...mcp, '--', prompt]
+    ? ['exec', 'resume', safe, '--json', '--skip-git-repo-check', ...modelArg, ...cfg, '--', prompt]
+    : ['exec', '--json', '--skip-git-repo-check', ...modelArg, '-s', SANDBOX, ...cfg, '--', prompt]
 }
 
-// Rookery's five effort levels → codex's three. xhigh/max both land on high.
+// Floe's five effort levels → codex's three. xhigh/max both land on high.
 function mapEffort(effort: string): string {
   if (effort === 'low') return 'low'
   if (effort === 'medium') return 'medium'
@@ -392,7 +382,7 @@ export function getCodexUsage(): Promise<CodexUsage | undefined> {
     const send = (o: unknown): void => {
       child.stdin?.write(JSON.stringify(o) + '\n')
     }
-    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'rookery', version: '1.0.0' } } })
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name: 'floe', version: '1.0.0' } } })
     send({ jsonrpc: '2.0', id: 2, method: 'account/rateLimits/read' })
   })
 }

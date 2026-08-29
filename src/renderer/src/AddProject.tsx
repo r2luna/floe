@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BackendInfo } from '../../preload/api'
+import { DEFAULT_GROUP } from '../../shared/types'
 
 /**
  * One dialog for the whole "add a project" question: which machine, which
@@ -28,8 +29,13 @@ export function AddProject({
 }) {
   const [backend, setBackend] = useState(backends[0]?.id ?? 'local')
   const [path, setPath] = useState('')
-  const [picked, setPicked] = useState(group || groups[0] || 'Projects')
+  const [picked, setPicked] = useState(group || groups[0] || DEFAULT_GROUP)
+  // Naming a new group is a second question, so it only appears once you ask for
+  // it — the dropdown's last entry — instead of a text box you must ignore.
+  const [making, setMaking] = useState(false)
+  const [newGroup, setNewGroup] = useState('')
   const input = useRef<HTMLInputElement>(null)
+  const groupInput = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     requestAnimationFrame(() => input.current?.focus())
@@ -37,9 +43,12 @@ export function AddProject({
 
   const machine = backends.find((b) => b.id === backend)
   const local = machine ? !machine.remote : true
+  // A group typed but never confirmed still counts — nobody expects to lose what
+  // they just wrote because they hit Add instead of Tab.
+  const chosenGroup = (making && newGroup.trim()) || picked
   const commit = () => {
     const p = path.trim()
-    if (p) onAdd(backend, p, picked)
+    if (p) onAdd(backend, p, chosenGroup)
   }
 
   return (
@@ -60,10 +69,58 @@ export function AddProject({
             <Chips label="Machine" name="add-backend" value={backend} onChange={setBackend}
               options={backends.map((b) => ({ id: b.id, label: b.label }))} />
           )}
-          {groups.length > 1 && (
-            <Chips label="Group" name="add-group" value={picked} onChange={setPicked}
-              options={groups.map((g) => ({ id: g, label: g }))} />
-          )}
+          <div className="dialog-field">
+            <label className="chips-label" htmlFor="add-group">
+              Group
+            </label>
+            <div className="dialog-row">
+              <select
+                id="add-group"
+                className="dialog-select"
+                value={making ? NEW : picked}
+                onChange={(e) => {
+                  if (e.target.value === NEW) {
+                    setMaking(true)
+                    requestAnimationFrame(() => groupInput.current?.focus())
+                    return
+                  }
+                  setMaking(false)
+                  setPicked(e.target.value)
+                }}
+              >
+                {groups.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+                <option value={NEW}>New group…</option>
+              </select>
+              {making && (
+                <input
+                  ref={groupInput}
+                  className="dialog-input"
+                  placeholder="Group name…"
+                  value={newGroup}
+                  spellCheck={false}
+                  onChange={(e) => setNewGroup(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Esc backs out of naming without closing the whole dialog —
+                    // the outer handler would otherwise take the whole thing down.
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setMaking(false)
+                      setNewGroup('')
+                      return
+                    }
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    input.current?.focus()
+                  }}
+                />
+              )}
+            </div>
+          </div>
 
           <div className="dialog-row">
             <input
@@ -106,6 +163,10 @@ export function AddProject({
     </div>
   )
 }
+
+// The sentinel the group <select> uses for "not a group — ask me for a name".
+// A value no group can have, since a blank name is rejected upstream.
+const NEW = '\u0000new'
 
 /** A row of choices as a native radio group, so the arrow keys already work. */
 function Chips({

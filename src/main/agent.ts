@@ -7,7 +7,6 @@ import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
-import { mcpConfigFor, browserToolName } from './mcpServer'
 import { getSystemPrompt } from './appSettings'
 import { log } from './log'
 
@@ -291,16 +290,6 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   const systemPrompt = getSystemPrompt()
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
 
-  // Wire the in-app MCP control server: a per-session config whose HTTP url carries
-  // this session's key as a token (/mcp/<key>), so a tool call knows its caller.
-  // Auto-permit every rookery tool (the "auto-permitir" decision) — the wildcard
-  // covers all mcp__rookery__* without raising a permission prompt.
-  args.push('--mcp-config', mcpConfigFor(key))
-  // Auto-permit rookery tools, plus Playwright when a Mac's browser is reachable
-  // over the reverse CDP forward (browserToolName is null otherwise).
-  const browserTool = browserToolName()
-  args.push('--allowedTools', browserTool ? `mcp__rookery,${browserTool}` : 'mcp__rookery')
-
   const child = spawn('claude', args, { cwd: worktreePath, env: process.env })
   const conn: Conn = {
     child,
@@ -573,7 +562,7 @@ export function isClaudeIdConnected(claudeId: string): boolean {
   return [...conns.values()].some((c) => c.sessionId === claudeId)
 }
 
-// Whether a Rookery session key has a turn in flight right now. Lets a freshly
+// Whether a Floe session key has a turn in flight right now. Lets a freshly
 // (re)attached renderer re-hydrate `running` from the server instead of assuming
 // idle — otherwise it wouldn't queue a type-while-busy message and the send would
 // kill the live turn (options-change respawn) it can't see.
@@ -943,7 +932,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
         // tool card. Emit the artifact (after flushing any streamed text so it
         // lands in order) and skip the default tool chip. On a malformed spec,
         // fall through to the plain tool card so nothing silently disappears.
-        if (block.name === 'mcp__rookery__present_decision') {
+        if (block.name === 'mcp__floe__present_decision') {
           const spec = parseArtifactSpec(block.input)
           if (spec) {
             flushDeltas(win, key, conn)

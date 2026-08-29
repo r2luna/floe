@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { register } from 'node:module'
 
-// codex.ts now pulls in mcpServer (which imports `electron`) and value imports
+// codex.ts pulls in modules that import `electron`, plus value imports
 // from ../shared/types — neither resolvable by raw Node ESM. Register the same
-// hermetic hook mcpServer.test.ts uses (rewrite extensionless `./x` → `./x.ts`,
+// hermetic hook the other main tests use (rewrite extensionless `./x` → `./x.ts`,
 // stub `electron`) before importing codex, so this pure-function test can load it.
 const hookSource = `
 import { existsSync } from 'node:fs'

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react'
 // quitting and relaunching. Same store and same ceiling as the lane — see the
 // note in laneStore.ts about localStorage and SIGKILL.
 
-const KEY = 'rookery.drafts'
+const KEY = 'floe.drafts'
 
 // ponytail: 50 drafts, newest kept. Empty ones are dropped on write, so this
 // only bites if you leave real text in 50 different sessions.

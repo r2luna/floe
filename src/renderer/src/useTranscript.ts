@@ -168,7 +168,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     let alive = true
     setLoading(true)
     setError(undefined)
-    window.rookery.claude
+    window.floe.claude
       .transcript(worktreePath, sessionId)
       .then((list) => {
         if (!alive) return
@@ -260,13 +260,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     // right away would double the text the snapshot already folded in; the
     // envelope's seq says which ones the snapshot has seen.
     let pending: AgentEventEnvelope[] | null = []
-    const off = window.rookery.agent.onEvent((payload: AgentEventEnvelope) => {
+    const off = window.floe.agent.onEvent((payload: AgentEventEnvelope) => {
       if (payload.key !== key) return
       if (pending) pending.push(payload)
       else apply(payload.event)
     })
     let alive = true
-    void window.rookery.agent
+    void window.floe.agent
       .replay(key)
       .then((replay) => {
         if (!alive || !pending) return
@@ -320,7 +320,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       if (!running) {
         runModel.current = choice.provider && choice.provider !== 'claude' ? choice.model : undefined
       }
-      void window.rookery.agent
+      void window.floe.agent
         .start(
           key,
           worktreePath,
@@ -386,7 +386,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       wasRunning.current = true
       // Both shapes travel: Claude's control channel takes the joined message,
       // codex answers per question id — main picks whichever fits the runtime.
-      void window.rookery.agent.answer(key, question.requestId, message, answered)
+      void window.floe.agent.answer(key, question.requestId, message, answered)
     },
     [question, key]
   )
@@ -466,7 +466,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   }, [running, queued, deliver])
 
   const stop = useCallback(() => {
-    void window.rookery.agent.stop(key)
+    void window.floe.agent.stop(key)
     setRunning(false)
     setQuestion(null)
   }, [key])

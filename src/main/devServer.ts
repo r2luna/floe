@@ -27,7 +27,7 @@ export function detectPackageManager(worktreePath: string): 'bun' | 'pnpm' | 'ya
 }
 
 // Figure out how to run this project's dev server — project-agnostic. Node
-// projects (like Rookery) use their package manager's `dev` script; Laravel
+// projects (like Floe) use their package manager's `dev` script; Laravel
 // projects use `composer dev` (or artisan serve). Composer/Herd are NOT assumed.
 export function detectDevCommand(worktreePath: string): DevCommand | null {
   const pkgPath = join(worktreePath, 'package.json')
@@ -85,8 +85,8 @@ export function startDev(win: BrowserWindow, worktreePath: string, branch: strin
     child = spawn(command.cmd, command.args, {
       cwd: worktreePath,
       // Tag the spawned process with the worktree so the app (or anything that
-      // reads ROOKERY_WORKTREE) can show which worktree it belongs to.
-      env: { ...process.env, ROOKERY_WORKTREE: branch, FORCE_COLOR: '0' }
+      // reads FLOE_WORKTREE) can show which worktree it belongs to.
+      env: { ...process.env, FLOE_WORKTREE: branch, FORCE_COLOR: '0' }
     })
   } catch (e) {
     emit({ kind: 'exit', code: 1, message: e instanceof Error ? e.message : String(e) })

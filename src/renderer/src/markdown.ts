@@ -117,6 +117,16 @@ export type MdLine = {
   depth?: number
   /** The bullet or number drawn in place of the source marker. */
   marker?: string
+  /** A table row's cells, already inline-rendered. Absent on the |---| row. */
+  cells?: MdSpan[][]
+  /** The |---|:--| row: drawn as a rule under the header, not as cells. */
+  rule?: boolean
+  /** True for the rows above the |---| row. */
+  head?: boolean
+  /** Column weights for the whole table block, in characters of widest cell. */
+  cols?: number[]
+  /** Per-column alignment, read from the |---| row. */
+  aligns?: ('left' | 'center' | 'right')[]
 }
 
 // Inline spans with their delimiters, so the rendered text can drop them.
@@ -194,19 +204,33 @@ export function renderMarkdown(text: string): MdLine[] {
         // Two spaces per level is the common case and the only one a line can
         // know on its own; a tab counts as one step.
         depth: Math.floor(list[1].replace(/\t/g, '  ').length / 2),
-        marker: /^\d/.test(list[2]) ? list[2] : '•',
+        // Empty for an unordered item: the dot is drawn in CSS, not typed, so
+        // it does not depend on the mono face having a decent bullet glyph.
+        marker: /^\d/.test(list[2]) ? list[2] : '',
         spans
       })
       continue
     }
 
-    // A table row keeps its pipes: they are what lines the columns up, and the
-    // panel is monospaced, so the source already reads as a table.
+    // A table row becomes cells, not pipes. The row is still ONE line — the
+    // columns are lined up by a shared grid template, computed per block in
+    // `layoutTables` below, so the panel keeps numbering and walking lines.
     if (/^\s*\|/.test(line)) {
-      // The |---|:--| row is scaffolding, not content: it stays (the numbers
-      // must match the file) but reads as a rule rather than as a row.
+      // The |---|:--| row is scaffolding, not content: it keeps its row (the
+      // numbers must match the file) but draws as the rule under the header.
       const rule = /^[\s|:-]+$/.test(line)
-      out.push({ kind: 'table', spans: [{ text: line, cls: rule ? 'md-marker' : '' }] })
+      const spans: MdSpan[] = [{ text: line, cls: rule ? 'md-marker' : '' }]
+      if (rule) out.push({ kind: 'table', spans, rule: true })
+      else
+        out.push({
+          kind: 'table',
+          spans,
+          cells: splitRow(line).map((cell) => {
+            const cellSpans: MdSpan[] = []
+            renderInline(cell, cellSpans)
+            return cellSpans
+          })
+        })
       continue
     }
 
@@ -215,8 +239,65 @@ export function renderMarkdown(text: string): MdLine[] {
     out.push({ kind: 'text', spans })
   }
 
+  layoutTables(out)
   return out
 }
+
+/** The cells of a `| a | b |` row, trimmed, with the outer pipes dropped. */
+function splitRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim())
+}
+
+/**
+ * Give every row of a table block the same column weights and alignment.
+ *
+ * This is the one thing a line cannot know on its own: columns line up only if
+ * the rows agree on their widths. So the per-line pass above stays per-line,
+ * and this walks the finished array to hand each block's rows a shared layout.
+ */
+function layoutTables(lines: MdLine[]): void {
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].kind !== 'table') continue
+    let end = i
+    while (end + 1 < lines.length && lines[end + 1].kind === 'table') end++
+    const block = lines.slice(i, end + 1)
+
+    // Widest cell per column, in characters — the grid then splits the panel's
+    // width in that proportion, so a column of dates never takes a third of a
+    // table just because it is a column.
+    const cols: number[] = []
+    for (const row of block) {
+      row.cells?.forEach((cell, c) => {
+        const len = cell.reduce((n, span) => n + span.text.length, 0)
+        cols[c] = Math.max(cols[c] ?? 1, Math.min(len, 40))
+      })
+    }
+
+    const ruleAt = block.findIndex((row) => row.rule)
+    const aligns = ruleAt === -1 ? [] : splitRow(block[ruleAt].spans[0].text).map(alignOf)
+
+    block.forEach((row, n) => {
+      row.cols = cols
+      row.aligns = aligns
+      // Everything above the |---| row is the header. A table without one has
+      // no header at all rather than a first row pretending to be one.
+      row.head = ruleAt > 0 && n < ruleAt
+    })
+    i = end
+  }
+}
+
+const alignOf = (spec: string): 'left' | 'center' | 'right' =>
+  spec.startsWith(':') && spec.endsWith(':')
+    ? 'center'
+    : spec.endsWith(':')
+      ? 'right'
+      : 'left'
 
 /* --- list continuation --------------------------------------------------- */
 

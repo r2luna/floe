@@ -8,11 +8,11 @@ import { dropComment, isValidComment, stampSent, upsertComment } from '../shared
 // from './sessionStore'; the source of truth lives in shared/types.
 export type { ProjectUiState, TerminalSnapshot, WorktreeUiState } from '../shared/types'
 
-// Rookery-side persistence for sessions. The session list shown in the app is
-// *only* the sessions the user has opened inside Rookery — never the full history
+// Floe-side persistence for sessions. The session list shown in the app is
+// *only* the sessions the user has opened inside Floe — never the full history
 // of `~/.claude/projects` — so it stays curated and a close actually sticks:
 //   - `meta`: custom titles (from renames) keyed by Claude's session id.
-//   - `created`: the sessions Rookery knows about — opened with ⌘T, or pulled in
+//   - `created`: the sessions Floe knows about — opened with ⌘T, or pulled in
 //     from disk via the Resume command (terminal or not). This is the source of
 //     truth for the sidebar. Closing a session removes it here, for good.
 export interface SessionMeta {
@@ -20,7 +20,7 @@ export interface SessionMeta {
 }
 
 export interface CreatedSession {
-  id: string // Rookery's own stable session id (`claude:<id>` for resumed ones)
+  id: string // Floe's own stable session id (`claude:<id>` for resumed ones)
   worktreePath: string
   title: string
   createdAt: number
@@ -72,28 +72,6 @@ export interface AppPrefs {
   // Project paths the user removed from the rail even though they had a session
   // today — so they stay off until brought back.
   hiddenProjects?: string[]
-  // Remote attach: the window keeps the LOCAL renderer + preload, but the
-  // preload routes workspace IPC over a WebSocket to an attached backend (a
-  // Rookery server, e.g. the link deploy) — projects, sessions, terminals and
-  // accounts live there. Only UI-kind channels (window, notifications, theme,
-  // updates) stay on this machine.
-  //
-  // `backends` is the list of attached targets, in add order. More than one may
-  // be attached at once: the rail is the union of every backend's projects, and
-  // selecting a project switches which backend the workspace channels ride
-  // (docs/attached.md). Empty/absent = plain local.
-  backends?: string[]
-  // Per-backend attach handshake, read from each server's __ROOKERY_HOST__ at
-  // attach time: homeDir labels the backend, appVersion powers the version-skew
-  // warning. Cached so a relaunch while the server is down still boots (the
-  // socket reconnects). Keyed by attach target.
-  backendHosts?: Record<string, { platform: string; homeDir: string; appVersion: string }>
-  // `serverUrl` is kept on detach so re-attaching prefills the last server.
-  // `serverAttached`/`attachedHost` are the pre-multi-backend shape, read once
-  // to migrate an existing install into `backends` (and never written again).
-  serverUrl?: string
-  serverAttached?: boolean
-  attachedHost?: { platform: string; homeDir: string; appVersion: string }
 }
 
 interface Store {
@@ -220,7 +198,7 @@ export function applyAiTitle(claudeId: string, title: string): boolean {
   return true
 }
 
-// Claude's on-disk session id for a Rookery session, if its first prompt linked
+// Claude's on-disk session id for a Floe session, if its first prompt linked
 // one. Lets the agent --resume the right session after the process is gone (the
 // machine slept, the app restarted) instead of silently starting a fresh one.
 export function getCreatedSessionClaudeId(id: string): string | undefined {
@@ -241,7 +219,7 @@ function nextSessionTitle(created: CreatedSession[], worktreePath: string): stri
   return `Session ${max + 1}`
 }
 
-// Register a session Rookery owns. Returns the title it was stored under: when the
+// Register a session Floe owns. Returns the title it was stored under: when the
 // caller omits one (a plain ⌘T / first-send session) the main process assigns the
 // next "Session N" itself, so two quick creates can never collide. Idempotent on id.
 export function addCreatedSession(s: { id: string; worktreePath: string; title?: string }): string {
@@ -340,7 +318,7 @@ export function setCreatedSessionSpawnedBy(id: string, parentSessionId: string):
   write(store)
 }
 
-// Link a Rookery session to Claude's real on-disk session once its first prompt
+// Link a Floe session to Claude's real on-disk session once its first prompt
 // has produced one, so on reload the two are recognised as the same session.
 export function linkCreatedSession(id: string, claudeId: string): void {
   const store = read()
@@ -350,9 +328,9 @@ export function linkCreatedSession(id: string, claudeId: string): void {
   write(store)
 }
 
-// Pull an existing on-disk session into Rookery (the Resume command). Keyed by
+// Pull an existing on-disk session into Floe (the Resume command). Keyed by
 // Claude's id so it's deduped against an already-adopted one; uses the session's
-// real mtime so it sorts naturally among the rest. Returns the stable Rookery id.
+// real mtime so it sorts naturally among the rest. Returns the stable Floe id.
 export function resumeSession(s: {
   worktreePath: string
   claudeId: string
@@ -401,62 +379,6 @@ export function getVibrancy(): boolean {
 export function setVibrancy(on: boolean): void {
   const store = read()
   store.prefs.vibrancy = on
-  write(store)
-}
-
-// A new instance (⌘⇧N) is spawned with --rookery-local so it always boots local,
-// never inheriting the persisted attach. Cleared the moment this process attaches
-// on purpose, so attaching from a new instance still works.
-let forceLocal = process.argv.includes('--rookery-local')
-
-// Every remote backend currently attached, in add order. Empty when local-only.
-export function getBackends(): string[] {
-  if (forceLocal) return []
-  const p = read().prefs
-  if (p.backends) return p.backends
-  // Pre-multi-backend install: the single attach becomes the first backend.
-  return p.serverAttached && p.serverUrl ? [p.serverUrl] : []
-}
-
-// The first attached backend, or null. Boot/menu paths that predate multiple
-// backends still read this — they only need to know "is anything remote".
-export function getAttachedServer(): string | null {
-  return getBackends()[0] ?? null
-}
-
-// Last server URL ever attached to — prefills the attach prompt after a detach.
-export function getServerUrl(): string {
-  return read().prefs.serverUrl ?? ''
-}
-
-export function addBackend(url: string): void {
-  forceLocal = false
-  const store = read()
-  const list = getBackends().filter((b) => b !== url)
-  store.prefs.backends = [...list, url]
-  store.prefs.serverUrl = url
-  write(store)
-}
-
-// Detach: one backend, or all of them when `url` is null.
-export function removeBackend(url: string | null): void {
-  const store = read()
-  store.prefs.backends = url ? getBackends().filter((b) => b !== url) : []
-  store.prefs.serverAttached = false // never resurrect the legacy single attach
-  write(store)
-}
-
-export function getBackendHost(url: string): { platform: string; homeDir: string; appVersion: string } | null {
-  const p = read().prefs
-  return p.backendHosts?.[url] ?? (p.serverUrl === url ? (p.attachedHost ?? null) : null)
-}
-
-export function setBackendHost(
-  url: string,
-  host: { platform: string; homeDir: string; appVersion: string }
-): void {
-  const store = read()
-  store.prefs.backendHosts = { ...store.prefs.backendHosts, [url]: host }
   write(store)
 }
 
@@ -570,9 +492,9 @@ export function markThreadCommentsSent(sessionKey: string, ids: string[], at = D
   write(store)
 }
 
-// Close a session for good: forget Rookery's record of it. Non-destructive — the
+// Close a session for good: forget Floe's record of it. Non-destructive — the
 // Claude `.jsonl` is left on disk (still resumable via `claude --resume`); it
-// simply no longer shows in Rookery, and stays gone across reloads.
+// simply no longer shows in Floe, and stays gone across reloads.
 export function closeSession(opts: { id: string; worktreePath: string; claudeId?: string }): void {
   const store = read()
   store.created = store.created.filter((s) => s.id !== opts.id)

@@ -7,9 +7,9 @@ import { hasActiveTurn, sendToAgent } from './agent'
 import { listProjects } from './projects'
 
 // Cron-triggered headless Claude runs. Config lives with the project's root
-// worktree (gitignored, same convention as .rookery/plans — see plans.ts) rather
+// worktree (gitignored, same convention as .floe/plans — see plans.ts) rather
 // than app userData, so it's per-project and inspectable as a normal file.
-const SCHEDULE_FILE = '.rookery/schedule.json'
+const SCHEDULE_FILE = '.floe/schedule.json'
 
 export interface ScheduleEntry {
   id: string
@@ -49,7 +49,7 @@ export function readSchedules(projectPath: string): ScheduleEntry[] {
 }
 
 export function writeSchedules(projectPath: string, entries: ScheduleEntry[]): void {
-  mkdirSync(join(projectPath, '.rookery'), { recursive: true })
+  mkdirSync(join(projectPath, '.floe'), { recursive: true })
   writeFileSync(storeFile(projectPath), JSON.stringify(entries, null, 2))
 }
 

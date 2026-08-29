@@ -20,6 +20,12 @@ export interface CommandContext {
   rowsOf: (panel: HTMLElement | null | undefined) => HTMLElement[]
   /** Build a panel of a kind — the registry must not know how panels are made. */
   makePanel: (kind: string, sub?: string) => Panel
+  /**
+   * Whether a panel of this kind can be opened right now. Some read the checked
+   * out tree and are meaningless without one — which kinds those are is the
+   * panel module's business, not the registry's.
+   */
+  canOpen: (kind: string) => boolean
   /** The unified diff for a path. Injected so the registry needs no demo data. */
   patchFor: (path: string) => string
   /** Show the project palette. */
@@ -36,6 +42,12 @@ export interface CommandContext {
   findNext: (dir: 1 | -1) => void
   /** Native folder picker, then add what was chosen. */
   addProject: () => void
+  /** Name a new project group. */
+  createGroup: () => void
+  /** Pick a project, then the group to file it under. */
+  moveProject: () => void
+  /** Pick a group to remove; its projects fall back to the default. */
+  deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
   /** Show the new-worktree flow. */

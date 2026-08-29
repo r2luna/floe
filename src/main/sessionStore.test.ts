@@ -32,7 +32,7 @@ register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.u
 const { setSharedDataDir } = await import('./dataDir.ts')
 const { forgetWorktree, pruneMissingWorktrees } = await import('./sessionStore.ts')
 
-const dataDir = mkdtempSync(join(tmpdir(), 'rookery-store-'))
+const dataDir = mkdtempSync(join(tmpdir(), 'floe-store-'))
 setSharedDataDir(dataDir)
 
 interface StoreShape {
@@ -72,7 +72,7 @@ function seed(root: string, wt: string): void {
 const readStore = (): StoreShape => JSON.parse(readFileSync(join(dataDir, 'sessions.json'), 'utf8'))
 
 test('forgetWorktree drops every trace of a removed worktree', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-repo-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-repo-'))
   try {
     const wt = join(root, '.worktrees', 'feat')
     seed(root, wt)
@@ -95,7 +95,7 @@ test('forgetWorktree drops every trace of a removed worktree', () => {
 })
 
 test('pruneMissingWorktrees only prunes when the repo is still on disk', () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-repo-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-repo-'))
   try {
     // Repo present, worktree gone -> pruned.
     const wt = join(root, '.worktrees', 'feat')
@@ -108,7 +108,7 @@ test('pruneMissingWorktrees only prunes when the repo is still on disk', () => {
     )
 
     // Repo itself gone (moved/unmounted) -> history kept.
-    const gone = join(tmpdir(), 'rookery-repo-vanished')
+    const gone = join(tmpdir(), 'floe-repo-vanished')
     seed(gone, join(gone, '.worktrees', 'feat'))
     pruneMissingWorktrees()
     assert.equal(readStore().created.length, 2)

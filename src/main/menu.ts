@@ -1,5 +1,4 @@
 import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron'
-import { getAttachedServer } from './sessionStore'
 
 // We replace Electron's default menu for two reasons, both about freeing up keys
 // the renderer wants. The default Window menu binds ⌘W to "Close Window"
@@ -9,7 +8,7 @@ import { getAttachedServer } from './sessionStore'
 // menu items keep their behavior via plain click handlers but drop the
 // accelerators — leaving ⌘W and ⌘M free to reach the page. Every other standard
 // shortcut (copy/paste/quit/reload/…) is preserved via roles.
-export function buildAppMenu(openNewInstance: () => void, detachFromServer: () => void): void {
+export function buildAppMenu(openNewInstance: () => void): void {
   const isMac = process.platform === 'darwin'
 
   const template: MenuItemConstructorOptions[] = [
@@ -50,7 +49,7 @@ export function buildAppMenu(openNewInstance: () => void, detachFromServer: () =
     {
       label: 'Window',
       submenu: [
-        // Open a separate, fully independent Rookery process (its own IPC/PTYs/
+        // Open a separate, fully independent Floe process (its own IPC/PTYs/
         // stores) — a second window in this process is unsupported (single-renderer
         // IPC). See openNewInstance in index.ts.
         { label: 'New Window', accelerator: 'CmdOrCtrl+Shift+N', click: openNewInstance },
@@ -64,19 +63,6 @@ export function buildAppMenu(openNewInstance: () => void, detachFromServer: () =
         // that would swallow ⌘W before the renderer's keymap (close session) sees it.
         // A plain click handler keeps the menu item while leaving ⌘W free.
         { label: 'Close Window', click: () => BrowserWindow.getFocusedWindow()?.close() },
-        // Only while attached to a remote server. The palette has the same
-        // command; the menu accelerator (⌘⌥D) keeps it reachable even if the
-        // renderer is wedged. Rebuilt on every attach/detach (applyAttachChange).
-        ...(getAttachedServer()
-          ? ([
-              { type: 'separator' },
-              {
-                label: 'Detach from Server',
-                accelerator: 'CmdOrCtrl+Alt+D',
-                click: (): void => detachFromServer()
-              }
-            ] as MenuItemConstructorOptions[])
-          : []),
         ...(isMac
           ? ([{ type: 'separator' }, { role: 'front' }] as MenuItemConstructorOptions[])
           : [])

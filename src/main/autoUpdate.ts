@@ -3,9 +3,13 @@ import electronUpdater from 'electron-updater'
 
 const { autoUpdater } = electronUpdater
 
+import { floeConfig } from './config/floe'
+
 // Re-check this often while the app stays open, so a machine that's left running
-// still picks up releases without a relaunch.
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6h
+// still picks up releases without a relaunch. `[update] check-interval-hours` in
+// floe.toml, read once when the updater starts — changing it takes a relaunch,
+// which is fine for a knob measured in hours.
+const checkIntervalMs = (): number => floeConfig().update.checkIntervalHours * 60 * 60 * 1000
 
 export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void {
   // Squirrel can only swap a real, signed, packaged bundle — there's nothing to
@@ -40,7 +44,7 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
     getWindow()?.webContents.send('update:downloaded', { version: info.version })
     if (Notification.isSupported()) {
       const note = new Notification({
-        title: 'Rookery atualizado',
+        title: 'Floe atualizado',
         body: `A versão ${info.version} está pronta — clique para reiniciar e aplicar agora.`
       })
       note.on('click', () => autoUpdater.quitAndInstall())
@@ -49,5 +53,5 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
   })
 
   void autoUpdater.checkForUpdates()
-  setInterval(() => void autoUpdater.checkForUpdates(), CHECK_INTERVAL_MS)
+  setInterval(() => void autoUpdater.checkForUpdates(), checkIntervalMs())
 }

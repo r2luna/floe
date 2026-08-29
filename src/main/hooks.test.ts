@@ -6,7 +6,7 @@ test('mergeAgentHook: appends only the missing managed hooks, preserving existin
   const settings = {
     model: 'claude-fable-5',
     hooks: {
-      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '~/.claude/hooks/rookery-block-branch.sh' }] }]
+      PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: '~/.claude/hooks/floe-block-branch.sh' }] }]
     }
   }
   const out = mergeAgentHook(settings)
@@ -15,10 +15,10 @@ test('mergeAgentHook: appends only the missing managed hooks, preserving existin
   assert.equal(pre.length, 4) // block-branch survives untouched, the other three appended
   const commands = pre.flatMap((e) => e.hooks.map((h) => h.command))
   assert.deepEqual(new Set(commands), new Set([
-    '~/.claude/hooks/rookery-block-branch.sh',
-    '~/.claude/hooks/rookery-confine-edits.sh',
-    '~/.claude/hooks/rookery-block-native-agents.sh',
-    '~/.claude/hooks/rookery-block-sleep-wait.sh'
+    '~/.claude/hooks/floe-block-branch.sh',
+    '~/.claude/hooks/floe-confine-edits.sh',
+    '~/.claude/hooks/floe-block-native-agents.sh',
+    '~/.claude/hooks/floe-block-sleep-wait.sh'
   ]))
   assert.equal(out!.model, 'claude-fable-5') // unrelated fields untouched
 })

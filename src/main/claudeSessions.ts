@@ -18,7 +18,7 @@ const encode = (p: string): string => p.replace(/[/.]/g, '-')
 const ACTIVE_WINDOW_MS = 2 * 60 * 1000
 
 export interface ClaudeSessionMeta {
-  // Rookery's stable session id: the created-session id for sessions opened in
+  // Floe's stable session id: the created-session id for sessions opened in
   // the app, or `claude:<claudeId>` for ones discovered straight off disk.
   id: string
   claudeId?: string
@@ -149,7 +149,7 @@ function readHead(file: string): HeadInfo {
 }
 
 // Claude's own auto-generated title for a session — only interactive TUI sessions
-// write an `ai-title` line, so this is empty for the headless runs Rookery drives.
+// write an `ai-title` line, so this is empty for the headless runs Floe drives.
 // Empty is the cue to generate one ourselves (generateSessionTitle).
 export function readAiTitle(worktreePath: string, claudeId: string): string {
   return cleanTitle(readHead(join(projectsDir(), encode(worktreePath), `${claudeId}.jsonl`)).aiTitle).slice(0, 72)
@@ -264,7 +264,7 @@ function shortLabel(raw: string): string {
   return (sp > 20 ? cut.slice(0, sp) : cut) + '…'
 }
 
-// The sidebar's session list: *only* the sessions Rookery knows about (opened
+// The sidebar's session list: *only* the sessions Floe knows about (opened
 // with ⌘T, or pulled in via Resume) — never the full on-disk history. Enriched
 // with each session's real mtime / active state and any stored rename.
 export function listClaudeSessions(worktreePath: string): ClaudeSessionMeta[] {
@@ -373,7 +373,7 @@ export function sessionHasUnansweredQuestion(worktreePath: string, claudeId: str
   return hasUnansweredQuestion(join(projectsDir(), encode(worktreePath), `${claudeId}.jsonl`))
 }
 
-// Aggregate one project's activity for the rail: walk its worktrees' Rookery
+// Aggregate one project's activity for the rail: walk its worktrees' Floe
 // sessions, keep the ones touched since the start of today, and return the most
 // urgent status across them (ask > pending > done). Returns null when nothing was
 // worked today, so the caller can drop the project off the rail.
@@ -426,7 +426,7 @@ export interface ResumableSession {
 }
 
 // Every real on-disk Claude session for a worktree — terminal or not — minus the
-// ones already pulled into Rookery. Powers the Resume picker so the user can
+// ones already pulled into Floe. Powers the Resume picker so the user can
 // bring any past session (hybrid: terminal or app) into the app.
 export function listResumableSessions(worktreePath: string): ResumableSession[] {
   const dir = join(projectsDir(), encode(worktreePath))
@@ -581,7 +581,7 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       } else if (block.type === 'tool_use') {
         // A present_decision call rebuilds as the inline artifact panel (not a
         // tool row), mirroring the live stream — so reload round-trips it.
-        if (block.name === 'mcp__rookery__present_decision') {
+        if (block.name === 'mcp__floe__present_decision') {
           const spec = parseArtifactSpec(block.input)
           if (spec) {
             items.push({ role: 'artifact', spec })

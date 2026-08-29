@@ -10,7 +10,7 @@ import type { LocalAgent } from '../../shared/types'
 export function useLocalAgents(): LocalAgent[] {
   const [agents, setAgents] = useState<LocalAgent[]>([])
   useEffect(() => {
-    void window.rookery.claude
+    void window.floe.claude
       .localAgents()
       .then(setAgents)
       .catch(() => setAgents([]))

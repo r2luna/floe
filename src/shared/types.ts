@@ -3,6 +3,13 @@
 import type { ArtifactSpec } from './artifact'
 export type { ArtifactSpec } from './artifact'
 
+/**
+ * The group a project falls into when none was chosen. Always exists, always
+ * sorts first, and can be neither renamed nor deleted — deleting a group has to
+ * have somewhere to put its projects.
+ */
+export const DEFAULT_GROUP = 'Projects'
+
 export interface Project {
   path: string
   name: string
@@ -89,7 +96,7 @@ export interface NeedsYouSession {
   projectName: string
   worktreePath: string
   branch: string
-  sessionId: string // Rookery session id, so ⏎ can jump straight to it
+  sessionId: string // Floe session id, so ⏎ can jump straight to it
   title: string
   lastActivityAt: number // session mtime (epoch ms) — "12m" ago
   additions: number // worktree diff vs its review base (`+310`)
@@ -336,10 +343,10 @@ export interface PrStatus {
   viewer?: string
 }
 
-// --- Plans (Claude Code plan-mode files saved under .rookery/plans/) --------
+// --- Plans (Claude Code plan-mode files saved under .floe/plans/) --------
 
 // A plan markdown file Claude saved while in plan mode (see the `plansDirectory`
-// setting, pointed at `.rookery/plans`). That directory is gitignored, so plans
+// setting, pointed at `.floe/plans`). That directory is gitignored, so plans
 // never appear in the normal file tree — this surfaces them for review. Like a
 // FileNode, `relPath` is POSIX and relative to the worktree root, so it opens in
 // nvim the same way (`:edit <relPath>`).
@@ -349,7 +356,7 @@ export interface PlanFile {
   mtime: number // epoch ms — newest-first ordering and the "time ago" label
   // Set for files coming from a spec-driven pipeline folder (`specs/<branch>/`):
   // the folder name, which drives a section header in the Plans panel so the
-  // pipeline's docs read as a group. Absent for plain `.rookery/plans/` plans.
+  // pipeline's docs read as a group. Absent for plain `.floe/plans/` plans.
   group?: string
 }
 
@@ -953,105 +960,6 @@ export interface McpAuthEnvelope {
   // looking at that worktree by the time consent finishes.
   worktreePath: string
   event: McpAuthEvent
-}
-
-// --- MCP control server (Claude drives Rookery from inside a session) -------
-// An MCP server runs in the main process (see main/mcpServer.ts). Each spawned
-// `claude` session gets a per-session `--mcp-config` whose HTTP url carries the
-// session's own key as a token (/mcp/<key>), so a tool call knows which session
-// made it (the "caller"). Tools that mutate state or read data run in main;
-// tools that drive the UI are forwarded to the renderer as an `mcp:command`.
-
-// Which center/right view to switch to. The right-pane modes mirror
-// ProjectUiState.rightMode; 'session'/'terminal' move the center pane.
-export type McpView = 'files' | 'review' | 'plans' | 'tasks' | 'pr' | 'database'
-
-// A command the main process asks the renderer to perform on the caller's behalf
-// (forwarded over the `mcp:command` channel). The renderer runs its existing
-// dispatch()/selectSession/openPlan flows. `callerKey` is the session that asked.
-export type McpCommand =
-  | { kind: 'switch_view'; callerKey: string; view: McpView; worktreePath?: string }
-  // `requestId` is only set when the caller needs to know whether a renderer
-  // actually took it — Fleet's tap, which reports back whether the window came
-  // forward. Absent (the select_session tool) = fire-and-forget, as before.
-  // `worktreePath`/`projectPath` say WHERE the session lives: a Fleet tap targets
-  // any project, and the renderer can only select a session whose worktree list
-  // is loaded — without them it lands on an empty view (see App's select_session).
-  | {
-      kind: 'select_session'
-      callerKey: string
-      sessionId: string
-      requestId?: string
-      worktreePath?: string
-      projectPath?: string
-    }
-  | { kind: 'open_plan'; callerKey: string; worktreePath: string; relPath: string }
-  // Run any command from the renderer's registry (renderer/src/commands.ts) by
-  // id. One tool covers every UI action instead of a tool per action, and stays
-  // correct as the registry grows.
-  | { kind: 'run_command'; callerKey: string; commandId: string; arg?: string }
-  // Open (and select) a project — used by the `rookery <dir>` CLI, which adds the
-  // folder main-side then asks the renderer to refresh its list and focus it.
-  | { kind: 'open_project'; callerKey: string; projectPath: string }
-  // Show a query the `run_query` MCP tool ran (main executed it read-only) in the
-  // database view: seed the editor with `sql` and render `result`'s rows. `table`
-  // is set when the query is a plain table preview so the header can name it.
-  | { kind: 'db_result'; callerKey: string; worktreePath: string; sql: string; table?: string; result: DbResult }
-  // Create a session in `worktreePath`, optionally send `prompt` as its first turn
-  // and select it. The renderer owns this because the live Session object (with its
-  // transcript blocks) lives there; main only persists the CreatedSession record.
-  | {
-      kind: 'create_session'
-      callerKey: string
-      requestId: string // correlates the renderer's ack back to the waiting tool
-      worktreePath: string
-      title?: string
-      prompt?: string
-      select?: boolean
-      model?: string // Claude alias (opus/sonnet/haiku/fable) or a codex model slug; defaults to the composer's current model
-    }
-  // Open an EPHEMERAL, focused terminal running a passphrase-unlock command
-  // (gpg/ssh pinentry draws inside it). Never persisted — the id carries `#unlock-`
-  // so the worktree snapshot skips it. `command` is shell-agnostic (`sh -c '…'`);
-  // it never carries the secret — the user types the passphrase into the PTY.
-  | { kind: 'unlock_open'; callerKey: string; worktreePath: string; terminalId: string; command: string }
-  // Close (kill + drop) the ephemeral unlock terminal once the poll finished.
-  | { kind: 'unlock_close'; callerKey: string; terminalId: string }
-  // Run Rookery's own visual pipeline (the tracked rail — specify → clarify →
-  // plan → review → tasks → implement → refactor, or the lighter bugfix flow) on
-  // a worktree, instead of an agent hand-typing /ds-* prompts into a session with
-  // no rail tracking. Attaches to `sessionId` if given, else opens a fresh session.
-  | {
-      kind: 'start_pipeline'
-      callerKey: string
-      worktreePath: string
-      input: string
-      pipelineKind: 'implement' | 'bugfix'
-      sessionId?: string
-    }
-
-// The renderer's reply to a `create_session` (or Fleet `select_session`) command,
-// pushed back over `mcp:command-result` so the tool can return the new session id
-// — or, for Fleet, whether this window actually came forward.
-export interface McpCommandResult {
-  requestId: string
-  ok: boolean
-  sessionId?: string
-  error?: string
-  // Fleet focus: the renderer asked ITS OWN machine to raise the window and that
-  // resolved. False in a plain browser tab, where window.focus() is usually
-  // ignored — a distinction Fleet shows the user instead of claiming success.
-  raised?: boolean
-}
-
-// A transient "Claude is acting on Rookery" signal, pushed to the renderer over
-// `mcp:activity` whenever a tool runs. Drives a non-blocking outline-chip banner
-// (auto-permitir, mas nunca silencioso). `target` is a short human label
-// (worktree branch, view name, session title) for the chip subtitle.
-export interface McpActivity {
-  callerKey: string // the session that invoked the tool
-  tool: string // the tool name, e.g. "create_worktree"
-  target?: string
 }
 
 export type MergeStepId = 'preflight' | 'merge' | 'resolve' | 'review' | 'commit' | 'fastforward' | 'database' | 'cleanup' | 'closebranch' | 'closetask'

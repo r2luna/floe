@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, columnsOf, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -273,10 +273,10 @@ test('changing project keeps the worktrees panel exactly where it was', () => {
     panels: [
       { id: 'projects:', kind: 'projects', title: 'projects', order: 0 },
       {
-        id: 'worktrees:rookery',
+        id: 'worktrees:floe',
         kind: 'worktrees',
         title: 'worktrees',
-        sub: 'rookery',
+        sub: 'floe',
         order: 10,
         width: 508,
         dock: 'below',
@@ -328,4 +328,44 @@ test('two kinds sharing a slot hand over the layout too', () => {
   })
   assert.equal(next.panels[0].kind, 'chat')
   assert.equal(next.panels[0].width, 720)
+})
+
+// --- closing a chat lands on the launcher --------------------------------
+
+const chat = (id: string): Panel => ({
+  id,
+  kind: 'chat',
+  title: id,
+  order: 30,
+  session: { id: `s-${id}`, worktreePath: '/w' }
+})
+const launcher = (): Panel => ({ id: 'branch:', kind: 'branch', title: 'branch', order: 30 })
+
+test('closing a chat leaves the launcher in its place, not a hole', () => {
+  let lane = laneOf(ranked('worktrees', 'worktrees', 10))
+  lane = open(lane, chat('c1'))
+  assert.deepEqual(ids(lane), ['worktrees', 'c1'])
+  lane = closePanel(lane, 1, launcher)
+  assert.deepEqual(ids(lane), ['worktrees', 'branch:'], 'the session column stays, now empty')
+  assert.equal(lane.panels[1].session, undefined, 'and carries no session over')
+})
+
+test('closing the only chat still leaves the launcher', () => {
+  let lane = laneOf(chat('c1'))
+  lane = closePanel(lane, 0, launcher)
+  assert.deepEqual(ids(lane), ['branch:'], 'never an empty lane')
+})
+
+test('closing anything without a session closes plainly', () => {
+  let lane = laneOf(ranked('worktrees', 'worktrees', 10))
+  lane = open(lane, ranked('files', 'files', 40))
+  lane = closePanel(lane, 1, launcher)
+  assert.deepEqual(ids(lane), ['worktrees'], 'no launcher conjured by closing a file tree')
+})
+
+test('closing a chat keeps focus on the column it replaced', () => {
+  let lane = laneOf(ranked('worktrees', 'worktrees', 10))
+  lane = open(lane, chat('c1'))
+  lane = closePanel(lane, 1, launcher)
+  assert.equal(lane.focus, 1, 'focus stays where the conversation was')
 })

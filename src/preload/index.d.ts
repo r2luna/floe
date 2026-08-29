@@ -1,8 +1,8 @@
-import type { RookeryApi } from './index'
+import type { FloeApi } from './index'
 
 declare global {
   interface Window {
-    rookery: RookeryApi
+    floe: FloeApi
   }
 }
 

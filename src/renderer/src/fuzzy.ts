@@ -1,6 +1,6 @@
 // Matching for the command palette.
 //
-// Subsequence matching, not substring: "rkr" should find "rookery-rust" the way
+// Subsequence matching, not substring: "rkr" should find "floe-rust" the way
 // every palette you have used does. Typing the letters of a name in order is how
 // people search when they already know what they want.
 
@@ -50,7 +50,7 @@ export function subsequence(text: string, query: string): number[] | null {
  * Rank a match. Lower is better.
  *
  * Two things decide it: how early the match starts, and how tightly the letters
- * sit together. "rkr" should rank `rookery-rust` above a project whose name
+ * sit together. "rkr" should rank `floe-rust` above a project whose name
  * merely contains those letters spread across it.
  */
 function score(hits: number[]): number {

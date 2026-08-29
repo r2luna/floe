@@ -1,12 +1,27 @@
 import { dialog } from 'electron'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import { dataDir } from './dataDir'
-import type { Project, ProjectEnvConfig, Worktree } from '../shared/types'
+import { DEFAULT_GROUP, type Project, type ProjectEnvConfig, type Worktree } from '../shared/types'
 import { isGitRepo, repoRoot } from './git'
+import { floeConfig, setFloeValue } from './config/floe'
+import {
+  createProject,
+  invalidateProjects,
+  projectScan,
+  removeProject as removeProjectDir,
+  setProjectEnvValue,
+  setProjectValue,
+  updateProject,
+  type ProjectConfig
+} from './config/projectStore'
 
-const DEFAULT_GROUP = 'Projects'
+// Storage lives in `~/.config/floe/projects/<dir>/config.toml`, one directory per
+// project (config/projectStore.ts). This module is the app's view of that: it
+// maps a stored project onto the `Project` the renderer speaks, owns the group
+// list (which needs a home of its own, since an empty group has no directory),
+// and carries the one-way migration off the old `projects.json`.
 
 // The synthetic "Home" workspace. It isn't stored in projects.json — it's a
 // constant the renderer injects at the top of the project/group lists so the app
@@ -33,72 +48,236 @@ export const homeWorktree = (): Worktree => ({
 
 export const isHomePath = (path: string): boolean => path === homeProjectPath()
 
-interface StoreShape {
-  groups: string[]
-  // `name` is an optional display-name override; when unset the folder basename is used.
-  // `readOnly` flips the project into reader mode (open files in the renderer's
-  // viewer instead of nvim).
-  // `pinned` keeps the project on the rail even with no activity today.
-  // `env` is the containerized-environment config (opt-in per project).
-  projects: Array<{
-    path: string
-    group: string
-    name?: string
-    readOnly?: boolean
-    pinned?: boolean
-    env?: ProjectEnvConfig
-  }>
+const toProject = (p: ProjectConfig): Project => ({
+  path: p.path,
+  name: p.name?.trim() || basename(p.path),
+  group: p.group,
+  readOnly: p.readOnly ? true : undefined,
+  pinned: p.pinned ? true : undefined,
+  env: p.env as ProjectEnvConfig | undefined
+})
+
+function stored(path: string): ProjectConfig | undefined {
+  return projectScan().projects.find((p) => p.path === path)
 }
 
-const storeFile = (): string => join(dataDir(), 'projects.json')
+function all(): Project[] {
+  migrateLegacyProjects()
+  return projectScan().projects.map(toProject)
+}
 
-function read(): StoreShape {
-  const file = storeFile()
-  if (!existsSync(file)) return { groups: [DEFAULT_GROUP], projects: [] }
+// Read a project's env config by its root path — used by provisioning to pick the
+// container recipe. Returns undefined for host-native (unconfigured) projects.
+export function getProjectEnv(path: string): ProjectEnvConfig | undefined {
+  return stored(path)?.env as ProjectEnvConfig | undefined
+}
+
+export function setProjectEnv(path: string, env: ProjectEnvConfig | null): Project[] {
+  if (stored(path)) {
+    if (env) {
+      setProjectEnvValue(path, 'mode', env.mode)
+      setProjectEnvValue(path, 'runtime', env.runtime)
+      setProjectEnvValue(path, 'php', env.php)
+      setProjectEnvValue(path, 'package-manager', env.packageManager)
+      setProjectEnvValue(path, 'db', env.db)
+      setProjectEnvValue(path, 'db-admin', env.dbAdmin !== false)
+    } else {
+      // Clearing the env means running on the host. The keys go rather than being
+      // set to some "off" value, so the block reads the way the template documents
+      // it: absent means host-native.
+      for (const key of ['mode', 'runtime', 'php', 'package-manager', 'db', 'db-admin']) {
+        updateProject(path, [{ op: 'unset', table: 'env', key }])
+      }
+    }
+  }
+  return all()
+}
+
+export function listProjects(): Project[] {
+  return all()
+}
+
+// The default first, then the rest in the order they were made. Callers render
+// this straight through, so the ordering rule lives here rather than in each of
+// them — and the default is guaranteed present even for a store that predates it.
+function ordered(groups: string[]): string[] {
+  return [DEFAULT_GROUP, ...groups.filter((g) => g !== DEFAULT_GROUP)]
+}
+
+/** Groups actually in use, plus the ones declared but still empty. */
+function currentGroups(): string[] {
+  const declared = floeConfig().projects.groups
+  const used = projectScan().projects.map((p) => p.group)
+  return ordered([...declared, ...used.filter((g) => !declared.includes(g))])
+}
+
+function writeGroups(groups: string[]): string[] {
+  const value = ordered(groups)
+  setFloeValue('projects', 'groups', value)
+  return value
+}
+
+export function listGroups(): string[] {
+  migrateLegacyProjects()
+  return currentGroups()
+}
+
+export function addGroup(name: string): string[] {
+  const trimmed = name.trim()
+  const groups = currentGroups()
+  if (!trimmed || groups.includes(trimmed)) return groups
+  return writeGroups([...groups, trimmed])
+}
+
+/**
+ * Drop a group; its projects fall back to the default rather than vanishing with
+ * it — losing a project because you tidied up the rail would be the worst
+ * possible reading of "delete group". The default itself can't go: it's where
+ * everything else lands.
+ */
+export function deleteGroup(name: string): { groups: string[]; projects: Project[] } {
+  if (name === DEFAULT_GROUP) return { groups: currentGroups(), projects: all() }
+  for (const p of projectScan().projects) {
+    if (p.group === name) setProjectValue(p.path, 'group', DEFAULT_GROUP)
+  }
+  const groups = writeGroups(currentGroups().filter((g) => g !== name))
+  return { groups, projects: all() }
+}
+
+export async function addProject(group?: string): Promise<{ project?: Project; error?: string }> {
+  const result = await dialog.showOpenDialog({
+    title: 'Select a project folder',
+    properties: ['openDirectory']
+  })
+  if (result.canceled || result.filePaths.length === 0) return {}
+  return addProjectByPath(result.filePaths[0], group)
+}
+
+// Add a project by an explicit path (no dialog) — used by the `floe` CLI.
+// Validates it's a git repo, resolves to the repo root, and dedupes by root
+// (re-adding an existing project just returns it, keeping its current group).
+export async function addProjectByPath(
+  picked: string,
+  group?: string
+): Promise<{ project?: Project; error?: string }> {
+  if (!existsSync(picked)) return { error: `Path does not exist: ${picked}` }
+  if (!(await isGitRepo(picked))) {
+    return { error: `"${basename(picked)}" is not a git repository.` }
+  }
+
+  const root = (await repoRoot(picked)) ?? picked
+  migrateLegacyProjects()
+  const existing = stored(root)
+  if (existing) return { project: toProject(existing) }
+
+  const groups = currentGroups()
+  const targetGroup = (group && group.trim()) || groups[0] || DEFAULT_GROUP
+  if (!groups.includes(targetGroup)) writeGroups([...groups, targetGroup])
+  return { project: toProject(createProject(root, { group: targetGroup })) }
+}
+
+export function renameGroup(
+  oldName: string,
+  newName: string
+): { groups: string[]; projects: Project[] } {
+  const trimmed = newName.trim()
+  // The default is a fixed slot, not a name the user owns — renaming it would
+  // leave deleteGroup with nowhere to move orphaned projects.
+  if (!trimmed || oldName === DEFAULT_GROUP || trimmed === oldName) {
+    return { groups: currentGroups(), projects: all() }
+  }
+  const groups = currentGroups()
+  if (!groups.includes(oldName)) return { groups, projects: all() }
+  for (const p of projectScan().projects) {
+    if (p.group === oldName) setProjectValue(p.path, 'group', trimmed)
+  }
+  // Merge into an existing group if the name is taken; otherwise rename in place.
+  const next = groups.includes(trimmed)
+    ? groups.filter((g) => g !== oldName)
+    : groups.map((g) => (g === oldName ? trimmed : g))
+  return { groups: writeGroups(next), projects: all() }
+}
+
+export function renameProject(path: string, newName: string): Project[] {
+  if (stored(path)) {
+    const trimmed = newName.trim()
+    // A blank name (or one matching the folder) clears the override and falls back
+    // to the directory basename. The folder on disk is never touched.
+    if (trimmed && trimmed !== basename(path)) setProjectValue(path, 'name', trimmed)
+    else updateProject(path, [{ op: 'unset', key: 'name' }])
+  }
+  return all()
+}
+
+export function setProjectGroup(path: string, group: string): Project[] {
+  if (stored(path)) {
+    setProjectValue(path, 'group', group)
+    if (!currentGroups().includes(group)) writeGroups([...currentGroups(), group])
+  }
+  return all()
+}
+
+export function setProjectReadOnly(path: string, value: boolean): Project[] {
+  if (stored(path)) {
+    if (value) setProjectValue(path, 'read-only', true)
+    else updateProject(path, [{ op: 'unset', key: 'read-only' }])
+  }
+  return all()
+}
+
+export function setProjectPinned(path: string, value: boolean): Project[] {
+  if (stored(path)) {
+    if (value) setProjectValue(path, 'pinned', true)
+    else updateProject(path, [{ op: 'unset', key: 'pinned' }])
+  }
+  return all()
+}
+
+export function removeProject(path: string): Project[] {
+  removeProjectDir(path)
+  return all()
+}
+
+/**
+ * Fold the old `projects.json` into one directory per project, once.
+ *
+ * One way: the JSON is renamed rather than deleted, so a migration that went
+ * wrong is still recoverable by hand, and is never read again either way.
+ */
+let migrated = false
+export function migrateLegacyProjects(): void {
+  if (migrated) return
+  migrated = true
+  const legacy = join(dataDir(), 'projects.json')
+  if (!existsSync(legacy)) return
   try {
-    const data = JSON.parse(readFileSync(file, 'utf8')) as {
+    const data = JSON.parse(readFileSync(legacy, 'utf8')) as {
       groups?: unknown
       projects?: unknown
     }
-    const rawProjects = Array.isArray(data.projects) ? data.projects : []
-
-    // Migrate the old shape: { projects: string[] }.
-    if (rawProjects.length > 0 && typeof rawProjects[0] === 'string') {
-      return {
-        groups: [DEFAULT_GROUP],
-        projects: (rawProjects as string[]).map((p) => ({ path: p, group: DEFAULT_GROUP }))
-      }
-    }
-
-    const groups =
-      Array.isArray(data.groups) && data.groups.length > 0 ? (data.groups as string[]) : [DEFAULT_GROUP]
-    const projects = (
-      rawProjects as Array<{
-        path?: unknown
-        group?: unknown
-        name?: unknown
-        readOnly?: unknown
-        pinned?: unknown
-        env?: unknown
-      }>
-    )
-      .filter((p) => p && typeof p.path === 'string')
-      .map((p) => ({
-        path: p.path as string,
+    const groups = Array.isArray(data.groups) ? (data.groups as string[]).filter((g) => typeof g === 'string') : []
+    if (groups.length) writeGroups(groups)
+    const raw = Array.isArray(data.projects) ? data.projects : []
+    for (const entry of raw) {
+      // The oldest shape was a bare array of paths.
+      const p = typeof entry === 'string' ? { path: entry } : (entry as Record<string, unknown>)
+      if (!p || typeof p.path !== 'string') continue
+      const project = createProject(p.path, {
         group: typeof p.group === 'string' ? p.group : DEFAULT_GROUP,
         name: typeof p.name === 'string' ? p.name : undefined,
-        readOnly: p.readOnly === true ? true : undefined,
-        pinned: p.pinned === true ? true : undefined,
-        env: isEnvConfig(p.env) ? p.env : undefined
-      }))
-    return { groups, projects }
+        pinned: p.pinned === true
+      })
+      if (p.readOnly === true) setProjectValue(project.path, 'read-only', true)
+      if (isEnvConfig(p.env)) {
+        setProjectEnv(project.path, p.env)
+      }
+    }
   } catch {
-    return { groups: [DEFAULT_GROUP], projects: [] }
+    // A corrupt legacy store is not worth failing the app over; it is renamed
+    // either way so this runs once.
   }
-}
-
-function write(store: StoreShape): void {
-  writeFileSync(storeFile(), JSON.stringify(store, null, 2))
+  renameSync(legacy, `${legacy}.migrated`)
+  invalidateProjects()
 }
 
 // A stored `env` blob is valid only if it names the container mode with the
@@ -113,162 +292,4 @@ function isEnvConfig(v: unknown): v is ProjectEnvConfig {
     typeof e.packageManager === 'string' &&
     (e.db === 'mysql' || e.db === 'postgres')
   )
-}
-
-const toProject = (p: {
-  path: string
-  group: string
-  name?: string
-  readOnly?: boolean
-  pinned?: boolean
-  env?: ProjectEnvConfig
-}): Project => ({
-  path: p.path,
-  name: p.name?.trim() || basename(p.path),
-  group: p.group,
-  readOnly: p.readOnly === true ? true : undefined,
-  pinned: p.pinned === true ? true : undefined,
-  env: p.env
-})
-
-// Read a project's env config by its root path — used by provisioning to pick the
-// container recipe. Returns undefined for host-native (unconfigured) projects.
-export function getProjectEnv(path: string): ProjectEnvConfig | undefined {
-  return read().projects.find((p) => p.path === path)?.env
-}
-
-export function setProjectEnv(path: string, env: ProjectEnvConfig | null): Project[] {
-  const store = read()
-  const project = store.projects.find((p) => p.path === path)
-  if (project) {
-    if (env) project.env = env
-    else delete project.env
-    write(store)
-  }
-  return store.projects.map(toProject)
-}
-
-export function listProjects(): Project[] {
-  return read().projects.map(toProject)
-}
-
-export function listGroups(): string[] {
-  return read().groups
-}
-
-export function addGroup(name: string): string[] {
-  const store = read()
-  const trimmed = name.trim()
-  if (trimmed && !store.groups.includes(trimmed)) {
-    store.groups.push(trimmed)
-    write(store)
-  }
-  return store.groups
-}
-
-export async function addProject(group?: string): Promise<{ project?: Project; error?: string }> {
-  const result = await dialog.showOpenDialog({
-    title: 'Select a project folder',
-    properties: ['openDirectory']
-  })
-  if (result.canceled || result.filePaths.length === 0) return {}
-  return addProjectByPath(result.filePaths[0], group)
-}
-
-// Add a project by an explicit path (no dialog) — used by the `rookery` CLI.
-// Validates it's a git repo, resolves to the repo root, and dedupes by root
-// (re-adding an existing project just returns it, keeping its current group).
-export async function addProjectByPath(
-  picked: string,
-  group?: string
-): Promise<{ project?: Project; error?: string }> {
-  if (!existsSync(picked)) return { error: `Path does not exist: ${picked}` }
-  if (!(await isGitRepo(picked))) {
-    return { error: `"${basename(picked)}" is not a git repository.` }
-  }
-
-  const root = (await repoRoot(picked)) ?? picked
-  const store = read()
-  const existing = store.projects.find((p) => p.path === root)
-  if (existing) return { project: toProject(existing) }
-
-  const targetGroup = (group && group.trim()) || store.groups[0] || DEFAULT_GROUP
-  if (!store.groups.includes(targetGroup)) store.groups.push(targetGroup)
-  store.projects.push({ path: root, group: targetGroup })
-  write(store)
-
-  return { project: toProject({ path: root, group: targetGroup }) }
-}
-
-export function renameGroup(
-  oldName: string,
-  newName: string
-): { groups: string[]; projects: Project[] } {
-  const store = read()
-  const trimmed = newName.trim()
-  const idx = store.groups.indexOf(oldName)
-  if (trimmed && idx !== -1 && trimmed !== oldName) {
-    // Merge into an existing group if the name is taken; otherwise rename in place.
-    if (store.groups.includes(trimmed)) store.groups.splice(idx, 1)
-    else store.groups[idx] = trimmed
-    for (const p of store.projects) {
-      if (p.group === oldName) p.group = trimmed
-    }
-    write(store)
-  }
-  return { groups: store.groups, projects: store.projects.map(toProject) }
-}
-
-export function renameProject(path: string, newName: string): Project[] {
-  const store = read()
-  const project = store.projects.find((p) => p.path === path)
-  if (project) {
-    const trimmed = newName.trim()
-    // A blank name (or one matching the folder) clears the override and falls back
-    // to the directory basename. The folder on disk is never touched.
-    if (trimmed && trimmed !== basename(path)) project.name = trimmed
-    else delete project.name
-    write(store)
-  }
-  return store.projects.map(toProject)
-}
-
-export function setProjectGroup(path: string, group: string): Project[] {
-  const store = read()
-  const project = store.projects.find((p) => p.path === path)
-  if (project) {
-    project.group = group
-    if (!store.groups.includes(group)) store.groups.push(group)
-    write(store)
-  }
-  return store.projects.map(toProject)
-}
-
-export function setProjectReadOnly(path: string, value: boolean): Project[] {
-  const store = read()
-  const project = store.projects.find((p) => p.path === path)
-  if (project) {
-    if (value) project.readOnly = true
-    else delete project.readOnly
-    write(store)
-  }
-  return store.projects.map(toProject)
-}
-
-export function setProjectPinned(path: string, value: boolean): Project[] {
-  const store = read()
-  const project = store.projects.find((p) => p.path === path)
-  if (project) {
-    if (value) project.pinned = true
-    else delete project.pinned
-    write(store)
-  }
-  return store.projects.map(toProject)
-}
-
-export function removeProject(path: string): Project[] {
-  const store = read()
-  store.projects = store.projects.filter((p) => p.path !== path)
-  write(store)
-  return store.projects.map(toProject)
 }

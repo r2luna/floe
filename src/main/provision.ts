@@ -20,7 +20,6 @@ import {
   worktreeVitePort,
   writeWorktreeCompose
 } from './compose'
-import { removeWorktreeRoute, writeWorktreeRoute } from './caddy'
 
 // Provisioning makes a freshly created worktree ready to work: it runs the
 // per-stack setup steps (copy .env, install deps, link Herd, start commands) and
@@ -31,7 +30,7 @@ type Stack = 'laravel' | 'node'
 
 // Detect the project's stack the same way the rest of the app does — Laravel
 // owns the `artisan` + `composer.json` pair (isLaravel); anything else with a
-// package.json is treated as a generic node project (Rookery included).
+// package.json is treated as a generic node project (Floe included).
 export function detectStack(worktreePath: string): Stack | null {
   if (isLaravel(worktreePath)) return 'laravel'
   if (existsSync(join(worktreePath, 'package.json'))) return 'node'
@@ -148,7 +147,7 @@ function runShell(
       } else if (process.platform === 'linux') {
         // Fail closed: sandbox requested, not disabled, but bwrap is missing —
         // never silently fall back to running the install with full access.
-        reject(new Error('bwrap not found — refusing to run install without the sandbox (install it, or set ROOKERY_SANDBOX=0 to opt out)'))
+        reject(new Error('bwrap not found — refusing to run install without the sandbox (install it, or set FLOE_SANDBOX=0 to opt out)'))
         return
       } else {
         // Fase 1.5: macOS has no bwrap yet. Run unsandboxed, but say so loudly.
@@ -352,26 +351,6 @@ const storageDirsStep: StepDef = {
   }
 }
 
-// The headless server has no host PHP/Herd, so every Laravel worktree MUST run in
-// Docker even when the project never opted into `env.mode: 'container'`. Synthesize a
-// sensible container config: PHP pinned from composer.json's `require.php` (else the
-// latest supported), package manager from the lockfile, MySQL by default.
-// ponytail: MySQL/latest-PHP defaults; pin an explicit Project.env to override.
-function defaultContainerEnv(worktreePath: string): ProjectEnvConfig {
-  let php: ProjectEnvConfig['php'] = '8.4'
-  const composer = join(worktreePath, 'composer.json')
-  if (existsSync(composer)) {
-    try {
-      const req = (JSON.parse(readFileSync(composer, 'utf8')).require ?? {}).php
-      const m = typeof req === 'string' ? req.match(/8\.([2345])/) : null
-      if (m) php = `8.${m[1]}` as ProjectEnvConfig['php']
-    } catch {
-      // malformed composer.json — keep the default
-    }
-  }
-  return { mode: 'container', runtime: 'laravel', php, packageManager: detectPackageManager(worktreePath), db: 'mysql' }
-}
-
 // ── container recipe (opt-in via Project.env) ─────────────────────────────────
 // `docker compose exec` args for the worktree's app container. `extraEnv` is
 // forwarded via `-e` so a single call can carry one-off secrets (composer auth)
@@ -405,7 +384,7 @@ function globalComposerAuth(): string | null {
 
 // Point the app at the shared DBs by service name (mysql/postgres) and at its
 // Caddy-routed URL. The app connects as the DB root user over the private
-// `rookery` network — the control plane creates the DB separately.
+// `floe` network — the control plane creates the DB separately.
 const containerEnvVarsStep: StepDef = {
   id: 'env-vars',
   label: 'Set container env vars',
@@ -455,13 +434,9 @@ const composeUpStep: StepDef = {
     log(`Wrote ${path}`)
     // --build so the Node+bun layer on top of serversideup is (re)built as needed.
     await runShell('docker', ['compose', '-f', path, 'up', '-d', '--build'], ctx.worktreePath, log)
-    const host = appHost(s, cfg)
-    await writeWorktreeRoute(host, worktreePort(s))
-    log(`App served at https://${host} (127.0.0.1:${worktreePort(s)})`)
-    // Second route for the containerized vite dev server (HMR over wss).
-    const vHost = viteHost(s, cfg)
-    await writeWorktreeRoute(vHost, worktreeVitePort(s))
-    log(`Vite served at https://${vHost} (127.0.0.1:${worktreeVitePort(s)})`)
+    log(`App served at http://127.0.0.1:${worktreePort(s)} (${appHost(s, cfg)})`)
+    // The containerized vite dev server (HMR) gets its own published port.
+    log(`Vite served at http://127.0.0.1:${worktreeVitePort(s)} (${viteHost(s, cfg)})`)
     return 'done'
   }
 }
@@ -686,19 +661,6 @@ async function dropContainerWorktree(
     log(e instanceof Error ? e.message : String(e))
   }
   const env = readEnvFile(join(worktreePath, '.env'))
-  // Drop the host Caddy route (`<slug>.dev.<domain>` = APP_URL without the scheme).
-  const host = (env.APP_URL || '').replace(/^https?:\/\//, '').replace(/\/$/, '')
-  if (host) {
-    // App route, plus the parallel vite route (`<slug>-vite.dev.…`).
-    for (const h of [host, host.replace('.dev.', '-vite.dev.')]) {
-      try {
-        await removeWorktreeRoute(h)
-        log(`Removed route ${h}`)
-      } catch (e) {
-        log(e instanceof Error ? e.message : String(e))
-      }
-    }
-  }
   const db = env.DB_DATABASE
   const conn = (env.DB_CONNECTION || 'mysql').toLowerCase()
   if (!db) {
@@ -799,14 +761,12 @@ export async function ensureContainerUp(
   worktreePath: string,
   branch: string
 ): Promise<void> {
-  // On the server every worktree is container-mode; elsewhere gate on Project.env.
-  if (getProjectEnv(root)?.mode !== 'container' && process.env.ROOKERY_SERVER !== '1') return
+  if (getProjectEnv(root)?.mode !== 'container') return
   const composePath = worktreeComposePath(worktreePath)
   if (!existsSync(composePath)) return // never provisioned as a container — nothing to ensure
   const s = slug(branch)
   const log: Log = (t) => console.log(`[ensureContainerUp ${s}]`, t.trimEnd())
   await runShell('docker', ['compose', '-f', composePath, 'up', '-d'], worktreePath, log)
-  await writeWorktreeRoute(appHost(s, readSupportConfig()), worktreePort(s))
 }
 
 // Distributive Omit so each ProvisionEvent variant keeps its own fields.
@@ -845,9 +805,7 @@ export async function provisionWorktree(
   const linkName = `${projectName}-${slug(branch)}`
   // On the headless server there's no host PHP/Herd, so a Laravel worktree ALWAYS runs
   // in Docker — synthesize a container env when the project didn't pin one.
-  const env =
-    getProjectEnv(root) ??
-    (process.env.ROOKERY_SERVER === '1' && stack === 'laravel' ? defaultContainerEnv(worktreePath) : undefined)
+  const env = getProjectEnv(root)
   const ctx: Ctx = { win, root, worktreePath, branch, projectName, linkName, domain: `${linkName}.test`, env }
 
   // Container mode (Project.env, or forced on the server above) overrides the

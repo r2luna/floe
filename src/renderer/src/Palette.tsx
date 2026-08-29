@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { filterItems, type PaletteItem } from './fuzzy'
-import { chordOf, formatChord, type Chord } from './keybindings'
+import { chordFor, formatChord } from '../../shared/keymap'
 
 /**
  * The command palette: a filtered list you drive entirely from the keyboard.
@@ -32,7 +32,7 @@ export function Palette({
    * project list has nothing to bind — and its presence is what puts the
    * "Change Keybinding…" action in the footer.
    */
-  onRebind?: (id: string, chord: Chord) => void
+  onRebind?: (id: string, chord: string) => void
 }) {
   const [query, setQuery] = useState('')
   const [at, setAt] = useState(0)
@@ -66,7 +66,7 @@ export function Palette({
     if (recording) {
       e.preventDefault()
       if (e.key === 'Escape') return setRecording(null)
-      const chord = chordOf({
+      const chord = chordFor({
         key: e.key,
         meta: e.metaKey,
         ctrl: e.ctrlKey,
@@ -75,7 +75,10 @@ export function Palette({
       })
       // A bare letter is refused rather than accepted: binding one would shadow
       // it everywhere, including in the composer. Keep waiting for a real chord.
-      if (!chord) return
+      // (The keymap CAN hold bare keys — the defaults are full of them — but they
+      // carry an implicit "not typing" that a chord recorded here would not, so
+      // this stays a modifier-only capture and the file is where you write one.)
+      if (!chord || !chord.includes('+')) return
       onRebind?.(recording, chord)
       setRecording(null)
       return
@@ -158,7 +161,7 @@ export function Palette({
               <>
                 <span className="palette-action">
                   Change Keybinding…
-                  <kbd>{formatChord('meta+enter')}</kbd>
+                  <kbd>{formatChord('cmd+enter')}</kbd>
                 </span>
                 <span className="palette-action">
                   Run

@@ -1,6 +1,6 @@
 {
-  "name": "Rookery",
-  "short_name": "Rookery",
+  "name": "Floe",
+  "short_name": "Floe",
   "description": "Manage git worktrees and Claude Code sessions.",
   "start_url": "/",
   "display": "standalone",

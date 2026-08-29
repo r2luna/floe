@@ -5,9 +5,8 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// provision.ts imports ./devServer, ./commands, ./commandRunner, ./projects,
-// ./caddy — whose graphs use extensionless relative imports and touch
-// `electron`. Same in-memory hook the other main tests use: rewrite `./x` →
+// provision.ts imports ./devServer, ./commands, ./commandRunner, ./projects —
+// whose graphs use extensionless relative imports and touch `electron`. Same in-memory hook the other main tests use: rewrite `./x` →
 // `./x.ts` and stub `electron`.
 const hookSource = `
 import { existsSync } from 'node:fs'

@@ -9,12 +9,22 @@
 // One browser per window (the app backs a single worktree view at a time; the
 // renderer remembers per-worktree URLs and re-points this view on switch).
 import { BrowserWindow, WebContentsView, type IpcMainInvokeEvent } from 'electron'
-import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
-import { getAttachedServer } from './sessionStore'
-import { parseSshTarget, ensureForward, freePort } from './sshTunnel'
+
+// Ask the OS for an unused loopback port by binding :0 and reading it back.
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer()
+    srv.on('error', reject)
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as { port: number }).port
+      srv.close(() => resolve(port))
+    })
+  })
+}
 
 export interface BrowserState {
   url: string
@@ -31,9 +41,7 @@ const views = new Map<number, WebContentsView>() // host window webContents.id �
 // keeps a previous layout's rect) until something happens to resize the surface.
 const paneBounds = new Map<number, { x: number; y: number; width: number; height: number }>()
 
-// When attached over SSH, a loopback URL names a port on the SERVER (that's
-// where the worktree apps listen) — transparently forward it and load the local
-// end. Detached (or URL-attached), loopback is genuinely local: pass through.
+// Normalise what the caller typed into a real URL (bare hosts get http://).
 async function resolveUrl(raw: string): Promise<string> {
   let u: URL
   try {
@@ -41,18 +49,12 @@ async function resolveUrl(raw: string): Promise<string> {
   } catch {
     throw new Error(`Invalid URL: ${raw}`)
   }
-  const ssh = parseSshTarget(getAttachedServer())
-  const loopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost'
-  if (ssh && loopback && u.port) {
-    const localPort = await ensureForward(ssh.host, Number(u.port))
-    u.port = String(localPort)
-  }
   return u.toString()
 }
 
 // Slack (and Google sign-in, and every other login wall that sniffs the UA)
 // refuses anything that isn't a current stock Chrome: Electron 33's UA carries
-// Chrome/130 plus `Electron/` and `rookery/` tokens, and slack.com/workspace-signin
+// Chrome/130 plus `Electron/` and `floe/` tokens, and slack.com/workspace-signin
 // answers it with a full-page "your browser is not supported" — which is what
 // an MCP OAuth consent lands on. Present the pane as plain Chrome, floored at a
 // version those checks still accept.
@@ -62,7 +64,7 @@ const CHROME_FLOOR = 141
 function chromeUserAgent(ua: string): string {
   const major = Number(ua.match(/Chrome\/(\d+)/)?.[1] ?? 0)
   return ua
-    .replace(/ \S*(?:Electron|rookery)\/[\d.]+/gi, '')
+    .replace(/ \S*(?:Electron|floe)\/[\d.]+/gi, '')
     .replace(/Chrome\/[\d.]+/, `Chrome/${Math.max(major, CHROME_FLOOR)}.0.0.0`)
 }
 
@@ -163,18 +165,10 @@ export async function openBrowser(event: IpcMainInvokeEvent, url: string): Promi
   return state(view)
 }
 
-// Render a local file in the pane. The pane is a local WebContentsView, so a
-// detached app just loads file://; attached over SSH the file lives on the
-// SERVER, which a local Chromium can't read — so route it through the server's
-// /rk-file endpoint on its loopback port, and let resolveUrl SSH-forward that
-// port exactly like a worktree app. `absPath` is absolute on whichever machine
-// backs the workspace (local when detached, the server when attached).
+// Render a local file in the pane — the pane is a local WebContentsView, so
+// file:// is all it takes.
 export async function openBrowserFile(event: IpcMainInvokeEvent, absPath: string): Promise<BrowserState> {
-  const ssh = parseSshTarget(getAttachedServer())
-  const url = ssh
-    ? `http://127.0.0.1:${ssh.remotePort}/rk-file?path=${encodeURIComponent(absPath)}`
-    : pathToFileURL(absPath).href
-  return openBrowser(event, url)
+  return openBrowser(event, pathToFileURL(absPath).href)
 }
 
 export async function navigateBrowser(event: IpcMainInvokeEvent, url: string): Promise<void> {
@@ -243,7 +237,7 @@ export function closeBrowser(event: IpcMainInvokeEvent): void {
 // world holds the full `window.api` IPC bridge (create/delete worktrees, run
 // commands, read files...). Turning that switch on and handing the port to a
 // session (directly, or indirectly since every session has unrestricted Bash
-// and could just curl the port) would let it drive Rookery's own UI with the
+// and could just curl the port) would let it drive Floe's own UI with the
 // app's own privilege — a full takeover, not just a peek at an embedded page.
 //
 // So the real Chromium debug port is never opened. Instead this relay speaks
@@ -276,7 +270,7 @@ function targetInfoFor(view: WebContentsView): Record<string, unknown> {
     url: wc.getURL() || 'about:blank',
     attached: false,
     canAccessOpener: false,
-    browserContextId: 'rookery'
+    browserContextId: 'floe'
   }
 }
 
@@ -405,7 +399,7 @@ async function handleRelayMessage(conn: RelayConn, msg: CdpMessage): Promise<voi
       reply({ result: {} })
       return
     case 'Browser.getVersion':
-      reply({ result: { protocolVersion: '1.3', product: 'Rookery', userAgent: 'Rookery' } })
+      reply({ result: { protocolVersion: '1.3', product: 'Floe', userAgent: 'Floe' } })
       return
     default:
       // Best-effort passthrough for anything else sent at browser level
@@ -430,7 +424,7 @@ function handleRelayHttp(req: IncomingMessage, res: ServerResponse, port: number
   if (req.url === '/json/version') {
     res.end(
       JSON.stringify({
-        Browser: 'Rookery/1.0',
+        Browser: 'Floe/1.0',
         'Protocol-Version': '1.3',
         webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/${browserId}`
       })

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { applyFileOps, listDir } from './files.ts'
 
 function withWorktree(files: Record<string, string>, body: (root: string) => void): void {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-files-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-files-'))
   try {
     for (const [rel, content] of Object.entries(files)) {
       const abs = join(root, rel)

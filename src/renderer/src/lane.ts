@@ -170,6 +170,25 @@ export function toggleKind(lane: Lane, kind: string, create: () => Panel): Lane 
   return at === lane.focus ? close(lane, at) : focusAt(lane, at)
 }
 
+/**
+ * Close panel `index`, or — when it holds a session — swap in `emptyState`.
+ *
+ * The chat and the launcher share the session slot, and the launcher is defined
+ * as the chat's empty state. So closing a conversation should leave that column
+ * standing and offering a new one, not tear it out and drop you on whatever
+ * happened to be beside it (or on nothing at all). Every other panel closes
+ * plainly — closing the file tree must not conjure a launcher.
+ */
+export function closePanel(lane: Lane, index: number, emptyState: () => Panel): Lane {
+  const panel = lane.panels[index]
+  if (!panel?.session) return close(lane, index)
+  const panels = [...lane.panels]
+  // A fresh panel, not a patch: the old one carries a session id, a first
+  // prompt and a width the launcher must not inherit.
+  panels[index] = emptyState()
+  return { ...lane, panels }
+}
+
 /** Replace one panel, keeping the rest of the lane identical. */
 export function patchPanel(lane: Lane, index: number, patch: Partial<Panel>): Lane {
   const panel = lane.panels[index]

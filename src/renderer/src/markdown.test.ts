@@ -129,7 +129,8 @@ test('shape per line: heading level, list marker and depth, quote, rule', () => 
   assert.equal(h.spans[0].text, 'Stack')
 
   const [bullet, numbered, nested] = renderMarkdown('- a\n2. b\n    - c')
-  assert.deepEqual([bullet.kind, bullet.marker, bullet.depth], ['list', '•', 0])
+  // An unordered item carries no marker text: the dot is a CSS shape.
+  assert.deepEqual([bullet.kind, bullet.marker, bullet.depth], ['list', '', 0])
   assert.deepEqual([numbered.marker, numbered.depth], ['2.', 0])
   assert.equal(nested.depth, 2)
 
@@ -146,8 +147,23 @@ test('a fence turns off inline rendering until it closes', () => {
   assert.equal(lines[3].spans[0].cls, 'md-bold')
 })
 
-test('a table row keeps its pipes — the panel is monospaced, so it lines up', () => {
-  const [row] = renderMarkdown('| Keys | Action |')
-  assert.equal(row.kind, 'table')
-  assert.equal(row.spans[0].text, '| Keys | Action |')
+test('a table becomes cells, and every row of the block shares one layout', () => {
+  const [head, rule, body] = renderMarkdown(
+    '| Keys | Action |\n|---|---:|\n| ⌘K | open the palette |'
+  )
+  assert.equal(head.kind, 'table')
+  assert.deepEqual(
+    head.cells?.map((cell) => cell[0].text),
+    ['Keys', 'Action']
+  )
+  assert.equal(head.head, true)
+
+  // The |---| row draws the header's underline; it holds no cells of its own.
+  assert.equal(rule.rule, true)
+  assert.equal(rule.cells, undefined)
+
+  // Shared column weights are what line the rows up, and `---:` right-aligns.
+  assert.deepEqual(body.cols, head.cols)
+  assert.deepEqual(body.aligns, ['left', 'right'])
+  assert.equal(body.head, false)
 })

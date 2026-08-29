@@ -10,6 +10,7 @@
 import {
   clearSize,
   close,
+  closePanel,
   focusAt,
   focusDir,
   open,
@@ -258,7 +259,8 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Panels',
         keys: '⌘W',
         enabled: (c) => c.lane.panels.length > 0,
-        run: (c) => c.setLane((l) => close(l, l.focus))
+        // Closing the chat lands on the launcher — see closePanel.
+        run: (c) => c.setLane((l) => closePanel(l, l.focus, () => c.makePanel('branch')))
       },
       {
         id: 'panel.goto',
@@ -268,6 +270,9 @@ export const REGISTRY: Map<string, Command> = new Map(
         // Open it, focus it, or — if it is already the focused one — put it away.
         run: (c, arg) => {
           const kind = arg ?? 'projects'
+          // Nothing to show without a worktree — silently, because this is one
+          // command behind several bindings and the palette dims it below.
+          if (!c.canOpen(kind)) return
           c.setLane((l) => toggleKind(l, kind, () => c.makePanel(kind)))
         }
       },
@@ -426,10 +431,43 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.setLane((l) => toggleKind(l, 'account', () => c.makePanel('account')))
       },
       {
+        id: 'keybindings.reset',
+        title: 'Reset keybindings to defaults…',
+        group: 'App',
+        run: () => {
+          void window.floe.keybindings.reset()
+        }
+      },
+      {
+        id: 'settings.open',
+        title: 'Settings…',
+        group: 'App',
+        keys: '⌘,',
+        run: (c) => c.setLane((l) => toggleKind(l, 'settings', () => c.makePanel('settings')))
+      },
+      {
         id: 'project.add',
         title: 'Add project…',
         group: 'App',
         run: (c) => c.addProject()
+      },
+      {
+        id: 'group.create',
+        title: 'New project group…',
+        group: 'App',
+        run: (c) => c.createGroup()
+      },
+      {
+        id: 'project.move',
+        title: 'Move project to group…',
+        group: 'App',
+        run: (c) => c.moveProject()
+      },
+      {
+        id: 'group.delete',
+        title: 'Delete project group…',
+        group: 'App',
+        run: (c) => c.deleteGroup()
       },
       {
         id: 'session.new',
@@ -475,7 +513,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.cycleSession(1)
       },
       {
-        // "Delete" is Rookery's record of the session, not the conversation:
+        // "Delete" is Floe's record of the session, not the conversation:
         // the Claude transcript stays on disk and `claude --resume` still finds
         // it. Same call the sidebar's close uses — one way to forget a session.
         id: 'session.delete',

@@ -1,10 +1,10 @@
 # HTTP Client — plano de ação
 
-Cliente HTTP embutido no Rookery, no estilo do HTTP Client do PhpStorm: lê todos os
+Cliente HTTP embutido no Floe, no estilo do HTTP Client do PhpStorm: lê todos os
 `.http` do projeto, abre o arquivo para leitura no centro e manda requests vendo a
 resposta em um **island separado** (status / headers / body).
 
-Conceito visual: `design/rookery.pen` → frames **"Rookery — HTTP Client (concept)"**
+Conceito visual: `design/floe.pen` → frames **"Floe — HTTP Client (concept)"**
 (dark) e **"… (concept · light)"**.
 
 ## Escopo v1 (fechado)

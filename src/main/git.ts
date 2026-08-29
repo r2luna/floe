@@ -530,7 +530,7 @@ export async function mergePreflight(root: string, target: string): Promise<Merg
 // "stash & retry" action. Returns the error message on failure.
 export async function mergeStash(path: string): Promise<{ ok: boolean; message?: string }> {
   try {
-    await git(path, ['stash', 'push', '--include-untracked', '-m', 'rookery: stash & retry merge'])
+    await git(path, ['stash', 'push', '--include-untracked', '-m', 'floe: stash & retry merge'])
     return { ok: true }
   } catch (e) {
     return { ok: false, message: firstLine(e) }

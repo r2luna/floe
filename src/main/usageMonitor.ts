@@ -3,7 +3,7 @@ import { getClaudeInfo } from './claudeInfo'
 import type { UsageStats, UsageWindow } from '../shared/types'
 
 // Reads Claude's account usage on demand. The probe spawns a throwaway `claude`
-// (up to ~20s), so it must never run merely because a Rookery window opened.
+// (up to ~20s), so it must never run merely because a Floe window opened.
 // Callers that explicitly request a refresh can reuse this module and its cache.
 //
 // The /usage text looks like:

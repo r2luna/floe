@@ -1,25 +1,27 @@
-// User-customizable keybindings, loaded from a Ghostty-style plain-text config
-// the user owns and edits. The renderer keeps the DEFAULT_KEYMAP; this layer
-// only parses the user's *overrides* (rebind a chord, or `unbind` a default)
-// and validates them against the canonical command id list before the renderer
-// merges them in. Living in the main process keeps the file I/O and validation
-// off the renderer and lets us import the shared id set without renderer code.
+// `~/.config/floe/keybindings.toml` — every binding, written out.
 //
-// File format (`~/.config/rookery/keybindings`):
+// The file used to hold only OVERRIDES, in a Ghostty-style plain-text format:
+// what you did not write, you could not see. That made "unbind" a special word
+// and left the real keymap invisible unless you read the source. Now the whole
+// default table is generated into the file (from shared/defaultKeymap.ts, which
+// carries the prose too), so the file IS the keymap: edit a `key` to rebind,
+// delete an entry to drop the binding.
 //
-//   # comment
-//   keybind = cmd+shift+p = palette.toggle
-//   keybind = cmd+t       = unbind         # drop a default binding
-//
-// Chords are normalized to the same shape `eventToChord` produces in the
-// renderer (modifiers in cmd, ctrl, alt, shift order; key lowercased) so a
-// user's `shift+cmd+p` still matches the event's `cmd+shift+p`.
+// The defaults still live in code, and that is the safety net. If this file does
+// not parse, names a command that does not exist, or carries a `when` that does
+// not compile, the app falls back to the ENTIRE default map and reports the
+// problems. A half-applied keymap — some keys working, some silently gone — is
+// far worse than losing your customizations for one launch.
 
 import { shell } from 'electron'
-import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, renameSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { COMMAND_ID_SET } from '../shared/commandIds'
+import { DEFAULT_KEYMAP, KEYMAP_SECTIONS, UNBOUND_SUGGESTIONS } from '../shared/defaultKeymap'
+import { normalizeChord, parseWhen, type Keybind } from '../shared/keymap'
 import { configDir } from './dataDir'
+import { editToml, parseToml } from './config/toml'
+import { writeTomlFile } from './config/io'
 
 // A parse problem tied to a line, surfaced to the renderer so the user can be
 // told their config has a typo instead of silently dropping the binding.
@@ -29,172 +31,350 @@ export interface KeybindingError {
   reason: string
 }
 
-// `null` value means "unbind this chord" (remove a default).
 export interface KeybindingsConfig {
   path: string
-  overrides: Record<string, string | null>
+  /** The bindings in force — the user's file, or the defaults when it can't be used. */
+  binds: Keybind[]
+  /** True when `binds` is the built-in table because the file could not be trusted. */
+  usingDefaults: boolean
   errors: KeybindingError[]
-}
-
-const MODIFIERS = new Set(['cmd', 'ctrl', 'alt', 'shift'])
-const MODIFIER_ORDER = ['cmd', 'ctrl', 'alt', 'shift']
-
-// Aliases people reach for; normalized to our canonical token.
-const MODIFIER_ALIASES: Record<string, string> = {
-  meta: 'cmd',
-  super: 'cmd',
-  command: 'cmd',
-  '⌘': 'cmd',
-  control: 'ctrl',
-  '⌃': 'ctrl',
-  option: 'alt',
-  opt: 'alt',
-  '⌥': 'alt',
-  '⇧': 'shift'
+  /**
+   * Commands the app ships a default binding for that this file has no entry
+   * for at all — almost always bindings added by an update, since the file is
+   * only generated once and never rewritten behind the user's back.
+   *
+   * NOT auto-added: "delete an entry to drop the binding" has to mean it, and a
+   * command you unbound on purpose is indistinguishable here from one that did
+   * not exist when the file was written. So it is reported, and reset is offered.
+   */
+  missing: string[]
 }
 
 export function keybindingsPath(): string {
-  return join(configDir(), 'keybindings')
+  return join(configDir(), 'keybindings.toml')
 }
 
-// Normalize a user-written chord into the canonical form `eventToChord`
-// produces. Returns null if it isn't a valid chord (no key, unknown shape).
-export function normalizeChord(raw: string): string | null {
-  const tokens = raw
-    .split('+')
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean)
-    .map((t) => MODIFIER_ALIASES[t] ?? t)
-  if (tokens.length === 0) return null
+// ---------------------------------------------------------------------------
+// Generating
+// ---------------------------------------------------------------------------
 
-  const mods = new Set<string>()
-  let key: string | null = null
-  for (const t of tokens) {
-    if (MODIFIERS.has(t)) {
-      mods.add(t)
-      continue
-    }
-    if (key !== null) return null // two non-modifier keys — invalid
-    key = t
+const BANNER = (title: string): string =>
+  `# ==============================================================================\n#  ${title}\n# ==============================================================================`
+
+/** A `# | …` block comment, the shape the rest of the config files use. */
+function block(title: string, body: string): string {
+  const rule = '# ' + '-'.repeat(78)
+  const lines = body.split('\n').map((l) => (l ? `# | ${l}` : '# |'))
+  return [rule, `# | ${title}`, rule, '# |', ...lines, '# |', rule].join('\n')
+}
+
+function renderBind(bind: Keybind, commented = false): string {
+  const fields: Array<[string, string]> = [
+    // A suggestion with no chord still shows the key line, so binding it is
+    // filling in a blank rather than remembering the field's name.
+    ['key', bind.key ? JSON.stringify(bind.key) : '""  # choose a chord'],
+    ['command', JSON.stringify(bind.command)]
+  ]
+  if (bind.arg !== undefined) fields.push(['arg', JSON.stringify(bind.arg)])
+  // Single-quoted so a `when` containing double quotes (`panel == "diff"`) reads
+  // the way it is documented instead of as a wall of backslashes.
+  if (bind.when !== undefined) fields.push(['when', `'${bind.when}'`])
+  const width = Math.max(...fields.map(([k]) => k.length))
+  const prefix = commented ? '# ' : ''
+  return [
+    `${prefix}[[keybind]]`,
+    ...fields.map(([k, v]) => `${prefix}${k.padEnd(width)} = ${v}`)
+  ].join('\n')
+}
+
+const WRITING_A_BINDING = `Each \`[[keybind]]\` needs a \`key\` and a \`command\`. Chords combine \`super\`,
+\`ctrl\`, \`alt\` and \`shift\` with one key, joined by \`+\`.
+
+\`super\` is Command on a Mac and the Super/Windows key on Linux — one word for
+one physical key, so this file moves between machines unchanged. \`cmd\`,
+\`command\`, \`meta\`, \`win\` and \`⌘\` are all accepted and normalize to it.
+Modifier order does not matter either: \`shift+cmd+p\` and \`super+shift+p\` are
+the same chord. A leading \`super+k \` makes it a two-step sequence.
+
+\`arg\` passes a value to commands that take one, such as which panel to jump
+to. \`when\` limits the binding to a situation — see the reference at the
+bottom of this file. Without it, a binding with no modifier only fires while
+you are NOT typing, since a bare letter inside the composer has to stay a
+letter.
+
+Entries are matched top to bottom and the first match wins, which is how two
+bindings can share a chord and differ only by their \`when\`. Delete an entry
+to drop that binding; the app keeps working from its built-in defaults if
+this whole file ever fails to parse.`
+
+const WHEN_REFERENCE = `\`when\` decides whether a binding is live right now. Leave it out and the
+binding always fires — except for chords with no modifier, which never fire
+while you are typing, since a bare letter inside the composer has to stay a
+letter.
+
+The conditions:
+
+  typing              focus is in a text field (the composer, a search box)
+  selecting           a line selection is open in the focused panel
+  stack-below         the focused panel has a neighbour docked below it
+  stack-above         the focused panel has a neighbour docked above it
+  panel == "diff"     the focused panel is of that kind
+  panel != "terminal" the focused panel is anything else
+  panel in ["a","b"]  the focused panel is one of these kinds
+
+Panel kinds: chat, diff, files, changes, terminal, projects, worktrees.
+
+Combine them with \`and\`, \`or\` and \`not\`. \`and\` binds tighter than \`or\`, so
+\`a and b or c\` reads as \`(a and b) or c\`. There are no parentheses — if you
+need them, write two entries instead.
+
+Entries are matched top to bottom and the first match wins. That is how one
+chord can do two jobs: put the narrower condition first.
+
+Examples:
+
+  when = "typing"
+      Only while you are in a text field. Escape uses this to leave the
+      composer before it means anything else.
+
+  when = "not typing"
+      Everywhere except a text field. Rarely needed — it is already the
+      default for a binding with no modifier.
+
+  when = 'panel == "diff" and selecting'
+      Both have to hold. \`c\` comments a selection only in a diff, and only
+      once there is something selected.
+
+  when = 'panel in ["projects", "worktrees"]'
+      Bare \`h\` and \`l\` jump between those two lists, and stay free letters
+      in every other panel.
+
+  when = "stack-below"
+      Put this entry above the unconditional one and ⌃J moves down the
+      stack when there is a stack, and scrolls when there isn't:
+
+        [[keybind]]
+        key     = "ctrl+j"
+        command = "panel.down"
+        when    = "stack-below"
+
+        [[keybind]]
+        key     = "ctrl+j"
+        command = "scroll.down"
+
+  when = 'not panel == "terminal"'
+      Everywhere but the terminal, which swallows most keys anyway.`
+
+/** The whole file, built from the same table the app resolves against. */
+export function generateKeybindings(): string {
+  const parts: string[] = [
+    BANNER('Floe — keybindings') +
+      `\n#  Every binding the app ships with, written out in full. This file is the\n` +
+      `#  source of truth: edit a \`key\` to rebind, delete an entry to drop the\n` +
+      `#  binding, add your own at the bottom. A problem anywhere in here — a typo,\n` +
+      `#  an unknown command, a \`when\` that does not compile — falls back to the\n` +
+      `#  built-in defaults for the whole file and is reported in Settings, rather\n` +
+      `#  than leaving you with half a keymap.\n# ==============================================================================`,
+    block('Writing a Binding', WRITING_A_BINDING)
+  ]
+
+  for (const section of KEYMAP_SECTIONS) {
+    parts.push(block(section.title, section.doc))
+    parts.push(section.binds.map((b) => renderBind(b)).join('\n\n'))
   }
-  if (key === null) return null // modifiers with no key
 
-  const ordered = MODIFIER_ORDER.filter((m) => mods.has(m))
-  ordered.push(key)
-  return ordered.join('+')
+  parts.push(
+    block(
+      'Unbound Commands',
+      `These ship with no key and are reachable from the command palette only.
+Uncomment one and give it a chord to bind it.`
+    )
+  )
+  parts.push(
+    UNBOUND_SUGGESTIONS.map((s) => renderBind({ key: s.key ?? '', command: s.command }, true)).join('\n\n')
+  )
+
+  parts.push(BANNER('Writing a `when` Condition') + '\n' + block('', WHEN_REFERENCE).split('\n').slice(3, -2).join('\n'))
+  return parts.join('\n\n\n') + '\n'
 }
 
-// Parse the config text into overrides + errors. Pure, so it's testable and the
-// caller decides where the text comes from.
-export function parseKeybindings(text: string): {
-  overrides: Record<string, string | null>
-  errors: KeybindingError[]
-} {
-  const overrides: Record<string, string | null> = {}
+// ---------------------------------------------------------------------------
+// Parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a keybindings file into bindings.
+ *
+ * Pure, so the caller decides where the text comes from — and so the fallback
+ * rule (any error means the defaults) is testable without touching a disk.
+ */
+export function parseKeybindings(text: string): { binds: Keybind[]; errors: KeybindingError[] } {
   const errors: KeybindingError[] = []
-
-  const lines = text.split('\n')
-  for (let i = 0; i < lines.length; i++) {
-    const lineNo = i + 1
-    const raw = lines[i]
-    const stripped = raw.replace(/#.*$/, '').trim()
-    if (!stripped) continue
-
-    // `keybind = <chord> = <action>` — three `=`-separated parts.
-    const parts = stripped.split('=').map((p) => p.trim())
-    if (parts.length !== 3 || parts[0].toLowerCase() !== 'keybind') {
-      errors.push({ line: lineNo, text: raw.trim(), reason: 'expected `keybind = <chord> = <command>`' })
-      continue
-    }
-
-    const chord = normalizeChord(parts[1])
-    if (!chord) {
-      errors.push({ line: lineNo, text: raw.trim(), reason: `invalid chord "${parts[1]}"` })
-      continue
-    }
-
-    const action = parts[2]
-    if (action.toLowerCase() === 'unbind') {
-      overrides[chord] = null
-      continue
-    }
-    if (!COMMAND_ID_SET.has(action)) {
-      errors.push({ line: lineNo, text: raw.trim(), reason: `unknown command "${action}"` })
-      continue
-    }
-    overrides[chord] = action
+  const lines = text.split(/\r?\n/)
+  const at = (needle: string): { line: number; text: string } => {
+    const index = lines.findIndex((l) => l.includes(needle))
+    return index === -1 ? { line: 1, text: '' } : { line: index + 1, text: lines[index].trim() }
   }
 
-  return { overrides, errors }
+  const parsed = parseToml<{ keybind?: unknown }>(text)
+  if (!parsed.ok) {
+    return {
+      binds: [],
+      errors: [{ line: parsed.error.line, text: lines[parsed.error.line - 1]?.trim() ?? '', reason: parsed.error.message }]
+    }
+  }
+
+  const entries = parsed.value.keybind
+  if (entries === undefined) return { binds: [], errors: [] }
+  if (!Array.isArray(entries)) {
+    return { binds: [], errors: [{ line: 1, text: '', reason: 'keybind must be a list of [[keybind]] entries' }] }
+  }
+
+  const binds: Keybind[] = []
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const e = entry as Record<string, unknown>
+    const key = typeof e.key === 'string' ? e.key.trim() : ''
+    const command = typeof e.command === 'string' ? e.command : ''
+    if (!key) {
+      errors.push({ ...at(command), reason: `binding for "${command}" has no key` })
+      continue
+    }
+    if (!COMMAND_ID_SET.has(command)) {
+      errors.push({ ...at(key), reason: `unknown command "${command}"` })
+      continue
+    }
+    if (e.when !== undefined) {
+      if (typeof e.when !== 'string') {
+        errors.push({ ...at(key), reason: 'when must be a string' })
+        continue
+      }
+      const when = parseWhen(e.when)
+      if (!when.ok) {
+        errors.push({ ...at(key), reason: when.reason })
+        continue
+      }
+    }
+    binds.push({
+      key: normalizeChord(key),
+      command,
+      arg: typeof e.arg === 'string' ? e.arg : undefined,
+      when: typeof e.when === 'string' ? e.when : undefined
+    })
+  }
+  return { binds, errors }
 }
 
-// Drop a commented template the first time so the file is discoverable and the
-// user has the syntax in front of them instead of a blank file.
-const TEMPLATE = `# Rookery keybindings — remap any command to your own chord.
-#
-# Syntax:
-#   keybind = <chord> = <command-id>
-#   keybind = <chord> = unbind          # remove a built-in binding
-#
-# Chords combine cmd, ctrl, alt, shift with one key, joined by +:
-#   keybind = cmd+shift+p = palette.toggle
-#   keybind = ctrl+\` = terminal.toggle
-#
-# Run "Edit keybindings" from the command palette to reopen this file.
-# Lines starting with # are ignored. Unknown commands are reported, not applied.
-#
-# Examples (uncomment and edit):
-# keybind = cmd+t = session.new
-# keybind = cmd+k = palette.toggle
-`
+// ---------------------------------------------------------------------------
+// The file on disk
+// ---------------------------------------------------------------------------
 
-function ensureFile(path: string): void {
+/**
+ * Write the file if it isn't there, folding in the old plain-text overrides.
+ *
+ * The pre-TOML format only ever recorded what the user changed, so a migration
+ * is: generate the full table, then append their overrides at the end — where,
+ * as the last entries, they lose to an earlier default on the same chord. That
+ * is wrong for a rebind, so they go in a section of their own that says to move
+ * them up, rather than being silently merged into the table above.
+ */
+export function ensureKeybindings(): void {
+  const path = keybindingsPath()
   if (existsSync(path)) return
-  try {
-    mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, TEMPLATE)
-  } catch {
-    // Non-fatal: if we can't scaffold it, load() just returns no overrides.
+  mkdirSync(dirname(path), { recursive: true })
+  let text = generateKeybindings()
+  const legacy = join(configDir(), 'keybindings')
+  if (existsSync(legacy)) {
+    const migrated = migrateLegacy(readFileSync(legacy, 'utf8'))
+    if (migrated) text += migrated
+    renameSync(legacy, `${legacy}.migrated`)
   }
+  writeTomlFile(path, text)
+}
+
+/** `keybind = cmd+t = session.new` lines from the old format, as TOML entries. */
+function migrateLegacy(text: string): string {
+  const binds: Keybind[] = []
+  for (const line of text.split('\n')) {
+    const stripped = line.replace(/#.*$/, '').trim()
+    if (!stripped) continue
+    const parts = stripped.split('=').map((p) => p.trim())
+    if (parts.length !== 3 || parts[0].toLowerCase() !== 'keybind') continue
+    if (parts[2].toLowerCase() === 'unbind') continue // the entry it removed is simply absent now
+    if (!COMMAND_ID_SET.has(parts[2])) continue
+    binds.push({ key: normalizeChord(parts[1]), command: parts[2] })
+  }
+  if (!binds.length) return ''
+  return (
+    '\n\n' +
+    block(
+      'Migrated From Your Old Keybindings File',
+      `These came from the plain-text \`keybindings\` file this replaced, which only
+recorded your changes. They are at the bottom, so a default above with the
+same chord still wins — move an entry up past that default to make it take
+effect, and delete the default if you no longer want it.`
+    ) +
+    '\n\n' +
+    binds.map((b) => renderBind(b)).join('\n\n') +
+    '\n'
+  )
 }
 
 export function loadKeybindings(): KeybindingsConfig {
   const path = keybindingsPath()
-  ensureFile(path)
-  if (!existsSync(path)) return { path, overrides: {}, errors: [] }
   try {
-    const text = readFileSync(path, 'utf8')
-    const { overrides, errors } = parseKeybindings(text)
-    return { path, overrides, errors }
+    ensureKeybindings()
+  } catch {
+    // Can't scaffold (read-only home, no permissions) — the defaults still work.
+  }
+  if (!existsSync(path)) return { path, binds: DEFAULT_KEYMAP, usingDefaults: true, errors: [], missing: [] }
+  try {
+    const { binds, errors } = parseKeybindings(readFileSync(path, 'utf8'))
+    // All-or-nothing: see the note at the top. Half a keymap is the one outcome
+    // worth refusing.
+    if (errors.length) return { path, binds: DEFAULT_KEYMAP, usingDefaults: true, errors, missing: [] }
+    return { path, binds, usingDefaults: false, errors: [], missing: missingDefaults(binds) }
   } catch (err) {
     return {
       path,
-      overrides: {},
-      errors: [{ line: 0, text: '', reason: `could not read file: ${(err as Error).message}` }]
+      binds: DEFAULT_KEYMAP,
+      usingDefaults: true,
+      errors: [{ line: 0, text: '', reason: `could not read file: ${(err as Error).message}` }],
+      missing: []
     }
   }
+}
+
+/** Default-bound commands the file does not mention at all. */
+function missingDefaults(binds: Keybind[]): string[] {
+  const present = new Set(binds.map((b) => b.command))
+  const missing = new Set<string>()
+  for (const bind of DEFAULT_KEYMAP) if (!present.has(bind.command)) missing.add(bind.command)
+  return [...missing]
 }
 
 // Open the config in the user's default editor (or reveal it). Keyboard-first:
 // the "Edit keybindings" command routes here so the user never needs the mouse.
 export async function revealKeybindings(): Promise<void> {
-  const path = keybindingsPath()
-  ensureFile(path)
-  await shell.openPath(path)
+  try {
+    ensureKeybindings()
+  } catch {
+    /* opening a missing file just fails below, which is loud enough */
+  }
+  await shell.openPath(keybindingsPath())
 }
 
 // Watch the file and fire `onChange` (debounced) on every edit so the renderer
 // can hot-reload bindings without an app restart.
 export function watchKeybindings(onChange: () => void): () => void {
   const path = keybindingsPath()
-  ensureFile(path)
   let timer: NodeJS.Timeout | null = null
   let watcher: FSWatcher | null = null
   try {
     // Watch the directory, not the file: editors that replace-on-save (write to
     // a temp file then rename) break a file-level watch.
     watcher = watch(dirname(path), (_event, filename) => {
-      if (filename && filename !== 'keybindings') return
+      if (filename && filename !== basename(path)) return
       if (timer) clearTimeout(timer)
       timer = setTimeout(onChange, 120)
     })
@@ -205,4 +385,46 @@ export function watchKeybindings(onChange: () => void): () => void {
     if (timer) clearTimeout(timer)
     watcher?.close()
   }
+}
+
+/**
+ * Rewrite the file from the built-in defaults.
+ *
+ * The user's version is kept as `keybindings.toml.bak` rather than overwritten:
+ * this is the answer to "an update added a binding my file doesn't have", and
+ * losing a year of customizations to fix that would be a bad trade. One backup,
+ * replaced each time — a chain of `.bak.bak` helps nobody.
+ */
+export function resetKeybindings(): string {
+  const path = keybindingsPath()
+  mkdirSync(dirname(path), { recursive: true })
+  if (existsSync(path)) renameSync(path, `${path}.bak`)
+  writeFileSync(path, generateKeybindings())
+  return path
+}
+
+/**
+ * Point a command at a new chord, from the UI.
+ *
+ * Edits the entry already in the file rather than appending a second one for the
+ * same command: two entries would both be live, and the first would win — so a
+ * rebind from the palette would appear to do nothing. Falls back to appending
+ * only when the command has no entry at all (one of the unbound suggestions).
+ */
+export function rebindCommand(command: string, chord: string): void {
+  ensureKeybindings()
+  const path = keybindingsPath()
+  const raw = readFileSync(path, 'utf8')
+  const parsed = parseToml<{ keybind?: Array<Record<string, unknown>> }>(raw)
+  if (!parsed.ok) throw new Error(`cannot rebind while ${basename(path)} has an error on line ${parsed.error.line}`)
+  const key = normalizeChord(chord)
+  const index = (parsed.value.keybind ?? []).findIndex((e) => e.command === command)
+  writeTomlFile(
+    path,
+    editToml(raw, [
+      index >= 0
+        ? { op: 'setInEntry', table: 'keybind', index, key: 'key', value: key }
+        : { op: 'appendEntry', table: 'keybind', fields: [['key', key], ['command', command]] }
+    ])
+  )
 }

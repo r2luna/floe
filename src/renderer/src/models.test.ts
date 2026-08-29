@@ -77,7 +77,7 @@ test('a choice from another runtime survives a reload', () => {
   // MODELS is Claude's list; validating a Codex or LM Studio model against it
   // would silently reset the picker to Opus every time the app started.
   const stored = { model: 'gpt-5.5', effort: 'high', provider: 'codex' }
-  const store = new Map([['rookery.model', JSON.stringify(stored)]])
+  const store = new Map([['floe.model', JSON.stringify(stored)]])
   ;(globalThis as { localStorage?: unknown }).localStorage = {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => void store.set(k, v)
@@ -86,7 +86,7 @@ test('a choice from another runtime survives a reload', () => {
 })
 
 test('a Claude model that no longer exists falls back', () => {
-  const store = new Map([['rookery.model', JSON.stringify({ model: 'sonnet-3', effort: 'low' })]])
+  const store = new Map([['floe.model', JSON.stringify({ model: 'sonnet-3', effort: 'low' })]])
   ;(globalThis as { localStorage?: unknown }).localStorage = {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: () => {}

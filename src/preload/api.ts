@@ -17,6 +17,9 @@ import type { ScheduleEntry } from '../main/schedules'
 import type { CommandEvent } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
+import type { FloeConfig } from '../main/config/floe'
+import type { ConfigError } from '../main/config/errors'
+import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
   AgentReplay,
@@ -37,7 +40,6 @@ import type {
   HttpResponse,
   ImageAttachment,
   ImplementPhase,
-  McpActivity,
   JumpSession,
   McpAuthEnvelope,
   AuthStatus,
@@ -45,8 +47,6 @@ import type {
   ClaudeStats,
   HarnessUsage,
   LocalAgent,
-  McpCommand,
-  McpCommandResult,
   MemoryStats,
   PermissionMode,
   NeedsYouSession,
@@ -87,7 +87,7 @@ export interface IpcLike {
   removeListener(channel: string, listener: (...a: any[]) => void): void
   /* eslint-enable @typescript-eslint/no-explicit-any */
 }
-export interface RookeryHost {
+export interface FloeHost {
   platform: string
   version: string
   appVersion: string
@@ -95,27 +95,13 @@ export interface RookeryHost {
   worktreeTag: string | null
 }
 
-// A machine this window can run work on: the local one plus every attached
-// server. Which backend a workspace call rides is a per-project choice made in
-// the renderer (see BackendsApi.use) — the rail is the union of all of them.
+// A machine this window can run work on. Single-entry today (this one) — the
+// shape is what the rail and AddProject read.
 export interface BackendInfo {
-  id: string // 'local', or the attach target ('ssh://link:41600', 'https://…')
+  id: string
   label: string // short name for the chip: the hostname
   homeDir: string
   remote: boolean
-}
-
-export interface BackendsApi {
-  list(): BackendInfo[]
-  // The backend every non-pinned call currently rides.
-  current(): string
-  use(id: string): void
-  // Run one call against a NAMED backend regardless of `current`. The rail needs
-  // each backend's own projects to build the union, and a fan-out like that can't
-  // wait on switching `current` back and forth. Channel strings stay confined to
-  // the renderer's backends helper — everything else goes through the typed api.
-  /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  invoke(id: string, channel: string, ...args: any[]): Promise<any>
 }
 
 // Live state of the embedded browser pane, pushed on every navigation.
@@ -136,10 +122,8 @@ export interface BrowserKey {
   alt: boolean
 }
 
-// The bridge the renderer talks to. Identical shape for Electron IPC and WebSocket.
-// `backends` is injected by the attached-mode preload (which owns one transport
-// per machine); everywhere else there is exactly one backend — this one.
-export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backends?: BackendsApi) {
+// The bridge the renderer talks to.
+export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
   const api = {
     platform: host.platform,
     version: host.version,
@@ -153,57 +137,27 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
     hide: (): Promise<void> => ipcRenderer.invoke('window:hide'),
     // Bring THIS window forward. Pinned to the local machine (see PINNED_INVOKE),
     // so an attached window raises itself on the user's desk even when the command
-    // came from a remote backend that has no window to raise (docs/fleet.md).
-    // Resolves false when there's no window to raise (a plain browser tab).
+    // Resolves false when there's no window to raise.
     focus: (): Promise<boolean> => ipcRenderer.invoke('window:focus'),
-    // Fires when the transport socket RE-connects (attached/web only): device
-    // handoff, network blip, or server restart. While disconnected the live
-    // event tail is missed, so the in-memory transcript is stale — the renderer
-    // uses this to re-pull the active session and reconcile. Never fires in
-    // local Electron (no socket, IPC never drops).
-    onReconnect: (cb: () => void): (() => void) => {
-      const listener = (): void => cb()
-      ipcRenderer.on('transport:connected', listener)
-      return () => ipcRenderer.removeListener('transport:connected', listener)
-    },
     // Translucent (vibrancy) window appearance — macOS only. `get` is the snapshot
     // for the initial [data-vibrancy] CSS state; `set` flips it live and persists.
     vibrancy: {
       get: (): Promise<boolean> => ipcRenderer.invoke('window:getVibrancy'),
       set: (on: boolean): Promise<void> => ipcRenderer.invoke('window:setVibrancy', on)
     },
-    // Attach this window to a remote Rookery server — the UI stays native, but
-    // every workspace channel (projects, sessions, terminals, files) rides a
-    // WebSocket to the server until "Detach from server" (⌘⌥D / palette / chip).
-    // `getUrl` prefills the attach prompt with the last server used;
-    // `getAttached` is the current target (null when running locally).
-    // The machines this window can run on. Single-entry (this one) unless the
-    // preload attached to remote backends.
-    backends: backends ?? {
+    // The machines this window can run on.
+    backends: {
       list: (): BackendInfo[] => [
         { id: 'local', label: host.homeDir.split('/').pop() || 'local', homeDir: host.homeDir, remote: false }
-      ],
-      current: (): string => 'local',
-      use: (): void => {},
-      /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-      invoke: (_id: string, channel: string, ...args: any[]): Promise<any> => ipcRenderer.invoke(channel, ...args)
+      ]
     },
-    server: {
-      getUrl: (): Promise<string> => ipcRenderer.invoke('server:getUrl'),
-      getAttached: (): Promise<string | null> => ipcRenderer.invoke('server:getAttached'),
-      attach: (url: string): Promise<void> => ipcRenderer.invoke('server:attach', url),
-      // No target = detach every backend; a target detaches just that one.
-      detach: (target?: string): Promise<void> => ipcRenderer.invoke('server:detach', target),
-      // Pulled once on mount: if boot-time attach fell back to local (SSH tunnel
-      // failed) this returns a message to toast (then null), so the local project
-      // list isn't silently mistaken for the server's.
-      getAttachFallback: (): Promise<string | null> => ipcRenderer.invoke('server:getAttachFallback')
-    },
-    // Open Rookery at login — OS login-item list (Settings → General).
+    // Open Floe at login — OS login-item list (Settings → General).
     loginItem: {
       get: (): Promise<boolean> => ipcRenderer.invoke('app:getLoginItem'),
       set: (on: boolean): Promise<void> => ipcRenderer.invoke('app:setLoginItem', on)
     },
+    // First name to greet the user by on the launcher (see main's `user:name`).
+    userName: (): Promise<string> => ipcRenderer.invoke('user:name'),
     // Settings read-only detection (Claude CLI binary/version, gh auth state).
     settingsProbe: (): Promise<{
       claude: { path: string | null; version: string | null }
@@ -255,10 +209,32 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
     keybindings: {
       load: (): Promise<KeybindingsConfig> => ipcRenderer.invoke('keybindings:load'),
       reveal: (): Promise<void> => ipcRenderer.invoke('keybindings:reveal'),
+      rebind: (command: string, chord: string): Promise<void> =>
+        ipcRenderer.invoke('keybindings:rebind', command, chord),
+      reset: (): Promise<string> => ipcRenderer.invoke('keybindings:reset'),
       onChange: (cb: () => void): (() => void) => {
         const listener = (): void => cb()
         ipcRenderer.on('keybindings:changed', listener)
         return () => ipcRenderer.removeListener('keybindings:changed', listener)
+      }
+    },
+    // Settings, backed by ~/.config/floe/floe.toml. `set` writes through the
+    // surgical TOML editor, so a change made here comes back as one changed value
+    // in a file whose comments and layout are untouched — the same file the user
+    // (or an agent) edits by hand. `errors` is every config file's problems in one
+    // list, and `onChange` fires when anything under the config dir is saved.
+    config: {
+      get: (): Promise<FloeConfig> => ipcRenderer.invoke('config:get'),
+      set: (table: string, key: string, value: TomlValue): Promise<FloeConfig> =>
+        ipcRenderer.invoke('config:set', table, key, value),
+      errors: (): Promise<ConfigError[]> => ipcRenderer.invoke('config:errors'),
+      paths: (): Promise<{ dir: string; floe: string; projects: string }> =>
+        ipcRenderer.invoke('config:paths'),
+      reveal: (path?: string): Promise<string> => ipcRenderer.invoke('config:reveal', path),
+      onChange: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('config:changed', listener)
+        return () => ipcRenderer.removeListener('config:changed', listener)
       }
     },
     projects: {
@@ -267,6 +243,9 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
       addGroup: (name: string): Promise<string[]> => ipcRenderer.invoke('projects:addGroup', name),
       renameGroup: (oldName: string, newName: string): Promise<{ groups: string[]; projects: Project[] }> =>
         ipcRenderer.invoke('projects:renameGroup', oldName, newName),
+      // Its projects fall back to the default group rather than going with it.
+      deleteGroup: (name: string): Promise<{ groups: string[]; projects: Project[] }> =>
+        ipcRenderer.invoke('projects:deleteGroup', name),
       rename: (path: string, newName: string): Promise<Project[]> =>
         ipcRenderer.invoke('projects:rename', path, newName),
       add: (group?: string): Promise<{ project?: Project; error?: string }> =>
@@ -473,40 +452,11 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
         return () => ipcRenderer.removeListener('claude:auth:event', listener)
       }
     },
-    // Internal MCP control server (Claude drives Rookery from inside a session).
-    // Tools that mutate state run in main; UI-driving tools are pushed here as a
-    // `mcp:command`, and every tool fires an `mcp:activity` for the visible chip.
-    // `create_session` is the only command that needs a reply, sent back over
-    // `mcp:command-result` so the waiting tool learns the new session id.
-    mcp: {
-      onCommand: (cb: (command: McpCommand) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, command: McpCommand): void => cb(command)
-        ipcRenderer.on('mcp:command', listener)
-        return () => ipcRenderer.removeListener('mcp:command', listener)
-      },
-      onActivity: (cb: (activity: McpActivity) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, activity: McpActivity): void => cb(activity)
-        ipcRenderer.on('mcp:activity', listener)
-        return () => ipcRenderer.removeListener('mcp:activity', listener)
-      },
-      commandResult: (result: McpCommandResult): Promise<void> =>
-        ipcRenderer.invoke('mcp:command-result', result),
-      // Register Rookery's MCP server in the user's global Claude config so any
-      // claude session (in-app or a plain terminal) gets the rookery tools.
-      installGlobal: (): Promise<{ ok: boolean; message: string }> =>
-        ipcRenderer.invoke('mcp:installGlobal'),
-      // The Fleet dashboard's read token for THIS backend (docs/fleet.md). Not
-      // pinned: when attached, the token you need is the remote one, because
-      // that's the instance whose agents Fleet is reading.
-      fleetToken: (): Promise<{ token: string; port: number }> => ipcRenderer.invoke('fleet:token')
-    },
     // Embedded browser pane — a native WebContentsView the renderer positions
-    // over its browser area. UI-kind (always this window); remote worktree app
-    // ports are transparently SSH-forwarded by the main process when attached.
+    // over its browser area.
     browser: {
       open: (url: string): Promise<BrowserPaneState> => ipcRenderer.invoke('browser:open', url),
-      // Render a local file (absolute path on whichever machine backs the
-      // workspace) — file:// detached, the server's /rk-file over SSH attached.
+      // Render a local file (absolute path) as file://.
       openFile: (absPath: string): Promise<BrowserPaneState> => ipcRenderer.invoke('browser:openFile', absPath),
       navigate: (url: string): Promise<void> => ipcRenderer.invoke('browser:navigate', url),
       back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
@@ -517,8 +467,7 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
         ipcRenderer.invoke('browser:setBounds', b),
       setVisible: (visible: boolean): Promise<void> => ipcRenderer.invoke('browser:setVisible', visible),
       close: (): Promise<void> => ipcRenderer.invoke('browser:close'),
-      // The worktree's own APP_URL from its .env, if any — not UI-kind, follows
-      // the attach target since that's where the worktree's files actually live.
+      // The worktree's own APP_URL from its .env, if any.
       defaultUrl: (worktreePath: string): Promise<string | null> =>
         ipcRenderer.invoke('browser:defaultUrl', worktreePath),
       onEvent: (cb: (state: BrowserPaneState) => void): (() => void) => {
@@ -533,10 +482,6 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
         ipcRenderer.on('browser:key', listener)
         return () => ipcRenderer.removeListener('browser:key', listener)
       }
-    },
-    // Install the `rookery` shell CLI so `rookery .` opens a folder in the app.
-    cli: {
-      install: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('cli:install')
     },
     slash: {
       list: (worktreePath: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', worktreePath)
@@ -854,7 +799,7 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
       }
     },
     // The worktree this app instance is running in. Prefer the explicit env set by
-    // Rookery's dev runner; otherwise derive it from the launch path — the segment
+    // Floe's dev runner; otherwise derive it from the launch path — the segment
     // after `.worktrees/`. Stays null on the main checkout, so the badge only shows
     // when this really is a worktree.
     tag: host.worktreeTag
@@ -862,4 +807,4 @@ export function buildRookeryApi(ipcRenderer: IpcLike, host: RookeryHost, backend
   return api
 }
 
-export type RookeryApi = ReturnType<typeof buildRookeryApi>
+export type FloeApi = ReturnType<typeof buildFloeApi>

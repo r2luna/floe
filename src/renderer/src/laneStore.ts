@@ -18,7 +18,7 @@ import type { Lane, Panel } from './lane'
 // fidelity ever matters, move `save` behind an IPC call that writes
 // <userData>/lane.json, which is durable the moment it returns.
 
-const KEY = 'rookery.lane'
+const KEY = 'floe.lane'
 const VERSION = 1
 
 // Panels left of the session belong to the window (which project, which

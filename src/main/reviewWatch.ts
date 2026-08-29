@@ -9,7 +9,7 @@ const exec = promisify(execFile)
 
 // Single live watcher set on the active worktree, so the changed-files list (and
 // the Changes tab badge) refresh as files are edited — by Claude or in the user's
-// own editor — without waiting for the agent turn to finish. Rookery is a
+// own editor — without waiting for the agent turn to finish. Floe is a
 // single-window app, so one set, retargeted as the user switches worktree, is
 // enough. fs.watch fires several events per save, so each refresh is debounced.
 let watchers: FSWatcher[] = []
@@ -47,7 +47,7 @@ function isNoise(filename: string | null): boolean {
     f === 'node_modules' ||
     f.startsWith('node_modules/') ||
     f.includes('/node_modules/') ||
-    f.startsWith('.rookery/')
+    f.startsWith('.floe/')
   )
 }
 
@@ -84,7 +84,7 @@ export async function watchChanges(wc: WebContents, worktreePath: string): Promi
   watchedPath = worktreePath
 
   // The git dir — catches commits/staging/resets/checkouts done in the terminal.
-  // For a linked worktree (Rookery's whole purpose) `.git` is a file, and HEAD,
+  // For a linked worktree (Floe's whole purpose) `.git` is a file, and HEAD,
   // index, ORIG_HEAD live OUTSIDE the working tree under the main repo's
   // `.git/worktrees/<name>/`, which the recursive watcher above never sees. The
   // common dir (shared `packed-refs`, `refs/heads`) is separate again. Watch both

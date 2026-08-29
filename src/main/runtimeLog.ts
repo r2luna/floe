@@ -5,7 +5,7 @@ import type { TranscriptItem } from './claudeSessions'
 
 // The conversation, for runtimes that keep none.
 //
-// Claude writes its own JSONL and Rookery just reads it. Codex writes rollouts
+// Claude writes its own JSONL and Floe just reads it. Codex writes rollouts
 // it will not let us resume by our own id, and gemini, opencode and LM Studio
 // write nothing at all — so a session answered by any of them looked empty the
 // moment you reopened it. This is the missing half: one line per message, in
@@ -23,7 +23,7 @@ const dir = (): string => {
   return path
 }
 
-/** One session's log. The id is Rookery's own, which is what the panel has. */
+/** One session's log. The id is Floe's own, which is what the panel has. */
 const fileFor = (sessionId: string): string =>
   join(dir(), `${sessionId.replace(/[^\w.-]/g, '_')}.jsonl`)
 

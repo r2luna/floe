@@ -257,7 +257,7 @@ function spawnProc(win: BrowserWindow, key: string, cwd: string, branch: string,
     cols: size.cols,
     rows: size.rows,
     cwd,
-    env: { ...process.env, ROOKERY_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
+    env: { ...process.env, FLOE_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
   })
   const run: Run = { proc, buffer: prev?.buffer ?? '', running: true, superseded: false, startedAt: Date.now() }
   runs.set(key, run)

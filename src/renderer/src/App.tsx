@@ -1,5 +1,4 @@
 import {
-  IconChevronRight,
   IconLayoutColumns,
   IconLayoutRows,
   IconX
@@ -10,6 +9,7 @@ import type { Lane, Panel } from './lane'
 import {
   clearSize,
   close,
+  closePanel,
   columnsOf,
   focusAt,
   laneOf,
@@ -21,7 +21,7 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, PANEL_KIND_LIST, PanelBody, type PanelKind } from './panels'
+import { KINDS, PANEL_KIND_LIST, PanelBody, needsProject, needsWorktree, type PanelKind } from './panels'
 import { resolveKey } from './keys'
 import { runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
@@ -34,7 +34,8 @@ import {
   sessionKeyOf,
   withScoped
 } from './laneStore'
-import { formatChord, loadOverrides, resolveOverride, saveOverrides } from './keybindings'
+import { setKeymap } from './keys'
+import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
 import { NewWorktree } from './NewWorktree'
@@ -43,7 +44,7 @@ import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
 import { useMenuItems } from './useMenuItems'
 import type { PaletteItem } from './fuzzy'
-import type { ContextUsage } from '../../shared/types'
+import { DEFAULT_GROUP, type ContextUsage } from '../../shared/types'
 
 
 const panelOf = (
@@ -318,6 +319,28 @@ export default function App() {
   // The worktrees of whichever project is current — switching project reloads
   // them, so the panel never shows a list belonging to somewhere else.
   const worktrees = useWorktrees(projects.current?.path)
+  // Nothing to work on. useProjects lands on the first project by itself, so
+  // this is only ever true on an empty install — no project has been added, or
+  // the last one was removed. A worktrees panel there is an empty list under a
+  // title; the launcher reads as an invitation instead, and its chat runs in the
+  // home directory, which is the right cwd for a question about no project.
+  const stranded = !projects.loading && !projects.current
+  // Only on a CHANGE, so a restored lane survives boot untouched: the mount pass
+  // strands if there is nothing (there is no lane worth keeping then) and
+  // otherwise leaves the lane exactly as it was saved. Crossing back — the first
+  // project gets added — hands over to its worktrees, or adding a project would
+  // leave you sitting on the launcher wondering where it went.
+  const wasStranded = useRef<boolean | null>(null)
+  useEffect(() => {
+    const before = wasStranded.current
+    wasStranded.current = stranded
+    if (before === null) {
+      if (stranded) setLane(() => laneOf(panelOf('branch')))
+      return
+    }
+    if (before === stranded) return
+    setLane(() => laneOf(panelOf(stranded ? 'branch' : 'worktrees')))
+  }, [stranded])
   const current = worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)
   // What that worktree has changed, watched so an agent editing behind the UI
   // shows up without a click.
@@ -328,9 +351,9 @@ export default function App() {
   // process only applies it while the title is still a placeholder and the
   // user hasn't renamed it — reload just picks up whatever it decided.
   useEffect(() => {
-    return window.rookery.agent.onEvent(({ key, event }) => {
+    return window.floe.agent.onEvent(({ key, event }) => {
       if (event.kind !== 'done') return
-      void window.rookery.claude.adoptAiTitle(key).then((title) => {
+      void window.floe.claude.adoptAiTitle(key).then((title) => {
         if (title) worktrees.reload()
       })
     })
@@ -345,10 +368,39 @@ export default function App() {
   const [findPos, setFindPos] = useState<{ at: number; total: number } | null>(null)
 
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // A one-off palette the group commands drive. Same component as the project
+  // and command lists — it already does filtering, keyboard nav and the "create
+  // what you typed" row — so a picker is a piece of state, not a new overlay.
+  // `onPick` may open the next one, which is how the two-step move works.
+  const [picker, setPicker] = useState<{
+    placeholder: string
+    items: PaletteItem[]
+    dynamic?: (query: string) => PaletteItem | null
+    onPick: (id: string) => void
+  } | null>(null)
   const [commandsOpen, setCommandsOpen] = useState(false)
-  // User keybindings. Read once at boot and kept in state so a rebind repaints
-  // the palette's key chips immediately, without a reload.
-  const [overrides, setOverrides] = useState(loadOverrides)
+  // The keymap, read from ~/.config/floe/keybindings.toml. It is the whole map,
+  // not a set of overrides — the main process generates the file with every
+  // default in it — so installing it REPLACES what resolveKey walks rather than
+  // layering onto it. Kept in state as well so the palette's key chips repaint
+  // when a rebind (or an edit to the file) changes them.
+  const [binds, setBinds] = useState<Keybind[]>([])
+  useEffect(() => {
+    const load = (): void => {
+      void window.floe.keybindings.load().then((config) => {
+        // `usingDefaults` means the file could not be trusted (a typo, an unknown
+        // command, a `when` that does not compile) and the main process fell back
+        // to the built-in table for ALL of it. Installing what it sends is right
+        // either way — it sends the defaults in that case.
+        setKeymap(compileKeymap(config.binds))
+        setBinds(config.binds)
+      })
+    }
+    load()
+    // Saving the file — by hand, from an agent, or through a rebind — reloads it,
+    // so a new binding works on the next key press without a restart.
+    return window.floe.keybindings.onChange(load)
+  }, [])
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
@@ -410,9 +462,17 @@ export default function App() {
     worktrees.select(want)
   }, [worktrees])
 
-  // Delete the session the lane is showing. "Delete" is Rookery's record of it:
+  // Delete the session the lane is showing. "Delete" is Floe's record of it:
   // the Claude transcript stays on disk and `claude --resume` still finds it,
   // which is why the confirm says so rather than implying the words are gone.
+  // Some panels list a project's branches; others read the checked-out tree — git
+  // status, the file list, a patch. Without the thing they read there is nothing
+  // to show, so they can't be opened at all: better than opening one onto an
+  // empty list or an error.
+  const canOpen = (kind: string): boolean =>
+    (!needsProject(kind) || !!projects.current) &&
+    (!needsWorktree(kind) || !!worktrees.currentPath)
+
   const deleteSession = (scope: 'one' | 'others' | 'all' = 'one') => {
     const at = lane.panels.findIndex((p) => p.session)
     const panel = lane.panels[at]
@@ -435,11 +495,11 @@ export default function App() {
       const claudeId = worktrees.rows.flatMap((r) => r.sessions).find((s) => s.id === id)?.claudeId
       const name = panel.sub ?? 'this session'
       if (
-        !window.confirm(`Delete "${name}"? Rookery forgets it — the Claude transcript stays on disk.`)
+        !window.confirm(`Delete "${name}"? Floe forgets it — the Claude transcript stays on disk.`)
       )
         return
-      void window.rookery.claude.closeSession({ id, worktreePath, claudeId }).then(() => {
-        setLane((l) => close(l, at))
+      void window.floe.claude.closeSession({ id, worktreePath, claudeId }).then(() => {
+        setLane((l) => closePanel(l, at, () => panelOf('branch')))
         worktrees.reload()
       })
       return
@@ -453,14 +513,14 @@ export default function App() {
         : `all ${targets.length} session${targets.length > 1 ? 's' : ''}`
     if (
       !window.confirm(
-        `Delete ${what} on this worktree? Rookery forgets them — the Claude transcripts stay on disk.`
+        `Delete ${what} on this worktree? Floe forgets them — the Claude transcripts stay on disk.`
       )
     )
       return
     const gone = new Set(targets.flatMap((s) => [s.id, s.claudeId].filter(Boolean) as string[]))
     void Promise.all(
       targets.map((s) =>
-        window.rookery.claude.closeSession({ id: s.id, worktreePath: path, claudeId: s.claudeId })
+        window.floe.claude.closeSession({ id: s.id, worktreePath: path, claudeId: s.claudeId })
       )
     ).then(() => {
       // Close every panel showing one of them — indices shift as we go, so
@@ -470,7 +530,7 @@ export default function App() {
         for (;;) {
           const i = next.panels.findIndex((p) => p.session && gone.has(p.session.id))
           if (i === -1) return next
-          next = close(next, i)
+          next = closePanel(next, i, () => panelOf('branch'))
         }
       })
       worktrees.reload()
@@ -677,6 +737,7 @@ export default function App() {
     panelEl: panelAt,
     rowsOf,
     makePanel: (kind, sub) => mkPanel(kind as PanelKind, sub),
+    canOpen,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
     patchFor: () => lastPatch.current,
@@ -687,6 +748,33 @@ export default function App() {
     openFind: () => setFinding(lastFind.current),
     findNext: (dir) => findFrom(lastFind.current, dir)?.focus(),
     addProject: () => setAdding(true),
+    createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
+    // Two steps, deliberately: which project, then where to. Reading the project
+    // off "whatever is current" would file the wrong one whenever the rail and
+    // the lane disagree.
+    moveProject: () =>
+      setPicker({
+        placeholder: 'Move which project?',
+        items: projects.all.map((p) => ({ id: p.path, title: p.name, detail: p.group })),
+        onPick: (path) =>
+          pickGroup('Move to which group?', {
+            create: true,
+            onPick: (g) => void projects.setGroup(path, g)
+          })
+      }),
+    deleteGroup: () =>
+      pickGroup('Delete which group?', {
+        // The default is where deleted groups send their projects, so it can't
+        // be one of the things you delete.
+        omitDefault: true,
+        onPick: (g) => {
+          const count = projects.all.filter((p) => p.group === g).length
+          const moved = count
+            ? ` Its ${count === 1 ? 'project moves' : `${count} projects move`} to ${DEFAULT_GROUP}.`
+            : ''
+          if (window.confirm(`Delete the group "${g}"?${moved}`)) void projects.deleteGroup(g)
+        }
+      }),
     worktree: current && { path: current.worktree.path, branch: current.worktree.branch },
     deleteSession,
     cycleSession,
@@ -697,7 +785,7 @@ export default function App() {
       if (!projects.current) return
       // Branches with no worktree yet: checking one out is a valid answer, and
       // offering one that is already open would create a worktree git refuses.
-      void window.rookery.worktrees
+      void window.floe.worktrees
         .branches(projects.current.path)
         .then((all) => {
           const taken = new Set(worktrees.rows.map((r) => r.worktree.branch))
@@ -707,17 +795,6 @@ export default function App() {
       setNewWt(true)
     }
   }
-
-  // Claude drives Rookery through the same registry the keyboard uses. The
-  // transport already existed (main pushes `mcp:command`); this is the renderer
-  // end of `run_command`.
-  useEffect(() => {
-    return window.rookery.mcp.onCommand((command) => {
-      if (command.kind !== 'run_command') return
-      const res = runCommand(REGISTRY, ctxRef.current, command.commandId, command.arg)
-      if (!res.ok) console.warn('[mcp]', res.error)
-    })
-  }, [])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -739,10 +816,7 @@ export default function App() {
       // An overlay owns the keyboard while it is up — including the user's own
       // bindings, or ⌘↵ inside the palette would fire a command behind it.
       const blocked = paletteOpen || commandsOpen || adding || newWt || finding !== null
-      // What the user bound wins over the built-in map. Checked first so a
-      // rebind onto a chord the app already uses actually takes effect.
       const action =
-        (blocked ? null : resolveOverride(input, overrides)) ??
         resolveKey(input, {
           typing,
           chord: chord.current,
@@ -767,14 +841,43 @@ export default function App() {
 
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [lane, paletteOpen, commandsOpen, adding, newWt, finding, overrides])
+    // No keymap dependency: resolveKey reads the installed bindings at call
+    // time, so a reload takes effect on the next press without rebinding this
+    // listener.
+  }, [lane, paletteOpen, commandsOpen, adding, newWt, finding])
+
+  // Every group command asks the same question, so they ask it the same way.
+  // `create` adds the "New group <name>" row built from the query — the one row
+  // that cannot come from the list, because it IS what you typed.
+  const pickGroup = (
+    placeholder: string,
+    opts: { create?: boolean; omitDefault?: boolean; onPick: (group: string) => void }
+  ): void => {
+    const names = projects.groupNames.filter((g) => !opts.omitDefault || g !== DEFAULT_GROUP)
+    setPicker({
+      placeholder,
+      items: names.map((g) => ({ id: g, title: g })),
+      dynamic: opts.create
+        ? (query) => {
+            const name = query.trim()
+            // Nothing typed, or it already exists — the plain row covers it.
+            return name && !names.includes(name)
+              ? { id: name, title: `New group “${name}”`, detail: 'create' }
+              : null
+          }
+        : undefined,
+      onPick: opts.onPick
+    })
+  }
 
   // The rail opens a tool; the lane decides where it sits.
-  const openFromRail = (kind: PanelKind) => setLane((l) => open(l, mkPanel(kind)))
+  const openFromRail = (kind: PanelKind) => {
+    if (!canOpen(kind)) return
+    setLane((l) => open(l, mkPanel(kind)))
+  }
 
   return (
     <div className="app">
-      <Titlebar crumbs={['DevSquad', 'rookery-rust', 'master', 'Session 1']} />
       <div className="workspace">
         <div className="lane" ref={laneRef}>
           {/* Columns, not panels: a docked panel shares its neighbour's column
@@ -834,6 +937,25 @@ export default function App() {
             const spec = KINDS[kind]
             const Icon = spec.icon
             const bare = 'bare' in spec && spec.bare
+            // The worktrees list is always the current project's, so the header
+            // names it — and reads from the live selection, not a sub captured
+            // when the panel was opened, which would go stale on the next switch.
+            const sub =
+              kind === 'worktrees'
+                ? projects.current?.name
+                : // A chat's header spells out where it lives: project/worktree/session.
+                  // The branch comes from the live list keyed by the session's worktree
+                  // path, so a renamed or moved session still reads correctly.
+                  kind === 'chat'
+                  ? [
+                      projects.current?.name,
+                      worktrees.rows.find((r) => r.worktree.path === panel.session?.worktreePath)
+                        ?.worktree.branch,
+                      panel.sub
+                    ]
+                      .filter(Boolean)
+                      .join('/')
+                  : panel.sub
             return (
               <section
                 key={panel.id}
@@ -880,11 +1002,11 @@ export default function App() {
                   <header className="panel-head">
                     <Icon size={14} stroke={1.6} className="panel-icon" />
                     <span className="panel-name">{panel.title}</span>
-                    {panel.sub && (
-                      <span className="panel-sub" title={panel.sub}>
+                    {sub && (
+                      <span className="panel-sub" title={sub}>
                         {/* A terminal's sub is an absolute path — too wide for a header,
                             and the last segment is the part you read anyway. */}
-                        {panel.kind === 'terminal' ? panel.sub.split('/').pop() : panel.sub}
+                        {panel.kind === 'terminal' ? sub.split('/').pop() : sub}
                       </span>
                     )}
                     {usage[panel.id]?.used > 0 && <ContextMeter usage={usage[panel.id]} />}
@@ -919,7 +1041,7 @@ export default function App() {
                       <button
                         className="panel-act"
                         title="Close (⌘W)"
-                        onClick={() => setLane((l) => close(l, i))}
+                        onClick={() => setLane((l) => closePanel(l, i, () => panelOf('branch')))}
                       >
                         <IconX size={13} stroke={1.6} />
                       </button>
@@ -945,6 +1067,10 @@ export default function App() {
                       )
                     }
                     menuItems={menuItems}
+                    // Same command the palette and the projects panel's header
+                    // button run — the launcher's empty state is one more way in,
+                    // not a second add flow.
+                    onAddProject={() => runCommand(REGISTRY, ctxRef.current, 'project.add')}
                     session={panel.session}
                     openSession={sessionKey}
                     // Only the panel the bar is searching: a query tinting rows
@@ -1023,8 +1149,19 @@ export default function App() {
         <nav className="rail">
           {PANEL_KIND_LIST.map((kind) => {
             const Icon = KINDS[kind].icon
+            const off = !canOpen(kind)
             return (
-              <button key={kind} className="rail-btn" title={KINDS[kind].title} onClick={() => openFromRail(kind)}>
+              <button
+                key={kind}
+                className="rail-btn"
+                // Dimmed and inert rather than hidden: the rail's shape is how
+                // you learn what the app has, and a row that reshuffles as you
+                // move around is harder to aim at than one that greys out.
+                data-off={off || undefined}
+                disabled={off}
+                title={off ? `${KINDS[kind].title} — select a worktree first` : KINDS[kind].title}
+                onClick={() => openFromRail(kind)}
+              >
                 <Icon size={17} stroke={1.5} />
               </button>
             )
@@ -1040,7 +1177,7 @@ export default function App() {
           onClose={() => setNewWt(false)}
           onCreate={({ branch, base, resetBranch }) => {
             setNewWt(false)
-            void window.rookery.worktrees
+            void window.floe.worktrees
               .create(projects.current!.path, branch, { base, resetBranch })
               .then((list) => {
                 worktrees.reload()
@@ -1059,14 +1196,14 @@ export default function App() {
 
       {adding && (
         <AddProject
-          backends={window.rookery.backends?.list() ?? []}
+          backends={window.floe.backends?.list() ?? []}
           groups={projects.groupNames}
           group={projects.current?.group}
           // No native picker in the web build: the headless backend's dialog is
           // a stub that always cancels, so offering Browse there would be a
           // button that does nothing. `version` is 'web' only in that build.
           onBrowse={
-            window.rookery.version === 'web'
+            window.floe.version === 'web'
               ? null
               : (group) => {
                   setAdding(false)
@@ -1081,23 +1218,37 @@ export default function App() {
         />
       )}
 
+      {picker && (
+        <Palette
+          placeholder={picker.placeholder}
+          items={picker.items}
+          dynamic={picker.dynamic}
+          onClose={() => setPicker(null)}
+          onPick={(id) => {
+            // Cleared first: onPick may open the next step, and clearing after
+            // would close the one it just put up.
+            setPicker(null)
+            picker.onPick(id)
+          }}
+        />
+      )}
       {commandsOpen && (
         <Palette
           placeholder="Execute a command…"
-          items={commandItems(overrides)}
+          items={commandItems(binds)}
           onClose={() => setCommandsOpen(false)}
           onPick={(id) => {
             setCommandsOpen(false)
             const res = runCommand(REGISTRY, ctxRef.current, id)
             if (!res.ok) console.debug('[command]', res.error)
           }}
-          onRebind={(id, chord) =>
-            setOverrides((prev) => {
-              const next = { ...prev, [id]: chord }
-              saveOverrides(next)
-              return next
-            })
-          }
+          onRebind={(id, chord) => {
+            // Written through to the file, which is the keymap — so the change
+            // is in the same place the user would have made it by hand, and
+            // survives a restart without a second store to keep in sync. The
+            // watcher below reloads and repaints once the write lands.
+            void window.floe.keybindings.rebind(id, chord)
+          }}
         />
       )}
 
@@ -1146,26 +1297,15 @@ function paletteItems(projects: ReturnType<typeof useProjects>): PaletteItem[] {
  * typing either half finds it. The key chip shows the user's binding when they
  * have set one, because that is the one that will fire.
  */
-function commandItems(overrides: Record<string, string>): PaletteItem[] {
+function commandItems(binds: Keybind[]): PaletteItem[] {
+  // The chip shows the binding that will actually fire: the FIRST entry for the
+  // command, since resolution is first-match-wins.
+  const bound = new Map<string, string>()
+  for (const b of binds) if (!bound.has(b.command)) bound.set(b.command, b.key)
   return listCommands(REGISTRY).map((c) => ({
     id: c.id,
     title: `${c.group.toLowerCase()}: ${c.title.replace(/…$/, '').toLowerCase()}`,
-    keys: overrides[c.id] ? formatChord(overrides[c.id]) : c.keys
+    keys: bound.has(c.id) ? formatChord(bound.get(c.id)!) : c.keys
   }))
-}
-
-function Titlebar({ crumbs }: { crumbs: string[] }) {
-  return (
-    <header className="titlebar">
-      <nav className="crumbs">
-        {crumbs.map((c, i) => (
-          <span className="crumb" key={c} data-last={i === crumbs.length - 1 || undefined}>
-            {i > 0 && <IconChevronRight size={12} stroke={1.8} className="crumb-sep" />}
-            {c}
-          </span>
-        ))}
-      </nav>
-    </header>
-  )
 }
 

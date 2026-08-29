@@ -5,6 +5,7 @@ import { appendFileSync } from 'node:fs'
 import { resolve, relative, isAbsolute, sep } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { appendScrollback, newScrollback, type Scrollback } from './terminalBuffer'
+import { floeConfig } from './config/floe'
 
 export type TerminalEvent =
   | { id: string; kind: 'data'; data: string }
@@ -34,12 +35,16 @@ const terms = new Map<string, Term>()
 // DECSET 2031 depois (fish que bootou antes do tema chegar até nós).
 let lastKnownDark: boolean | null = null
 
-// The user's default login shell — same one they'd get in a real terminal (e.g.
-// fish). The OS user record (dscl/getent) is authoritative: `process.env.SHELL`
-// can be stale or plain wrong (e.g. inherited as /bin/zsh from whatever launched
-// the app), so we trust the system record first and only fall back to $SHELL.
+// The shell the terminal panel opens. `[terminal] shell` in floe.toml wins when
+// set; otherwise it's the user's default login shell — the same one they'd get
+// in a real terminal (e.g. fish). The OS user record (dscl/getent) is
+// authoritative over `process.env.SHELL`, which can be stale or plain wrong
+// (e.g. inherited as /bin/zsh from whatever launched the app), so we trust the
+// system record first and only fall back to $SHELL.
 let cachedShell: string | undefined
 function userShell(): string {
+  const configured = floeConfig().terminal.shell
+  if (configured) return configured
   if (cachedShell) return cachedShell
   if (process.platform === 'win32') {
     cachedShell = process.env.COMSPEC || 'powershell.exe'
@@ -101,10 +106,10 @@ function loginShellFromSystem(): string | undefined {
   }
 }
 
-// TEMPORARY diagnostic (ROOKERY_PTY_TAP=<file>): timestamped log of every byte a
+// TEMPORARY diagnostic (FLOE_PTY_TAP=<file>): timestamped log of every byte a
 // PTY emits, every answer we inject, and the open/replay/resize/write calls — to
 // find why fish's DA1 goes unanswered on a return to Home. Remove once fixed.
-const TAP = process.env.ROOKERY_PTY_TAP
+const TAP = process.env.FLOE_PTY_TAP
 function tap(id: string, kind: string, data: string): void {
   if (!TAP) return
   try {
@@ -157,7 +162,7 @@ export function openTerminal(
     cols: cols || 80,
     rows: rows || 24,
     cwd: dir,
-    env: { ...process.env, ROOKERY_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
+    env: { ...process.env, FLOE_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
   })
 
   const term: Term = { proc, cwd: dir, scrollback: newScrollback(), pending: '' }
@@ -232,7 +237,7 @@ export function openEditor(
     cols: cols || 80,
     rows: rows || 24,
     cwd: dir,
-    env: { ...process.env, ROOKERY_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
+    env: { ...process.env, FLOE_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
   })
 
   const term: Term = { proc, cwd: dir, scrollback: newScrollback(), pending: '' }

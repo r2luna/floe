@@ -8,9 +8,9 @@ import type { BrowserWindow } from 'electron'
 import type { AgentEvent, AgentRunOptions } from '../shared/types'
 import type { Conn } from './agent.ts'
 
-// agent.ts imports mcpServer/sessionStore (which import `electron`) and value
+// agent.ts imports sessionStore (which import `electron`) and value
 // imports from ../shared/types — none resolvable by raw Node ESM. Register the
-// same hermetic hook codex.test.ts/mcpServer.test.ts use (rewrite extensionless
+// same hermetic hook codex.test.ts uses (rewrite extensionless
 // `./x` → `./x.ts`, stub `electron`) before importing agent, so this
 // pure-function/handler test can load it.
 const hookSource = `
@@ -65,7 +65,7 @@ const { addCreatedSession, setCreatedSessionSpawnedBy } = await import('./sessio
 
 // Point the persistent stores at a throwaway dir — the spawned-session test seeds
 // a real sessions.json and must not touch the machine's store.
-setSharedDataDir(mkdtempSync(join(tmpdir(), 'rookery-agent-test-')))
+setSharedDataDir(mkdtempSync(join(tmpdir(), 'floe-agent-test-')))
 
 // A window whose send() captures the emitted AgentEvents so handler tests can
 // assert on what reached the renderer.

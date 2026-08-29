@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // git.ts uses extensionless relative imports (and its graph touches `electron`),
 // neither of which raw Node ESM resolves. Register the same in-memory hook the
-// mcpServer test uses: rewrite `./x` → `./x.ts` and stub `electron`.
+// the other main tests use: rewrite `./x` → `./x.ts` and stub `electron`.
 const hookSource = `
 import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -46,7 +46,7 @@ const g = (cwd: string, ...args: string[]): string =>
 // git refuses for a branch in use). Regression for the "cannot force update the
 // branch used by worktree" bug.
 test('fast-forwards base checked out in a linked worktree', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-git-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-git-'))
   try {
     g(root, 'init', '-q', '-b', 'trunk')
     g(root, 'config', 'user.email', 't@t')
@@ -76,7 +76,7 @@ test('fast-forwards base checked out in a linked worktree', async () => {
 // old base sticks. `resetBranch` is the only way to rebuild it somewhere else —
 // regression for "não consigo trocar a base do worktree".
 test('createWorktree reuses an existing branch, or resets it onto a new base', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-git-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-git-'))
   try {
     g(root, 'init', '-q', '-b', 'trunk')
     g(root, 'config', 'user.email', 't@t')

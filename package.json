@@ -1,5 +1,5 @@
 {
-  "name": "rookery",
+  "name": "floe",
   "version": "5.24.0",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
@@ -15,9 +15,8 @@
     "test": "node --test --test-reporter spec 'src/**/*.test.ts'",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
-    "build:server": "node scripts/build-server.mjs && electron-vite build",
     "release": "electron-vite build && electron-builder --mac --publish always",
-    "install:local": "rm -rf /Applications/Rookery.app && cp -R dist/mac-arm64/Rookery.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Rookery.app && echo 'Rookery instalado em /Applications — abra com duplo-clique.'",
+    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications — abra com duplo-clique.'",
     "postinstall": "electron-rebuild -f -w node-pty,better-sqlite3"
   },
   "dependencies": {
@@ -44,6 +43,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "shiki": "^4.2.0",
+    "smol-toml": "^1.8.0",
     "tiptap-markdown": "^0.8.10",
     "ws": "^8.21.0",
     "zod": "4.4.3"

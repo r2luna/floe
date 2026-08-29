@@ -1,4 +1,4 @@
-// Rookery-managed global Claude Code hooks. Previously the three rookery-*
+// Floe-managed global Claude Code hooks. Previously the three floe-*
 // PreToolUse hooks were hand-installed personal artifacts with no source in
 // this repo — this file makes them app-managed: written to ~/.claude/hooks and
 // merged into ~/.claude/settings.json on every boot, on BOTH targets (desktop +
@@ -11,22 +11,22 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 // Shared ps-ancestry walk every managed hook uses to fire ONLY inside a
-// Rookery-launched session (its argv carries `--allowedTools mcp__rookery` /
-// `--mcp-config .../rookery-mcp-*.json`) — a plain terminal session stays
+// Floe-launched session (its argv carries `--allowedTools mcp__floe` /
+// `--mcp-config .../floe-mcp-*.json`) — a plain terminal session stays
 // untouched.
-const DETECT_ROOKERY = `is_rookery=0
+const DETECT_FLOE = `is_floe=0
 pid=\${PPID:-0}
 hops=0
 while [ "$pid" -gt 1 ] && [ "$hops" -lt 30 ]; do
   args=$(ps -ww -o args= -p "$pid" 2>/dev/null)
   case "$args" in
-    *mcp__rookery*|*rookery-mcp-*) is_rookery=1; break ;;
+    *mcp__floe*|*floe-mcp-*) is_floe=1; break ;;
   esac
   pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
   [ -z "$pid" ] && break
   hops=$((hops + 1))
 done
-[ "$is_rookery" -eq 1 ] || exit 0`
+[ "$is_floe" -eq 1 ] || exit 0`
 
 interface ManagedHook {
   filename: string
@@ -40,17 +40,17 @@ interface ManagedHook {
 // electron-builder vs the esbuild server shim.
 const MANAGED_HOOKS: ManagedHook[] = [
   {
-    filename: 'rookery-block-branch.sh',
+    filename: 'floe-block-branch.sh',
     matcher: 'Bash',
     statusMessage: 'Checking branch-creation policy…',
     script: `#!/usr/bin/env bash
-# Rookery: block branch creation inside a Rookery-launched Claude session.
+# Floe: block branch creation inside a Floe-launched Claude session.
 #
-# When a session spawned by the Rookery app tries to create a NEW branch in the
+# When a session spawned by the Floe app tries to create a NEW branch in the
 # current worktree (git checkout -b / switch -c / branch <name>), this denies the
-# command and steers Claude to spin up a fresh worktree + session via the rookery
+# command and steers Claude to spin up a fresh worktree + session via the floe
 # MCP instead — carrying a summary of the work forward so it continues there.
-# Managed by the Rookery app (src/main/hooks.ts) — edits here are overwritten on
+# Managed by the Floe app (src/main/hooks.ts) — edits here are overwritten on
 # next boot.
 set -u
 
@@ -64,16 +64,16 @@ printf '%s' "$cmd" | grep -Eq \\
   'git[[:space:]].*(checkout[[:space:]]+-[bB]([[:space:]]|$)|switch[[:space:]]+(-[cC]|--create)([[:space:]]|$)|branch[[:space:]]+[^-[:space:]])' \\
   || exit 0
 
-# 2) Only enforce inside a Rookery-launched session.
-${DETECT_ROOKERY}
+# 2) Only enforce inside a Floe-launched session.
+${DETECT_FLOE}
 
-# 3) Block and steer Claude to the rookery MCP worktree+session flow.
+# 3) Block and steer Claude to the floe MCP worktree+session flow.
 read -r -d '' MSG <<'EOF'
 Não crie uma branch nova neste worktree — isso trocaria a branch em que o usuário está trabalhando (main/master/develop) e sequestraria o checkout atual.
 
-Em vez disso, continue o trabalho num worktree separado usando o MCP do Rookery:
-1. mcp__rookery__create_worktree — cria um worktree novo (a branch nova é criada automaticamente nele; não precisa de git checkout -b).
-2. mcp__rookery__create_session — abre uma sessão NESSE worktree e passe um resumo do contexto atual (o que estava sendo feito, decisões já tomadas, próximos passos) para continuar de lá.
+Em vez disso, continue o trabalho num worktree separado usando o MCP do Floe:
+1. mcp__floe__create_worktree — cria um worktree novo (a branch nova é criada automaticamente nele; não precisa de git checkout -b).
+2. mcp__floe__create_session — abre uma sessão NESSE worktree e passe um resumo do contexto atual (o que estava sendo feito, decisões já tomadas, próximos passos) para continuar de lá.
 
 Não rode git checkout -b / git switch -c / git branch <nome> aqui.
 EOF
@@ -84,17 +84,17 @@ exit 0
 `
   },
   {
-    filename: 'rookery-confine-edits.sh',
+    filename: 'floe-confine-edits.sh',
     matcher: 'Edit|Write|MultiEdit|NotebookEdit',
     statusMessage: 'Checking project boundary…',
     script: `#!/usr/bin/env bash
-# Rookery: confine file edits to the session's own worktree.
+# Floe: confine file edits to the session's own worktree.
 #
-# A Rookery session is spawned with cwd = its worktree (src/main/agent.ts). This
+# A Floe session is spawned with cwd = its worktree (src/main/agent.ts). This
 # denies any file-writing tool (Edit/Write/MultiEdit/NotebookEdit) whose target
 # path falls OUTSIDE that worktree subtree — so a session opened for project A
 # can never edit the files of project B sitting elsewhere on disk. Managed by
-# the Rookery app (src/main/hooks.ts) — edits here are overwritten on next boot.
+# the Floe app (src/main/hooks.ts) — edits here are overwritten on next boot.
 set -u
 
 input=$(cat)
@@ -108,8 +108,8 @@ path=$(printf '%s' "$input" | jq -r '.tool_input.file_path // .tool_input.notebo
 root=$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null)
 [ -z "$root" ] && root=$PWD
 
-# Only enforce inside a Rookery-launched session.
-${DETECT_ROOKERY}
+# Only enforce inside a Floe-launched session.
+${DETECT_FLOE}
 
 # Canonicalize lexically (collapses .., joins relative paths onto root) WITHOUT
 # requiring the file to exist — new files in not-yet-created dirs must pass too.
@@ -131,16 +131,16 @@ case "$abs" in
   "$HOME"/.claude/*) exit 0 ;;
 esac
 
-# Outside → deny and steer to the rookery worktree/session flow.
+# Outside → deny and steer to the floe worktree/session flow.
 read -r -d '' MSG <<EOF
 Blocked: this file is OUTSIDE the project open in this session.
 
   target:  $abs
   project: $rootp
 
-A Rookery session may only edit files inside the worktree it was opened in. Editing another project's files from here is not allowed — that's how the "dash" session ended up altering the "os" project's files.
+A Floe session may only edit files inside the worktree it was opened in. Editing another project's files from here is not allowed — that's how the "dash" session ended up altering the "os" project's files.
 
-If you need to work on another project, open a dedicated session in it via Rookery (mcp__rookery__create_session in the correct worktree) and continue the work there. Do not edit paths outside $rootp.
+If you need to work on another project, open a dedicated session in it via Floe (mcp__floe__create_session in the correct worktree) and continue the work there. Do not edit paths outside $rootp.
 EOF
 
 jq -n --arg reason "$MSG" \\
@@ -149,13 +149,13 @@ exit 0
 `
   },
   {
-    filename: 'rookery-block-native-agents.sh',
+    filename: 'floe-block-native-agents.sh',
     matcher: 'Task|Agent',
     statusMessage: 'Checking subagent policy…',
     script: `#!/usr/bin/env bash
-# Rookery: block the native subagent (Task) tool inside a Rookery-launched
-# session and steer to the rookery MCP, so subagents become real Rookery
-# sessions instead of opaque detached Tasks. Managed by the Rookery app
+# Floe: block the native subagent (Task) tool inside a Floe-launched
+# session and steer to the floe MCP, so subagents become real Floe
+# sessions instead of opaque detached Tasks. Managed by the Floe app
 # (src/main/hooks.ts) — edits here are overwritten on next boot.
 set -u
 
@@ -166,18 +166,18 @@ case "$tool" in
   *) exit 0 ;;
 esac
 
-# Only enforce inside a Rookery-launched session.
-${DETECT_ROOKERY}
+# Only enforce inside a Floe-launched session.
+${DETECT_FLOE}
 
 read -r -d '' MSG <<'EOF'
-Não use o subagente nativo (Task/Agent) dentro de uma sessão do Rookery — ele roda detached e fica invisível na tela.
+Não use o subagente nativo (Task/Agent) dentro de uma sessão do Floe — ele roda detached e fica invisível na tela.
 
-Em vez disso, abra uma sessão do Rookery como "lane" e coordene por lá:
-1. mcp__rookery__create_session — cria uma sessão (aparece na barra lateral) com o deliverable daquela lane; passe o contexto no prompt.
-2. mcp__rookery__send_message com wait=true — bloqueia até a lane terminar o turno e retorna o resumo final dela.
-3. mcp__rookery__read_session_output / list_sessions — monitore e colha resultados.
+Em vez disso, abra uma sessão do Floe como "lane" e coordene por lá:
+1. mcp__floe__create_session — cria uma sessão (aparece na barra lateral) com o deliverable daquela lane; passe o contexto no prompt.
+2. mcp__floe__send_message com wait=true — bloqueia até a lane terminar o turno e retorna o resumo final dela.
+3. mcp__floe__read_session_output / list_sessions — monitore e colha resultados.
 
-Assim cada subagente é uma sessão visível que o Rookery controla de ponta a ponta.
+Assim cada subagente é uma sessão visível que o Floe controla de ponta a ponta.
 EOF
 
 jq -n --arg reason "$MSG" \\
@@ -186,17 +186,17 @@ exit 0
 `
   },
   {
-    filename: 'rookery-block-sleep-wait.sh',
+    filename: 'floe-block-sleep-wait.sh',
     matcher: 'Bash',
     statusMessage: 'Checking wait policy…',
     script: `#!/usr/bin/env bash
-# Rookery: block a Rookery session from sitting on a bare, long \`sleep\` (the
+# Floe: block a Floe session from sitting on a bare, long \`sleep\` (the
 # "wait N minutes then follow up" antipattern) and steer it to
-# mcp__rookery__create_followup instead — Rookery owns the timer and fires the
+# mcp__floe__create_followup instead — Floe owns the timer and fires the
 # follow-up message itself, so the calling turn can end right away instead of
 # holding the session open. Only fires on a command that is JUST a sleep (no
 # other work chained on it) of 60s or more — a short sleep, or one chained with
-# real work (e.g. \`sleep 5 && curl ...\`), is left alone. Managed by the Rookery
+# real work (e.g. \`sleep 5 && curl ...\`), is left alone. Managed by the Floe
 # app (src/main/hooks.ts) — edits here are overwritten on next boot.
 set -u
 
@@ -204,8 +204,8 @@ input=$(cat)
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 [ -z "$cmd" ] && exit 0
 
-# Only enforce inside a Rookery-launched session.
-${DETECT_ROOKERY}
+# Only enforce inside a Floe-launched session.
+${DETECT_FLOE}
 
 # A command that is nothing but a sleep call — nothing chained before or after.
 long=$(python3 -c '
@@ -223,10 +223,10 @@ print("1" if secs >= 60 else "0")
 read -r -d '' MSG <<'EOF'
 Não fique parado num sleep longo para depois conferir outra sessão (ou você mesma/o) — isso segura o turno à toa.
 
-Em vez disso, delegue o waketime ao Rookery:
-  mcp__rookery__create_followup { session_id?, delay_minutes, message }
+Em vez disso, delegue o waketime ao Floe:
+  mcp__floe__create_followup { session_id?, delay_minutes, message }
 
-Sem session_id ele volta pra esta própria sessão. O Rookery dispara a mensagem quando o tempo passar — encerre o turno agora em vez de dormir.
+Sem session_id ele volta pra esta própria sessão. O Floe dispara a mensagem quando o tempo passar — encerre o turno agora em vez de dormir.
 EOF
 
 jq -n --arg reason "$MSG" \\
@@ -306,7 +306,7 @@ export function ensureAgentHookInstalled(): void {
 // Write via temp + rename so a torn read can never leave the user's global
 // config half-written.
 function atomicWrite(path: string, content: string): void {
-  const tmp = `${path}.rookery-tmp`
+  const tmp = `${path}.floe-tmp`
   writeFileSync(tmp, content)
   renameSync(tmp, path)
 }

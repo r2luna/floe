@@ -48,19 +48,19 @@ export function useAuth(): Auth {
   const [error, setError] = useState<string>()
 
   const reload = useCallback(() => {
-    void window.rookery.claude.authStatus().then(setStatus)
+    void window.floe.claude.authStatus().then(setStatus)
     // Signing in or out changes whose stats these are, so both are read from
     // the same place — the panel never shows one account's numbers under
     // another's name.
-    void window.rookery.claude.stats().then(setStats)
+    void window.floe.claude.stats().then(setStats)
     // Claude's windows and the other runtimes' come from different places but
     // mean the same thing, so they are merged into one shape here rather than
     // in the panel — the panel should not know who reports what.
-    void window.rookery.claude.localStats().then(setHarnessStats)
-    void window.rookery.claude.localUsage().then((others) =>
+    void window.floe.claude.localStats().then(setHarnessStats)
+    void window.floe.claude.localUsage().then((others) =>
       setUsage((prev) => ({ ...prev, ...others }))
     )
-    void window.rookery.stats.refreshUsage().then((u: UsageStats | null) => {
+    void window.floe.stats.refreshUsage().then((u: UsageStats | null) => {
       if (!u) return
       const windows = [
         u.session && { label: '5h', usedPercent: u.session.pct },
@@ -73,7 +73,7 @@ export function useAuth(): Auth {
   useEffect(reload, [reload])
 
   useEffect(() => {
-    return window.rookery.claude.onAuthEvent((event: ClaudeAuthEvent) => {
+    return window.floe.claude.onAuthEvent((event: ClaudeAuthEvent) => {
       if (event.kind === 'url') return setUrl(event.url)
       // Every other event ends the flow, so the shared teardown runs first and
       // only the message differs.
@@ -101,16 +101,16 @@ export function useAuth(): Auth {
     login: (mode = 'claudeai') => {
       setError(undefined)
       setBusy(true)
-      void window.rookery.claude.login(mode)
+      void window.floe.claude.login(mode)
     },
-    paste: (code) => void window.rookery.claude.pasteLoginCode(code),
+    paste: (code) => void window.floe.claude.pasteLoginCode(code),
     cancel: () => {
       setBusy(false)
       setUrl(undefined)
-      void window.rookery.claude.cancelLogin()
+      void window.floe.claude.cancelLogin()
     },
     logout: () => {
-      void window.rookery.claude.logout().then(reload)
+      void window.floe.claude.logout().then(reload)
     },
     reload
   }

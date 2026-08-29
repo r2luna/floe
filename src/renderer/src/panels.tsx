@@ -10,6 +10,7 @@ import {
   IconMessage,
   IconPlus,
   IconTrash,
+  IconSettings,
   IconSparkles,
   IconTerminal2,
   IconUserCircle,
@@ -45,6 +46,7 @@ import { addressOf, lastChoice, loadChoice, speakerKey, windowOf, type ModelChoi
 import { useDraft } from './drafts'
 import { useAuth } from './useAuth'
 import { useLocalAgents } from './useLocalAgents'
+import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { MessageBody, RunInTerminal } from './MessageBody'
@@ -71,7 +73,7 @@ export const KINDS = {
     // three.
     action: { icon: IconPlus, title: 'Add project…', command: 'project.add' }
   },
-  worktrees: { icon: IconGitBranch, title: 'worktrees', width: 330, order: 10 },
+  worktrees: { icon: IconGitBranch, title: 'worktrees', width: 330, order: 10, needsProject: true },
   // A branch with no session open. Its whole body is the launcher, so it is as
   // wide as the chat it turns into — sending must not make the lane jump.
   // `bare` drops the card and header: there is no content to frame yet, and a
@@ -109,15 +111,15 @@ export const KINDS = {
   },
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
-  changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40 },
+  changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsWorktree: true },
   // The worktree's tree. Same shape as `changes`: a narrow list whose rows open
   // something wider beside it, so it spends as little width as it can.
-  files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42 },
-  diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50 },
+  files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsWorktree: true },
+  diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsWorktree: true },
   // What a file row opens: the file as it is on disk, not as a patch. Shares
   // the diff's slot — both are "the file you just picked", and two of them side
   // by side would be the same file twice.
-  file: { icon: IconFile, title: 'file', width: 760, grow: true, min: 460, order: 50, slot: 'diff' },
+  file: { icon: IconFile, title: 'file', width: 760, grow: true, min: 460, order: 50, slot: 'diff', needsWorktree: true },
   // Grows like the chat does. Both can be open at once — the one further right
   // takes the leftover, which is the terminal, and the chat falls back to its
   // own width. Neither ever disappears.
@@ -131,7 +133,10 @@ export const KINDS = {
   },
   // The Claude account the CLI runs as — the app's own /login. Narrow: it holds
   // one identity and two buttons, never a list.
-  account: { icon: IconUserCircle, title: 'account', width: 380, order: 130 }
+  account: { icon: IconUserCircle, title: 'account', width: 380, order: 130 },
+  // Settings: a view of ~/.config/floe/floe.toml. Narrow like the account panel —
+  // it is a column of single values, not a list that grows.
+  settings: { icon: IconSettings, title: 'settings', width: 420, order: 140 }
 } satisfies Record<
   string,
   {
@@ -150,8 +155,33 @@ export const KINDS = {
     // How narrow this panel may get before the lane scrolls instead. Omitted
     // means "never shrink" — right for lists, wrong for anything holding prose.
     min?: number
+    /**
+     * Lists something belonging to a project. Nothing to list without one.
+     * `needsWorktree` implies this — a worktree is always inside a project.
+     */
+    needsProject?: true
+    /**
+     * Reads the checked-out tree — git status, the file list, a patch. Without a
+     * worktree there is nothing for it to read.
+     */
+    needsWorktree?: true
   }
 >
+
+// Both flags gate the same way: the rail button dims and every binding that
+// would open the panel does nothing. See canOpen in App.
+
+// `in`, not a property read: KINDS is `satisfies`-typed, so each entry keeps its
+// own literal shape and only some of them declare these flags.
+export function needsWorktree(kind: string): boolean {
+  const spec = KINDS[kind as PanelKind]
+  return !!spec && 'needsWorktree' in spec
+}
+
+export function needsProject(kind: string): boolean {
+  const spec = KINDS[kind as PanelKind]
+  return (!!spec && 'needsProject' in spec) || needsWorktree(kind)
+}
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
@@ -176,7 +206,7 @@ export type OpenFn = (child: {
 const HOME = '~'
 
 // ponytail: static bodies so the lane's geometry is judgeable before any panel
-// is wired to window.rookery. Each one gets replaced by its real component.
+// is wired to window.floe. Each one gets replaced by its real component.
 export function PanelBody({
   kind,
   sub,
@@ -192,6 +222,7 @@ export function PanelBody({
   onPatch,
   onUsage,
   menuItems,
+  onAddProject,
   onOpen
 }: {
   kind: PanelKind
@@ -211,6 +242,8 @@ export function PanelBody({
   onUsage?: (usage: Usage) => void
   /** What `/` and `@` offer in any composer this panel holds. */
   menuItems?: (trigger: Trigger) => PaletteItem[]
+  /** Opens the add-project dialog — see `project.add` in the registry. */
+  onAddProject?: () => void
   /**
    * The find bar's query, when this is the panel it is searching. Rows tint the
    * part that matched, so a jump to a row nine screens down explains itself.
@@ -248,6 +281,8 @@ export function PanelBody({
         worktreePath={worktrees.currentPath}
         recent={worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.sessions}
         onCreated={worktrees.reload}
+        noProjects={!projects.loading && projects.all.length === 0}
+        onAddProject={onAddProject}
       />
     )
   if (kind === 'chat')
@@ -274,10 +309,44 @@ export function PanelBody({
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />
+  // Owns its own state for the same reason the account panel does: the config is
+  // global, so nothing above it needs to know when a setting changes.
+  if (kind === 'settings') return <SettingsPanel />
   return null
 }
 
 /* --- launcher ------------------------------------------------------------ */
+
+/**
+ * Morning / afternoon / evening, by the clock on this machine.
+ *
+ * Boundaries are the plain English ones (noon and 18:00), not astronomical: the
+ * greeting has to match what the user would call the time, not when the sun set.
+ */
+function partOfDay(hour: number): string {
+  if (hour < 12) return 'morning'
+  if (hour < 18) return 'afternoon'
+  return 'evening'
+}
+
+/** The greeting, re-read on mount and whenever the hour rolls over. */
+function useGreeting(): string {
+  const [name, setName] = useState('')
+  const [part, setPart] = useState(() => partOfDay(new Date().getHours()))
+  useEffect(() => {
+    void window.floe.userName().then(setName).catch(() => setName(''))
+  }, [])
+  useEffect(() => {
+    // Tick on the hour rather than every minute: leaving the launcher open
+    // across 18:00 should say "evening" without a relaunch, and nothing finer
+    // than the hour can change the answer.
+    const now = new Date()
+    const msToNextHour = (60 - now.getMinutes()) * 60_000 - now.getSeconds() * 1000
+    const id = setTimeout(() => setPart(partOfDay(new Date().getHours())), msToNextHour + 1000)
+    return () => clearTimeout(id)
+  }, [part])
+  return name ? `Good ${part}, ${name}` : `Good ${part}`
+}
 
 /**
  * The empty state for a selected branch: one box, centred, that starts a
@@ -289,7 +358,9 @@ function Launcher({
   menuItems,
   worktreePath,
   recent,
-  onCreated
+  onCreated,
+  noProjects,
+  onAddProject
 }: {
   onOpen: OpenFn
   menuItems?: (trigger: Trigger) => PaletteItem[]
@@ -298,10 +369,18 @@ function Launcher({
   recent?: ClaudeSessionMeta[]
   /** Re-read the worktree list, so the new session shows up under its branch. */
   onCreated?: () => void
+  /** Nothing has ever been added — not merely "none selected right now". */
+  noProjects?: boolean
+  onAddProject?: () => void
 }) {
+  // With no branch selected the launcher still works — it just starts the
+  // session in the user's home directory, so a question that isn't about any
+  // project has somewhere to run.
+  const cwd = worktreePath ?? window.floe.homeDir
   // Keyed by the worktree, since there is no session yet — what you started
   // typing for this branch is still waiting when you come back to it.
-  const [text, setText] = useDraft(worktreePath && `branch:${worktreePath}`)
+  const [text, setText] = useDraft(`branch:${cwd}`)
+  const greeting = useGreeting()
 
   // Sending creates the session for real, then opens the ordinary chat panel
   // for it and hands over the first prompt. The launcher is a way in, not a
@@ -310,10 +389,10 @@ function Launcher({
   // nothing behind.
   const start = (choice: ModelChoice) => {
     const prompt = text.trim()
-    if (!prompt || !worktreePath) return
+    if (!prompt) return
     const id = crypto.randomUUID()
-    void window.rookery.claude
-      .createSession({ id, worktreePath, title: prompt.slice(0, 60) })
+    void window.floe.claude
+      .createSession({ id, worktreePath: cwd, title: prompt.slice(0, 60) })
       .then(() => {
         // The prompt now lives in the session; leaving it in the launcher would
         // greet you with your last message the next time you land on the branch.
@@ -322,7 +401,7 @@ function Launcher({
         onOpen({
           kind: 'chat',
           sub: prompt.slice(0, 40),
-          session: { id, worktreePath },
+          session: { id, worktreePath: cwd },
           firstPrompt: prompt,
           firstChoice: choice
         })
@@ -336,7 +415,7 @@ function Launcher({
     <div className="launcher">
       <h1 className="greet">
         <PenguinHead size={24} className="greet-mark" />
-        Good evening, Rafael
+        {greeting}
       </h1>
 
       <Composer
@@ -347,6 +426,18 @@ function Launcher({
         autoFocus
         menuItems={menuItems}
       />
+
+      {/* Gated on "none exist", not "none selected": with projects added but
+          none picked, telling the user they have none would be false. */}
+      {noProjects && (
+        <div className="launcher-note">
+          <span>No projects added yet — the box above starts a chat in your home folder.</span>
+          <button className="chip" onClick={onAddProject}>
+            <IconPlus size={13} stroke={1.8} />
+            Add a project
+          </button>
+        </div>
+      )}
 
       {/* Only shown when there is something to show: an empty "Recent" header
           over nothing is a worse first run than no header at all. */}
@@ -364,7 +455,7 @@ function Launcher({
                   kind: 'chat',
                   sub: s.title,
                   // `claudeId` names the transcript on disk — see WorktreesList.
-                  session: { id: s.claudeId ?? s.id, worktreePath: worktreePath! }
+                  session: { id: s.claudeId ?? s.id, worktreePath: cwd }
                 })
               }
             >
@@ -573,7 +664,7 @@ function ChatPanel({
       // so an unopened panel never pays for a probe.
       breakdown:
         (!choice.provider || choice.provider === 'claude') && session
-          ? () => window.rookery.claude.contextUsage(session.worktreePath, session.id)
+          ? () => window.floe.claude.contextUsage(session.worktreePath, session.id)
           : undefined
     })
   }, [tokens, choice, agents, onUsage, session])
@@ -1184,7 +1275,7 @@ function FilesTree({ root, onOpen }: { root?: string; onOpen: OpenFn }) {
   const read = useCallback(
     (relPath: string) => {
       if (!root) return
-      window.rookery.files
+      window.floe.files
         .list(root, relPath || undefined)
         .then((nodes) => {
           setLoaded((prev) => new Map(prev).set(relPath, nodes))
@@ -1279,14 +1370,28 @@ function MarkdownLines({ text }: { text: string }) {
               and code span here in one flat grey. */}
           <span className="md-text" style={indentOf(line)}>
             {line.kind === 'rule' && <span className="md-rule" />}
-            {line.kind === 'list' && <span className="md-bullet">{line.marker}</span>}
-            {line.spans.map((span, j) =>
-              span.cls ? (
-                <span className={span.cls} key={j}>
-                  {span.text}
-                </span>
-              ) : (
-                <Fragment key={j}>{span.text}</Fragment>
+            {line.kind === 'list' && (
+              // No marker text means an unordered item — the dot is a CSS shape
+              // sized in pixels, which a font's bullet glyph is not.
+              <span
+                className="md-bullet"
+                data-dot={!line.marker || undefined}
+                data-depth={Math.min(line.depth ?? 0, 2)}
+              >
+                {line.marker}
+              </span>
+            )}
+            {line.kind === 'table' ? (
+              <MarkdownRow line={line} />
+            ) : (
+              line.spans.map((span, j) =>
+                span.cls ? (
+                  <span className={span.cls} key={j}>
+                    {span.text}
+                  </span>
+                ) : (
+                  <Fragment key={j}>{span.text}</Fragment>
+                )
               )
             )}
           </span>
@@ -1297,17 +1402,54 @@ function MarkdownLines({ text }: { text: string }) {
 }
 
 /**
+ * One row of a table, drawn as cells.
+ *
+ * Still one DOM row per source line — the row is a grid of its own, and every
+ * row of the block gets the SAME template (`line.cols`), which is what makes
+ * the columns line up. Nothing is merged across lines, so the numbers and the
+ * cursor keep working exactly as they do in prose.
+ */
+function MarkdownRow({ line }: { line: MdLine }): ReactNode {
+  // The |---| row: the header's underline, drawn once across the full width.
+  if (line.rule) return <span className="md-trule" />
+  return (
+    <span
+      className="md-cells"
+      data-head={line.head || undefined}
+      style={{
+        // fr, not ch: the table fills the panel and splits it in proportion to
+        // its content, so a narrow panel shrinks columns instead of clipping.
+        gridTemplateColumns: (line.cols ?? []).map((w) => `minmax(0, ${w}fr)`).join(' ')
+      }}
+    >
+      {(line.cells ?? []).map((cell, c) => (
+        <span className="md-cell" key={c} style={{ textAlign: line.aligns?.[c] }}>
+          {cell.map((span, j) =>
+            span.cls ? (
+              <span className={span.cls} key={j}>
+                {span.text}
+              </span>
+            ) : (
+              <Fragment key={j}>{span.text}</Fragment>
+            )
+          )}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/**
  * A nested list item's indent, and the hanging indent that keeps its wrapped
  * text under its own first character rather than back at the bullet.
  */
 function indentOf(line: MdLine): CSSProperties | undefined {
   if (line.kind !== 'list') return undefined
-  // The marker is 2ch wide (.md-bullet), so pulling the first line back by that
-  // much puts the bullet in the margin and every wrapped line under the text.
-  const indent = (line.depth ?? 0) * 2 + 2
-  // The 8px is the gutter every line keeps between the number and the text; the
-  // hanging indent is added on top of it, never instead of it.
-  return { paddingLeft: `calc(8px + ${indent}ch)`, textIndent: '-2ch' }
+  // The marker starts where a paragraph starts — a top-level item lines up with
+  // the prose above it — and the item's own text sits 2ch further in, where the
+  // negative text-indent leaves every wrapped line.
+  const marker = (line.depth ?? 0) * 2
+  return { paddingLeft: `calc(8px + ${marker + 2}ch)`, textIndent: '-2ch' }
 }
 
 /** One file as it is on disk, highlighted once Shiki has the grammar. */
@@ -1320,7 +1462,7 @@ function FileView({ root, path }: { root?: string; path: string }) {
     let live = true
     setContent(null)
     setError(undefined)
-    window.rookery.files
+    window.floe.files
       .read(root, path)
       .then((c) => live && setContent(c))
       .catch((e: Error) => live && setError(e.message))
@@ -1518,7 +1660,7 @@ function WorktreesList({
               data-active={(openSession && (s.claudeId ?? s.id) === openSession) || undefined}
               onClick={() => {
                 worktrees.select(worktree.path)
-                // `claudeId` names the transcript file on disk; Rookery's own id
+                // `claudeId` names the transcript file on disk; Floe's own id
                 // does not. Sending the wrong one reads an empty conversation.
                 onOpen({
                   kind: 'chat',
@@ -1603,7 +1745,7 @@ function AccountPanel({ onOpen }: { onOpen: OpenFn }) {
     // the kernel, so the command survives a shell still starting; the delay
     // only covers the panel mounting and calling terminal:open. If this ever
     // misfires, thread the command through the terminal panel instead.
-    setTimeout(() => void window.rookery.terminal.write('term:~', `${login}\r`), 1500)
+    setTimeout(() => void window.floe.terminal.write('term:~', `${login}\r`), 1500)
   }
   const [code, setCode] = useState('')
   const box = useRef<HTMLInputElement>(null)
@@ -1638,7 +1780,7 @@ function AccountPanel({ onOpen }: { onOpen: OpenFn }) {
           <button
             className="account-link"
             title={auth.url}
-            onClick={() => void window.rookery.openExternal(auth.url!)}
+            onClick={() => void window.floe.openExternal(auth.url!)}
           >
             Open the sign-in page again
           </button>
@@ -1935,5 +2077,294 @@ function Stats({ stats }: { stats: ClaudeStats }) {
         {short(stats.tokens.cacheRead)} read / {short(stats.tokens.cacheWrite)} written
       </p>
     </div>
+  )
+}
+
+/* --- settings ------------------------------------------------------------- */
+
+/**
+ * What a row in the Settings panel edits.
+ *
+ * Every setting is one of four shapes, and each shape has exactly one keyboard
+ * gesture: Enter toggles a switch, cycles a choice, or opens a box. Nothing here
+ * needs a pointer, which is the rule for any new UI in this app.
+ */
+type SettingRow =
+  | { kind: 'bool'; table: string; key: string; label: string; value: boolean; hint?: string }
+  | { kind: 'choice'; table: string; key: string; label: string; value: string; options: readonly string[]; hint?: string }
+  | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
+  | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
+
+/**
+ * Settings — a view of `~/.config/floe/floe.toml`.
+ *
+ * The file is the source of truth and this panel is one of its editors, not the
+ * canonical one: every change goes through the surgical TOML writer, so a toggle
+ * flipped here comes back as one changed value in a file that still carries all
+ * its documentation. Anything the panel does not cover is a row that opens the
+ * file, rather than a setting the user cannot reach.
+ */
+function SettingsPanel() {
+  const settings = useSettings()
+  const { config } = settings
+  // Which row is mid-edit, by `table.key`. One at a time: two open boxes would
+  // make Escape ambiguous.
+  const [editing, setEditing] = useState<string | null>(null)
+
+  if (!config) return <p className="empty">Loading…</p>
+
+  const groups: Array<{ title: string; rows: SettingRow[] }> = [
+    {
+      title: 'Appearance',
+      rows: [
+        {
+          kind: 'text',
+          table: 'appearance',
+          key: 'font-family',
+          label: 'Font family',
+          value: config.appearance.fontFamily ?? '',
+          placeholder: 'system monospace'
+        },
+        { kind: 'number', table: 'appearance', key: 'font-size', label: 'Font size', value: config.appearance.fontSize },
+        { kind: 'text', table: 'appearance', key: 'theme', label: 'Theme', value: config.appearance.theme }
+      ]
+    },
+    {
+      title: 'Default agent',
+      rows: [
+        {
+          kind: 'choice',
+          table: 'agent',
+          key: 'model',
+          label: 'Model',
+          value: config.agent.model,
+          options: ['fable', 'opus', 'sonnet', 'haiku']
+        },
+        {
+          kind: 'choice',
+          table: 'agent',
+          key: 'effort',
+          label: 'Effort',
+          value: config.agent.effort,
+          options: ['low', 'medium', 'high', 'xhigh', 'max']
+        },
+        {
+          kind: 'choice',
+          table: 'agent',
+          key: 'provider',
+          label: 'Provider',
+          value: config.agent.provider,
+          options: ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama']
+        }
+      ]
+    },
+    {
+      title: 'Terminal',
+      rows: [
+        {
+          kind: 'text',
+          table: 'terminal',
+          key: 'shell',
+          label: 'Shell',
+          value: config.terminal.shell ?? '',
+          placeholder: 'your login shell'
+        }
+      ]
+    },
+    {
+      title: 'Installs',
+      rows: [
+        {
+          kind: 'bool',
+          table: 'sandbox',
+          key: 'enabled',
+          label: 'Sandbox dependency installs',
+          value: config.sandbox.enabled,
+          hint: 'Linux only — macOS runs unsandboxed either way'
+        }
+      ]
+    },
+    {
+      title: 'Updates',
+      rows: [
+        {
+          kind: 'number',
+          table: 'update',
+          key: 'check-interval-hours',
+          label: 'Check for updates every',
+          value: config.update.checkIntervalHours,
+          suffix: 'h'
+        }
+      ]
+    }
+  ]
+
+  return (
+    <div className="settings">
+      {settings.error && <p className="empty error">{settings.error}</p>}
+
+      {/* Problems first: a value you set that did not take is the one thing you
+          need to know before reading anything below it. */}
+      {settings.errors.length > 0 && (
+        <div className="group">
+          <div className="group-label">PROBLEMS</div>
+          {settings.errors.map((err, i) => (
+            <button
+              className="row settings-problem"
+              key={`${err.file}:${err.line}:${i}`}
+              title={`${err.file}:${err.line}`}
+              onClick={() => settings.reveal(err.file)}
+            >
+              <span className="row-name">{err.reason}</span>
+              <span className="badge">
+                {err.file.split('/').pop()}:{err.line}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {groups.map((group) => (
+        <div className="group" key={group.title}>
+          <div className="group-label">{group.title.toUpperCase()}</div>
+          {group.rows.map((row) => (
+            <SettingRowView
+              key={`${row.table}.${row.key}`}
+              row={row}
+              editing={editing === `${row.table}.${row.key}`}
+              onEdit={() => setEditing(`${row.table}.${row.key}`)}
+              onDone={() => setEditing(null)}
+              onSet={settings.set}
+            />
+          ))}
+        </div>
+      ))}
+
+      {/* A file written by an older version has no entry for a binding added
+          since. Not added silently — "delete an entry to drop the binding" has to
+          mean it — so it is offered, with the old file kept as a .bak. */}
+      {settings.keys && settings.keys.missing.length > 0 && (
+        <div className="group">
+          <div className="group-label">KEYBINDINGS</div>
+          <button className="row settings-row" onClick={settings.resetKeys}>
+            <span className="row-name">
+              {settings.keys.missing.length} new binding
+              {settings.keys.missing.length === 1 ? '' : 's'} not in your file
+            </span>
+            <span className="settings-value">rewrite</span>
+          </button>
+        </div>
+      )}
+
+      <div className="group">
+        <div className="group-label">FILES</div>
+        {/* Everything not on a row above still has a home: these open the files
+            themselves, which are documented in place. */}
+        <button className="row" onClick={() => settings.reveal(settings.paths?.floe)}>
+          <span className="row-name">floe.toml</span>
+          <span className="badge">all settings</span>
+        </button>
+        <button className="row" onClick={() => void window.floe.keybindings.reveal()}>
+          <span className="row-name">keybindings.toml</span>
+          <span className="badge">every binding</span>
+        </button>
+        <button className="row" onClick={() => settings.reveal(settings.paths?.projects)}>
+          <span className="row-name">projects/</span>
+          <span className="badge">one dir each</span>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * One setting.
+ *
+ * A row is a button so the lane's cursor walks it and Enter activates it, the
+ * same as every other list in the app. Editing a text or number value swaps the
+ * row for an input in place — and on the way out, focus goes back to the row, so
+ * `j` keeps working without a click.
+ */
+function SettingRowView({
+  row,
+  editing,
+  onEdit,
+  onDone,
+  onSet
+}: {
+  row: SettingRow
+  editing: boolean
+  onEdit: () => void
+  onDone: () => void
+  onSet: (table: string, key: string, value: string | number | boolean) => void
+}) {
+  const [draft, setDraft] = useState('')
+  const button = useRef<HTMLButtonElement>(null)
+  const box = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) box.current?.focus()
+  }, [editing])
+
+  const leave = (): void => {
+    onDone()
+    // Focus never gets stranded on a dismissed input: it goes back to the row it
+    // came from, so the next keystroke still moves the cursor.
+    button.current?.focus()
+  }
+
+  const commit = (): void => {
+    if (row.kind === 'number') {
+      const n = Number(draft)
+      if (Number.isFinite(n)) onSet(row.table, row.key, n)
+    } else {
+      onSet(row.table, row.key, draft.trim())
+    }
+    leave()
+  }
+
+  if (editing && (row.kind === 'text' || row.kind === 'number')) {
+    return (
+      <div className="row settings-row settings-editing">
+        <span className="row-name">{row.label}</span>
+        <input
+          ref={box}
+          className="dialog-input settings-input"
+          value={draft}
+          placeholder={row.kind === 'text' ? row.placeholder : undefined}
+          spellCheck={false}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') commit()
+            if (e.key === 'Escape') leave()
+          }}
+        />
+      </div>
+    )
+  }
+
+  const activate = (): void => {
+    if (row.kind === 'bool') return onSet(row.table, row.key, !row.value)
+    if (row.kind === 'choice') {
+      // Cycles rather than opening a menu: the sets here are short and every
+      // value is one Enter away, which beats a second overlay to dismiss.
+      const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
+      return onSet(row.table, row.key, next)
+    }
+    setDraft(row.kind === 'number' ? String(row.value) : row.value)
+    onEdit()
+  }
+
+  return (
+    <button ref={button} className="row settings-row" onClick={activate} title={row.hint}>
+      <span className="row-name">{row.label}</span>
+      <span className={`settings-value${row.kind === 'bool' && !row.value ? ' settings-off' : ''}`}>
+        {row.kind === 'bool' && (row.value ? 'on' : 'off')}
+        {row.kind === 'choice' && row.value}
+        {row.kind === 'number' && `${row.value}${row.suffix ?? ''}`}
+        {row.kind === 'text' && (row.value || row.placeholder || '—')}
+      </span>
+    </button>
   )
 }

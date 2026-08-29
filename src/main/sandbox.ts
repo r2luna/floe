@@ -27,8 +27,18 @@ function whichSync(bin: string): boolean {
   return false
 }
 
-// Opt-out escape hatch: ROOKERY_SANDBOX=0 disables sandboxing everywhere.
-export const sandboxDisabled = (): boolean => process.env.ROOKERY_SANDBOX === '0'
+// `[sandbox] enabled` from floe.toml, pushed in at boot rather than read here.
+// This module deliberately imports no electron (see sandbox.test.ts, which loads
+// it directly), and reaching for the config would drag it in through dataDir.
+let configuredEnabled = true
+export function setSandboxEnabled(enabled: boolean): void {
+  configuredEnabled = enabled
+}
+
+// Opt-out escape hatches: `enabled = false` in floe.toml, or FLOE_SANDBOX=0 for
+// a single run. The environment variable wins as the narrower, more deliberate
+// of the two.
+export const sandboxDisabled = (): boolean => process.env.FLOE_SANDBOX === '0' || !configuredEnabled
 
 // bwrap is present and usable on this (Linux) host. When false on Linux and the
 // sandbox wasn't explicitly disabled, callers must fail closed rather than run an

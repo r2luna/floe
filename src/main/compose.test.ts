@@ -30,10 +30,10 @@ test('worktreePort separates distinct slugs (no trivial constant)', () => {
 // build if serversideup ever changes the stock line.
 test('Dockerfile maps X-Forwarded-Proto onto the HTTPS fastcgi param', () => {
   const df = worktreeDockerfile()
-  assert.match(df, /map \$http_x_forwarded_proto \$rookery_https/)
+  assert.match(df, /map \$http_x_forwarded_proto \$floe_https/)
   assert.match(df, /'    https   on;'/)
   assert.match(df, /grep -q 'HTTPS {14}\$https if_not_empty' \/etc\/nginx\/fastcgi_params/)
-  assert.match(df, /sed -i .*HTTPS {14}\$rookery_https if_not_empty.* \/etc\/nginx\/fastcgi_params/)
+  assert.match(df, /sed -i .*HTTPS {14}\$floe_https if_not_empty.* \/etc\/nginx\/fastcgi_params/)
 })
 
 test('Dockerfile keeps $https as the map default so real TLS still works', () => {
@@ -43,7 +43,7 @@ test('Dockerfile keeps $https as the map default so real TLS still works', () =>
 // The layer must run before the image drops back to www-data.
 test('Dockerfile applies the nginx layer while still root', () => {
   const df = worktreeDockerfile()
-  assert.ok(df.indexOf('00-rookery-forwarded-proto.conf') < df.indexOf('USER www-data'))
+  assert.ok(df.indexOf('00-floe-forwarded-proto.conf') < df.indexOf('USER www-data'))
 })
 
 test('vite wrapper binds the container and points HMR at the Caddy vite host', () => {
@@ -66,6 +66,6 @@ test('vite wrapper still produces a config when the project has none', () => {
 
 test('vite wrapper overrides the project server block rather than being overridden', () => {
   const out = worktreeViteConfig('feat-x', 'https://feat-x.dev.pinguim.io', cfg, 'vite.config.ts')
-  // Spread order decides the fix: Rookery's `server` must come last.
+  // Spread order decides the fix: Floe's `server` must come last.
   assert.match(out, /server: \{ \.\.\.resolved\?\.server, \.\.\.server \}/)
 })

@@ -28,7 +28,7 @@ export function useChanges(worktreePath?: string): Changes {
       return
     }
     setLoading(true)
-    window.rookery.review
+    window.floe.review
       .changedFiles(worktreePath)
       .then((list) => {
         setFiles(list)
@@ -42,15 +42,15 @@ export function useChanges(worktreePath?: string): Changes {
 
   useEffect(() => {
     if (!worktreePath) return
-    void window.rookery.review.watch(worktreePath)
-    return window.rookery.review.onEvent((event) => {
+    void window.floe.review.watch(worktreePath)
+    return window.floe.review.onEvent((event) => {
       if (event.worktreePath === worktreePath) reload()
     })
   }, [worktreePath, reload])
 
   const diffOf = useCallback(
     (relPath: string) =>
-      worktreePath ? window.rookery.review.fileDiff(worktreePath, relPath) : Promise.resolve(''),
+      worktreePath ? window.floe.review.fileDiff(worktreePath, relPath) : Promise.resolve(''),
     [worktreePath]
   )
 

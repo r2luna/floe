@@ -42,7 +42,7 @@ const { generateWorktreeDesc } = await import('./claudeSessions.ts')
 // regen loop). We prove it without the claude binary: a stale-spec/fresh-marker
 // worktree returns null, and it returns fast (no 20s CLI timeout).
 test('generateWorktreeDesc: fresh marker skips regeneration (no claude call)', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-desc-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-desc-'))
   try {
     const specDir = join(root, 'specs', 'feat-x')
     mkdirSync(specDir, { recursive: true })
@@ -67,7 +67,7 @@ test('generateWorktreeDesc: fresh marker skips regeneration (no claude call)', a
 
 // No spec folder at all → null (nothing to summarise), also without a claude call.
 test('generateWorktreeDesc: no spec returns null', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'rookery-desc-'))
+  const root = mkdtempSync(join(tmpdir(), 'floe-desc-'))
   try {
     const result = await generateWorktreeDesc(root, 'feat-x')
     assert.equal(result, null)

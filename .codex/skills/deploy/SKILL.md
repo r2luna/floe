@@ -1,17 +1,17 @@
 ---
 name: deploy
-description: Cut and publish a new Rookery release so the auto-updater can ship it, AND ship the matching headless server to the `link` box so both halves stay on the same version. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, signed build, GitHub publish, and the server update. Takes an optional bump level (patch/minor/major) as argument.
+description: Cut and publish a new Floe release so the auto-updater can ship it. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, signed build, GitHub publish. Takes an optional bump level (patch/minor/major) as argument.
 ---
 
-# Deploy — release a new Rookery version
+# Deploy — release a new Floe version
 
-Rookery auto-updates from **GitHub Releases**: `electron-updater` (see `src/main/autoUpdate.ts`)
-polls the private `r2luna/rookery` repo, reads `latest-mac.yml`, downloads the signed `.zip`,
+Floe auto-updates from **GitHub Releases**: `electron-updater` (see `src/main/autoUpdate.ts`)
+polls the private `r2luna/floe` repo, reads `latest-mac.yml`, downloads the signed `.zip`,
 and applies it on restart. A release only reaches users if **all** of these hold:
 
 - The GitHub release is **published** (not draft) — the updater ignores drafts.
 - The version in `package.json` is **higher** than what users are running (semver compare).
-- Every build is signed with the **same** identity (`Rookery Local Signing`) — Squirrel.Mac
+- Every build is signed with the **same** identity (`Floe Local Signing`) — Squirrel.Mac
   refuses an update whose signature doesn't match the installed app.
 - The release carries `latest-mac.yml` **and** the `.zip` (Squirrel swaps the zip; the dmg is
   first-install only).
@@ -28,7 +28,7 @@ Run these in order. **Stop and report** at the first failure — never publish p
   `git rev-parse --abbrev-ref HEAD` → `master`; `git status --porcelain` → empty.
   If the user is on a feature branch, tell them to merge to `master` first — releases ship from `master`.
 - **Synced with origin:** `git fetch` then confirm `master` is not behind `origin/master`.
-- **Signing identity present:** `security find-identity -v -p codesigning | grep "Rookery Local Signing"`.
+- **Signing identity present:** `security find-identity -v -p codesigning | grep "Floe Local Signing"`.
   Missing → stop: without it Squirrel can't apply the update. (The cert must match prior releases.)
 - **Publish token:** `gh auth status` must be logged in. The build reads `GH_TOKEN` — supply it from gh
   in step 3. Do not ask the user to paste a token.
@@ -60,43 +60,20 @@ The release auto-updates *other* machines, but the Mac that just built it should
 6h auto-update check — drop the freshly-built app straight into `/Applications` so a quit+reopen runs the
 new version now.
 
-- `electron-builder` already left the signed bundle unpacked under `dist/mac*/Rookery.app` (alongside the
+- `electron-builder` already left the signed bundle unpacked under `dist/mac*/Floe.app` (alongside the
   `.dmg`). Install *that* — no need to mount the dmg. Use `ditto`, not `cp -R`: it preserves the code
   signature + xattrs (a `cp -R` can strip them and trip Gatekeeper):
   ```
-  APP=$(ls -d dist/mac*/Rookery.app | head -1)
-  rm -rf /Applications/Rookery.app && ditto "$APP" /Applications/Rookery.app
+  APP=$(ls -d dist/mac*/Floe.app | head -1)
+  rm -rf /Applications/Floe.app && ditto "$APP" /Applications/Floe.app
   ```
-- Safe while Rookery is running — macOS keeps the running process on its old inode; the new version
-  applies on the **next launch**. Do **not** force-quit: the deploy may be running from inside Rookery.
+- Safe while Floe is running — macOS keeps the running process on its old inode; the new version
+  applies on the **next launch**. Do **not** force-quit: the deploy may be running from inside Floe.
 - Tell the user it's installed and to quit+reopen (or ⌘Q → relaunch) to pick it up.
-
-### 6. Ship the matching server to `link` (do this every deploy — not optional)
-Desktop and server are **one tree, two build targets** (`process.env.ROOKERY_SERVER`). The `/deploy` above
-only ships the **desktop app**; the headless server on `link` must be updated in the **same** deploy or the
-two drift and the attach handshake shows a "Version mismatch" banner (app vX.Y.Z vs server vA.B.C).
-
-- **Build both targets and ship over SSH** (from `master`; clients auto-reconnect so the blip is invisible):
-  ```
-  node scripts/build-server.mjs && pnpm exec electron-vite build
-  tar czf - out bin package.json | ssh link 'bash -lc "bash ~/rk-deploy.sh"'
-  ```
-  `~/rk-deploy.sh` preserves the box's native `node_modules` (node-pty built for its arch), unpacks, and
-  `systemctl --user restart rookery`.
-- **Bump `ROOKERY_VERSION` to match** — `rk-deploy.sh` restarts but does **not** touch the unit env, and the
-  version-skew banner reads `ROOKERY_VERSION` from the systemd unit, not from the shipped code. So update it
-  to the new `vX.Y.Z` (without the `v`) or the banner persists even with the new code running:
-  ```
-  ssh link 'bash -lc "sed -i \"s/^Environment=ROOKERY_VERSION=.*/Environment=ROOKERY_VERSION=X.Y.Z/\" ~/.config/systemd/user/rookery.service && systemctl --user daemon-reload && systemctl --user restart rookery"'
-  ```
-  (If the unit uses a different quoting for that line, edit it to match — the goal is `ROOKERY_VERSION` == the
-  released version. `grep ROOKERY_VERSION ~/.config/systemd/user/rookery.service` to confirm first.)
-- **Verify:** `ssh link 'bash -lc "rookery server status"'` (or reattach from the app and confirm the banner is
-  gone). Report the server version alongside the desktop one.
 
 ## Notes
 - **Receiving** updates is separate from publishing: each machine needs a PAT at
-  `~/Library/Application Support/rookery/.gh-update-token` (the repo is private). That's per-machine
+  `~/Library/Application Support/floe/.gh-update-token` (the repo is private). That's per-machine
   setup, not part of deploy — see `src/main/autoUpdate.ts`.
 - This ships **mac** only (matches the auto-updater, which is Squirrel.Mac/zip based). The Linux
   AppImage target exists in `electron-builder.yml` but is a manual `pnpm build:linux` — not wired to

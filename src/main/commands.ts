@@ -1,27 +1,29 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+// A worktree's named processes, as the rest of the app sees them.
+//
+// Storage moved out of `commands.json` and into each project's own
+// `commands.toml` (config/commandStore.ts) — one file per project, documented in
+// place, editable by hand and by agents. This module keeps the shape the app
+// already speaks: a flat list per worktree, project-scope commands first, with
+// the container rewrites applied at read time.
+
+import { existsSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { configDir, dataDir } from './dataDir'
 import { worktreeComposePath } from './compose'
 import { detectPackageManager } from './devServer'
+import {
+  addCommand as storeAdd,
+  readCommands,
+  removeCommand as storeRemove,
+  setCommandWorktree,
+  updateCommand as storeUpdate,
+  type NotifyLevel,
+  type StoredCommand
+} from './config/commandStore'
+import { createProject, projectScan, setProjectValue } from './config/projectStore'
 
 export type CommandScope = 'project' | 'local'
-export type NotifyLevel = 'all' | 'important' | 'none'
-
-interface StoredCommand {
-  id: string
-  name: string
-  command: string
-  cwd?: string // override the working directory (defaults to the worktree path)
-  autoStart?: boolean
-  autoRestart?: boolean
-  notify?: NotifyLevel
-  watch?: string[] // glob patterns that restart the command when they change
-}
-
-// A named process the user registers for a worktree. Project-scope commands are
-// shared by every worktree of the project; local ones belong to a single
-// worktree. (Running/status arrives with the process runner in a later phase.)
-export type ProjectCommand = StoredCommand & { scope: CommandScope }
+export type { NotifyLevel }
 
 // The fields an edit can touch — every one optional so callers patch just one.
 export interface CommandPatch {
@@ -34,39 +36,7 @@ export interface CommandPatch {
   watch?: string[]
 }
 
-interface StoreShape {
-  // project-scope commands, keyed by the project (repo) path
-  projects: Record<string, StoredCommand[]>
-  // local commands, keyed by the worktree path
-  worktrees: Record<string, StoredCommand[]>
-  // project paths already seeded with their stack's defaults (so we seed once,
-  // and don't re-add commands the user deleted on purpose)
-  seeded: string[]
-}
-
-// User-authored config, so it lives in `configDir()` (backup-worthy) rather than
-// with the app's state. The old `<userData>/commands.json` is read once and
-// copied over, so an existing setup lands in the config dir on first launch
-// instead of waiting for the next edit.
-const storeFile = (): string => join(configDir(), 'commands.json')
-
-function read(): StoreShape {
-  const migrated = existsSync(storeFile())
-  const file = migrated ? storeFile() : join(dataDir(), 'commands.json')
-  if (!existsSync(file)) return { projects: {}, worktrees: {}, seeded: [] }
-  try {
-    const data = JSON.parse(readFileSync(file, 'utf8')) as Partial<StoreShape>
-    const store = {
-      projects: data.projects && typeof data.projects === 'object' ? data.projects : {},
-      worktrees: data.worktrees && typeof data.worktrees === 'object' ? data.worktrees : {},
-      seeded: Array.isArray(data.seeded) ? data.seeded : []
-    }
-    if (!migrated) write(store)
-    return store
-  } catch {
-    return { projects: {}, worktrees: {}, seeded: [] }
-  }
-}
+export type ProjectCommand = Omit<StoredCommand, 'index' | 'worktree'> & { scope: CommandScope }
 
 // A Laravel project ships with `artisan` + `composer.json`. New Laravel projects
 // get a starter command set the first time they're opened.
@@ -77,7 +47,7 @@ export function isLaravel(projectPath: string): boolean {
 // A Laravel project's starter commands. `Dev` runs the JS bundler's dev server
 // via the project's package manager (bun/pnpm/yarn/npm by lockfile) — not
 // `composer dev` — so it's computed per project rather than hardcoded.
-function laravelDefaults(projectPath: string): Omit<StoredCommand, 'id'>[] {
+function laravelDefaults(projectPath: string): Array<{ name: string; command: string; autoStart?: boolean; watch?: string[] }> {
   const pm = detectPackageManager(projectPath)
   return [
     // The long-running services start automatically so a fresh worktree is ready
@@ -92,30 +62,27 @@ function laravelDefaults(projectPath: string): Omit<StoredCommand, 'id'>[] {
   ]
 }
 
-// Seed a project's defaults once (project scope). Returns true if it wrote.
-function seedDefaults(store: StoreShape, projectPath: string): boolean {
-  if (store.seeded.includes(projectPath)) return false
-  store.seeded.push(projectPath)
-  if ((store.projects[projectPath]?.length ?? 0) > 0) return true // already has commands
-  if (!isLaravel(projectPath)) return true
-  store.projects[projectPath] = laravelDefaults(projectPath).map((c) => ({ ...c, id: newId() }))
-  return true
-}
-
-function write(store: StoreShape): void {
-  writeFileSync(storeFile(), JSON.stringify(store, null, 2))
-}
-
-let seq = 0
-function newId(): string {
-  seq += 1
-  return `cmd_${Date.now().toString(36)}_${seq}`
+/**
+ * Seed a project's stack defaults, once.
+ *
+ * `seeded` is recorded in the project's own `config.toml` rather than in a shared
+ * list, so it travels with the project — and so a user who deletes a seeded
+ * command does not get it back on the next launch.
+ */
+function seedDefaults(projectPath: string): void {
+  const project = projectScan().projects.find((p) => p.path === projectPath)
+  if (project?.seeded) return
+  if (!project) createProject(projectPath)
+  setProjectValue(projectPath, 'seeded', true)
+  if (readCommands(projectPath).commands.length > 0) return
+  if (!isLaravel(projectPath)) return
+  for (const c of laravelDefaults(projectPath)) storeAdd(projectPath, c)
 }
 
 // Commands run on the host, but a containerized worktree has no PHP or JS runtime
 // there (the headless server box has neither) — so `php artisan queue:work` and
-// `bun run dev` just fail with "not found". The `rookery` CLI router
-// (bin/rookery-server.mjs) execs those into the worktree's app container, which is
+// `bun run dev` just fail with "not found". The `floe` CLI router
+// (bin/floe-server.mjs) execs those into the worktree's app container, which is
 // why every containerized process command must carry the prefix.
 //
 // Applied at read time rather than at seed time so projects seeded before this
@@ -126,12 +93,12 @@ const CONTAINER_CMD = /^(?:artisan|bun|bunx|composer|php|node|npm|npx|pnpm|yarn)
 export function containerizeCommand(command: string, worktreePath: string): string {
   if (!CONTAINER_CMD.test(command)) return command
   if (!existsSync(worktreeComposePath(worktreePath))) return command
-  return `rookery ${command}`
+  return `floe ${command}`
 }
 
 // In a containerized worktree the dev server must bind 0.0.0.0 and advertise the
 // Caddy-fronted vite host — settings the project's own vite config can't know, and
-// commonly contradicts. Provisioning writes `.rookery/vite.config.mjs` (see
+// commonly contradicts. Provisioning writes `.floe/vite.config.mjs` (see
 // compose.ts) which wraps the project's config with them; this points the seeded
 // `Dev` command at it.
 //
@@ -143,10 +110,10 @@ export function containerizeCommand(command: string, worktreePath: string): stri
 // ponytail: a `concurrently` dev script stays unwrapped and keeps the old failure;
 // widen by parsing the script if a project actually needs it.
 export function containerizeViteCommand(command: string, projectPath: string, worktreePath: string): string {
-  // Both shapes occur: the bare seeded one, and the `rookery `-prefixed form the
-  // container command router (bin/rookery-server.mjs) uses on the server.
-  if (!/^(?:rookery\s+)?(?:bun|pnpm|yarn|npm) run dev$/.test(command)) return command
-  if (!existsSync(join(worktreePath, '.rookery', 'vite.config.mjs'))) return command
+  // Both shapes occur: the bare seeded one, and the `floe `-prefixed form the
+  // container command router (bin/floe-server.mjs) uses on the server.
+  if (!/^(?:floe\s+)?(?:bun|pnpm|yarn|npm) run dev$/.test(command)) return command
+  if (!existsSync(join(worktreePath, '.floe', 'vite.config.mjs'))) return command
   let dev: unknown
   try {
     dev = JSON.parse(readFileSync(join(projectPath, 'package.json'), 'utf8')).scripts?.dev
@@ -154,20 +121,22 @@ export function containerizeViteCommand(command: string, projectPath: string, wo
     return command // no/unreadable package.json — nothing to wrap
   }
   if (typeof dev !== 'string' || !/^vite(\s|$)/.test(dev.trim())) return command
-  return `${command} -- --config .rookery/vite.config.mjs`
+  return `${command} -- --config .floe/vite.config.mjs`
 }
 
 // The merged command list for a worktree: the project's shared commands first,
 // then this worktree's local ones.
 export function listCommands(projectPath: string, worktreePath: string): ProjectCommand[] {
-  const store = read()
-  if (seedDefaults(store, projectPath)) write(store)
-  const project = (store.projects[projectPath] ?? []).map((c) => ({ ...c, scope: 'project' as const }))
-  const local = (store.worktrees[worktreePath] ?? []).map((c) => ({ ...c, scope: 'local' as const }))
-  return [...project, ...local].map((c) => ({
-    ...c,
-    command: containerizeViteCommand(containerizeCommand(c.command, worktreePath), projectPath, worktreePath)
-  }))
+  migrateLegacyStore()
+  seedDefaults(projectPath)
+  const { commands } = readCommands(projectPath)
+  return commands
+    .filter((c) => !c.worktree || c.worktree === worktreePath)
+    .map(({ index: _index, worktree, ...c }) => ({
+      ...c,
+      scope: worktree ? ('local' as const) : ('project' as const),
+      command: containerizeViteCommand(containerizeCommand(c.command, worktreePath), projectPath, worktreePath)
+    }))
 }
 
 export function addCommand(
@@ -177,13 +146,11 @@ export function addCommand(
   name: string,
   command: string
 ): ProjectCommand[] {
-  const store = read()
-  const bucket = scope === 'project' ? store.projects : store.worktrees
-  const key = scope === 'project' ? projectPath : worktreePath
-  const list = bucket[key] ?? []
-  list.push({ id: newId(), name: name.trim() || 'Command', command: command.trim() })
-  bucket[key] = list
-  write(store)
+  storeAdd(projectPath, {
+    name: name.trim() || 'Command',
+    command: command.trim(),
+    worktree: scope === 'local' ? worktreePath : undefined
+  })
   return listCommands(projectPath, worktreePath)
 }
 
@@ -193,30 +160,19 @@ export function updateCommand(
   id: string,
   patch: CommandPatch
 ): ProjectCommand[] {
-  const store = read()
-  for (const bucket of [store.projects, store.worktrees]) {
-    for (const list of Object.values(bucket)) {
-      const c = list.find((x) => x.id === id)
-      if (!c) continue
-      if (patch.name != null) c.name = patch.name.trim() || c.name
-      if (patch.command != null) c.command = patch.command.trim()
-      if (patch.cwd != null) c.cwd = patch.cwd.trim() || undefined
-      if (patch.autoStart != null) c.autoStart = patch.autoStart
-      if (patch.autoRestart != null) c.autoRestart = patch.autoRestart
-      if (patch.notify != null) c.notify = patch.notify
-      if (patch.watch != null) c.watch = patch.watch
-    }
-  }
-  write(store)
+  storeUpdate(projectPath, id, {
+    ...patch,
+    name: patch.name?.trim() || undefined,
+    command: patch.command?.trim(),
+    // An empty cwd means "no override": commandStore removes the key rather than
+    // writing an empty string, which would read back as a real override.
+    cwd: patch.cwd === undefined ? undefined : patch.cwd.trim()
+  })
   return listCommands(projectPath, worktreePath)
 }
 
 export function removeCommand(projectPath: string, worktreePath: string, id: string): ProjectCommand[] {
-  const store = read()
-  for (const bucket of [store.projects, store.worktrees]) {
-    for (const key of Object.keys(bucket)) bucket[key] = bucket[key].filter((x) => x.id !== id)
-  }
-  write(store)
+  storeRemove(projectPath, id)
   return listCommands(projectPath, worktreePath)
 }
 
@@ -228,22 +184,59 @@ export function setCommandScope(
   id: string,
   scope: CommandScope
 ): ProjectCommand[] {
-  const store = read()
-  let found: StoredCommand | undefined
-  for (const bucket of [store.projects, store.worktrees]) {
-    for (const key of Object.keys(bucket)) {
-      const idx = bucket[key].findIndex((x) => x.id === id)
-      if (idx >= 0) {
-        found = bucket[key][idx]
-        bucket[key].splice(idx, 1)
-      }
+  setCommandWorktree(projectPath, id, scope === 'local' ? worktreePath : null)
+  return listCommands(projectPath, worktreePath)
+}
+
+/**
+ * Fold the old `commands.json` into the per-project files, once.
+ *
+ * Runs from the first listing rather than at boot so it can't delay startup, and
+ * is a one-way trip: the JSON is renamed rather than deleted, so a bad migration
+ * is recoverable, and never read again.
+ */
+let migrated = false
+export function migrateLegacyStore(): void {
+  if (migrated) return
+  migrated = true
+  const candidates = [join(configDir(), 'commands.json'), join(dataDir(), 'commands.json')]
+  const legacy = candidates.find((f) => existsSync(f))
+  if (!legacy) return
+  try {
+    const data = JSON.parse(readFileSync(legacy, 'utf8')) as {
+      projects?: Record<string, StoredCommand[]>
+      worktrees?: Record<string, StoredCommand[]>
+      seeded?: string[]
+    }
+    for (const [projectPath, list] of Object.entries(data.projects ?? {})) {
+      for (const c of list) storeAdd(projectPath, { ...c, worktree: undefined })
+    }
+    for (const [worktreePath, list] of Object.entries(data.worktrees ?? {})) {
+      // A local command names its worktree; the project it belongs to is the one
+      // whose path the worktree sits under, or the worktree itself when it is the
+      // main checkout.
+      const owner = projectForWorktree(worktreePath)
+      for (const c of list) storeAdd(owner, { ...c, worktree: worktreePath })
+    }
+    for (const projectPath of data.seeded ?? []) {
+      if (projectScan().byPath.has(projectPath)) setProjectValue(projectPath, 'seeded', true)
+    }
+  } catch {
+    // A corrupt legacy file is not worth failing the app over — it is renamed
+    // below either way, so this runs once and stops.
+  }
+  renameSync(legacy, `${legacy}.migrated`)
+}
+
+/** The configured project a worktree path belongs to; the path itself if none matches. */
+function projectForWorktree(worktreePath: string): string {
+  let best = worktreePath
+  let bestLength = -1
+  for (const path of projectScan().byPath.keys()) {
+    if ((worktreePath === path || worktreePath.startsWith(`${path}/`)) && path.length > bestLength) {
+      best = path
+      bestLength = path.length
     }
   }
-  if (found) {
-    const bucket = scope === 'project' ? store.projects : store.worktrees
-    const key = scope === 'project' ? projectPath : worktreePath
-    ;(bucket[key] ??= []).push(found)
-    write(store)
-  }
-  return listCommands(projectPath, worktreePath)
+  return best
 }

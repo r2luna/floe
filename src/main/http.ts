@@ -17,7 +17,7 @@ import { isHomePath } from './projects'
 // keeps .http files somewhere this hides.
 // `.worktrees` matters: nested linked worktrees are full checkouts, so walking
 // them lists every .http file twice (and edits could land in the wrong copy).
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'out', 'build', '.rookery', 'vendor', '.worktrees'])
+const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'out', 'build', '.floe', 'vendor', '.worktrees'])
 
 const ENV_FILES = ['http-client.env.json', 'http-client.private.env.json']
 

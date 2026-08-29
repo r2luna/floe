@@ -4,7 +4,7 @@ import type { AgentEventEnvelope } from '../../shared/types'
 // Sessions with an answer you have not seen. Kept in the same store as the
 // drafts and the lane — a reply that landed before you quit is still unread
 // when you come back, or the mark would only live as long as the window.
-const KEY = 'rookery.unread'
+const KEY = 'floe.unread'
 
 // ponytail: 200 keys, oldest dropped. Reading one removes it, so this only
 // fills up if you leave 200 sessions unopened.
@@ -58,7 +58,7 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
 
   useEffect(
     () =>
-      window.rookery.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
+      window.floe.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
         const live = event.kind !== 'done' && event.kind !== 'error'
         setBusy((prev) => {
           // Most events are text deltas in a session already known to be
