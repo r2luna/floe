@@ -13,6 +13,7 @@ import { chordFor, formatChord } from '../../shared/keymap'
 export function Palette({
   items,
   placeholder,
+  value,
   dynamic,
   limit,
   onPick,
@@ -21,6 +22,11 @@ export function Palette({
 }: {
   items: PaletteItem[]
   placeholder: string
+  /**
+   * What the box starts with. A rename opens on the current name — editing one
+   * character of it must not mean typing the whole thing back.
+   */
+  value?: string
   /**
    * Most rows to draw. The file list is thousands long, and a palette that
    * renders every one of them stutters on the first keystroke — nobody scrolls
@@ -41,7 +47,7 @@ export function Palette({
    */
   onRebind?: (id: string, chord: string) => void
 }) {
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(value ?? '')
   const [at, setAt] = useState(0)
   // Recording swallows the whole keyboard: the next chord is the new binding,
   // not a command. Holds the id being rebound so the list can stay on screen.
@@ -61,7 +67,15 @@ export function Palette({
   // best match for what you have typed so far is the one you meant.
   useEffect(() => setAt(0), [query])
 
-  useEffect(() => input.current?.focus(), [])
+  // Focused with the caret at the end, not selecting what is there: the text is
+  // a starting point to edit, and a selection would make the first keystroke
+  // throw it away.
+  useEffect(() => {
+    const el = input.current
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [])
 
   // Keep the cursor row in view as it moves past the fold.
   useEffect(() => {

@@ -17,6 +17,7 @@ import type { ScheduleEntry } from '../main/schedules'
 import type { CommandEvent } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
+import type { Skill } from '../main/config/skills'
 import type { FloeConfig } from '../main/config/floe'
 import type { ConfigError } from '../main/config/errors'
 import type { TomlValue } from '../main/config/toml'
@@ -483,6 +484,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('browser:key', listener)
       }
     },
+    // Floe's own skills — Markdown in ~/.config/floe, global or per project.
+    // The renderer only ever needs the LIST: the text itself is expanded in the
+    // main process at the moment a turn is sent, so a skill never has to travel
+    // through the UI or sit in a message the chat would then have to hide.
+    skills: {
+      list: (worktreePath?: string): Promise<Skill[]> => ipcRenderer.invoke('skills:list', worktreePath)
+    },
     slash: {
       list: (worktreePath: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', worktreePath)
     },
@@ -606,7 +614,18 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       resolveLink: (worktreePath: string, fromRelPath: string, target: string): Promise<string | null> =>
         ipcRenderer.invoke('files:resolveLink', worktreePath, fromRelPath, target),
       apply: (worktreePath: string, ops: FileOp[]): Promise<string[]> =>
-        ipcRenderer.invoke('files:apply', worktreePath, ops)
+        ipcRenderer.invoke('files:apply', worktreePath, ops),
+      /**
+       * Fires when anything in the worktree lands on disk — including the
+       * gitignored files (`.floe/plans/…`) the review event skips, because the
+       * tree lists those too. Armed by `review.watch`: one watcher in main
+       * feeds both. See watchChanges.
+       */
+      onChanged: (cb: (event: { worktreePath: string }) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, event: { worktreePath: string }): void => cb(event)
+        ipcRenderer.on('files:changed', listener)
+        return () => ipcRenderer.removeListener('files:changed', listener)
+      }
     },
     review: {
       changedFiles: (worktreePath: string): Promise<ChangedFile[]> =>

@@ -11,6 +11,15 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.json" />
     <title>Floe</title>
+    <!-- First paint follows the OS, before floe.toml has been read. `system` is
+         the default theme, so guessing it here is right almost always; when the
+         config pins dark or light, applyConfig() overwrites this attribute
+         before React mounts. Without it a light-mode machine flashes dark. -->
+    <script>
+      document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark'
+    </script>
   </head>
   <body>
     <div id="root"></div>

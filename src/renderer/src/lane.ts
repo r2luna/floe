@@ -16,6 +16,15 @@ export type Panel = {
   /** Dimmed secondary label in the panel header (file path, chat topic, …). */
   sub?: string
   /**
+   * The directory `sub` is relative to, when it is not the worktree.
+   *
+   * A file panel normally reads the tree you are working in. A skill does not
+   * live there — it lives in Floe's config — and the reader is the same reader,
+   * so it is given a different root rather than a second panel kind that would
+   * duplicate it. Absent means "the worktree", which is every other case.
+   */
+  root?: string
+  /**
    * Where this panel belongs in the lane, left to right. The lane reads the
    * number and knows nothing about kinds; the kind table assigns it.
    *

@@ -78,7 +78,8 @@ export function TerminalPanel({
   // program in a terminal, and the panel should not learn two ways to host one.
   mode = 'shell',
   file,
-  line
+  line,
+  onExit
 }: {
   termId: string
   cwd: string
@@ -86,8 +87,18 @@ export function TerminalPanel({
   mode?: 'shell' | 'editor'
   file?: string
   line?: number
+  /**
+   * The program on this PTY quit. Given, it replaces the exit notice: the
+   * editor panel IS the editor, so a dead one has nothing left to show.
+   */
+  onExit?: () => void
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
+  // Through a ref, like `onOpen` elsewhere: this is a fresh arrow on every
+  // parent render, and naming it as an effect dependency would tear the
+  // terminal down and rebuild it on each one.
+  const onExitRef = useRef(onExit)
+  onExitRef.current = onExit
   const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim()
 
   useEffect(() => {
@@ -212,7 +223,11 @@ export function TerminalPanel({
         if (held) held.push(event.data)
         else term.write(event.data)
       } else if (event.kind === 'exit') {
-        term.write(`\r\n\x1b[90m[process exited (${event.code})]\x1b[0m\r\n`)
+        // A shell keeps the notice — its scrollback is still worth reading, and
+        // the panel is where you left it. An editor's caller closes the panel
+        // instead, which is what puts the keyboard back on the file tree.
+        if (onExitRef.current) onExitRef.current()
+        else term.write(`\r\n\x1b[90m[process exited (${event.code})]\x1b[0m\r\n`)
       }
     })
 

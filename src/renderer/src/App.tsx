@@ -405,6 +405,7 @@ export default function App() {
   const [picker, setPicker] = useState<{
     placeholder: string
     items: PaletteItem[]
+    value?: string
     dynamic?: (query: string) => PaletteItem | null
     onPick: (id: string) => void
   } | null>(null)
@@ -632,15 +633,20 @@ export default function App() {
     sub?: string,
     session?: { id: string; worktreePath: string },
     firstPrompt?: string,
-    firstChoice?: ModelChoice
+    firstChoice?: ModelChoice,
+    root?: string
   ): Panel => {
-    return panelOf(
+    const panel = panelOf(
       kind,
       kind === 'terminal' ? (sub ?? cwd ?? '~') : sub,
       session,
       firstPrompt,
       firstChoice
     )
+    // Set after the fact rather than threaded through panelOf: only a file
+    // opened from outside the worktree has one, and every other caller would
+    // have to pass undefined past four arguments to reach it.
+    return root ? { ...panel, root } : panel
   }
 
   // ⌃I / ⌃O walk this branch's sessions. Newest first — the same order the
@@ -725,6 +731,46 @@ export default function App() {
     // no: searching as you type must not pull the caret out of the field you
     // are typing in.
     return rows[at]
+  }
+
+  /**
+   * The skills palette: every skill this project can use, opened in the reader.
+   *
+   * The list is fetched when the palette opens rather than held in state —
+   * skills are files a person edits in another window all day, and a list read
+   * at the moment you ask for it cannot be stale.
+   *
+   * Picking one opens its Markdown in the file panel. The reader already knows
+   * how to render Markdown with line numbers and a cursor; giving it a root
+   * outside the worktree was cheaper, and better, than a second viewer that
+   * would then have to be kept looking the same.
+   */
+  const openSkills = (): void => {
+    void window.floe.skills.list(cwd).then((list) => {
+      if (!list.length) {
+        say('no skills yet — see ~/.config/floe/skills')
+        return
+      }
+      setPicker({
+        placeholder: 'Read a skill…',
+        items: list.map((skill) => ({
+          id: skill.name,
+          title: skill.name,
+          detail: skill.description ?? skill.scope,
+          group: skill.scope
+        })),
+        onPick: (name) => {
+          const skill = list.find((s) => s.name === name)
+          if (!skill) return
+          setLane((l) =>
+            open(
+              l,
+              mkPanel('file', skill.file.slice(skill.dir.length + 1), undefined, undefined, undefined, skill.dir)
+            )
+          )
+        }
+      })
+    })
   }
 
   /**
@@ -880,6 +926,7 @@ export default function App() {
   ctxRef.current = {
     lane,
     setLane,
+    openSkills,
     panelEl: panelAt,
     rowsOf,
     makePanel: (kind, sub) => mkPanel(kind as PanelKind, sub),
@@ -902,6 +949,10 @@ export default function App() {
     openFind: () => setFinding(lastFind.current),
     findNext: (dir) => findFrom(lastFind.current, dir)?.focus(),
     addProject: () => setAdding(true),
+    // Wrapped rather than passed: both are declared below this object, and the
+    // command that calls them only runs long after the render that built it.
+    askText: (opts) => askText(opts),
+    say,
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
     deleteProject: () => {
       const project = projectAtCursor()
@@ -959,7 +1010,17 @@ export default function App() {
           if (window.confirm(`Delete the group "${g}"?${moved}`)) void projects.deleteGroup(g)
         }
       }),
-    worktree: current && { path: current.worktree.path, branch: current.worktree.branch },
+    // `here`, not the sidebar selection. A project opened with no row clicked
+    // still HAS a tree — its root, which is what the files panel is already
+    // listing — and reading the selection instead left `e`, `r`, `m` and `d`
+    // silently refusing on a tree the user can see. Same answer as `here`, so
+    // the commands and the panels cannot disagree about which tree they mean.
+    worktree: here
+      ? {
+          path: here,
+          branch: worktrees.rows.find((r) => r.worktree.path === here)?.worktree.branch ?? ''
+        }
+      : undefined,
     deleteSession,
     cycleSession,
     // Undefined until there IS one, which is also how the command knows to dim
@@ -1056,6 +1117,44 @@ export default function App() {
       onPick: opts.onPick
     })
   }
+
+  /**
+   * Put the keyboard back in the lane: the row the focused panel's cursor is on,
+   * or the panel itself if it has no rows. What an overlay owes on the way out —
+   * focus left on a dismissed element is focus nobody can type into.
+   */
+  const backToLane = (): void => {
+    const el = panelAt(lane.focus)
+    if (!el) return
+    const rows = rowsOf(el)
+    const at = lane.panels[lane.focus]?.cursor
+    ;(rows[Math.min(at ?? 0, rows.length - 1)] ?? el).focus({ preventScroll: true })
+  }
+
+  /**
+   * Ask for a line of text — a new name, a destination directory.
+   *
+   * The palette again, not a new overlay: it already focuses itself, closes on
+   * Escape, and turns what you typed into the row Enter takes. `items` is empty
+   * because there is nothing to pick from here; the answer IS the query.
+   */
+  const askText = (opts: {
+    placeholder: string
+    value?: string
+    verb: string
+    onDone: (text: string) => void
+  }): void =>
+    setPicker({
+      placeholder: opts.placeholder,
+      value: opts.value,
+      items: [],
+      dynamic: (query) => {
+        const text = query.trim()
+        // Nothing typed, or nothing changed — neither is an action to offer.
+        return text && text !== opts.value ? { id: text, title: `${opts.verb} ${text}` } : null
+      },
+      onPick: opts.onDone
+    })
 
   /**
    * "project/branch[/rest]" for a panel header — the answer to "where am I".
@@ -1264,6 +1363,7 @@ export default function App() {
                     worktrees={worktrees}
                     changes={changes}
                     cwd={cwd}
+                    root={panel.root}
                     onPatch={(patch) => (lastPatch.current = patch)}
                     onUsage={(u) =>
                       setUsage((prev) =>
@@ -1279,6 +1379,14 @@ export default function App() {
                     // button run — the launcher's empty state is one more way in,
                     // not a second add flow.
                     onAddProject={() => runCommand(REGISTRY, ctxRef.current, 'project.add')}
+                    // Quitting the editor closes its panel, so `:q` lands you
+                    // back on the file tree instead of on a dead terminal you
+                    // then have to close by hand. Located by id, not by `i`:
+                    // the editor can quit long after this render, by which time
+                    // a panel opened to its left has shifted every index.
+                    onEditorExit={() =>
+                      setLane((l) => close(l, l.panels.findIndex((p) => p.id === panel.id)))
+                    }
                     session={panel.session}
                     openSession={sessionKey}
                     // Only the panel the bar is searching: a query tinting rows
@@ -1291,7 +1399,17 @@ export default function App() {
                     // me".
                     onOpen={(child) =>
                       setLane((l) =>
-                        open(l, mkPanel(child.kind, child.sub, child.session, child.firstPrompt, child.firstChoice))
+                        open(
+                          l,
+                          mkPanel(
+                            child.kind,
+                            child.sub,
+                            child.session,
+                            child.firstPrompt,
+                            child.firstChoice,
+                            child.root
+                          )
+                        )
                       )
                     }
                   />
@@ -1445,13 +1563,21 @@ export default function App() {
         <Palette
           placeholder={picker.placeholder}
           items={picker.items}
+          value={picker.value}
           dynamic={picker.dynamic}
-          onClose={() => setPicker(null)}
+          onClose={() => {
+            setPicker(null)
+            backToLane()
+          }}
           onPick={(id) => {
             // Cleared first: onPick may open the next step, and clearing after
             // would close the one it just put up.
             setPicker(null)
             picker.onPick(id)
+            // After the answer, back to the row you asked from — so `r`, a new
+            // name, Enter leaves you where `j` still works. A step that opened
+            // another palette takes the focus back on mount, after this.
+            backToLane()
           }}
         />
       )}

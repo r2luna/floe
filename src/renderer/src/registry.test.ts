@@ -17,6 +17,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     rowsOf: () => [],
     makePanel: (kind: string, sub?: string) => panel(kind, sub),
     canOpen: () => true,
+    openSkills: () => {},
     whyCannotOpen: () => 'not available',
     patchFor: () => '',
     openPalette: () => {},
@@ -35,7 +36,9 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     deleteGroup: () => {},
     newWorktree: () => {},
     deleteSession: () => {},
-    cycleSession: () => {}
+    cycleSession: () => {},
+    askText: () => {},
+    say: () => {}
   }
   return ctx
 }

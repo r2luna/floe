@@ -22,6 +22,7 @@ import {
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import type { Command, CommandContext } from './commands.ts'
 import { editSub } from './editorTarget.ts'
+import type { FileOp } from '../../shared/types.ts'
 
 /**
  * Scroll the focused panel's content.
@@ -98,6 +99,38 @@ function fileRow(c: CommandContext): HTMLElement | null {
   return active && c.panelEl(c.lane.focus)?.contains(active) ? active : null
 }
 
+/**
+ * The tree row the cursor is on, as a worktree-relative path.
+ *
+ * Directories count: renaming, moving and deleting a directory are the same
+ * three operations, and refusing them on a folder would be an arbitrary hole.
+ */
+function fileTarget(c: CommandContext): string | undefined {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'files') return undefined
+  const row = fileRow(c)
+  return row?.dataset.file ?? row?.dataset.dir
+}
+
+/** Join a directory and a name, where the directory may be the root (''). */
+function join(dir: string, name: string): string {
+  const clean = name.replace(/^\/+|\/+$/g, '')
+  const base = dir.replace(/^\/+|\/+$/g, '')
+  return base ? `${base}/${clean}` : clean
+}
+
+/**
+ * Run file operations and report what failed.
+ *
+ * Nothing here refreshes the tree: the panel already follows the worktree's
+ * watcher, so the row disappears (or reappears under its new name) the same way
+ * it would if an agent had done it.
+ */
+function applyOps(c: CommandContext, root: string, ops: FileOp[]): void {
+  void window.floe.files.apply(root, ops).then((errors) => {
+    if (errors.length) c.say(errors[0])
+  })
+}
+
 function moveCursor(c: CommandContext, delta: number): void {
   const panelEl = c.panelEl(c.lane.focus)
   const all = c.rowsOf(panelEl)
@@ -138,15 +171,19 @@ function moveCursor(c: CommandContext, delta: number): void {
 /**
  * The file `e` would open, and the line to land on.
  *
- * Three panels can answer: the tree (the row under the cursor), the reader (its
- * own file, on the cursor's line) and a diff (the file, on the line that row is
- * in the NEW version — an editor has nothing to say about the old one). Null
- * when the focused panel is none of those, which is what dims the command.
+ * Four panels can answer: the tree and the plans list (the row under the
+ * cursor), the reader (its own file, on the cursor's line) and a diff (the
+ * file, on the line that row is in the NEW version — an editor has nothing to
+ * say about the old one). Null when the focused panel is none of those, which
+ * is what dims the command.
  */
 function editTargetOf(c: CommandContext): { path: string; line?: number } | null {
   const panel = c.lane.panels[c.lane.focus]
   if (!panel) return null
-  if (panel.kind === 'files') {
+  // A list whose rows name a file — the tree and the plans list. Both mark the
+  // row with `data-file`, so one read covers them and a third list joins by
+  // marking its rows the same way.
+  if (panel.kind === 'files' || panel.kind === 'plans') {
     const path = fileRow(c)?.dataset.file
     return path ? { path } : null
   }
@@ -555,6 +592,73 @@ export const REGISTRY: Map<string, Command> = new Map(
           const up = c.panelEl(c.lane.focus)?.querySelector<HTMLElement>(`[data-dir="${CSS.escape(parent)}"]`)
           up?.focus()
         }
+      },
+      {
+        id: 'files.rename',
+        title: 'Rename file…',
+        group: 'Files',
+        keys: 'r',
+        enabled: (c) => !!fileTarget(c) && !!c.worktree,
+        run: (c) => {
+          const path = fileTarget(c)
+          const root = c.worktree?.path
+          if (!path || !root) return
+          const cut = path.lastIndexOf('/')
+          const dir = cut === -1 ? '' : path.slice(0, cut)
+          c.askText({
+            placeholder: 'New name…',
+            value: path.slice(cut + 1),
+            verb: 'Rename to',
+            // A name, not a path: this renames in place. Moving somewhere else
+            // is `m`, and keeping the two apart is what makes `r` safe to press.
+            onDone: (name) => applyOps(c, root, [{ kind: 'rename', from: path, to: join(dir, name) }])
+          })
+        }
+      },
+      {
+        id: 'files.move',
+        title: 'Move file…',
+        group: 'Files',
+        keys: 'm',
+        enabled: (c) => !!fileTarget(c) && !!c.worktree,
+        run: (c) => {
+          const path = fileTarget(c)
+          const root = c.worktree?.path
+          if (!path || !root) return
+          const cut = path.lastIndexOf('/')
+          c.askText({
+            placeholder: 'Destination directory…',
+            value: cut === -1 ? '' : path.slice(0, cut),
+            verb: 'Move to',
+            // The directory, and the file keeps its name — the common move. A
+            // rename on the way is `r` afterwards, or a path with a new last
+            // segment, which `join` handles either way.
+            onDone: (dest) =>
+              applyOps(c, root, [{ kind: 'rename', from: path, to: join(dest, path.slice(cut + 1)) }])
+          })
+        }
+      },
+      {
+        id: 'files.delete',
+        title: 'Delete file…',
+        group: 'Files',
+        keys: 'd',
+        enabled: (c) => !!fileTarget(c) && !!c.worktree,
+        run: (c) => {
+          const path = fileTarget(c)
+          const root = c.worktree?.path
+          if (!path || !root) return
+          // This one really does delete from disk, so it says so — unlike
+          // removing a project, which only forgets it.
+          if (!window.confirm(`Delete "${path}" from the worktree? This removes it from disk.`)) return
+          applyOps(c, root, [{ kind: 'delete', path }])
+        }
+      },
+      {
+        id: 'skills.open',
+        title: 'Skills…',
+        group: 'App',
+        run: (c) => c.openSkills()
       },
       {
         id: 'settings.open',

@@ -6,6 +6,7 @@ import { getSessionMeta, getCreatedSessions } from './sessionStore'
 import { findSpecSummarySource } from './plans'
 
 import { contextTokens } from '../shared/types'
+import { collapseSkills, hasSkill } from '../shared/skills'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
 import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
 
@@ -514,6 +515,14 @@ function expandUserText(text: string): TranscriptItem[] {
   if (stdoutMatch) {
     const out = stdoutMatch[1].trim()
     return out ? [{ role: 'assistant', text: '```\n' + out + '\n```' }] : []
+  }
+
+  // A Floe skill the harness echoed back. Collapsed to the token that was
+  // typed, so a transcript reopened tomorrow reads the way it did when it was
+  // written — the instructions went to the model, not to you.
+  if (hasSkill(stripped)) {
+    const collapsed = collapseSkills(stripped)
+    return collapsed ? [{ role: 'user', text: collapsed }] : []
   }
 
   return [{ role: 'user', text: stripped }]

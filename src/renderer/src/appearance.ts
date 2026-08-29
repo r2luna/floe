@@ -15,7 +15,7 @@ type Theme = 'system' | 'dark' | 'light'
 
 // The theme in force, kept so an OS switch can be applied without re-reading the
 // config — and ignored when the config names a theme outright.
-let chosen: Theme = 'dark'
+let chosen: Theme = 'system'
 
 /**
  * Put `light` or `dark` on <html>, which is what every themed rule keys off.

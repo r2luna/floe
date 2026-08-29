@@ -31,16 +31,16 @@ export const FLOE_TOML = `# ====================================================
 # | way a terminal's font size does — rather than the text alone. 13 is the size
 # | the interface is drawn at, so it is the neutral value.
 # |
-# | \`theme\` is \`dark\`, \`light\`, or \`system\` to follow the OS. Dark is the
-# | default because it is what the interface is designed at; light is a full
-# | palette of its own, not a filter over it.
+# | \`theme\` is \`dark\`, \`light\`, or \`system\`. The default, \`system\`, follows
+# | the OS and flips live when it does; the other two pin the app to one theme.
+# | Light is a full palette of its own, not a filter over dark.
 # |
 # ------------------------------------------------------------------------------
 
 [appearance]
 font-family = "CommitMonoPinguim"
 font-size   = 13
-theme       = "dark"
+theme       = "system"
 
 
 # ------------------------------------------------------------------------------

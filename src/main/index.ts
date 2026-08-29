@@ -147,6 +147,9 @@ import {
 import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
+import { listSkills, readSkill } from './config/skills'
+import { projectFor } from './config/projectStore'
+import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
 import { launchEditor } from './editors'
@@ -397,6 +400,12 @@ function registerIpc(): void {
     ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return
+      // Skills expand HERE, above the provider split, because that is the whole
+      // reason they live in Floe's config: `/deploy` has to mean the same thing
+      // whichever CLI answers. Expanding per runtime would be four copies of
+      // one rule. The wrapper the expansion carries is what lets the transcript
+      // show `/deploy` again — see shared/skills.ts.
+      prompt = expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined))
       // Anything but Claude runs on the machine's own runtime and answers over
       // the same agent:event channel. The provider is stated by the picker;
       // `isCodexModel` stays only as the fallback for a choice made before
@@ -906,6 +915,11 @@ function registerIpc(): void {
   // Settings. The panel reads and writes the same `floe.toml` the user edits by
   // hand — `set` goes through the surgical writer, so a toggle flipped in the UI
   // comes back as one changed value in a file whose comments are all still there.
+  // Skills the composer's `/` menu and the skills palette read. Scoped to the
+  // worktree's project, so a project skill only shows up where it applies.
+  ipcMain.handle('skills:list', (_event, worktreePath?: string) =>
+    listSkills(worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+  )
   ipcMain.handle('config:get', () => floeConfig())
   ipcMain.handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
     setFloeValue(table, key, value)

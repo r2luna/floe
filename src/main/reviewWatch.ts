@@ -7,14 +7,16 @@ import { isHomePath } from './projects'
 
 const exec = promisify(execFile)
 
-// Single live watcher set on the active worktree, so the changed-files list (and
-// the Changes tab badge) refresh as files are edited — by Claude or in the user's
-// own editor — without waiting for the agent turn to finish. Floe is a
+// Single live watcher set on the active worktree, feeding both the changed-files
+// list (`review:event`) and the file tree (`files:changed`), so they refresh as
+// files are edited — by Claude or in the user's own editor — without waiting for
+// the agent turn to finish. Floe is a
 // single-window app, so one set, retargeted as the user switches worktree, is
 // enough. fs.watch fires several events per save, so each refresh is debounced.
 let watchers: FSWatcher[] = []
 let watchedPath: string | null = null
 let debounce: ReturnType<typeof setTimeout> | null = null
+let treeDebounce: ReturnType<typeof setTimeout> | null = null
 
 // Git state files that DO alter what the Changes panel shows — the index
 // (staging, `reset`, `git add`), HEAD/ORIG_HEAD (commit, checkout, `reset
@@ -34,21 +36,24 @@ function isGitState(f: string): boolean {
   )
 }
 
-// Paths whose changes never alter the review diff. Skipping them keeps a busy
-// node_modules (an install) or the gitignored plans directory from triggering
-// pointless git calls. The git dir is watched separately (see watchGitDir), so
-// here we ignore the worktree's `.git` entry entirely. A null filename (the
-// platform couldn't name the entry) refreshes to stay safe.
-function isNoise(filename: string | null): boolean {
+// Paths no panel cares about, at any cost: the git dir (watched separately, see
+// below) and an installing node_modules, whose event storm would buy a refresh
+// of a directory nobody has expanded. A null filename (the platform couldn't
+// name the entry) refreshes to stay safe.
+export function isTreeNoise(filename: string | null): boolean {
   if (!filename) return false
   const f = filename.split(sep).join('/')
   if (f === '.git' || f.startsWith('.git/')) return true
-  return (
-    f === 'node_modules' ||
-    f.startsWith('node_modules/') ||
-    f.includes('/node_modules/') ||
-    f.startsWith('.floe/')
-  )
+  return f === 'node_modules' || f.startsWith('node_modules/') || f.includes('/node_modules/')
+}
+
+// Paths whose changes never alter the review DIFF. `.floe/` is gitignored, so a
+// plan or a schedule landing there moves no diff and must not cost a git call —
+// but it IS a file in the tree, which is why the tree has its own event below.
+export function isNoise(filename: string | null): boolean {
+  if (isTreeNoise(filename)) return true
+  if (!filename) return false
+  return filename.split(sep).join('/').startsWith('.floe/')
 }
 
 export async function watchChanges(wc: WebContents, worktreePath: string): Promise<void> {
@@ -70,10 +75,24 @@ export async function watchChanges(wc: WebContents, worktreePath: string): Promi
     }, 250)
   }
 
+  // The file tree's own event. Same watcher, wider net: the tree lists every
+  // file in the worktree, including the gitignored ones the review ignores, so
+  // an agent writing `.floe/plans/foo.md` has to show up there even though it
+  // moves no diff. Two events rather than two watchers — a second recursive
+  // watch over the same tree is a real cost on Linux, where Node emulates it.
+  const fireTree = (): void => {
+    if (treeDebounce) clearTimeout(treeDebounce)
+    treeDebounce = setTimeout(() => {
+      if (!wc.isDestroyed()) wc.send('files:changed', { worktreePath })
+    }, 250)
+  }
+
   // The working tree — catches file edits from Claude or the user's editor.
   try {
     watchers.push(
       watch(worktreePath, { recursive: true }, (_event, filename) => {
+        if (isTreeNoise(filename)) return
+        fireTree()
         if (isNoise(filename)) return
         fire()
       })

@@ -46,8 +46,24 @@ export interface CommandContext {
   findNext: (dir: 1 | -1) => void
   /** Native folder picker, then add what was chosen. */
   addProject: () => void
+  /**
+   * Ask for one line of text — a new file name, a destination directory. The
+   * registry must not learn what the prompt is made of; App answers with the
+   * palette it already has.
+   */
+  askText: (opts: {
+    placeholder: string
+    value?: string
+    /** What Enter will do, written on the row: "Rename to", "Move to". */
+    verb: string
+    onDone: (text: string) => void
+  }) => void
+  /** Say something to the user, briefly. Failures that have no row to dim. */
+  say: (text: string) => void
   /** Name a new project group. */
   createGroup: () => void
+  /** The skills palette: pick one and read it. */
+  openSkills: () => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
   /** Forget the project the cursor is on, after asking. */

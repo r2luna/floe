@@ -50,7 +50,7 @@ export const DEFAULTS: FloeConfig = {
   // `dark` rather than `system`: dark is what the app has always been and what
   // it is designed at, so following the OS by default would flip an existing
   // user into light on the next launch without them asking for it.
-  appearance: { fontFamily: undefined, fontSize: 13, theme: 'dark' },
+  appearance: { fontFamily: undefined, fontSize: 13, theme: 'system' },
   agent: {
     model: 'opus',
     effort: 'high',

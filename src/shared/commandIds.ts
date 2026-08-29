@@ -32,6 +32,9 @@ export const COMMAND_IDS: string[] = [
   'find.next',
   'find.prev',
   'files.expand',
+  'files.rename',
+  'files.move',
+  'files.delete',
   'editor.open',
   'files.collapse',
   'scroll.down',
@@ -60,6 +63,7 @@ export const COMMAND_IDS: string[] = [
   'group.delete',
   'auth.account',
   'settings.open',
+  'skills.open',
   'keybindings.reset',
   // Sessions & worktrees
   'session.prev',

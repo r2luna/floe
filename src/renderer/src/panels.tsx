@@ -213,6 +213,8 @@ export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).
 export type OpenFn = (child: {
   kind: PanelKind
   sub?: string
+  /** Read `sub` relative to this instead of the worktree. See Panel.root. */
+  root?: string
   /** For a chat: which session it shows. */
   session?: { id: string; worktreePath: string }
   /** For a brand-new chat: the message that started it, sent on mount. */
@@ -233,6 +235,7 @@ export function PanelBody({
   worktrees,
   changes,
   cwd,
+  root,
   session,
   openSession,
   find,
@@ -242,6 +245,7 @@ export function PanelBody({
   onUsage,
   menuItems,
   onAddProject,
+  onEditorExit,
   onOpen
 }: {
   kind: PanelKind
@@ -253,6 +257,8 @@ export function PanelBody({
   changes: Changes
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
   cwd?: string
+  /** Overrides `cwd` for this panel — see Panel.root. */
+  root?: string
   /** Reports the patch the diff panel is rendering, so commands can quote it. */
   onPatch?: (patch: string) => void
   /**
@@ -265,6 +271,8 @@ export function PanelBody({
   menuItems?: (trigger: Trigger) => PaletteItem[]
   /** Opens the add-project dialog — see `project.add` in the registry. */
   onAddProject?: () => void
+  /** The editor quit: the lane closes this panel — see TerminalPanel.onExit. */
+  onEditorExit?: () => void
   /**
    * The find bar's query, when this is the panel it is searching. Rows tint the
    * part that matched, so a jump to a row nine screens down explains itself.
@@ -333,7 +341,9 @@ export function PanelBody({
     )
   // `find` reaches the code views too: `/` searches whatever panel is focused,
   // and a file is the panel where a match is hardest to spot unaided.
-  if (kind === 'file') return <FileView root={cwd} path={sub ?? ''} find={find} />
+  // `root` overrides the worktree — that is how a skill opens in the same
+  // reader as any other file.
+  if (kind === 'file') return <FileView root={root ?? cwd} path={sub ?? ''} find={find} />
   // The editor panel is a terminal running your editor, one per worktree: every
   // file you open lands in the same session, the way it would in a real
   // terminal. `sub` carries the file and the line — see editSub.
@@ -347,6 +357,7 @@ export function PanelBody({
         mode="editor"
         file={target.path}
         line={target.line}
+        onExit={onEditorExit}
       />
     )
   }
@@ -1353,6 +1364,37 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
     read('')
   }, [root, read])
 
+  // Which directories are on screen, for the watcher below. A ref, not the state
+  // itself: re-reading a directory must not tear down and re-arm the listener,
+  // which is exactly what depending on `loaded` would do.
+  const openDirs = useRef<string[]>([])
+  openDirs.current = [...loaded.keys()]
+
+  /**
+   * Follow the worktree, don't snapshot it.
+   *
+   * An agent creating a file is the normal case here, so a tree that only
+   * re-read on expand shows a directory that no longer exists as it is drawn.
+   * One watcher in main serves both panels, but this listens on the tree's own
+   * event, not the review's: the review skips gitignored paths (`.floe/plans/`)
+   * because they move no diff, and those are files the tree must still show.
+   *
+   * Every loaded directory is re-read, not just the visible ones: a collapsed
+   * directory keeps its contents cached, and a stale cache would surface the
+   * moment you opened it again.
+   */
+  useEffect(() => {
+    if (!root) return
+    void window.floe.review.watch(root)
+    return window.floe.files.onChanged((event) => {
+      if (event.worktreePath !== root) return
+      for (const dir of openDirs.current) read(dir)
+      // The flat search list is a snapshot of the whole tree; drop it so a
+      // search after a file lands finds the file. Refetched only if one runs.
+      setAll(null)
+    })
+  }, [root, read])
+
   const query = find?.trim().toLowerCase() ?? ''
 
   useEffect(() => {
@@ -1713,6 +1755,10 @@ function PlansList({
             <button
               className="row"
               title={plan.relPath}
+              // What `e` reads to edit the plan — a plan is a file in the
+              // worktree like any other, so it takes the same key. Same
+              // attribute the file tree uses; the command needs one reader.
+              data-file={plan.relPath}
               onClick={() => onOpen({ kind: 'file', sub: plan.relPath })}
             >
               <span className="row-name">{markAll(plan.name, find)}</span>

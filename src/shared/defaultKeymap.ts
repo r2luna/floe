@@ -33,8 +33,14 @@ the worktree's files, and picking one opens it in the file panel.`,
     title: 'Settings',
     doc: `\`⌘,\` opens Settings — a view of this file's neighbour, \`floe.toml\`. Anything
 it does not put on a row is a link to the file itself, which is documented in
-place, so nothing is reachable only through the UI.`,
-    binds: [{ key: 'super+,', command: 'settings.open' }]
+place, so nothing is reachable only through the UI.
+
+\`⌘K S\` lists your skills — the Markdown in \`~/.config/floe/skills\` that \`/name\`
+sends to whichever harness answers — and opens one in the file reader.`,
+    binds: [
+      { key: 'super+,', command: 'settings.open' },
+      { key: 'super+k s', command: 'skills.open' }
+    ]
   },
   {
     title: 'Panels',
@@ -85,10 +91,20 @@ not an open directory \`h\` goes up to the containing one instead, so it is
 never a key that does nothing.
 
 These come before the cursor keys because \`h\` and \`l\` mean something else in
-the project and worktree lists, and first match wins.`,
+the project and worktree lists, and first match wins.
+
+\`r\` renames the row under the cursor, \`m\` moves it to another directory and
+\`d\` deletes it — the same three letters the project list uses, on the same
+principle: the row the cursor is on is the thing they act on. \`r\` and \`m\` open
+on the current name and directory, so editing one character is one keystroke.
+Directories count too, and \`d\` asks first, because this one really does remove
+from disk.`,
     binds: [
       { key: 'l', command: 'files.expand', when: 'panel == "files"' },
-      { key: 'h', command: 'files.collapse', when: 'panel == "files"' }
+      { key: 'h', command: 'files.collapse', when: 'panel == "files"' },
+      { key: 'r', command: 'files.rename', when: 'panel == "files"' },
+      { key: 'm', command: 'files.move', when: 'panel == "files"' },
+      { key: 'd', command: 'files.delete', when: 'panel == "files"' }
     ]
   },
   {
@@ -97,12 +113,12 @@ the project and worktree lists, and first match wins.`,
 \`[editor] command\` names in floe.toml. A terminal editor (nvim, vim, helix)
 takes over the file panel itself, on the line the cursor was on; a GUI editor
 (VS Code, Zed, Sublime) is launched beside the app. Either way it is the same
-key from the file tree, the reader and a diff.`,
+key from the file tree, the plans list, the reader and a diff.`,
     binds: [
       {
         key: 'e',
         command: 'editor.open',
-        when: 'panel in ["files", "file", "diff", "edit"]'
+        when: 'panel in ["files", "plans", "file", "diff", "edit"]'
       }
     ]
   },

@@ -213,6 +213,22 @@ export function scanProjects(): ProjectScan {
   return { projects, byPath, errors }
 }
 
+/**
+ * The configured project a worktree belongs to.
+ *
+ * The longest configured path the worktree sits under, so a worktree inside a
+ * project inside another project lands on the nearer one. Null when the path
+ * belongs to no project Floe knows about.
+ */
+export function projectFor(worktreePath: string): string | null {
+  let best: string | null = null
+  for (const path of projectScan().byPath.keys()) {
+    const inside = worktreePath === path || worktreePath.startsWith(`${path}/`)
+    if (inside && (best === null || path.length > best.length)) best = path
+  }
+  return best
+}
+
 export function displayName(project: ProjectConfig): string {
   return project.name ?? project.path.split('/').filter(Boolean).pop() ?? project.path
 }
