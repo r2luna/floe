@@ -7,6 +7,7 @@ import {
   selRange,
   inSelection,
   quoteSelection,
+  fileRef,
   appendComment
 } from './diff.ts'
 
@@ -110,4 +111,16 @@ test('appendComment leaves exactly one blank line at the join', () => {
   assert.equal(appendComment('a\n', 'B'), 'a\n\nB')
   assert.equal(appendComment('a\n\n\n\n', 'B'), 'a\n\nB')
   assert.equal(appendComment('   \n ', 'B'), 'B', 'blank-only is the same as empty')
+})
+
+test('fileRef points at the lines rather than pasting them', () => {
+  assert.equal(fileRef('docs/plan.md', 11, 29), 'docs/plan.md:12-30\n\n')
+})
+
+test('fileRef names one line when the range is one row', () => {
+  assert.equal(fileRef('docs/plan.md', 4, 4), 'docs/plan.md:5\n\n')
+})
+
+test('fileRef reads the same selected upwards', () => {
+  assert.equal(fileRef('a.md', 9, 2), fileRef('a.md', 2, 9))
 })

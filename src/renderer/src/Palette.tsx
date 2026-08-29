@@ -14,12 +14,19 @@ export function Palette({
   items,
   placeholder,
   dynamic,
+  limit,
   onPick,
   onClose,
   onRebind
 }: {
   items: PaletteItem[]
   placeholder: string
+  /**
+   * Most rows to draw. The file list is thousands long, and a palette that
+   * renders every one of them stutters on the first keystroke — nobody scrolls
+   * past the fold of a fuzzy list anyway, they type another letter.
+   */
+  limit?: number
   /**
    * An item built from what you typed, offered first. This is how "Create
    * <name>" works: the option IS the query, so it cannot come from a fixed list.
@@ -47,8 +54,9 @@ export function Palette({
     const made = dynamic?.(query)
     // Built from the query, so it is never filtered — and first, because when
     // you are typing a new name that is what you meant.
-    return made ? [{ item: made, hits: [], score: -1 }, ...found] : found
-  }, [items, query, dynamic])
+    const rows = made ? [{ item: made, hits: [], score: -1 }, ...found] : found
+    return limit ? rows.slice(0, limit) : rows
+  }, [items, query, dynamic, limit])
   // Typing changes the list under the cursor, so it goes back to the top: the
   // best match for what you have typed so far is the one you meant.
   useEffect(() => setAt(0), [query])

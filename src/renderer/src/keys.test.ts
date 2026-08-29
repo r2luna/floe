@@ -132,6 +132,15 @@ test('⌃J and ⌃K scroll by default, and keep working while typing', () => {
   assert.deepEqual(r({ key: 'j', ctrl: true }, { typing: true }), { id: 'scroll.down' })
 })
 
+test('⌃⇧J and ⌃⇧K only ever scroll — a stack cannot take them', () => {
+  assert.deepEqual(r({ key: 'j', ctrl: true, shift: true }, { stackDown: true }), {
+    id: 'scroll.down'
+  })
+  assert.deepEqual(r({ key: 'k', ctrl: true, shift: true }, { stackUp: true }), { id: 'scroll.up' })
+  // Reading back through a chat while writing into it is the whole point.
+  assert.deepEqual(r({ key: 'j', ctrl: true, shift: true }, { typing: true }), { id: 'scroll.down' })
+})
+
 test('⌃J and ⌃K move within a stack when there is one to move into', () => {
   assert.deepEqual(r({ key: 'j', ctrl: true }, { stackDown: true }), { id: 'panel.down' })
   assert.deepEqual(r({ key: 'k', ctrl: true }, { stackUp: true }), { id: 'panel.up' })

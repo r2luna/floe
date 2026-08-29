@@ -13,6 +13,7 @@ import { configDir } from '../dataDir'
 import type { ConfigError } from './errors'
 import { ensureFloeConfig, floeConfigPath, floeConfigResult, invalidateFloeConfig } from './floe'
 import { invalidateProjects, projectScan } from './projectStore'
+import { invalidateEditorCache } from '../editors'
 import { readCommands } from './commandStore'
 import { ensureKeybindings } from '../keybindings'
 
@@ -43,6 +44,9 @@ export function configErrors(): ConfigError[] {
 export function invalidateAll(): void {
   invalidateFloeConfig()
   invalidateProjects()
+  // The editor's resolved binary is cached off `[editor] command`, so changing
+  // it has to drop that too — otherwise the new editor takes a relaunch.
+  invalidateEditorCache()
 }
 
 /**

@@ -10,8 +10,12 @@ import {
   writeFileSync,
   type Dirent
 } from 'node:fs'
+import { execFile } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { promisify } from 'node:util'
 import type { FileContent, FileNode, FileOp } from '../shared/types'
+
+const execFileAsync = promisify(execFile)
 
 // Reads a worktree's directories for the Files panel. One level at a time (see
 // listDir) and straight off the filesystem, so freshly-created files show up.
@@ -217,4 +221,66 @@ export function resolveWikiLink(
   } catch {
     return null
   }
+}
+
+// --- Every file in the worktree, for the file palette -----------------------
+
+// Enough to hold a large repo, small enough that the payload stays an IPC
+// message rather than a transfer. A repo past this is one where you type a few
+// letters anyway, so the tail is not what you were reaching for.
+const MAX_SEARCH_FILES = 20000
+
+// Directories a fallback walk never descends into. Unlike the tree — which
+// lists everything, because you go looking for `dist` in a file tree — a search
+// over them returns thousands of rows nobody typed a query for.
+const SKIP_DIRS = new Set(['.git', '.worktrees', 'node_modules', '.venv', 'vendor', 'dist', 'build', 'target'])
+
+/**
+ * Every file in the worktree, worktree-relative, for the file palette.
+ *
+ * `git ls-files` when the tree is a repo: it already answers "the files that
+ * are mine" — tracked plus untracked, minus everything .gitignore names — which
+ * is the list you want to fuzzy-match against. Outside a repo it walks instead,
+ * skipping the directories a walk would otherwise drown in.
+ */
+export async function searchableFiles(worktreePath: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['-C', worktreePath, 'ls-files', '--cached', '--others', '--exclude-standard', '-z'],
+      { maxBuffer: 64 * 1024 * 1024 }
+    )
+    const files = stdout.split('\0').filter(Boolean)
+    // Deduped: a path can be both cached and modified-untracked in a repo with
+    // an assume-unchanged entry, and a doubled row in a palette is a misclick.
+    return [...new Set(files)].slice(0, MAX_SEARCH_FILES)
+  } catch {
+    return walkFiles(worktreePath)
+  }
+}
+
+function walkFiles(root: string): string[] {
+  const out: string[] = []
+  const queue = ['']
+  while (queue.length && out.length < MAX_SEARCH_FILES) {
+    const rel = queue.shift()!
+    let entries: Dirent<string>[]
+    try {
+      entries = readdirSync(rel ? join(root, rel) : root, { withFileTypes: true, encoding: 'utf8' })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const path = rel ? `${rel}/${entry.name}` : entry.name
+      // Symlinked directories are not followed: a link back up the tree turns
+      // the walk into a loop.
+      if (entry.isDirectory()) {
+        if (!SKIP_DIRS.has(entry.name)) queue.push(path)
+      } else if (entry.isFile()) {
+        if (out.length >= MAX_SEARCH_FILES) break
+        out.push(path)
+      }
+    }
+  }
+  return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
 }

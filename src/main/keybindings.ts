@@ -94,7 +94,12 @@ const WRITING_A_BINDING = `Each \`[[keybind]]\` needs a \`key\` and a \`command\
 one physical key, so this file moves between machines unchanged. \`cmd\`,
 \`command\`, \`meta\`, \`win\` and \`⌘\` are all accepted and normalize to it.
 Modifier order does not matter either: \`shift+cmd+p\` and \`super+shift+p\` are
-the same chord. A leading \`super+k \` makes it a two-step sequence.
+the same chord.
+
+A leading \`super+k \` makes it a two-step sequence. You may keep the modifier
+held for the second key — \`⌘K ⌘F\` and \`⌘K F\` both fire \`super+k f\` — but only
+the one the first step held is forgiven, since any other would change which key
+you actually pressed.
 
 \`arg\` passes a value to commands that take one, such as which panel to jump
 to. \`when\` limits the binding to a situation — see the reference at the

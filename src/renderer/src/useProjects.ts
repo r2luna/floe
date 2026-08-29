@@ -29,6 +29,8 @@ export interface Projects {
   deleteGroup: (name: string) => Promise<void>
   /** Move a project into a group, creating the group if it is new. */
   setGroup: (path: string, group: string) => Promise<void>
+  /** Forget a project. Its folder on disk is untouched — Floe just stops listing it. */
+  remove: (path: string) => Promise<void>
   reload: () => void
 }
 
@@ -102,6 +104,14 @@ export function useProjects(): Projects {
     setGroupNames(await window.floe.projects.groups())
   }, [])
 
+  const remove = useCallback(async (path: string) => {
+    const list = await window.floe.projects.remove(path)
+    setAll(list)
+    // The removed one cannot stay current: land on whatever is left, or on
+    // nothing when it was the last project.
+    setCurrentPath((p) => (p === path ? list.find((x) => !x.home)?.path ?? list[0]?.path : p))
+  }, [])
+
   // Grouped in first-seen order rather than alphabetically: the order in
   // projects.json is the user's own, and re-sorting it would move things they
   // arranged. The default group is the one exception — it leads, always, so the
@@ -130,6 +140,7 @@ export function useProjects(): Projects {
     addGroup,
     deleteGroup,
     setGroup,
+    remove,
     reload
   }
 }

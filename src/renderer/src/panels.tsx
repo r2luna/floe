@@ -8,6 +8,8 @@ import {
   IconGitBranch,
   IconGitCompare,
   IconMessage,
+  IconNotes,
+  IconPencil,
   IconPlus,
   IconTrash,
   IconSettings,
@@ -33,11 +35,15 @@ import {
 import { Composer } from './Composer'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
+import { hitRanges, splitByHits } from './findHits.ts'
+import { usePlans } from './usePlans'
+import { editTarget } from './editorTarget.ts'
 import { renderMarkdown, type MdLine } from './markdown'
 import { PenguinHead } from './PenguinHead'
 import { TerminalPanel, sendToTerminal } from './Terminal'
 import { useSessionActivity } from './useRunning'
 import type { Projects } from './useProjects'
+import { moveTargets } from './projectMove'
 import type { Worktrees } from './useWorktrees'
 import type { Changes } from './useChanges'
 import type { PaletteItem } from './fuzzy'
@@ -111,15 +117,33 @@ export const KINDS = {
   },
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
-  changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsWorktree: true },
+  changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
   // The worktree's tree. Same shape as `changes`: a narrow list whose rows open
   // something wider beside it, so it spends as little width as it can.
-  files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsWorktree: true },
-  diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsWorktree: true },
+  files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsProject: true },
+  // Plan-mode documents and spec-pipeline docs. A narrow list whose rows open
+  // the reader beside it, like `changes` and `files` — same reason for the same
+  // width. Rows open a `file` panel, so a plan is read (and quoted, and
+  // commented on) with exactly the machinery every other markdown file gets.
+  plans: { icon: IconNotes, title: 'plans', width: 300, min: 220, order: 44, needsProject: true },
+  diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsProject: true },
   // What a file row opens: the file as it is on disk, not as a patch. Shares
   // the diff's slot — both are "the file you just picked", and two of them side
   // by side would be the same file twice.
-  file: { icon: IconFile, title: 'file', width: 760, grow: true, min: 460, order: 50, slot: 'diff', needsWorktree: true },
+  file: { icon: IconFile, title: 'file', width: 760, grow: true, min: 460, order: 50, slot: 'diff', needsProject: true },
+  // The same file, in your editor. Shares the diff's slot for the same reason
+  // the reader does — pressing `e` turns the file window INTO the editor rather
+  // than opening a second copy of it beside itself.
+  edit: {
+    icon: IconPencil,
+    title: 'edit',
+    width: 760,
+    grow: true,
+    min: 460,
+    order: 50,
+    slot: 'diff',
+    needsProject: true
+  },
   // Grows like the chat does. Both can be open at once — the one further right
   // takes the leftover, which is the terminal, and the chat falls back to its
   // own width. Neither ever disappears.
@@ -156,36 +180,30 @@ export const KINDS = {
     // means "never shrink" — right for lists, wrong for anything holding prose.
     min?: number
     /**
-     * Lists something belonging to a project. Nothing to list without one.
-     * `needsWorktree` implies this — a worktree is always inside a project.
+     * Needs a project open. Nothing to list, read or diff without one.
+     *
+     * There is deliberately no separate "needs a worktree": a project's ROOT is
+     * its main worktree, so a project with none selected still has a tree to
+     * read. Which tree that is comes from `here` in App — the open chat's
+     * worktree, the sidebar's, or the root — and these panels follow it.
      */
     needsProject?: true
-    /**
-     * Reads the checked-out tree — git status, the file list, a patch. Without a
-     * worktree there is nothing for it to read.
-     */
-    needsWorktree?: true
   }
 >
 
-// Both flags gate the same way: the rail button dims and every binding that
-// would open the panel does nothing. See canOpen in App.
+// It gates the rail button (which dims) and every binding that would open the
+// panel (which refuses, with the reason). See canOpen in App.
 
 // `in`, not a property read: KINDS is `satisfies`-typed, so each entry keeps its
-// own literal shape and only some of them declare these flags.
-export function needsWorktree(kind: string): boolean {
-  const spec = KINDS[kind as PanelKind]
-  return !!spec && 'needsWorktree' in spec
-}
-
+// own literal shape and only some of them declare the flag.
 export function needsProject(kind: string): boolean {
   const spec = KINDS[kind as PanelKind]
-  return (!!spec && 'needsProject' in spec) || needsWorktree(kind)
+  return !!spec && 'needsProject' in spec
 }
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit']
 
 export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
   (k) => !CONTEXTUAL.includes(k)
@@ -211,6 +229,7 @@ export function PanelBody({
   kind,
   sub,
   projects,
+  movingProject,
   worktrees,
   changes,
   cwd,
@@ -228,6 +247,8 @@ export function PanelBody({
   kind: PanelKind
   sub?: string
   projects: Projects
+  /** The project being moved between groups, while `m` has a move running. */
+  movingProject?: { path: string; group: string } | null
   worktrees: Worktrees
   changes: Changes
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
@@ -263,7 +284,10 @@ export function PanelBody({
   firstChoice?: ModelChoice
   onOpen: OpenFn
 }): ReactNode {
-  if (kind === 'projects') return <ProjectsList projects={projects} onOpen={onOpen} />
+  // Every panel with rows gets the query: the find bar is one feature, so it
+  // has to look and behave the same wherever `/` is pressed.
+  if (kind === 'projects')
+    return <ProjectsList projects={projects} moving={movingProject} onOpen={onOpen} find={find} />
   if (kind === 'worktrees')
     return (
       <WorktreesList
@@ -296,10 +320,38 @@ export function PanelBody({
         onOpen={onOpen}
       />
     )
-  if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} />
-  if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} />
-  if (kind === 'file') return <FileView root={cwd} path={sub ?? ''} />
-  if (kind === 'diff') return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} />
+  if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
+  if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} find={find} />
+  if (kind === 'plans')
+    return (
+      <PlansList
+        root={cwd}
+        branch={worktrees.rows.find((r) => r.worktree.path === cwd)?.worktree.branch}
+        onOpen={onOpen}
+        find={find}
+      />
+    )
+  // `find` reaches the code views too: `/` searches whatever panel is focused,
+  // and a file is the panel where a match is hardest to spot unaided.
+  if (kind === 'file') return <FileView root={cwd} path={sub ?? ''} find={find} />
+  // The editor panel is a terminal running your editor, one per worktree: every
+  // file you open lands in the same session, the way it would in a real
+  // terminal. `sub` carries the file and the line — see editSub.
+  if (kind === 'edit') {
+    const target = editTarget(sub)
+    return (
+      <TerminalPanel
+        termId={`edit:${cwd ?? HOME}`}
+        cwd={cwd ?? HOME}
+        branch=""
+        mode="editor"
+        file={target.path}
+        line={target.line}
+      />
+    )
+  }
+  if (kind === 'diff')
+    return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} find={find} />
   // A real shell, not a mock: the PTY machinery in src/main survived the
   // rewrite untouched, so this panel is wired for real while the rest is demo.
   // `sub` carries the directory the shell opens in — the worktree you are in,
@@ -1078,7 +1130,15 @@ const LETTER = { added: 'A', modified: 'M', deleted: 'D', untracked: '?' } as co
  * its diff beside this list, and the two stay on screen together — you pick the
  * next file from the same list, without scrolling back to find it.
  */
-function ChangesList({ changes, onOpen }: { changes: Changes; onOpen: OpenFn }) {
+function ChangesList({
+  changes,
+  onOpen,
+  find
+}: {
+  changes: Changes
+  onOpen: OpenFn
+  find?: string
+}) {
   if (changes.loading && !changes.files.length) return <p className="empty">Loading…</p>
   if (changes.error) return <p className="empty error">{changes.error}</p>
   if (!changes.files.length) return <p className="empty">No changes.</p>
@@ -1108,7 +1168,7 @@ function ChangesList({ changes, onOpen }: { changes: Changes; onOpen: OpenFn }) 
           <span className="change-status" data-status={LETTER[f.status]}>
             {LETTER[f.status]}
           </span>
-          <span className="row-name">{f.relPath.slice(base.length)}</span>
+          <span className="row-name">{markAll(f.relPath.slice(base.length), find)}</span>
           <span className="change-stat">
             {f.additions > 0 && <span className="stat-add">+{f.additions}</span>}
             {f.deletions > 0 && <span className="stat-del">−{f.deletions}</span>}
@@ -1123,11 +1183,13 @@ function ChangesList({ changes, onOpen }: { changes: Changes; onOpen: OpenFn }) 
 function FileDiff({
   path,
   changes,
-  onPatch
+  onPatch,
+  find
 }: {
   path: string
   changes: Changes
   onPatch?: (patch: string) => void
+  find?: string
 }) {
   // The stable half of `changes`. Depending on the object itself would re-run
   // the fetch on every render — clearing the patch, rebuilding every row, and
@@ -1212,13 +1274,7 @@ function FileDiff({
               {r.kind === 'add' ? '+' : r.kind === 'del' ? '−' : ' '}
             </span>
             <span className="diff-code">
-              {tokens
-                ? tokens.map((t, j) => (
-                    <span key={j} style={t.style}>
-                      {t.content}
-                    </span>
-                  ))
-                : r.text || ' '}
+              {markCode(tokens, r.text, find)}
             </span>
           </div>
         )
@@ -1262,13 +1318,17 @@ function flattenTree(
  * precisely because it is lazy: `node_modules` and `vendor` are rows like any
  * other and cost nothing until you open them.
  */
-function FilesTree({ root, onOpen }: { root?: string; onOpen: OpenFn }) {
+function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find?: string }) {
   // Directory contents, keyed by worktree-relative path ('' is the root). Also
   // the cache: reopening a directory you have already been in is instant, and a
   // collapse never throws away what was read.
   const [loaded, setLoaded] = useState<Map<string, FileNode[]>>(new Map())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string>()
+  // Every file in the tree, for search. Fetched once per root and only when a
+  // search actually starts — walking the whole tree to draw a collapsed list
+  // nobody is filtering would be work for nothing.
+  const [all, setAll] = useState<string[] | null>(null)
 
   // One reader for every level, the root included — the root is just the
   // directory named ''.
@@ -1289,40 +1349,105 @@ function FilesTree({ root, onOpen }: { root?: string; onOpen: OpenFn }) {
   useEffect(() => {
     setLoaded(new Map())
     setExpanded(new Set())
+    setAll(null)
     read('')
   }, [root, read])
+
+  const query = find?.trim().toLowerCase() ?? ''
+
+  useEffect(() => {
+    if (!root || !query || all) return
+    // `files.all` is `git ls-files` where it can be, so .gitignore already keeps
+    // node_modules and vendor out; outside a repo the walk skips them by name.
+    void window.floe.files.all(root).then(setAll)
+  }, [root, query, all])
 
   const rows = useMemo(
     () => flattenTree(loaded.get('') ?? [], expanded, loaded),
     [loaded, expanded]
   )
 
-  if (!root) return <p className="empty">No worktree selected.</p>
+  /**
+   * Search hits, from the whole tree rather than what happens to be expanded.
+   *
+   * A filter over the visible rows would only ever find what you had already
+   * opened — which is the one case where you did not need to search. So a query
+   * switches the panel to a flat list of every matching path in the project.
+   */
+  const hits = useMemo(() => {
+    if (!query || !all) return []
+    return all.filter((path) => path.toLowerCase().includes(query)).slice(0, 500)
+  }, [all, query])
+
+  if (!root) return <p className="empty">No project open.</p>
   if (error) return <p className="empty error">{error}</p>
+
+  if (query) {
+    if (!all) return <p className="empty">Searching…</p>
+    if (!hits.length) return <p className="empty">No file matches “{find?.trim()}”.</p>
+    return (
+      <>
+        {hits.map((path) => {
+          const cut = path.lastIndexOf('/')
+          return (
+            <button
+              className="row file-row file-hit"
+              key={path}
+              title={path}
+              data-file={path}
+              onClick={() => onOpen({ kind: 'file', sub: path })}
+            >
+              <span className="file-mark" />
+              {/* Name first, path after — the name is what you typed and must
+                  never be the part that gets cut off. The directory follows in
+                  grey and gives way when the panel is narrow, which is exactly
+                  the right trade: it is there to tell two files of the same name
+                  apart, not to be read in full. */}
+              <span className="row-name">{markAll(path.slice(cut + 1), query)}</span>
+              {cut !== -1 && <span className="file-hit-dir">{markAll(path.slice(0, cut), query)}</span>}
+            </button>
+          )
+        })}
+      </>
+    )
+  }
+
   if (!loaded.has('')) return <p className="empty">Loading…</p>
   if (!rows.length) return <p className="empty">No files.</p>
+
+  const toggle = (node: FileNode): void => {
+    // Read on the way in, once. A directory you have opened before keeps what it
+    // had, so expanding it again doesn't blink.
+    if (!loaded.has(node.relPath)) read(node.relPath)
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(node.relPath)) next.add(node.relPath)
+      return next
+    })
+  }
 
   return (
     <>
       {rows.map(({ node, depth }) => {
         const open = node.type === 'dir' && expanded.has(node.relPath)
+        const cut = node.relPath.lastIndexOf('/')
         return (
           <button
             className="row file-row"
             key={node.relPath}
             title={node.relPath}
             style={{ paddingLeft: 8 + depth * 12 }}
-            onClick={() => {
-              if (node.type === 'file') return onOpen({ kind: 'file', sub: node.relPath })
-              // Read on the way in, once. A directory you have opened before
-              // keeps what it had, so expanding it again doesn't blink.
-              if (!loaded.has(node.relPath)) read(node.relPath)
-              setExpanded((prev) => {
-                const next = new Set(prev)
-                if (!next.delete(node.relPath)) next.add(node.relPath)
-                return next
-              })
-            }}
+            // Read by the `l` and `h` commands (registry.ts). The DOM is the
+            // honest place for them: whether a directory is open is already
+            // drawn here, and lifting that state into the lane just so a
+            // keybinding could see it would buy nothing.
+            data-dir={node.type === 'dir' ? node.relPath : undefined}
+            // What `e` reads to know which file to edit — same reasoning as
+            // data-dir: the row already knows, so nothing has to be lifted.
+            data-file={node.type === 'file' ? node.relPath : undefined}
+            data-open={open || undefined}
+            data-parent={cut === -1 ? '' : node.relPath.slice(0, cut)}
+            onClick={() => (node.type === 'file' ? onOpen({ kind: 'file', sub: node.relPath }) : toggle(node))}
           >
             {node.type === 'dir' ? (
               open ? (
@@ -1371,12 +1496,18 @@ function MarkdownLines({ text }: { text: string }) {
           <span className="md-text" style={indentOf(line)}>
             {line.kind === 'rule' && <span className="md-rule" />}
             {line.kind === 'list' && (
-              // No marker text means an unordered item — the dot is a CSS shape
-              // sized in pixels, which a font's bullet glyph is not.
+              // No marker text means an unordered item — the dot (or the
+              // checkbox) is a CSS shape sized in pixels, which a font's bullet
+              // glyph is not.
               <span
                 className="md-bullet"
-                data-dot={!line.marker || undefined}
+                data-dot={(!line.marker && !line.task) || undefined}
+                data-task={line.task}
                 data-depth={Math.min(line.depth ?? 0, 2)}
+                // The block's shared marker column: "10." makes it 4ch and
+                // every item of that list gets the same, so the numbers line up
+                // on the period and all the text starts in one column.
+                style={{ minWidth: `${line.markerWidth ?? 2}ch` }}
               >
                 {line.marker}
               </span>
@@ -1444,16 +1575,25 @@ function MarkdownRow({ line }: { line: MdLine }): ReactNode {
  * text under its own first character rather than back at the bullet.
  */
 function indentOf(line: MdLine): CSSProperties | undefined {
+  // A quote's depth is its own indent: `> >` steps in rather than showing the
+  // second `>` as text.
+  if (line.kind === 'quote')
+    return { paddingLeft: `${((line.depth ?? 1) - 1) * 14 + 16}px` }
+  // A lazily-indented line under an item is that item's paragraph, so it lines
+  // up with the item's TEXT — not with its marker, and not back at the margin.
+  if (line.cont)
+    return { paddingLeft: `calc(8px + ${(line.depth ?? 0) * 2 + (line.markerWidth ?? 2)}ch)` }
   if (line.kind !== 'list') return undefined
   // The marker starts where a paragraph starts — a top-level item lines up with
-  // the prose above it — and the item's own text sits 2ch further in, where the
-  // negative text-indent leaves every wrapped line.
+  // the prose above it — and the item's own text sits one marker column further
+  // in, where the negative text-indent leaves every wrapped line.
+  const width = line.markerWidth ?? 2
   const marker = (line.depth ?? 0) * 2
-  return { paddingLeft: `calc(8px + ${marker + 2}ch)`, textIndent: '-2ch' }
+  return { paddingLeft: `calc(8px + ${marker + width}ch)`, textIndent: `-${width}ch` }
 }
 
 /** One file as it is on disk, highlighted once Shiki has the grammar. */
-function FileView({ root, path }: { root?: string; path: string }) {
+function FileView({ root, path, find }: { root?: string; path: string; find?: string }) {
   const [content, setContent] = useState<FileContent | null>(null)
   const [error, setError] = useState<string>()
 
@@ -1508,18 +1648,80 @@ function FileView({ root, path }: { root?: string; path: string }) {
         // the same way it walks a patch.
         <div className="diff-row file-line" key={i} data-nav tabIndex={-1}>
           <span className="diff-no">{i + 1}</span>
-          <span className="diff-code">
-            {hl?.[i]
-              ? hl[i].map((t, j) => (
-                  <span key={j} style={t.style}>
-                    {t.content}
-                  </span>
-                ))
-              : line || ' '}
-          </span>
+          <span className="diff-code">{markCode(hl?.[i], line, find)}</span>
         </div>
       ))}
     </div>
+  )
+}
+
+/** Terse "time ago" for a plan's mtime — the plans panel is a narrow column. */
+function timeAgo(ms: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+  if (s < 60) return 'now'
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h`
+  return `${Math.floor(h / 24)}d`
+}
+
+/**
+ * The worktree's plan documents, newest first.
+ *
+ * Two sources in one list — the gitignored `.floe/plans/*.md` Claude writes in
+ * plan mode, and the `specs/<folder>/` docs of a spec pipeline whose folder
+ * matches this branch. Which spec folder that is, is decided in the main
+ * process (see matchSpecDir in src/main/plans.ts); when nothing matches
+ * confidently it sends every folder, and this list becomes the picker.
+ *
+ * A row opens a `file` panel, not a reader of its own: a plan is markdown, and
+ * the file panel already renders markdown, searches it with `/`, selects lines
+ * with `v` and sends them to the composer with `c`. A second reader would be
+ * the same four features again, drifting.
+ *
+ * Spec docs carry the folder they came from; the group label is a label, not a
+ * row, so the cursor only ever lands on a plan.
+ */
+function PlansList({
+  root,
+  branch,
+  onOpen,
+  find
+}: {
+  root?: string
+  branch?: string
+  onOpen: OpenFn
+  find?: string
+}) {
+  const { plans, loading, error } = usePlans(root, branch)
+
+  if (error) return <p className="empty error">{error}</p>
+  if (loading && !plans.length) return <p className="empty">Loading…</p>
+  if (!plans.length) return <p className="empty">No plans yet.</p>
+
+  return (
+    <>
+      {plans.map((plan, i) => {
+        // Head a group whenever the folder changes. Plain `.floe/plans/` files
+        // have no group and get no heading — they are the default, and a
+        // "Plans" label over them would name what the panel is already called.
+        const group = plan.group && plan.group !== plans[i - 1]?.group ? plan.group : null
+        return (
+          <Fragment key={plan.relPath}>
+            {group && <div className="group-label">{group.toUpperCase()}</div>}
+            <button
+              className="row"
+              title={plan.relPath}
+              onClick={() => onOpen({ kind: 'file', sub: plan.relPath })}
+            >
+              <span className="row-name">{markAll(plan.name, find)}</span>
+              <span className="plan-age">{timeAgo(plan.mtime)}</span>
+            </button>
+          </Fragment>
+        )
+      })}
+    </>
   )
 }
 
@@ -1530,7 +1732,18 @@ function FileView({ root, path }: { root?: string; path: string }) {
  * so the cursor walks projects only and `j` never lands somewhere Enter would
  * do nothing.
  */
-function ProjectsList({ projects, onOpen }: { projects: Projects; onOpen: OpenFn }) {
+function ProjectsList({
+  projects,
+  moving,
+  onOpen,
+  find
+}: {
+  projects: Projects
+  /** The project being moved and the group it is hovering over — see `project.move.start`. */
+  moving?: { path: string; group: string } | null
+  onOpen: OpenFn
+  find?: string
+}) {
   if (projects.loading) return <p className="empty">Loading…</p>
   if (projects.error) return <p className="empty error">{projects.error}</p>
   if (!projects.all.length)
@@ -1540,9 +1753,26 @@ function ProjectsList({ projects, onOpen }: { projects: Projects; onOpen: OpenFn
       </p>
     )
 
+  // A move is previewed, not applied: the row is drawn under the group it is
+  // hovering over, and nothing is written until Enter. Empty groups are drawn
+  // too, since one you cannot see is one you cannot move into.
+  const groups = moving
+    ? moveTargets(projects.groups, projects.groupNames).map((name) => {
+        const listed = projects.groups.find((g) => g.name === name)?.projects ?? []
+        // Back in its own group, the row sits where it always did: picking a
+        // project up and putting it straight back must not move it.
+        if (name === moving.group && listed.some((p) => p.path === moving.path)) {
+          return { name, projects: listed }
+        }
+        const rest = listed.filter((p) => p.path !== moving.path)
+        const held = projects.all.find((p) => p.path === moving.path)
+        return { name, projects: held && name === moving.group ? [...rest, held] : rest }
+      })
+    : projects.groups
+
   return (
     <>
-      {projects.groups.map((group) => (
+      {groups.map((group) => (
         <div className="group" key={group.name}>
           <div className="group-label">{group.name.toUpperCase()}</div>
           {group.projects.map((p) => (
@@ -1550,6 +1780,12 @@ function ProjectsList({ projects, onOpen }: { projects: Projects; onOpen: OpenFn
               className="row"
               key={p.path}
               title={p.path}
+              // Which project a row is, for the commands that act on the row the
+              // cursor is on — `d` and `m` read this rather than counting rows.
+              data-project={p.path}
+              // The row in flight. Marked so the preview reads as one thing
+              // being carried rather than as the list having changed.
+              data-moving={(moving?.path === p.path) || undefined}
               // The project you are in, which is also where the cursor lands
               // when this panel is focused with nothing remembered.
               data-active={p.path === projects.current?.path || undefined}
@@ -1559,7 +1795,7 @@ function ProjectsList({ projects, onOpen }: { projects: Projects; onOpen: OpenFn
               }}
             >
               <span className="dot" />
-              <span className="row-name">{p.name}</span>
+              <span className="row-name">{markAll(p.name, find)}</span>
               {/* Local is the default and gets no badge — naming this machine on
                   every row answers nothing. */}
               {p.backend && p.backend !== 'local' && <span className="badge">{p.backend}</span>}
@@ -1567,6 +1803,11 @@ function ProjectsList({ projects, onOpen }: { projects: Projects; onOpen: OpenFn
           ))}
         </div>
       ))}
+      {moving && (
+        <p className="panel-hint">
+          <kbd>j</kbd>/<kbd>k</kbd> pick a group · <kbd>↵</kbd> move · <kbd>Esc</kbd> cancel
+        </p>
+      )}
     </>
   )
 }
@@ -1643,7 +1884,7 @@ function WorktreesList({
             {/* No session count and no spinner: the sessions are listed right
                 underneath, each with its own mark, so a tally on the branch
                 only repeats what the next three rows already say. */}
-            <span className="row-name">{markFind(worktree.branch, find)}</span>
+            <span className="row-name">{markAll(worktree.branch, find)}</span>
           </button>
 
           {(collapsed.has(worktree.path) ? [] : sessions).map((s) => (
@@ -1683,7 +1924,7 @@ function WorktreesList({
                   />
                 )
               })()}
-              <span className="row-name">{markFind(s.title, find)}</span>
+              <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>
             </button>
           ))}
@@ -1693,22 +1934,63 @@ function WorktreesList({
   )
 }
 
+
 /**
- * Tint the run of text the find bar matched — the same mark the palette puts on
- * its rows, so "why is the cursor here" is answered in the row itself.
+ * Tint every run of text the find bar matched, INSIDE the syntax tokens.
+ *
+ * A row can mark a match by slicing one string; a line of code cannot. It is
+ * already a list of Shiki spans, each carrying its own colour, and a match does
+ * not respect those boundaries — searching `log` in `$logger->log()` lands
+ * inside a variable token and across a punctuation one. So this walks the
+ * tokens, splits any that a match crosses, and re-emits both halves with the
+ * SAME syntax style. The highlight is a background, never a colour, for exactly
+ * that reason: overwriting the colour would erase the highlighting you searched
+ * through to find the line.
+ *
+ * Every occurrence is marked, not just the first — one line can hold several,
+ * and marking one of them would say the others are not matches.
  */
-function markFind(text: string, query?: string): ReactNode {
+function markCode(tokens: HlToken[] | null | undefined, line: string, query?: string): ReactNode {
   const q = query?.trim().toLowerCase()
-  const at = q ? text.toLowerCase().indexOf(q) : -1
-  if (!q || at === -1) return text
-  return (
-    <>
-      {text.slice(0, at)}
-      <b className="palette-hit">{text.slice(at, at + q.length)}</b>
-      {text.slice(at + q.length)}
-    </>
-  )
+  if (!tokens) return markAll(line || ' ', q)
+  return splitByHits(tokens, q).map((piece, i) => (
+    <span key={i} className={piece.hit ? 'find-hit' : undefined} style={piece.style}>
+      {piece.content}
+    </span>
+  ))
 }
+
+/**
+ * Tint every occurrence of the find bar's query in a piece of text.
+ *
+ * The one marker for every panel. It used to be two — rows marked the FIRST
+ * match in the palette's blue while code marked ALL of them in amber — which
+ * meant the same search looked like two different features depending on which
+ * panel you ran it in. Blue stays with the palette, where it means a fuzzy
+ * match on something you are picking; the find bar is always amber, always
+ * every occurrence.
+ */
+function markAll(text: string, query?: string): ReactNode {
+  const q = query?.trim().toLowerCase()
+  if (!q) return text
+  // Same range finder the code marker uses, so a row and a line of code cannot
+  // disagree about what counts as a match.
+  const hits = hitRanges(text, q)
+  if (!hits.length) return text
+  const out: ReactNode[] = []
+  let at = 0
+  hits.forEach(([from, to], i) => {
+    if (from > at) out.push(text.slice(at, from))
+    out.push(
+      <span key={i} className="find-hit">
+        {text.slice(from, to)}
+      </span>
+    )
+    at = to
+  })
+  return [...out, text.slice(at)]
+}
+
 
 /** Coarse on purpose: you want "recent or not", not a stopwatch. */
 function ago(at: number): string {
@@ -2126,7 +2408,15 @@ function SettingsPanel() {
           placeholder: 'system monospace'
         },
         { kind: 'number', table: 'appearance', key: 'font-size', label: 'Font size', value: config.appearance.fontSize },
-        { kind: 'text', table: 'appearance', key: 'theme', label: 'Theme', value: config.appearance.theme }
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'theme',
+          label: 'Theme',
+          value: config.appearance.theme,
+          options: ['dark', 'light', 'system'],
+          hint: 'system follows the OS; dark and light stay put'
+        }
       ]
     },
     {
@@ -2168,6 +2458,20 @@ function SettingsPanel() {
           label: 'Shell',
           value: config.terminal.shell ?? '',
           placeholder: 'your login shell'
+        }
+      ]
+    },
+    {
+      title: 'Editor',
+      rows: [
+        {
+          kind: 'choice',
+          table: 'editor',
+          key: 'command',
+          label: 'Editor',
+          value: config.editor.command,
+          options: ['nvim', 'vim', 'helix', 'vscode', 'zed', 'sublime'],
+          hint: 'nvim, vim and helix run inside the file panel; the rest open beside the app'
         }
       ]
     },

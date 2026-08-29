@@ -33,6 +33,8 @@ export interface KeyContext {
   kind?: string
   /** A line selection is open, which changes what Escape means. */
   selecting?: boolean
+  /** A project is being moved between groups, so j/k carry it instead of the cursor. */
+  moving?: boolean
   /** The palette is open: it owns the keyboard until it closes. */
   palette?: boolean
   /** There is a panel to move to below the focused one. */
@@ -162,6 +164,7 @@ export type WhenPredicate = (ctx: KeyContext) => boolean
 const FLAGS: Record<string, (ctx: KeyContext) => boolean> = {
   typing: (ctx) => ctx.typing === true,
   selecting: (ctx) => ctx.selecting === true,
+  moving: (ctx) => ctx.moving === true,
   'stack-below': (ctx) => ctx.stackDown === true,
   'stack-above': (ctx) => ctx.stackUp === true
 }
@@ -291,8 +294,17 @@ function unquote(token: string | undefined): string | null {
 
 export interface CompiledBind {
   chord: string
-  /** The tail of a sequence (`g` of `cmd+k g`), or null for a plain chord. */
+  /** The tail of a sequence (`g` of `super+k g`), or null for a plain chord. */
   chordTail: string | null
+  /**
+   * The modifiers the sequence's FIRST step held, e.g. `super` for `super+k g`.
+   *
+   * They are allowed to still be down when the tail is pressed: nobody lets go
+   * of Command between `⌘K` and `⌘G`, and every editor with chords accepts it.
+   * Only these are forgiven — a `shift` the prefix never held still changes the
+   * key, so `⌘K ⇧G` is not `⌘K G`.
+   */
+  holdable: string[]
   command: string
   arg?: string
   predicate: WhenPredicate | null
@@ -324,12 +336,21 @@ export function compileKeymap(binds: Keybind[]): CompiledBind[] {
     out.push({
       chord,
       chordTail: steps.length > 1 ? steps[steps.length - 1] : null,
+      holdable: steps.length > 1 ? steps[0].split('+').slice(0, -1) : [],
       command: bind.command,
       arg: bind.arg,
       predicate
     })
   }
   return out
+}
+
+/** Drop `mods` from a chord, so a still-held Command does not spoil the match. */
+function withoutMods(chord: string, mods: string[]): string {
+  if (!mods.length) return chord
+  const parts = chord.split('+')
+  const key = parts.pop() ?? ''
+  return [...parts.filter((m) => !mods.includes(m)), key].join('+')
 }
 
 /**
@@ -345,7 +366,10 @@ export function resolveIn(keymap: CompiledBind[], e: KeyInput, ctx: KeyContext =
   const chord = chordFor(e)
   if (chord === null) return null
   for (const bind of keymap) {
-    if (ctx.chord ? bind.chordTail !== chord : bind.chordTail !== null || bind.chord !== chord) continue
+    const hit = ctx.chord
+      ? bind.chordTail !== null && withoutMods(chord, bind.holdable) === bind.chordTail
+      : bind.chordTail === null && bind.chord === chord
+    if (!hit) continue
     if (bind.predicate && !bind.predicate(ctx)) continue
     return bind.arg === undefined ? { id: bind.command } : { id: bind.command, arg: bind.arg }
   }

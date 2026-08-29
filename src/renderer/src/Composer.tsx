@@ -19,6 +19,7 @@ import {
   saveChoice,
   type ModelChoice
 } from './models'
+import { DEFAULT_MODE, MODES, modesFor, nearestMode } from '../../shared/modes.ts'
 import { useLocalAgents } from './useLocalAgents'
 import { pushHistory, readHistory } from './history'
 
@@ -122,8 +123,14 @@ export function Composer({
   // codex. The panel only pins once per session, so this never fights a pick.
   useEffect(() => {
     if (!pinned) return
-    setChoice(pinned)
-    onChoice?.(pinned)
+    // The transcript records who answered, never what it was allowed to do — a
+    // mode is a property of the next turn, not of the last one. So the mode you
+    // have keeps travelling, snapped to what the pinned harness can do.
+    setChoice((prev) => {
+      const next = { ...pinned, mode: nearestMode(prev.mode ?? DEFAULT_MODE, pinned.provider) }
+      onChoice?.(next)
+      return next
+    })
   }, [pinned])
 
   // Keep the cursor row in view as ↑/↓ walk it past the fold.
@@ -137,6 +144,11 @@ export function Composer({
 
   const choose = (next: Partial<ModelChoice>) => {
     const merged = { ...choice, ...next }
+    // Changing harness can invalidate the mode — gemini has no plan mode, and
+    // sending it one fails the turn. Snap rather than let the picker lie.
+    if (next.provider !== undefined) {
+      merged.mode = nearestMode(merged.mode ?? DEFAULT_MODE, next.provider)
+    }
     setChoice(merged)
     saveChoice(merged)
     // The panel above needs it too: the context gauge counts against the chosen
@@ -149,15 +161,43 @@ export function Composer({
   // the menu renders its groups (models, then each agent, then efforts) — the
   // render below must stay in that same order or the highlight lands wrong.
   const [modelAt, setModelAt] = useState(0)
-  const modelFlat = [
-    ...MODELS.map((m) => () => choose({ model: m.id, provider: 'claude' })),
-    ...agents.flatMap((agent) =>
-      agent.models.length
-        ? agent.models.map((m) => () => choose({ model: m.slug, provider: agent.id }))
-        : [() => choose({ model: '', provider: agent.id })]
-    ),
-    ...EFFORTS.map((e) => () => choose({ effort: e }))
+  // Which modes this harness can honestly do. Empty for a runtime with no tools
+  // (LM Studio, Ollama) — the row is then not rendered at all.
+  const modes = modesFor(choice.provider)
+  const mode = choice.mode ?? DEFAULT_MODE
+  const claude = !choice.provider || choice.provider === 'claude'
+  // Each row carries whether it is the current pick, so opening the menu can
+  // put the cursor on what is already chosen instead of on the first row —
+  // ⌃M then ⏎ should be a no-op, not a silent switch to Fable.
+  const modelFlat: { run: () => void; on: boolean }[] = [
+    // The model half is locked once a chat is open, so it is not walkable
+    // either — the cursor would otherwise stop on rows that do nothing.
+    ...(pinned
+      ? []
+      : [
+          ...MODELS.map((m) => ({
+            run: () => choose({ model: m.id, provider: 'claude' }),
+            on: claude && m.id === choice.model
+          })),
+          ...agents.flatMap((agent) =>
+            agent.models.length
+              ? agent.models.map((m) => ({
+                  run: () => choose({ model: m.slug, provider: agent.id }),
+                  on: choice.provider === agent.id && m.slug === choice.model
+                }))
+              : [
+                  {
+                    run: () => choose({ model: '', provider: agent.id }),
+                    on: choice.provider === agent.id && !choice.model
+                  }
+                ]
+          ),
+          ...EFFORTS.map((e) => ({ run: () => choose({ effort: e }), on: e === choice.effort }))
+        ]),
+    ...modes.map((m) => ({ run: () => choose({ mode: m }), on: m === mode }))
   ]
+  /** Where the cursor lands when the menu opens: on the current pick. */
+  const openAt = (): number => Math.max(0, modelFlat.findIndex((r) => r.on))
   useEffect(() => {
     modelMenu.current?.querySelector('[data-at]')?.scrollIntoView({ block: 'nearest' })
   }, [modelAt, picking])
@@ -195,6 +235,9 @@ export function Composer({
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [files, setFiles] = useState<FileAttachment[]>([])
   const [rejected, setRejected] = useState<string[]>([])
+  // Set while the file picker is (or just was) up: the attach button's hover
+  // style is suppressed until the pointer proves it is still there.
+  const [cold, setCold] = useState(false)
   const [dropping, setDropping] = useState(false)
   // dragenter/dragleave also fire when the pointer crosses a CHILD element, so
   // a boolean would flicker off mid-drag. Depth only hits zero on a real exit.
@@ -230,11 +273,20 @@ export function Composer({
       }
     }
 
+    // ⌃⇧M cycles the mode in place — it is the one part of the choice you
+    // change mid-chat (plan, then auto once the plan is agreed), and stopping
+    // to open a menu for it every time is the thing that reaches for a mouse.
+    if (e.key.toLowerCase() === 'm' && e.ctrlKey && e.shiftKey && modes.length) {
+      e.preventDefault()
+      return choose({ mode: modes[(modes.indexOf(mode) + 1) % modes.length] })
+    }
+
     // ⌃M opens the model menu without leaving the keyboard; j/k or the arrows
     // then walk it and Enter picks, same shape as the trigger menu above.
-    if (e.key.toLowerCase() === 'm' && e.ctrlKey && !pinned) {
+    // It opens in a pinned chat too: the model is locked there, the mode is not.
+    if (e.key.toLowerCase() === 'm' && e.ctrlKey && modelFlat.length) {
       e.preventDefault()
-      setModelAt(0)
+      setModelAt(openAt())
       return setPicking((p) => !p)
     }
 
@@ -253,7 +305,7 @@ export function Composer({
       }
       if (e.key === 'Enter') {
         e.preventDefault()
-        modelFlat[modelAt]()
+        modelFlat[modelAt].run()
         return setPicking(false)
       }
       return
@@ -484,7 +536,18 @@ export function Composer({
           // The native picker steals focus and hands it back as :focus-visible,
           // leaving the button lit forever. Never take focus off the composer.
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => picker.current?.click()}
+          // …and the OS dialog covers the window without ever sending a
+          // pointerleave, so :hover stays true and the button stays lit after
+          // the dialog is gone. `data-cold` turns the hover style off until the
+          // pointer moves over the button again, which is the first moment the
+          // browser can honestly say it is there.
+          data-cold={cold || undefined}
+          onPointerEnter={() => setCold(false)}
+          onPointerMove={() => cold && setCold(false)}
+          onClick={() => {
+            setCold(true)
+            picker.current?.click()
+          }}
         >
           <IconPlus size={15} stroke={1.8} />
         </button>
@@ -505,21 +568,33 @@ export function Composer({
         <button
           className="model"
           data-pending={pinPending || undefined}
-          disabled={!!pinned}
-          title={pinned ? 'Model is locked once the chat is open' : undefined}
+          data-locked={pinned ? true : undefined}
+          title={
+            pinned
+              ? 'Model is locked once the chat is open — the mode is not (⌃⇧M)'
+              : 'Model, effort and mode (⌃M) — ⌃⇧M cycles the mode'
+          }
           // Pointer down, not click: the textarea would blur first and a menu
           // that closes on blur would never survive to be clicked.
           onPointerDown={(e) => {
             e.preventDefault()
-            if (pinned) return
+            // A runtime with no tools in a pinned chat has nothing left to pick.
+            if (!modelFlat.length) return
+            setModelAt(openAt())
             setPicking((p) => !p)
           }}
         >
-          {/* harness · model · effort — the harness first, because it is the
-              part that decides what you are talking to. */}
+          {/* harness · model · effort · mode — the harness first, because it is
+              the part that decides what you are talking to, and the mode last
+              because it is the part you change most often mid-chat. */}
           <span className="model-harness">{picked.harness}</span>
           {picked.model && <span className="model-name">{picked.model}</span>}
           <span className="model-effort">{picked.effort}</span>
+          {modes.length > 0 && (
+            <span className="model-mode" data-tone={mode}>
+              {picked.mode}
+            </span>
+          )}
           <IconChevronDown size={13} stroke={1.8} />
         </button>
       </div>
@@ -555,101 +630,163 @@ export function Composer({
           {/* Anything outside dismisses — including a click in the textarea,
               which is the usual way out of here. */}
           <div className="model-scrim" onPointerDown={() => setPicking(false)} />
+          {/* Two columns, because the menu answers two different questions.
+              Left: who answers — one scrolling list, a heading per harness.
+              Right: how it answers — effort and mode, on a rail that does not
+              scroll, so the two settings that apply to every row above stay
+              on screen wherever the list is. */}
           <div className="model-menu" ref={modelMenu}>
             {(() => {
               // Same running index as modelFlat, so the keyboard highlight and
               // the click handlers stay in lockstep without a second list.
+              // j/k walks down the left column and continues down the right.
               let mi = -1
               return (
                 <>
-                  <div className="model-group">
-                    {MODELS.map((m) => {
-                      const at = ++mi
-                      return (
-                        <button
-                          key={m.id}
-                          className="model-option"
-                          data-at={at === modelAt || undefined}
-                          data-on={(!choice.provider || choice.provider === 'claude') && m.id === choice.model || undefined}
-                          onPointerDown={(e) => {
-                            e.preventDefault()
-                            choose({ model: m.id, provider: 'claude' })
-                          }}
-                          onPointerEnter={() => setModelAt(at)}
-                        >
-                          {m.label}
-                        </button>
-                      )
-                    })}
-                  </div>
-                  {agents.map((agent) => (
-                    <div className="model-group model-agent" key={agent.id}>
-                      <div className="model-agent-head" title={agent.bin}>{agent.label}</div>
-                      {/* A runtime whose models we cannot enumerate still runs: this
-                          sends with no model flag, so the tool answers on whatever it
-                          is configured for. Without it the group would be a label you
-                          cannot click. */}
-                      {!agent.models.length &&
-                        (() => {
+                  {!pinned && (
+                    <div className="model-list">
+                      <div className="model-group">
+                        {/* Claude is a harness like the others, so it gets the
+                            same heading rather than being the unlabelled one
+                            everything else hangs off. */}
+                        <div className="model-head">claude</div>
+                        {MODELS.map((m) => {
                           const at = ++mi
                           return (
                             <button
+                              key={m.id}
                               className="model-option"
-                              title={`${agent.bin} — its own configured model`}
                               data-at={at === modelAt || undefined}
-                              data-on={(choice.provider === agent.id && !choice.model) || undefined}
+                              data-on={
+                                ((!choice.provider || choice.provider === 'claude') &&
+                                  m.id === choice.model) ||
+                                undefined
+                              }
                               onPointerDown={(e) => {
                                 e.preventDefault()
-                                choose({ model: '', provider: agent.id })
+                                choose({ model: m.id, provider: 'claude' })
                               }}
                               onPointerEnter={() => setModelAt(at)}
                             >
-                              default
+                              {m.label}
                             </button>
                           )
-                        })()}
-                      {agent.models.map((m) => {
-                        const at = ++mi
-                        return (
-                          <button
-                            key={m.slug}
-                            className="model-option"
-                            title={m.slug}
-                            data-at={at === modelAt || undefined}
-                            data-on={(choice.provider === agent.id && m.slug === choice.model) || undefined}
-                            onPointerDown={(e) => {
-                              e.preventDefault()
-                              // The runtime is carried with the model, not guessed from
-                              // its name: two tools can offer the same model id.
-                              choose({ model: m.slug, provider: agent.id })
-                            }}
-                            onPointerEnter={() => setModelAt(at)}
-                          >
-                            {m.label}
-                          </button>
-                        )
-                      })}
+                        })}
+                      </div>
+                      {agents.map((agent) => (
+                        <div className="model-group" key={agent.id}>
+                          <div className="model-head" title={agent.bin}>
+                            {agent.label}
+                          </div>
+                          {/* A runtime whose models we cannot enumerate still runs:
+                              this sends with no model flag, so the tool answers on
+                              whatever it is configured for. Without it the group
+                              would be a label you cannot click. */}
+                          {!agent.models.length &&
+                            (() => {
+                              const at = ++mi
+                              return (
+                                <button
+                                  className="model-option"
+                                  title={`${agent.bin} — its own configured model`}
+                                  data-at={at === modelAt || undefined}
+                                  data-on={
+                                    (choice.provider === agent.id && !choice.model) || undefined
+                                  }
+                                  onPointerDown={(e) => {
+                                    e.preventDefault()
+                                    choose({ model: '', provider: agent.id })
+                                  }}
+                                  onPointerEnter={() => setModelAt(at)}
+                                >
+                                  default
+                                </button>
+                              )
+                            })()}
+                          {agent.models.map((m) => {
+                            const at = ++mi
+                            return (
+                              <button
+                                key={m.slug}
+                                className="model-option"
+                                title={m.slug}
+                                data-at={at === modelAt || undefined}
+                                data-on={
+                                  (choice.provider === agent.id && m.slug === choice.model) ||
+                                  undefined
+                                }
+                                onPointerDown={(e) => {
+                                  e.preventDefault()
+                                  // The runtime is carried with the model, not guessed
+                                  // from its name: two tools can offer the same id.
+                                  choose({ model: m.slug, provider: agent.id })
+                                }}
+                                onPointerEnter={() => setModelAt(at)}
+                              >
+                                {m.label}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                  <div className="model-group model-efforts">
-                    {EFFORTS.map((e) => {
-                      const at = ++mi
-                      return (
-                        <button
-                          key={e}
-                          className="model-option model-effort-option"
-                          data-at={at === modelAt || undefined}
-                          data-on={e === choice.effort || undefined}
-                          onPointerDown={(ev) => {
-                            ev.preventDefault()
-                            choose({ effort: e })
-                          }}
-                          onPointerEnter={() => setModelAt(at)}
-                        >
-                          {e}
-                        </button>
-                      )
-                    })}
+                  )}
+
+                  <div className="model-rail">
+                    {!pinned && (
+                      <div className="model-group">
+                        <div className="model-head">effort</div>
+                        {EFFORTS.map((e) => {
+                          const at = ++mi
+                          return (
+                            <button
+                              key={e}
+                              className="model-option"
+                              data-at={at === modelAt || undefined}
+                              data-on={e === choice.effort || undefined}
+                              onPointerDown={(ev) => {
+                                ev.preventDefault()
+                                choose({ effort: e })
+                              }}
+                              onPointerEnter={() => setModelAt(at)}
+                            >
+                              {e}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                    {/* What the harness is allowed to do. Only the modes this
+                        runtime can honestly do are here — a mode it does not
+                        have would fail the turn rather than be ignored. Each
+                        carries its own tone, so the one that can rewrite your
+                        worktree does not look like the one that cannot. */}
+                    {modes.length > 0 && (
+                      <div className="model-group">
+                        <div className="model-head">mode</div>
+                        {modes.map((id) => {
+                          const at = ++mi
+                          const info = MODES.find((m) => m.id === id)!
+                          return (
+                            <button
+                              key={id}
+                              className="model-option model-mode-option"
+                              data-tone={id}
+                              title={info.hint}
+                              data-at={at === modelAt || undefined}
+                              data-on={id === mode || undefined}
+                              onPointerDown={(ev) => {
+                                ev.preventDefault()
+                                choose({ mode: id })
+                              }}
+                              onPointerEnter={() => setModelAt(at)}
+                            >
+                              {info.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 </>
               )

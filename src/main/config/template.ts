@@ -23,17 +23,24 @@ export const FLOE_TOML = `# ====================================================
 # | Appearance
 # ------------------------------------------------------------------------------
 # |
-# | The interface font and theme. \`font-family\` must name a font installed on
-# | this machine; when it can't be found Floe falls back to the default
-# | monospace and says so. \`theme\` takes one of the built-in themes
-# | (\`omarchy\`, \`carbon\`) or a path to your own colors file.
+# | \`font-family\` must name a font installed on this machine; when it can't be
+# | found the default monospace is used. Whatever you pick, the bundled Nerd Font
+# | stays behind it as per-glyph fallback, so terminal icons keep resolving.
+# |
+# | \`font-size\` scales the whole surface — text, padding and rules together, the
+# | way a terminal's font size does — rather than the text alone. 13 is the size
+# | the interface is drawn at, so it is the neutral value.
+# |
+# | \`theme\` is \`dark\`, \`light\`, or \`system\` to follow the OS. Dark is the
+# | default because it is what the interface is designed at; light is a full
+# | palette of its own, not a filter over it.
 # |
 # ------------------------------------------------------------------------------
 
 [appearance]
 font-family = "CommitMonoPinguim"
 font-size   = 13
-theme       = "omarchy"
+theme       = "dark"
 
 
 # ------------------------------------------------------------------------------
@@ -48,6 +55,13 @@ theme       = "omarchy"
 # | \`lmstudio\` or \`ollama\`. Switching model inside a session does not rewrite
 # | this default — it only sets the starting point for the next one.
 # |
+# | \`mode\` is how much the agent may do without asking: \`plan\` (reads and
+# | plans, writes nothing), \`ask\` (asks before each tool that acts), \`auto\`
+# | (edits the worktree without asking) or \`full\` (no prompts, no sandbox).
+# | Not every harness has all four — codex has no \`ask\`, gemini has no
+# | \`plan\`, opencode stops at \`auto\` — and a mode a harness cannot do snaps
+# | to the nearest safer one it can. ⌃⇧M cycles it inside a chat.
+# |
 # | \`system-prompt\` names a Markdown file in this directory, injected into every
 # | CLI process Floe spawns, whatever project or worktree started it. It is
 # | prose, so it stays its own file instead of one escaped string in here.
@@ -58,6 +72,7 @@ theme       = "omarchy"
 model         = "opus"
 effort        = "high"
 provider      = "claude"
+mode          = "ask"
 system-prompt = "system-prompt.md"
 
 
@@ -73,6 +88,28 @@ system-prompt = "system-prompt.md"
 
 [terminal]
 # shell = "/opt/homebrew/bin/fish"
+
+
+# ------------------------------------------------------------------------------
+# | Editor
+# ------------------------------------------------------------------------------
+# |
+# | The editor \`e\` opens the file under the cursor in.
+# |
+# | \`nvim\`, \`vim\` and \`helix\` are terminal editors: the file panel BECOMES the
+# | editor, on Floe's own PTY, so nothing leaves the window and Escape-Escape
+# | hands the panel back. One editor per worktree, so every file you open lands
+# | in the same session.
+# |
+# | \`vscode\`, \`zed\` and \`sublime\` are separate apps, so \`e\` launches them with
+# | the file and the line the cursor is on instead.
+# |
+# | Any other value is taken as a terminal editor binary and run in the panel.
+# |
+# ------------------------------------------------------------------------------
+
+[editor]
+command = "nvim"
 
 
 # ------------------------------------------------------------------------------

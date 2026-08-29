@@ -6,6 +6,7 @@ import { resolve, relative, isAbsolute, sep } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { appendScrollback, newScrollback, type Scrollback } from './terminalBuffer'
 import { floeConfig } from './config/floe'
+import { currentEditor, editKeys, resolveEditorBin, spawnArgs } from './editors'
 
 export type TerminalEvent =
   | { id: string; kind: 'data'; data: string }
@@ -54,16 +55,16 @@ function userShell(): string {
   return cachedShell
 }
 
-// The editor binary used for the in-app file editor: nvim if available, then
-// whatever $EDITOR points at, then plain vim. Resolved to a full path so the
-// spawn works even from a packaged GUI launch with a minimal environment.
-let cachedEditor: string | undefined
+// The editor binary the in-app editor panel runs: whatever `[editor] command`
+// names, resolved to a full path so the spawn works from a packaged GUI launch
+// with a minimal environment. $EDITOR and then vim are the fallbacks, for a
+// configured editor that isn't installed — an empty panel would say nothing.
 function editorBin(): string {
-  if (cachedEditor) return cachedEditor
+  const spec = currentEditor()
+  const found = resolveEditorBin(spec)
+  if (found) return found
   const editorEnv = process.env.EDITOR?.trim().split(/\s+/)[0]
-  cachedEditor =
-    resolveBin('nvim') ?? (editorEnv ? resolveBin(editorEnv) : undefined) ?? resolveBin('vim') ?? 'vim'
-  return cachedEditor
+  return (editorEnv ? resolveBin(editorEnv) : undefined) ?? resolveBin('vim') ?? 'vim'
 }
 
 // The renderer says `~` when the panel belongs to no worktree (the Home
@@ -192,10 +193,10 @@ function safeEditorFile(file: string, cwd: string): string {
   return rel.split(sep).join('/')
 }
 
-// Open (or re-attach to) an nvim editor for `id`. Reuses the same long-lived
-// PTY machinery as the shell: a fresh editor spawns `nvim <file>`; an existing
-// one replays its scrollback and is told to `:edit` the requested file, so a
-// single nvim per worktree gathers every file the user opens.
+// Open (or re-attach to) the terminal editor for `id`. Reuses the same
+// long-lived PTY machinery as the shell: a fresh editor spawns `<editor>
+// <file>`; an existing one replays its scrollback and is told to open the
+// requested file, so a single editor per worktree gathers every file opened.
 export function openEditor(
   win: BrowserWindow,
   id: string,
@@ -216,22 +217,15 @@ export function openEditor(
   if (existing) {
     resizeTerminal(id, cols, rows)
     const buffer = replay(id, existing)
-    if (safeFile) {
-      // Leave whatever mode nvim is in, then edit the file. Build the path with
-      // fnameescape() inside nvim (instead of interpolating it raw) so spaces
-      // and metacharacters can't break out of the :edit command.
-      const quoted = safeFile.replace(/'/g, "''") // vimscript single-quote escape
-      existing.proc.write(`\x1b:execute 'edit ' . fnameescape('${quoted}')\r`)
-      // Then jump to the request's line. safeLine is a validated integer, so the
-      // interpolation can't inject anything.
-      if (safeLine) existing.proc.write(`\x1b:${safeLine}\r`)
-    }
+    // Tell the running editor to open this file — see editKeys. An editor we
+    // have no command for keeps showing what it had; typing a guess into an
+    // unknown program is worse than one extra `:e`.
+    const keys = safeFile ? editKeys(currentEditor(), safeFile, safeLine) : null
+    if (keys) existing.proc.write(keys)
     return buffer
   }
 
-  // `--` terminates option parsing so a file named like `-c`/`+cmd` can't smuggle
-  // a flag into nvim's argv. `+<line>` (a real nvim option) must precede it.
-  const args = safeFile ? [...(safeLine ? [`+${safeLine}`] : []), '--', safeFile] : []
+  const args = spawnArgs(currentEditor(), safeFile, safeLine)
   const proc = pty.spawn(editorBin(), args, {
     name: 'xterm-256color',
     cols: cols || 80,

@@ -599,6 +599,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       /** One directory's entries — omit `relPath` for the worktree root. */
       list: (worktreePath: string, relPath?: string): Promise<FileNode[]> =>
         ipcRenderer.invoke('files:list', worktreePath, relPath),
+      /** Every file in the worktree, worktree-relative — the file palette's list. */
+      all: (worktreePath: string): Promise<string[]> => ipcRenderer.invoke('files:all', worktreePath),
       read: (worktreePath: string, relPath: string): Promise<FileContent> =>
         ipcRenderer.invoke('files:read', worktreePath, relPath),
       resolveLink: (worktreePath: string, fromRelPath: string, target: string): Promise<string | null> =>
@@ -737,7 +739,20 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         // 1-based line to place the nvim cursor on (e.g. the selected .http request).
         line?: number
       ): Promise<string | null> =>
-        ipcRenderer.invoke('editor:open', id, cwd, branch, file, cols, rows, line)
+        ipcRenderer.invoke('editor:open', id, cwd, branch, file, cols, rows, line),
+      /**
+       * Open a file in the configured editor.
+       *
+       * `mode: 'panel'` means the editor is a terminal one and nothing was
+       * launched — open the editor panel, which runs it on the PTY. `external`
+       * means a GUI editor was started (or `error` says why it wasn't).
+       */
+      launch: (
+        cwd: string,
+        file: string,
+        line?: number
+      ): Promise<{ mode: 'panel' | 'external'; error?: string }> =>
+        ipcRenderer.invoke('editor:launch', cwd, file, line)
     },
     // The `.http` client: discover files for the right-pane list, parse one file's
     // requests for the center view, load the environments (http-client.env.json),

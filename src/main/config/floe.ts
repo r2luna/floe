@@ -21,17 +21,25 @@ import { DEFAULT_GROUP } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export const THEMES = ['system', 'dark', 'light'] as const
+
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
+// The written names for how much the agent may do. `MODES` in shared/modes.ts
+// carries the same four under the ids the CLIs use; these are the words a
+// person types in a config file.
+export const MODES = ['plan', 'ask', 'auto', 'full'] as const
 
 export interface FloeConfig {
-  appearance: { fontFamily?: string; fontSize: number; theme: string }
+  appearance: { fontFamily?: string; fontSize: number; theme: (typeof THEMES)[number] }
   agent: {
     model: (typeof MODELS)[number]
     effort: (typeof EFFORTS)[number]
     provider: (typeof PROVIDERS)[number]
+    mode: (typeof MODES)[number]
     systemPromptFile: string
   }
   terminal: { shell?: string }
+  editor: { command: string }
   sandbox: { enabled: boolean }
   update: { checkIntervalHours: number }
   projects: { groups: string[] }
@@ -39,9 +47,19 @@ export interface FloeConfig {
 }
 
 export const DEFAULTS: FloeConfig = {
-  appearance: { fontFamily: undefined, fontSize: 13, theme: 'omarchy' },
-  agent: { model: 'opus', effort: 'high', provider: 'claude', systemPromptFile: 'system-prompt.md' },
+  // `dark` rather than `system`: dark is what the app has always been and what
+  // it is designed at, so following the OS by default would flip an existing
+  // user into light on the next launch without them asking for it.
+  appearance: { fontFamily: undefined, fontSize: 13, theme: 'dark' },
+  agent: {
+    model: 'opus',
+    effort: 'high',
+    provider: 'claude',
+    mode: 'ask',
+    systemPromptFile: 'system-prompt.md'
+  },
   terminal: { shell: undefined },
+  editor: { command: 'nvim' },
   sandbox: { enabled: true },
   update: { checkIntervalHours: 6 },
   projects: { groups: [DEFAULT_GROUP] },
@@ -98,6 +116,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const appearance = subTable(sink, raw, root, 'appearance')
   const agent = subTable(sink, raw, root, 'agent')
   const terminal = subTable(sink, raw, root, 'terminal')
+  const editor = subTable(sink, raw, root, 'editor')
   const sandbox = subTable(sink, raw, root, 'sandbox')
   const update = subTable(sink, raw, root, 'update')
   const projects = subTable(sink, raw, root, 'projects')
@@ -110,15 +129,19 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
       appearance: {
         fontFamily: appearance?.optStr('font-family'),
         fontSize: appearance?.num('font-size', d.appearance.fontSize, { min: 6, max: 48 }) ?? d.appearance.fontSize,
-        theme: appearance?.str('theme', d.appearance.theme) ?? d.appearance.theme
+        theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme
       },
       agent: {
         model: agent?.oneOf('model', MODELS, d.agent.model) ?? d.agent.model,
         effort: agent?.oneOf('effort', EFFORTS, d.agent.effort) ?? d.agent.effort,
         provider: agent?.oneOf('provider', PROVIDERS, d.agent.provider) ?? d.agent.provider,
+        mode: agent?.oneOf('mode', MODES, d.agent.mode) ?? d.agent.mode,
         systemPromptFile: agent?.str('system-prompt', d.agent.systemPromptFile) ?? d.agent.systemPromptFile
       },
       terminal: { shell: terminal?.optStr('shell') },
+      // Not `oneOf`: the known ids are what Settings offers, not the whole set —
+      // any editor binary on the machine is a valid answer here.
+      editor: { command: editor?.str('command', d.editor.command) ?? d.editor.command },
       sandbox: { enabled: sandbox?.bool('enabled', d.sandbox.enabled) ?? d.sandbox.enabled },
       update: {
         checkIntervalHours:

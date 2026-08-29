@@ -69,7 +69,24 @@ export function sendToTerminal(termId: string, command: string): void {
  * session and its scrollback survive this component unmounting — closing the
  * panel hides the terminal, it does not kill the shell. Reopening replays it.
  */
-export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: string; branch: string }) {
+export function TerminalPanel({
+  termId,
+  cwd,
+  branch,
+  // 'editor' runs the configured terminal editor on this PTY instead of a
+  // shell, on the requested file. Same machinery either way — an editor is a
+  // program in a terminal, and the panel should not learn two ways to host one.
+  mode = 'shell',
+  file,
+  line
+}: {
+  termId: string
+  cwd: string
+  branch: string
+  mode?: 'shell' | 'editor'
+  file?: string
+  line?: number
+}) {
   const hostRef = useRef<HTMLDivElement>(null)
   const MONO = getComputedStyle(document.documentElement).getPropertyValue('--mono').trim()
 
@@ -229,9 +246,10 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
       waiting.delete(termId)
     }
 
-    void window.floe.terminal
-      .open(termId, cwd, branch, term.cols, term.rows)
-      .then(release, () => release(null))
+    void (mode === 'editor'
+      ? window.floe.editor.open(termId, cwd, branch, file ?? null, term.cols, term.rows, line)
+      : window.floe.terminal.open(termId, cwd, branch, term.cols, term.rows)
+    ).then(release, () => release(null))
 
     const input = term.onData((data) => {
       if (replaying) return
@@ -257,7 +275,9 @@ export function TerminalPanel({ termId, cwd, branch }: { termId: string; cwd: st
       term.dispose()
       // The PTY is deliberately left running in the main process.
     }
-  }, [termId, cwd, branch])
+    // `file` is a dependency: opening another file re-runs this, which re-attaches
+    // to the same PTY and tells the editor to open it (see openEditor in main).
+  }, [termId, cwd, branch, mode, file, line])
 
   return (
     <div className="terminal-panel">

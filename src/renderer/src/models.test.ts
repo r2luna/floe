@@ -82,7 +82,14 @@ test('a choice from another runtime survives a reload', () => {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => void store.set(k, v)
   }
-  assert.deepEqual(loadChoice(), { model: 'gpt-5.5', effort: 'high', provider: 'codex' })
+  // The mode comes back snapped to what codex can do: nothing was saved, which
+  // reads as "ask", and codex has no ask.
+  assert.deepEqual(loadChoice(), {
+    model: 'gpt-5.5',
+    effort: 'high',
+    provider: 'codex',
+    mode: 'plan'
+  })
 })
 
 test('a Claude model that no longer exists falls back', () => {
@@ -91,7 +98,19 @@ test('a Claude model that no longer exists falls back', () => {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: () => {}
   }
-  assert.deepEqual(loadChoice(), { model: 'opus', effort: 'low' })
+  assert.deepEqual(loadChoice(), { model: 'opus', effort: 'low', mode: 'default' })
+})
+
+test('a saved mode the harness cannot do is snapped, not sent', () => {
+  // opencode has no "full": sending it one is a run that fails rather than a
+  // run that is merely tamer than asked for.
+  const stored = { model: 'anthropic/claude-opus-5', effort: 'high', provider: 'opencode', mode: 'skip' }
+  const store = new Map([['floe.model', JSON.stringify(stored)]])
+  ;(globalThis as { localStorage?: unknown }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: () => {}
+  }
+  assert.equal(loadChoice().mode, 'acceptEdits')
 })
 
 const AGENTS = [
@@ -116,15 +135,18 @@ test('an unknown window is undefined, not Claude’s million', () => {
   assert.equal(windowOf({ model: 'sonnet-9', effort: 'high' }, AGENTS), undefined)
 })
 
-test('the picker button names the harness, the model and the effort', () => {
+test('the picker button names the harness, the model, the effort and the mode', () => {
   assert.deepEqual(describeChoice({ model: 'opus', effort: 'high' }), {
     harness: 'claude',
     model: 'Opus 5',
-    effort: 'high'
+    effort: 'high',
+    // No mode saved reads as the safe middle, and the button says the word a
+    // person picked rather than the flag the CLI takes.
+    mode: 'ask'
   })
   assert.deepEqual(
-    describeChoice({ model: 'gpt-5.4-mini', effort: 'medium', provider: 'codex' }),
-    { harness: 'codex', model: 'gpt-5.4-mini', effort: 'medium' }
+    describeChoice({ model: 'gpt-5.4-mini', effort: 'medium', provider: 'codex', mode: 'acceptEdits' }),
+    { harness: 'codex', model: 'gpt-5.4-mini', effort: 'medium', mode: 'auto' }
   )
 })
 
@@ -133,7 +155,8 @@ test('a runtime with no named model shows the harness alone, never "default"', (
   assert.deepEqual(describeChoice({ model: '', effort: 'high', provider: 'gemini' }), {
     harness: 'gemini',
     model: '',
-    effort: 'high'
+    effort: 'high',
+    mode: 'ask'
   })
 })
 

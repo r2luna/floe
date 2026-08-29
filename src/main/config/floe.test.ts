@@ -11,7 +11,7 @@ test('the generated template parses to exactly the documented defaults', () => {
   const { config, errors } = parseFloeConfig(FLOE_TOML, 'floe.toml')
   assert.deepEqual(errors, [])
   assert.equal(config.appearance.fontSize, 13)
-  assert.equal(config.appearance.theme, 'omarchy')
+  assert.equal(config.appearance.theme, 'dark')
   assert.equal(config.agent.model, 'opus')
   assert.equal(config.agent.effort, 'high')
   assert.equal(config.agent.provider, 'claude')
@@ -36,10 +36,10 @@ test('a value outside the allowed set falls back and names the options', () => {
 })
 
 test('a value of the wrong type falls back and points at its line', () => {
-  const raw = '[appearance]\ntheme = "carbon"\nfont-size = "big"\n'
+  const raw = '[appearance]\ntheme = "light"\nfont-size = "big"\n'
   const { config, errors } = parseFloeConfig(raw, 'floe.toml')
   assert.equal(config.appearance.fontSize, 13)
-  assert.equal(config.appearance.theme, 'carbon', 'the good value next to it still applies')
+  assert.equal(config.appearance.theme, 'light', 'the good value next to it still applies')
   assert.equal(errors[0].line, 3)
   assert.equal(errors[0].text, 'font-size = "big"')
 })
@@ -68,4 +68,10 @@ test('several bad values are all reported, not just the first', () => {
   const { errors } = parseFloeConfig(raw, 'floe.toml')
   assert.equal(errors.length, 3)
   assert.deepEqual(errors.map((e) => e.line), [2, 3, 4])
+})
+
+test('theme takes only the two themes and system, and names them when it does not', () => {
+  const { config, errors } = parseFloeConfig('[appearance]\ntheme = "omarchy"\n', 'floe.toml')
+  assert.equal(config.appearance.theme, 'dark', 'an unknown theme falls back to the one the app is designed at')
+  assert.match(errors[0].reason, /system, dark, light/)
 })

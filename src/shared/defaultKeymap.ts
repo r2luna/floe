@@ -18,13 +18,15 @@ export interface KeymapSection {
 export const KEYMAP_SECTIONS: KeymapSection[] = [
   {
     title: 'Palettes',
-    doc: `Two palettes, on purpose. \`⌘⇧P\` is every command; \`⌘/\` is the narrower
+    doc: `Three palettes, on purpose. \`⌘⇧P\` is every command; \`⌘/\` is the narrower
 "switch project" list, because the common case should not make you read past
-forty commands to reach it. \`⌘K\` opens a chord — the next key completes it.`,
+forty commands to reach it. \`⌘K\` opens a chord — the next key completes it. \`⌘P\` is
+the worktree's files, and picking one opens it in the file panel.`,
     binds: [
       { key: 'super+k', command: 'palette.chord' },
       { key: 'super+shift+p', command: 'palette.commands' },
-      { key: 'super+/', command: 'palette.open' }
+      { key: 'super+/', command: 'palette.open' },
+      { key: 'super+p', command: 'palette.files' }
     ]
   },
   {
@@ -70,8 +72,62 @@ stay free everywhere else.`,
       { key: 'super+y', command: 'panel.goto', arg: 'terminal' },
       { key: 'super+k g', command: 'panel.goto', arg: 'changes' },
       { key: 'super+k f', command: 'panel.goto', arg: 'files' },
+      { key: 'super+k p', command: 'panel.goto', arg: 'plans' },
       { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel in ["projects", "worktrees"]' },
       { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel in ["projects", "worktrees"]' }
+    ]
+  },
+  {
+    title: 'File Tree',
+    doc: `In the file tree \`h\` and \`l\` walk depth the way \`j\` and \`k\` walk rows:
+\`l\` opens the directory under the cursor, \`h\` closes it. On anything that is
+not an open directory \`h\` goes up to the containing one instead, so it is
+never a key that does nothing.
+
+These come before the cursor keys because \`h\` and \`l\` mean something else in
+the project and worktree lists, and first match wins.`,
+    binds: [
+      { key: 'l', command: 'files.expand', when: 'panel == "files"' },
+      { key: 'h', command: 'files.collapse', when: 'panel == "files"' }
+    ]
+  },
+  {
+    title: 'Editor',
+    doc: `\`e\` opens the file under the cursor in your editor — the one
+\`[editor] command\` names in floe.toml. A terminal editor (nvim, vim, helix)
+takes over the file panel itself, on the line the cursor was on; a GUI editor
+(VS Code, Zed, Sublime) is launched beside the app. Either way it is the same
+key from the file tree, the reader and a diff.`,
+    binds: [
+      {
+        key: 'e',
+        command: 'editor.open',
+        when: 'panel in ["files", "file", "diff", "edit"]'
+      }
+    ]
+  },
+  {
+    title: 'Projects',
+    doc: `The list's own letters. \`n\` adds a project, \`d\` removes the one under the
+cursor — Floe forgets it, the folder on disk is untouched — and \`m\` picks it
+up. While it is held, \`j\`/\`k\` and the arrows carry it from group to group,
+Enter drops it there and Escape puts it back, so filing a project never
+leaves the list.
+
+Two orderings matter here. These sit above the cursor keys so that \`j\` moves
+the PROJECT while one is in flight, and above Find so that \`n\` in this panel
+adds a project rather than repeating a search — \`/\` still searches it, and
+\`n\` still repeats the match everywhere else.`,
+    binds: [
+      { key: 'n', command: 'project.add', when: 'panel == "projects"' },
+      { key: 'd', command: 'project.delete', when: 'panel == "projects"' },
+      { key: 'm', command: 'project.move.start', when: 'panel == "projects"' },
+      { key: 'j', command: 'project.move.down', when: 'moving' },
+      { key: 'k', command: 'project.move.up', when: 'moving' },
+      { key: 'arrowdown', command: 'project.move.down', when: 'moving' },
+      { key: 'arrowup', command: 'project.move.up', when: 'moving' },
+      { key: 'enter', command: 'project.move.commit', when: 'moving' },
+      { key: 'escape', command: 'project.move.cancel', when: 'moving' }
     ]
   },
   {
@@ -79,12 +135,19 @@ stay free everywhere else.`,
     doc: `The vim set, and it means the same thing in a file, a diff and a list,
 because all of these move the CURSOR. \`⌃D\` and \`⌃U\` take half a screen and
 carry the cursor with them — that is what separates them from \`⌃J\` and \`⌃K\`,
-where only the view moves.`,
+where only the view moves.
+
+\`⌃⇧J\` and \`⌃⇧K\` scroll too, and only scroll: \`⌃J\`/\`⌃K\` give the chord up to
+moving between stacked panels when there is one above or below, and adding
+shift is how you read back through a chat that sits in a stack. Both work with
+the cursor in the composer.`,
     binds: [
       { key: 'ctrl+d', command: 'cursor.halfDown' },
       { key: 'ctrl+u', command: 'cursor.halfUp' },
       { key: 'ctrl+j', command: 'scroll.down' },
       { key: 'ctrl+k', command: 'scroll.up' },
+      { key: 'ctrl+shift+j', command: 'scroll.down' },
+      { key: 'ctrl+shift+k', command: 'scroll.up' },
       { key: 'arrowdown', command: 'cursor.down' },
       { key: 'arrowup', command: 'cursor.up' },
       { key: 'j', command: 'cursor.down' },
@@ -116,13 +179,15 @@ comes before the \`selecting\` one.`,
     ]
   },
   {
-    title: 'Diff Selection',
-    doc: `Visual-line selection, only in the panel where lines exist to select. \`c\`
-means comment only once there is a selection to comment on — loose, it would
-swallow the letter for no reason.`,
+    title: 'Line Selection',
+    doc: `Visual-line selection, only in the panels where lines exist to select — a
+diff and a file (which includes a rendered .md, one row per source line). \`c\`
+sends the range to the composer: the diff as a quoted patch, a file as a
+\`path:12-30\` reference. It means comment only once there is a selection to
+comment on — loose, it would swallow the letter for no reason.`,
     binds: [
-      { key: 'v', command: 'selection.toggle', when: 'panel == "diff"' },
-      { key: 'c', command: 'selection.comment', when: 'panel == "diff" and selecting' },
+      { key: 'v', command: 'selection.toggle', when: 'panel in ["diff", "file"]' },
+      { key: 'c', command: 'selection.comment', when: 'panel in ["diff", "file"] and selecting' },
       { key: 'escape', command: 'selection.cancel', when: 'selecting' }
     ]
   },
@@ -162,7 +227,6 @@ export const UNBOUND_SUGGESTIONS: Array<{ command: string; key?: string }> = [
   { command: 'panel.grow', key: 'super+shift+.' },
   { command: 'panel.shrink', key: 'super+shift+,' },
   { command: 'panel.resetSize', key: 'super+shift+0' },
-  { command: 'project.add', key: 'super+shift+n' },
   { command: 'project.move' },
   { command: 'group.create' },
   { command: 'group.delete' },

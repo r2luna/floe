@@ -2,8 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { applyFileOps, listDir } from './files.ts'
+import { applyFileOps, listDir, searchableFiles } from './files.ts'
 
 function withWorktree(files: Record<string, string>, body: (root: string) => void): void {
   const root = mkdtempSync(join(tmpdir(), 'floe-files-'))
@@ -93,4 +94,35 @@ test('listDir reads one level, hides nothing but .git, and stays in the worktree
       assert.throws(() => listDir(root, '../..'))
     }
   )
+})
+
+test('searchableFiles walks a plain directory, skipping the heavy ones', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-files-walk-'))
+  try {
+    for (const rel of ['src/App.tsx', 'README.md', 'node_modules/pkg/index.js', '.git/config']) {
+      const abs = join(root, rel)
+      mkdirSync(join(abs, '..'), { recursive: true })
+      writeFileSync(abs, '')
+    }
+    // Not a repo, so `git ls-files` cannot answer and the walk does.
+    assert.deepEqual(await searchableFiles(root), ['README.md', 'src/App.tsx'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('searchableFiles in a repo leaves out what .gitignore names', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-files-repo-'))
+  try {
+    execFileSync('git', ['-C', root, 'init', '-q'])
+    writeFileSync(join(root, '.gitignore'), 'dist\n')
+    mkdirSync(join(root, 'dist'), { recursive: true })
+    writeFileSync(join(root, 'dist', 'bundle.js'), '')
+    writeFileSync(join(root, 'kept.ts'), '')
+    const files = await searchableFiles(root)
+    assert.ok(files.includes('kept.ts'))
+    assert.ok(!files.some((f) => f.startsWith('dist/')), 'ignored files stay out of the palette')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

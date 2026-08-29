@@ -109,7 +109,7 @@ export function tokenizeMarkdown(text: string): Token[] {
 export type MdSpan = { text: string; cls: string }
 
 export type MdLine = {
-  kind: 'text' | 'heading' | 'list' | 'quote' | 'fence' | 'code' | 'rule' | 'table'
+  kind: 'text' | 'heading' | 'list' | 'quote' | 'fence' | 'code' | 'rule' | 'table' | 'front'
   spans: MdSpan[]
   /** Heading level, 1-6. */
   level?: number
@@ -125,38 +125,123 @@ export type MdLine = {
   head?: boolean
   /** Column weights for the whole table block, in characters of widest cell. */
   cols?: number[]
+  /** The marker column's width, in characters — shared by a list block. */
+  markerWidth?: number
   /** Per-column alignment, read from the |---| row. */
   aligns?: ('left' | 'center' | 'right')[]
+  /** A `- [ ]` item: the marker is a checkbox instead of a bullet. */
+  task?: 'open' | 'done'
+  /** A line that continues the item above it — indented under its text. */
+  cont?: boolean
 }
 
 // Inline spans with their delimiters, so the rendered text can drop them.
-const RENDER_INLINE =
-  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|_([^_\n]+)_|\[([^\]\n]*)\]\(([^)\n]*)\)/g
+// Longest-first, and image before link: `![a](b)` must never match as a link
+// with a stray `!` in front of it.
+const RENDER_INLINE = new RegExp(
+  [
+    /\\([\\`*_~[\]()#!>+-])/, // an escape is the literal character
+    /`([^`\n]+)`/, // code — never nested, it is literal by definition
+    /!\[([^\]\n]*)\]\([^)\n]*\)/, // image: only its alt text can be drawn
+    /\[\^([^\]\n]+)\]/, // footnote reference
+    /\[([^\]\n]*)\]\([^)\n]*\)/, // inline link
+    /\[([^\]\n]*)\]\[[^\]\n]*\]/, // reference link
+    /<((?:https?|mailto):[^>\s]+)>/, // autolink
+    /\*\*([^*\n]+)\*\*|__([^_\n]+)__/, // bold
+    /~~([^~\n]+)~~/, // strikethrough
+    /\*([^*\n]+)\*|_([^_\n]+)_/ // emphasis
+  ]
+    .map((re) => `(?:${re.source})`)
+    .join('|'),
+  'g'
+)
 
-function renderInline(text: string, out: MdSpan[]): void {
+/**
+ * Render one line's inline markup, dropping the delimiters.
+ *
+ * `base` is what the surrounding span already is, so nesting composes instead
+ * of replacing: bold inside a link comes back as "md-link md-bold" and gets
+ * both the colour and the weight. The recursion is what makes that work — each
+ * form renders its own content through this function again.
+ */
+function renderInline(text: string, out: MdSpan[], base = ''): void {
+  const add = (t: string, cls: string): void => {
+    if (t) out.push({ text: t, cls: [base, cls].filter(Boolean).join(' ') })
+  }
+  const nest = (t: string, cls: string): void =>
+    renderInline(t, out, [base, cls].filter(Boolean).join(' '))
+
   let last = 0
-  RENDER_INLINE.lastIndex = 0
+  const re = new RegExp(RENDER_INLINE.source, 'g')
   let m: RegExpExecArray | null
-  while ((m = RENDER_INLINE.exec(text))) {
-    if (m.index > last) out.push({ text: text.slice(last, m.index), cls: '' })
-    const [, code, bold, boldAlt, em, emAlt, link] = m
-    if (code !== undefined) out.push({ text: code, cls: 'md-code' })
-    else if (bold !== undefined || boldAlt !== undefined)
-      out.push({ text: (bold ?? boldAlt) as string, cls: 'md-bold' })
-    else if (em !== undefined || emAlt !== undefined)
-      out.push({ text: (em ?? emAlt) as string, cls: 'md-em' })
-    else out.push({ text: link ?? '', cls: 'md-link' })
+  while ((m = re.exec(text))) {
+    if (m.index > last) add(text.slice(last, m.index), '')
+    const [, esc, code, img, note, link, ref, auto, bold, boldAlt, strike, em, emAlt] = m
+    if (esc !== undefined) add(esc, '')
+    else if (code !== undefined) add(code, 'md-code')
+    else if (img !== undefined) add(img, 'md-img')
+    // The brackets stay: a bare "1" in the middle of a sentence would read as
+    // part of it, and this is a reference you are meant to be able to find.
+    else if (note !== undefined) add(`[${note}]`, 'md-note')
+    else if (link !== undefined) nest(link, 'md-link')
+    else if (ref !== undefined) nest(ref, 'md-link')
+    else if (auto !== undefined) add(auto, 'md-link')
+    else if (bold !== undefined || boldAlt !== undefined) nest((bold ?? boldAlt) as string, 'md-bold')
+    else if (strike !== undefined) nest(strike, 'md-del')
+    else nest((em ?? emAlt) as string, 'md-em')
     last = m.index + m[0].length
   }
-  if (last < text.length) out.push({ text: text.slice(last), cls: '' })
+  if (last < text.length) add(text.slice(last), '')
 }
 
 /** Render a whole file, line by line. The array is 1:1 with the source lines. */
 export function renderMarkdown(text: string): MdLine[] {
+  const src = text.split('\n')
   const out: MdLine[] = []
   let fence: string | null = null
+  // YAML front matter, which is metadata rather than prose. Only at the very top
+  // of the file, and only when it CLOSES — an opening `---` with no partner is
+  // a rule on the first line, not a block that swallows the whole document.
+  let front = src[0]?.trim() === '---' && src.slice(1).some((l) => l.trim() === '---')
+  // The item a lazily-indented line would continue, and whether the line above
+  // was blank — indented code needs one, a continuation must not have one.
+  // Depth of the item an indented line would continue, or -1 for "no list open".
+  // A holder rather than a plain let: `push` below writes it, and a variable
+  // written from a closure keeps whatever type it was narrowed to at the call
+  // site, which would make this permanently "no list".
+  const open = { item: -1 }
+  let blank = true
+  // Set when the line below is a setext underline the heading already consumed.
+  let underline = false
 
-  for (const line of text.split('\n')) {
+  for (let n = 0; n < src.length; n++) {
+    const line = src[n]
+    const next = src[n + 1] ?? ''
+    const empty = !line.trim()
+
+    const push = (mdLine: MdLine): void => {
+      out.push(mdLine)
+      if (mdLine.kind === 'list') open.item = mdLine.depth ?? 0
+      else if (!mdLine.cont && !empty) open.item = -1
+      blank = empty
+    }
+
+    if (underline) {
+      // The `====` under a setext heading: its row stays (the numbers must match
+      // the file) and draws nothing, because the heading above already reads as
+      // one and a second line under it would be a rule it never asked for.
+      underline = false
+      push({ kind: 'text', spans: [] })
+      continue
+    }
+
+    if (front) {
+      // The closing `---` ends it; both delimiters read as part of the block.
+      if (n > 0 && line.trim() === '---') front = false
+      push({ kind: 'front', spans: [{ text: line, cls: '' }] })
+      continue
+    }
+
     const fenceMatch = FENCE.exec(line)
     if (fenceMatch) {
       const mark = fenceMatch[2]
@@ -165,17 +250,28 @@ export function renderMarkdown(text: string): MdLine[] {
       else if (mark[0] === open[0] && mark.length >= open.length) fence = null
       // The fence itself is not content: it keeps its row (the numbers must
       // stay true to the file) but shows only the language, if it named one.
-      out.push({ kind: 'fence', spans: [{ text: open ? '' : fenceMatch[3].trim(), cls: '' }] })
+      push({ kind: 'fence', spans: [{ text: open ? '' : fenceMatch[3].trim(), cls: '' }] })
       continue
     }
     // Inside a fence everything is literal — no bold, no links, no bullets.
     if (fence) {
-      out.push({ kind: 'code', spans: [{ text: line, cls: '' }] })
+      push({ kind: 'code', spans: [{ text: line, cls: '' }] })
       continue
     }
 
-    if (HR.test(line) && line.trim()) {
-      out.push({ kind: 'rule', spans: [] })
+    // A setext heading is the only shape a line cannot recognise alone: it is
+    // the line BELOW that makes it one. Checked before HR, because `---` under
+    // a paragraph is an underline, not a rule.
+    if (!empty && open.item < 0 && /^\s*(=+|-+)\s*$/.test(next) && !LIST.test(line) && !/^\s*[|>#]/.test(line)) {
+      const spans: MdSpan[] = []
+      renderInline(line, spans)
+      underline = true
+      push({ kind: 'heading', level: next.trim()[0] === '=' ? 1 : 2, spans })
+      continue
+    }
+
+    if (HR.test(line) && !empty) {
+      push({ kind: 'rule', spans: [] })
       continue
     }
 
@@ -183,23 +279,35 @@ export function renderMarkdown(text: string): MdLine[] {
     if (heading) {
       const spans: MdSpan[] = []
       renderInline(heading[2], spans)
-      out.push({ kind: 'heading', level: heading[1].trim().length, spans })
+      push({ kind: 'heading', level: heading[1].trim().length, spans })
       continue
     }
 
     const quote = QUOTE.exec(line)
     if (quote) {
+      // `> > x` is a quote inside a quote: strip every level and count them, so
+      // the depth shows as indentation instead of as a stray `>` in the text.
+      let body = quote[2]
+      let depth = 1
+      let deeper: RegExpExecArray | null
+      while ((deeper = QUOTE.exec(body))) {
+        body = deeper[2]
+        depth++
+      }
       const spans: MdSpan[] = []
-      renderInline(quote[2], spans)
-      out.push({ kind: 'quote', spans })
+      renderInline(body, spans)
+      push({ kind: 'quote', depth, spans })
       continue
     }
 
     const list = LIST.exec(line)
     if (list) {
+      // `- [ ] thing` is a task: the checkbox replaces the bullet, and the
+      // brackets are markup rather than the first two characters of the text.
+      const task = /^\[([ xX])\]\s+/.exec(list[4])
       const spans: MdSpan[] = []
-      renderInline(list[4], spans)
-      out.push({
+      renderInline(task ? list[4].slice(task[0].length) : list[4], spans)
+      push({
         kind: 'list',
         // Two spaces per level is the common case and the only one a line can
         // know on its own; a tab counts as one step.
@@ -207,6 +315,7 @@ export function renderMarkdown(text: string): MdLine[] {
         // Empty for an unordered item: the dot is drawn in CSS, not typed, so
         // it does not depend on the mono face having a decent bullet glyph.
         marker: /^\d/.test(list[2]) ? list[2] : '',
+        task: task ? (task[1] === ' ' ? 'open' : 'done') : undefined,
         spans
       })
       continue
@@ -220,9 +329,9 @@ export function renderMarkdown(text: string): MdLine[] {
       // numbers must match the file) but draws as the rule under the header.
       const rule = /^[\s|:-]+$/.test(line)
       const spans: MdSpan[] = [{ text: line, cls: rule ? 'md-marker' : '' }]
-      if (rule) out.push({ kind: 'table', spans, rule: true })
+      if (rule) push({ kind: 'table', spans, rule: true })
       else
-        out.push({
+        push({
           kind: 'table',
           spans,
           cells: splitRow(line).map((cell) => {
@@ -234,13 +343,93 @@ export function renderMarkdown(text: string): MdLine[] {
       continue
     }
 
+    // An indented line is one of two things, and the list decides which: under
+    // an item it continues that item's paragraph; on its own, four spaces are a
+    // code block — but only where a block can start, since indented code cannot
+    // interrupt a paragraph.
+    const after = out[out.length - 1]?.kind
+    const canStart = blank || !after || after === 'fence' || after === 'rule' || after === 'front'
+    if (!empty && /^(?: {4}|\t)/.test(line) && open.item < 0 && canStart) {
+      push({ kind: 'code', spans: [{ text: line.replace(/^(?: {4}|\t)/, ''), cls: '' }] })
+      continue
+    }
+    if (!empty && /^\s+\S/.test(line) && open.item >= 0) {
+      const spans: MdSpan[] = []
+      renderInline(line.trim(), spans)
+      push({ kind: 'text', cont: true, depth: open.item, spans })
+      continue
+    }
+
+    // A definition — of a link or of a footnote — is machinery, not prose: it
+    // is what makes `[x]` elsewhere work, and nobody reads it as a sentence.
+    if (/^\s*\[[^\]\n]+\]:\s/.test(line)) {
+      push({ kind: 'text', spans: [{ text: line, cls: 'md-def' }] })
+      continue
+    }
+
+    // Raw HTML passes through markdown untouched, so it reaches here as-is.
+    // Shown dimmed and literal rather than parsed: this panel reads documents,
+    // it does not run them.
+    // The tag name must be followed by a space, a slash or the closing angle —
+    // `<https://floe.dev>` is an autolink, and "https:" is not a tag.
+    if (/^\s*<\/?[a-zA-Z][a-zA-Z0-9-]*(\s[^>]*)?\/?>/.test(line)) {
+      push({ kind: 'text', spans: [{ text: line, cls: 'md-html' }] })
+      continue
+    }
+
     const spans: MdSpan[] = []
     renderInline(line, spans)
-    out.push({ kind: 'text', spans })
+    push({ kind: 'text', spans })
   }
 
+  numberLists(out)
   layoutTables(out)
   return out
+}
+
+/**
+ * Renumber ordered lists, and size the marker column for the whole block.
+ *
+ * Both are things a line cannot know alone. Markdown lets every item be written
+ * `1.` — the sequence is the renderer's job — and the markers only line up if
+ * the items of a block agree on how wide their column is, so `10.` does not
+ * push its own text out of step with `9.`.
+ */
+function numberLists(lines: MdLine[]): void {
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].kind !== 'list') continue
+
+    // The block runs to the last list item, blank lines included: a blank line
+    // between items is a loose list, not the end of one.
+    let end = i
+    for (let n = i; n < lines.length; n++) {
+      if (lines[n].kind === 'list') end = n
+      // A continuation belongs to the item above it, so it is part of the block.
+      else if (lines[n].cont) end = n
+      else if (lines[n].kind !== 'text' || lines[n].spans.some((span) => span.text.trim())) break
+    }
+
+    // One counter per depth. A deeper level starts at 1 and is forgotten on the
+    // way back out, so a second sub-list does not continue the first one's
+    // numbering.
+    const counters: number[] = []
+    let width = 2
+    for (let n = i; n <= end; n++) {
+      const line = lines[n]
+      if (line.kind !== 'list' || !line.marker) continue
+      const depth = line.depth ?? 0
+      counters.length = depth + 1
+      counters[depth] = (counters[depth] ?? 0) + 1
+      line.marker = `${counters[depth]}.`
+      // +1 for the gap between the marker and the text it labels.
+      width = Math.max(width, line.marker.length + 1)
+    }
+
+    // Continuation lines get it too: their indent is the item's text column.
+    for (let n = i; n <= end; n++)
+      if (lines[n].kind === 'list' || lines[n].cont) lines[n].markerWidth = width
+    i = end
+  }
 }
 
 /** The cells of a `| a | b |` row, trimmed, with the outer pipes dropped. */

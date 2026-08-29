@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
-import type { AgentQuestion } from '../shared/types'
+import type { AgentQuestion, PermissionMode } from '../shared/types'
 import { sendAgentEvent } from './agent'
 import { resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
@@ -16,8 +16,9 @@ import { logTurn } from './runtimeLog'
 //
 // The tool is gated twice upstream: the client must declare the
 // `experimentalApi` capability at initialize, and the thread must be in the
-// "plan" collaboration mode (codex_core rejects it in Default mode). Plan mode
-// costs us nothing: the exec path already ran codex read-only.
+// "plan" collaboration mode (codex_core rejects it in Default mode) — so codex
+// can only ask you something while the picker is on plan. In the modes that
+// let it write, it works instead of asking, which is what those modes mean.
 
 const TURN_TIMEOUT_MS = 240_000
 
@@ -45,6 +46,10 @@ let ready: Promise<void> | null = null
 const pending = new Map<number, Pending>()
 const turnsByThread = new Map<string, TurnCtx>()
 const threadBySession = new Map<string, string>()
+// The mode each live thread was last configured for. A thread carries its
+// sandbox from thread/start, so a mode picked afterwards has to be pushed at it
+// — and pushing the same one on every turn would be a round trip per message.
+const modeByThread = new Map<string, PermissionMode>()
 // A question the model is blocked on: the JSON-RPC request id to respond to,
 // the question ids in presentation order (the renderer answers by index), and
 // the display texts so the answered exchange can be written to the runtime log.
@@ -122,7 +127,10 @@ function teardown(): void {
   for (const ctx of turnsByThread.values()) finishTurn(ctx, 'codex app-server exited.')
   turnsByThread.clear()
   questionBySession.clear()
-  // Threads die with the server process; a fresh one must thread/resume.
+  // Threads die with the server process; a fresh one must thread/resume — and
+  // resume does not carry a sandbox, so forget the posture too or the next turn
+  // would skip the update and run in whatever the resumed thread defaults to.
+  modeByThread.clear()
 }
 
 function handleMessage(msg: Record<string, unknown>): void {
@@ -255,6 +263,24 @@ function finishTurn(ctx: TurnCtx, error?: string): void {
   sendAgentEvent(ctx.win, ctx.key, { kind: 'done', ok: !error })
 }
 
+/**
+ * Floe's mode → the two settings codex spells it with.
+ *
+ * `approvalPolicy` stays "never" in every mode on purpose: an approval request
+ * arrives as a server→client request we answer with a flat decline (see the
+ * dispatcher above), so a policy that asks would stall the turn on a question
+ * nobody can answer. What varies is the sandbox — which is the part that
+ * actually decides what a turn can touch — and the collaboration mode.
+ *
+ * "ask" is not here because codex cannot do it; shared/modes.ts leaves it off
+ * codex's list, and runtimes.ts snaps anything that still arrives.
+ */
+function codexPosture(mode: PermissionMode): { sandbox: string; collaboration: string } {
+  if (mode === 'skip') return { sandbox: 'danger-full-access', collaboration: 'default' }
+  if (mode === 'acceptEdits') return { sandbox: 'workspace-write', collaboration: 'default' }
+  return { sandbox: 'read-only', collaboration: 'plan' }
+}
+
 // Floe's five effort levels → codex's three (same mapping as codex.ts).
 function mapEffort(effort?: string): string | undefined {
   if (!effort) return undefined
@@ -265,8 +291,8 @@ function mapEffort(effort?: string): string | undefined {
 
 /**
  * One user turn against the session's codex thread. Starts (or resumes) the
- * thread on the shared app-server, flips it to plan mode so requestUserInput
- * is available, and streams the outcome through the normal AgentEvents.
+ * thread on the shared app-server, puts it in the posture the picker asked for,
+ * and streams the outcome through the normal AgentEvents.
  */
 export async function chatWithCodexServer(
   win: BrowserWindow,
@@ -274,9 +300,11 @@ export async function chatWithCodexServer(
   worktreePath: string,
   prompt: string,
   model: string | undefined,
-  effort?: string
+  effort?: string,
+  mode: PermissionMode = 'plan'
 ): Promise<void> {
   const slug = resolveModel(model)
+  const posture = codexPosture(mode)
   try {
     await ensureServer()
 
@@ -294,20 +322,37 @@ export async function chatWithCodexServer(
       const started = await request('thread/start', {
         cwd: worktreePath,
         model: slug,
-        // Match the exec path's posture: codex chat analyses, it doesn't edit.
-        // "never" also means no approval requests can wedge the turn.
+        // See codexPosture: the sandbox is the setting that carries the mode,
+        // and "never" keeps an unanswerable approval request from wedging us.
         approvalPolicy: 'never',
-        sandbox: 'read-only'
+        sandbox: posture.sandbox
       })
       threadId = String((started.thread as { id?: string })?.id ?? '')
       if (!threadId) throw new Error('codex thread/start returned no thread id.')
       threadBySession.set(key, threadId)
-      // Plan mode is the gate on requestUserInput. Best-effort: an older codex
-      // without the method still chats, just never asks.
+      // Plan's collaboration mode is also the gate on requestUserInput.
+      // Best-effort: an older codex without the method still chats.
       await request('thread/settings/update', {
         threadId,
-        collaborationMode: { mode: 'plan', settings: { model: slug } }
+        collaborationMode: { mode: posture.collaboration, settings: { model: slug } }
       }).catch(() => {})
+      modeByThread.set(threadId, mode)
+    } else if (modeByThread.get(threadId) !== mode) {
+      // The mode changed mid-chat — the usual path, since plan-then-build is
+      // how a session actually goes. The thread keeps its history; only its
+      // posture moves. A failure here is said out loud rather than swallowed:
+      // silently answering in the old sandbox is how you lose an afternoon
+      // wondering why nothing gets written.
+      try {
+        await request('thread/settings/update', {
+          threadId,
+          sandboxPolicy: posture.sandbox,
+          collaborationMode: { mode: posture.collaboration, settings: { model: slug } }
+        })
+        modeByThread.set(threadId, mode)
+      } catch (e) {
+        throw new Error(`codex would not switch to ${mode} mode: ${(e as Error).message}`)
+      }
     }
 
     const ctx: TurnCtx = { win, key, threadId, model, effort, reply: '', timer: null }

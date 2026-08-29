@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
-import type { AgentEvent } from '../shared/types'
+import type { AgentEvent, PermissionMode } from '../shared/types'
+import { DEFAULT_MODE, nearestMode } from '../shared/modes'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { chatWithCodexServer } from './codexServer'
@@ -22,6 +23,10 @@ import { lmStudioServerModels } from './localAgents'
 //  - gemini    — one turn at a time (see the note on continuity below)
 //  - lmstudio  — full conversation, because we hold the messages ourselves
 //  - ollama    — same, via its own OpenAI-compatible endpoint
+//
+// The permission mode travels the same way: shared/modes.ts says which of the
+// four each runtime can do, and each branch below spells its own flag for it.
+// A runtime with no tools (LM Studio, Ollama) has nothing to spell.
 //
 // ponytail: prose only. None of these forward tool activity as tool rows the
 // way agent.ts does for Claude — their JSON event streams each spell tools
@@ -273,7 +278,8 @@ export async function runRuntime(
   prompt: string,
   runtime: string,
   model?: string,
-  effort?: string
+  effort?: string,
+  mode: PermissionMode = DEFAULT_MODE
 ): Promise<void> {
   // These runtimes write no transcript, so nothing on disk would say this
   // session was ever used. Stamp it, or the sidebar sorts it by the day it was
@@ -285,7 +291,12 @@ export async function runRuntime(
   markTurnStart(key)
   // Codex already has a home: the app-server session (codexServer.ts), which
   // is also the only channel that can surface its request_user_input questions.
-  if (runtime === 'codex') return chatWithCodexServer(win, key, worktreePath, prompt, model, effort)
+  // Snapped here rather than trusted: the picker snaps too, but a scheduled run
+  // or an older saved choice can still arrive with a mode this runtime has no
+  // flag for, and that fails the whole turn.
+  const allowed = nearestMode(mode, runtime)
+  if (runtime === 'codex')
+    return chatWithCodexServer(win, key, worktreePath, prompt, model, effort, allowed)
 
   const thread = threads.get(key) ?? {}
   threads.set(key, thread)
@@ -314,6 +325,10 @@ export async function runRuntime(
       // stalled run says what is wrong (a provider it cannot reach, say).
       const args = ['run', '--format', 'json', '--print-logs']
       if (model) args.push('-m', model)
+      // opencode spells the mode as a built-in agent: `plan` reads and reasons,
+      // `build` edits. There is nothing looser than build, which is why skip is
+      // not on opencode's list of modes.
+      args.push('--agent', allowed === 'plan' ? 'plan' : 'build')
       // ponytail: no `--variant`. opencode's variants are provider-specific
       // ("high", "max", "minimal" — not our five), and an unknown one fails the
       // run instead of being ignored. Map them per provider if it ever matters.
@@ -331,7 +346,11 @@ export async function runRuntime(
     }
 
     if (runtime === 'gemini') {
-      const args = ['-p', prompt, '-o', 'json', '--approval-mode', 'default']
+      // gemini's three approval modes line up with ours from "ask" upwards; it
+      // has no read-only mode, which is why plan is not on gemini's list.
+      const approval =
+        allowed === 'skip' ? 'yolo' : allowed === 'acceptEdits' ? 'auto_edit' : 'default'
+      const args = ['-p', prompt, '-o', 'json', '--approval-mode', approval]
       if (model) args.push('-m', model)
       // ponytail: one turn at a time. `--resume` takes "latest" or an index
       // rather than an id we chose, so there is no way to name OUR session

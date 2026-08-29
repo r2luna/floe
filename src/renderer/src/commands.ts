@@ -26,12 +26,16 @@ export interface CommandContext {
    * panel module's business, not the registry's.
    */
   canOpen: (kind: string) => boolean
+  /** Why `canOpen` said no, phrased for the user. */
+  whyCannotOpen: (kind: string) => string
   /** The unified diff for a path. Injected so the registry needs no demo data. */
   patchFor: (path: string) => string
   /** Show the project palette. */
   openPalette: () => void
   /** Show the palette listing every command. */
   openCommands: () => void
+  /** Show the palette listing the worktree's files — ⌘P. */
+  openFiles: () => void
   /** Open the find bar over the focused panel — `/`. */
   openFind: () => void
   /**
@@ -46,6 +50,19 @@ export interface CommandContext {
   createGroup: () => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
+  /** Forget the project the cursor is on, after asking. */
+  deleteProject: () => void
+  /**
+   * Pick up the project the cursor is on, so `j`/`k` carry it between groups.
+   * The move is a preview until it is committed — see `movingProject`.
+   */
+  startMoveProject: () => void
+  /** Carry the held project `delta` groups down the list. */
+  stepMoveProject: (delta: number) => void
+  /** File the held project where it is showing, or put it back. */
+  endMoveProject: (commit: boolean) => void
+  /** True while a project is held — what makes j/k mean "carry it". */
+  movingProject: boolean
   /** Pick a group to remove; its projects fall back to the default. */
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
@@ -73,8 +90,22 @@ export interface Command {
   group: string
   /** What the keymap presses for it, shown in the palette. Not the binding. */
   keys?: string
-  /** False when the command can't act right now — the palette dims it and MCP refuses. */
-  enabled?: (ctx: CommandContext) => boolean
+  /**
+   * False when the command can't act right now — the palette dims it and MCP
+   * refuses. Takes the argument too, because one command can be available for
+   * one argument and not another: `panel.goto worktrees` always works, while
+   * `panel.goto files` needs a worktree checked out.
+   */
+  enabled?: (ctx: CommandContext, arg?: string) => boolean
+  /**
+   * Why it is off, in the user's words.
+   *
+   * Without this a refusal reads `not available now: panel.goto`, which is a
+   * developer's sentence. Pressing a key and being told nothing is the failure
+   * this exists to prevent — the palette can dim a row, but a key press has no
+   * row to dim.
+   */
+  unavailable?: (ctx: CommandContext, arg?: string) => string
   run: (ctx: CommandContext, arg?: string) => void
 }
 
@@ -95,7 +126,9 @@ export function runCommand(
 ): { ok: true } | { ok: false; error: string } {
   const cmd = registry.get(id)
   if (!cmd) return { ok: false, error: `unknown command: ${id}` }
-  if (cmd.enabled && !cmd.enabled(ctx)) return { ok: false, error: `not available now: ${id}` }
+  if (cmd.enabled && !cmd.enabled(ctx, arg)) {
+    return { ok: false, error: cmd.unavailable?.(ctx, arg) ?? `not available now: ${id}` }
+  }
   cmd.run(ctx, arg)
   return { ok: true }
 }

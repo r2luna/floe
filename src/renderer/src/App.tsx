@@ -21,7 +21,8 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, PANEL_KIND_LIST, PanelBody, needsProject, needsWorktree, type PanelKind } from './panels'
+import { KINDS, PANEL_KIND_LIST, PanelBody, needsProject, type PanelKind } from './panels'
+import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
@@ -35,17 +36,32 @@ import {
   withScoped
 } from './laneStore'
 import { setKeymap } from './keys'
+import { useAppearance } from './appearance'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
 import { NewWorktree } from './NewWorktree'
 import { useProjects } from './useProjects'
+import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
 import { useMenuItems } from './useMenuItems'
 import type { PaletteItem } from './fuzzy'
-import { DEFAULT_GROUP, type ContextUsage } from '../../shared/types'
+import { DEFAULT_GROUP, type ContextUsage, type Project } from '../../shared/types'
 
+
+/**
+ * The rows a query matches, by index.
+ *
+ * Matching is on the row's TEXT, and on its content where the row has a
+ * separate part for it: a file line renders its number beside it, so a search
+ * for `2` would otherwise hit every twentieth line before the first match.
+ */
+function matchingRows(rows: HTMLElement[], q: string): number[] {
+  const text = (row: HTMLElement): string =>
+    ((row.querySelector('.diff-code, .md-text, .row-name') ?? row).textContent ?? '').toLowerCase()
+  return rows.flatMap((row, i) => (text(row).includes(q) ? [i] : []))
+}
 
 const panelOf = (
   kind: PanelKind,
@@ -342,9 +358,23 @@ export default function App() {
     setLane(() => laneOf(panelOf(stranded ? 'branch' : 'worktrees')))
   }, [stranded])
   const current = worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)
-  // What that worktree has changed, watched so an agent editing behind the UI
-  // shows up without a click.
-  const changes = useChanges(worktrees.currentPath)
+  /**
+   * Where the app currently IS.
+   *
+   * The worktree of the open chat first — a session is the most specific answer
+   * to "which tree" there is — then the one picked in the sidebar, and finally
+   * the PROJECT ROOT. That last fallback is the point: the root is the project's
+   * main worktree, not the absence of one, so a project with nothing selected
+   * still has a tree to read. Everything that asks "here" reads this, so the
+   * file list, git status and the terminal cannot disagree.
+   */
+  const here =
+    lane.panels.find((p) => p.session)?.session?.worktreePath ??
+    worktrees.currentPath ??
+    projects.current?.path
+  // What that tree has changed, watched so an agent editing behind the UI shows
+  // up without a click.
+  const changes = useChanges(here)
   const menuItems = useMenuItems(worktrees.currentPath, worktrees)
   // After a turn ends, adopt Claude's auto-generated title (or a Haiku-written
   // one for headless runs) so a session stops reading "Session N". The main
@@ -379,11 +409,30 @@ export default function App() {
     onPick: (id: string) => void
   } | null>(null)
   const [commandsOpen, setCommandsOpen] = useState(false)
+  // The file palette (⌘P): the worktree's files, or null while it is closed.
+  // The list is fetched when it opens rather than kept in sync — files appear
+  // and vanish behind the app all day, and a list read at the moment you ask
+  // for it cannot be stale.
+  const [fileList, setFileList] = useState<string[] | null>(null)
   // The keymap, read from ~/.config/floe/keybindings.toml. It is the whole map,
   // not a set of overrides — the main process generates the file with every
   // default in it — so installing it REPLACES what resolveKey walks rather than
   // layering onto it. Kept in state as well so the palette's key chips repaint
   // when a rebind (or an edit to the file) changes them.
+  // The font from floe.toml, live. The size is a window zoom applied in main.
+  useAppearance()
+  // The one line the app can say to a keyboard user. A key press has no row to
+  // dim and no tooltip to hover, so a refused command would otherwise be
+  // indistinguishable from a broken binding — which is exactly how ⌘K F read
+  // before this existed.
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<number | null>(null)
+  const say = useCallback((text: string) => {
+    setNotice(text)
+    if (noticeTimer.current) clearTimeout(noticeTimer.current)
+    // Long enough to read, short enough that it never becomes furniture.
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 2200)
+  }, [])
   const [binds, setBinds] = useState<Keybind[]>([])
   useEffect(() => {
     const load = (): void => {
@@ -401,6 +450,10 @@ export default function App() {
     // so a new binding works on the next key press without a restart.
     return window.floe.keybindings.onChange(load)
   }, [])
+  // A project picked up with `m`: which one, and the group it is hovering over.
+  // The panel draws the preview from this and nothing is written until Enter, so
+  // Escape really does put the project back where it was.
+  const [moving, setMoving] = useState<{ path: string; group: string } | null>(null)
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
@@ -419,6 +472,25 @@ export default function App() {
     const id = lane.panels[i]?.id
     return id ? refs.current.get(id) : undefined
   }
+  /**
+   * How wide a column is, widened while it is being searched.
+   *
+   * The file panel is narrow because a tree of names is narrow. Its search is
+   * not: it lists whole paths, and reading `src/Actions/Middleware/…` in 300px
+   * means reading an ellipsis. So a searched panel gets room, and only while the
+   * bar is up — nothing is written down, so closing the search puts the column
+   * straight back where the user had it.
+   *
+   * `max`, never a fixed number: a column you dragged wider stays wider.
+   */
+  const SEARCH_WIDTH = 520
+  const isSearched = (head: Panel): boolean =>
+    finding !== null && head.id === lane.panels[lane.focus]?.id
+  const searchWidth = (head: Panel, spec: { width: number }): number => {
+    const base = head.width ?? spec.width
+    return isSearched(head) ? Math.max(base, SEARCH_WIDTH) : base
+  }
+
   const laneRef = useRef<HTMLDivElement>(null)
   // Column elements, for the splitters: a drag writes the new width here
   // directly and only tells the lane about it when the mouse comes up.
@@ -469,9 +541,19 @@ export default function App() {
   // status, the file list, a patch. Without the thing they read there is nothing
   // to show, so they can't be opened at all: better than opening one onto an
   // empty list or an error.
-  const canOpen = (kind: string): boolean =>
-    (!needsProject(kind) || !!projects.current) &&
-    (!needsWorktree(kind) || !!worktrees.currentPath)
+  const canOpen = (kind: string): boolean => !needsProject(kind) || !!projects.current
+
+  /**
+   * The same sentence the rail puts in its tooltip, for the keyboard.
+   *
+   * One function so the two cannot drift: a mouse user hovering a dimmed icon
+   * and a keyboard user pressing its chord are asking the identical question and
+   * deserve the identical answer.
+   */
+  const whyCannotOpen = (kind: string): string =>
+    needsProject(kind) && !projects.current
+      ? `${kind} — open a project first`
+      : `${kind} is not available right now`
 
   const deleteSession = (scope: 'one' | 'others' | 'all' = 'one') => {
     const at = lane.panels.findIndex((p) => p.session)
@@ -543,10 +625,7 @@ export default function App() {
   // and a panel opening another one all land in the same directory — and the
   // shell's identity (`term:<cwd>`) stays tied to it, so two worktrees get two
   // shells and returning to one finds it as you left it.
-  // Where the app currently IS: the worktree of the open session, the one
-  // selected in the sidebar, or home. The terminal opens here and the file tree
-  // lists it, so both agree on what "here" means.
-  const cwd = lane.panels.find((p) => p.session)?.session?.worktreePath ?? worktrees.currentPath
+  const cwd = here
 
   const mkPanel = (
     kind: PanelKind,
@@ -597,6 +676,20 @@ export default function App() {
       : []
 
   /**
+   * The project the cursor is sitting on, for `d` and `m`.
+   *
+   * Read off the row's own `data-project` rather than by counting rows: the list
+   * is grouped, and an index into "projects, ignoring headings" is exactly the
+   * kind of arithmetic that files the wrong project the day a group is added.
+   */
+  const projectAtCursor = (): Project | undefined => {
+    if (lane.panels[lane.focus]?.kind !== 'projects') return undefined
+    const rows = rowsOf(panelAt(lane.focus))
+    const path = rows[lane.panels[lane.focus]?.cursor ?? 0]?.dataset.project
+    return path ? projects.all.find((p) => p.path === path) : undefined
+  }
+
+  /**
    * Move the cursor to the next row matching `query`, wrapping around the end,
    * and record where you are in the matches so the bar can say "3/12".
    *
@@ -611,9 +704,7 @@ export default function App() {
       return
     }
     const rows = rowsOf(panelAt(lane.focus))
-    const text = (row: HTMLElement) =>
-      ((row.querySelector('.diff-code, .md-text, .row-name') ?? row).textContent ?? '').toLowerCase()
-    const matches = rows.flatMap((row, i) => (text(row).includes(q) ? [i] : []))
+    const matches = matchingRows(rows, q)
     setFindPos({ at: 0, total: matches.length })
     if (!matches.length) return
 
@@ -635,6 +726,43 @@ export default function App() {
     // are typing in.
     return rows[at]
   }
+
+  /**
+   * Keep the "3/12" honest when the rows arrive after the query does.
+   *
+   * The count used to be a snapshot taken the moment you typed, which was fine
+   * while every row was already in the DOM. The file panel's search is not: it
+   * fetches the whole tree, so the first count landed against the rows that were
+   * there before and the bar said 1/2 next to a hundred results.
+   *
+   * An effect alone cannot fix that — the rows appear when the PANEL re-renders
+   * from its own state, which never re-renders this component. So the DOM is
+   * watched instead: any change to the focused panel's rows recounts. It only
+   * writes when the number actually moved, so it settles rather than looping.
+   */
+  useEffect(() => {
+    const q = finding?.trim().toLowerCase()
+    const panel = panelAt(lane.focus)
+    if (!q || !panel) return
+    // Once per query: the rows can settle in several mutations and jumping the
+    // cursor on each one would fight whatever the user did in between.
+    let landed = false
+    const recount = (): void => {
+      const total = matchingRows(rowsOf(panel), q).length
+      setFindPos((prev) => (prev && prev.total !== total ? { ...prev, total } : prev))
+      // Rows that arrive after the query leave the cursor on nothing, which
+      // leaves Enter with no file to open. Step onto the first match the moment
+      // there is one — what typing would have done had the list been there.
+      if (total > 0 && !landed) {
+        landed = true
+        findFrom(q, 1, true)
+      }
+    }
+    recount()
+    const observer = new MutationObserver(recount)
+    observer.observe(panel, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [finding, lane])
 
   // The focused panel is always scrolled into view and always holds DOM focus.
   // A panel you can see but can't type into is worse than no panel at all.
@@ -721,6 +849,24 @@ export default function App() {
     })
   })
 
+  // A held project is only held while you are looking at the list: focus another
+  // panel and the move is off. Otherwise `j` would still be carrying a project
+  // three panels away, where nothing shows it.
+  useEffect(() => {
+    if (moving && lane.panels[lane.focus]?.kind !== 'projects') setMoving(null)
+  }, [moving, lane.focus, lane.panels])
+
+  // The cursor rides along with the project it picked up. The row keeps its DOM
+  // focus across the re-render (React keys it by path), but its INDEX changes
+  // when it lands in another group — so without this the mark is left behind on
+  // whatever row inherited the old position.
+  useEffect(() => {
+    if (!moving) return
+    const rows = rowsOf(panelAt(lane.focus))
+    const at = rows.findIndex((row) => row.dataset.project === moving.path)
+    if (at !== -1) setLane((l) => setCursor(l, lane.focus, at))
+  }, [moving, lane.focus])
+
   // One dispatcher for the whole keymap. It lives on the window rather than on
   // each panel so a binding behaves the same wherever focus happens to be —
   // which is the only way ⌃L can mean "next panel" while you are mid-sentence
@@ -738,17 +884,55 @@ export default function App() {
     rowsOf,
     makePanel: (kind, sub) => mkPanel(kind as PanelKind, sub),
     canOpen,
+    whyCannotOpen,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
     patchFor: () => lastPatch.current,
     openPalette: () => setPaletteOpen(true),
     openCommands: () => setCommandsOpen(true),
+    openFiles: () => {
+      if (!here) return
+      // Opens empty and fills: reading a large repo takes a moment, and a
+      // palette that waits for it looks like the key did nothing.
+      setFileList([])
+      void window.floe.files.all(here).then(setFileList)
+    },
     // Opens on the last query, selected, so `/` then typing replaces it and `/`
     // then Enter repeats it.
     openFind: () => setFinding(lastFind.current),
     findNext: (dir) => findFrom(lastFind.current, dir)?.focus(),
     addProject: () => setAdding(true),
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
+    deleteProject: () => {
+      const project = projectAtCursor()
+      if (!project) return
+      // What is being removed is Floe's record of the project, not the code:
+      // say so, because "delete" over a folder full of work reads much worse
+      // than what this does.
+      if (window.confirm(`Remove "${project.name}" from Floe? The folder stays on disk.`)) {
+        void projects.remove(project.path)
+      }
+    },
+    startMoveProject: () => {
+      const project = projectAtCursor()
+      if (project) setMoving({ path: project.path, group: project.group || DEFAULT_GROUP })
+    },
+    stepMoveProject: (delta) =>
+      setMoving((m) =>
+        m ? { ...m, group: stepGroup(moveTargets(projects.groups, projects.groupNames), m.group, delta) } : m
+      ),
+    endMoveProject: (commit) => {
+      const held = moving
+      setMoving(null)
+      if (!held || !commit) return
+      const from = projects.all.find((p) => p.path === held.path)
+      // Dropping a project back in its own group is a move that changes nothing
+      // — no write, so the list does not repaint for a no-op.
+      if (from && (from.group || DEFAULT_GROUP) !== held.group) {
+        void projects.setGroup(held.path, held.group)
+      }
+    },
+    movingProject: moving !== null,
     // Two steps, deliberately: which project, then where to. Reading the project
     // off "whatever is current" would file the wrong one whenever the rail and
     // the lane disagree.
@@ -815,13 +999,14 @@ export default function App() {
       }
       // An overlay owns the keyboard while it is up — including the user's own
       // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || adding || newWt || finding !== null
+      const blocked = paletteOpen || commandsOpen || fileList !== null || adding || newWt || finding !== null
       const action =
         resolveKey(input, {
           typing,
           chord: chord.current,
           kind: lane.panels[lane.focus]?.kind,
           selecting: !!lane.panels[lane.focus]?.selection,
+          moving: moving !== null,
           palette: blocked,
           ...stackNeighbours(columns, lane.focus)
         })
@@ -836,7 +1021,9 @@ export default function App() {
       e.preventDefault()
 
       const res = runCommand(REGISTRY, ctxRef.current, action.id, action.arg)
-      if (!res.ok) console.debug('[command]', res.error)
+      // Said out loud, not only to the console: the whole point is that the user
+      // learns why nothing happened.
+      if (!res.ok) say(res.error)
     }
 
     window.addEventListener('keydown', onKey)
@@ -844,7 +1031,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, adding, newWt, finding])
+  }, [lane, paletteOpen, commandsOpen, fileList, adding, newWt, finding, moving])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -869,6 +1056,20 @@ export default function App() {
       onPick: opts.onPick
     })
   }
+
+  /**
+   * "project/branch[/rest]" for a panel header — the answer to "where am I".
+   * The branch is looked up by path in the live list, so a worktree renamed or
+   * removed behind the app's back stops claiming a name it no longer has.
+   */
+  const whereOf = (worktreePath?: string, rest?: string): string =>
+    [
+      projects.current?.name,
+      worktrees.rows.find((r) => r.worktree.path === worktreePath)?.worktree.branch,
+      rest
+    ]
+      .filter(Boolean)
+      .join('/')
 
   // The rail opens a tool; the lane decides where it sits.
   const openFromRail = (kind: PanelKind) => {
@@ -900,8 +1101,18 @@ export default function App() {
                 }}
                 style={
                   {
-                    '--panel-w': `${head.width ?? headSpec.width}px`,
-                    '--panel-min': `${'min' in headSpec ? headSpec.min : headSpec.width}px`
+                    '--panel-w': `${searchWidth(head, headSpec)}px`,
+                    // The MINIMUM moves with it while searching, or the column
+                    // is still shrinkable and a grow panel beside it takes the
+                    // room straight back — which is exactly what happened when
+                    // only the width was raised.
+                    '--panel-min': `${
+                      isSearched(head)
+                        ? searchWidth(head, headSpec)
+                        : 'min' in headSpec
+                          ? headSpec.min
+                          : headSpec.width
+                    }px`
                   } as React.CSSProperties
                 }
                 // A width you dragged to is a width you asked for: it wins over
@@ -937,25 +1148,21 @@ export default function App() {
             const spec = KINDS[kind]
             const Icon = spec.icon
             const bare = 'bare' in spec && spec.bare
-            // The worktrees list is always the current project's, so the header
-            // names it — and reads from the live selection, not a sub captured
-            // when the panel was opened, which would go stale on the next switch.
+            // Where this panel is pointed, spelled out in its header: a panel
+            // that shows one worktree's contents looks the same whichever
+            // worktree it is. Read from the live selection, never from a sub
+            // captured when the panel opened, which goes stale on the next
+            // switch.
             const sub =
               kind === 'worktrees'
                 ? projects.current?.name
-                : // A chat's header spells out where it lives: project/worktree/session.
-                  // The branch comes from the live list keyed by the session's worktree
-                  // path, so a renamed or moved session still reads correctly.
-                  kind === 'chat'
-                  ? [
-                      projects.current?.name,
-                      worktrees.rows.find((r) => r.worktree.path === panel.session?.worktreePath)
-                        ?.worktree.branch,
-                      panel.sub
-                    ]
-                      .filter(Boolean)
-                      .join('/')
-                  : panel.sub
+                : kind === 'chat'
+                  ? whereOf(panel.session?.worktreePath, panel.sub)
+                  : kind === 'files'
+                    ? whereOf(here)
+                    : kind === 'edit'
+                      ? editTarget(panel.sub).path
+                      : panel.sub
             return (
               <section
                 key={panel.id}
@@ -1053,6 +1260,7 @@ export default function App() {
                     kind={kind}
                     sub={panel.sub}
                     projects={projects}
+                    movingProject={moving}
                     worktrees={worktrees}
                     changes={changes}
                     cwd={cwd}
@@ -1110,13 +1318,28 @@ export default function App() {
                         // The bar owns the keyboard while it is up (see
                         // `blocked`), so these are handled here rather than
                         // through the keymap.
-                        if (e.key === 'Enter') {
-                          // Enter walks the matches and the bar STAYS UP —
-                          // stepping through hits is the whole point of a find
-                          // bar, and closing on the first one made you reopen
-                          // it to see the second. Escape is how you leave.
+                        // ↑/↓ walk the matches and the bar STAYS UP — stepping
+                        // through hits is the whole point of a find bar, and
+                        // closing on the first one made you reopen it to see the
+                        // second. Escape is how you leave.
+                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
                           e.preventDefault()
-                          findFrom(finding, e.shiftKey ? -1 : 1)
+                          findFrom(finding, e.key === 'ArrowDown' ? 1 : -1)
+                          return
+                        }
+                        if (e.key === 'Enter') {
+                          // Enter OPENS what the cursor is on. Once the bar
+                          // searches whole trees it is a picker as much as a
+                          // find, and in a picker Enter is how you take the
+                          // thing — walking is what the arrows are for.
+                          e.preventDefault()
+                          const rows = rowsOf(panelAt(lane.focus))
+                          const at = lane.panels[lane.focus]?.cursor
+                          // Not on a match yet (the rows arrived after the
+                          // query): step onto the first one instead of opening
+                          // whatever happens to be under the cursor.
+                          if (at === undefined || !findPos?.at) findFrom(finding, 1)
+                          else rows[at]?.click()
                           return
                         }
                         if (e.key === 'Escape') {
@@ -1159,7 +1382,7 @@ export default function App() {
                 // move around is harder to aim at than one that greys out.
                 data-off={off || undefined}
                 disabled={off}
-                title={off ? `${KINDS[kind].title} — select a worktree first` : KINDS[kind].title}
+                title={off ? whyCannotOpen(kind) : KINDS[kind].title}
                 onClick={() => openFromRail(kind)}
               >
                 <Icon size={17} stroke={1.5} />
@@ -1252,6 +1475,24 @@ export default function App() {
         />
       )}
 
+      {fileList && (
+        <Palette
+          placeholder="Find a file…"
+          // The whole path is the title, so `srcapp` finds src/App.tsx: the
+          // fuzzy match runs on the title alone, and a bare filename would make
+          // the directory unsearchable.
+          items={fileList.map((path) => ({ id: path, title: path }))}
+          // A repo has thousands of files and nobody reads past the fold of a
+          // fuzzy list — they type another letter.
+          limit={200}
+          onClose={() => setFileList(null)}
+          onPick={(path) => {
+            setFileList(null)
+            setLane((l) => open(l, panelOf('file', path)))
+          }}
+        />
+      )}
+
       {paletteOpen && (
         <Palette
           placeholder="Switch project…"
@@ -1267,6 +1508,15 @@ export default function App() {
             setLane((l) => open(l, panelOf('worktrees', projects.all.find((p) => p.path === id)?.name)))
           }}
         />
+      )}
+
+      {/* One line, bottom centre, gone in two seconds. Deliberately not a
+          dismissible toast: there is nothing to act on, only something to know,
+          and a thing you have to close would cost more than it tells. */}
+      {notice && (
+        <div className="notice" role="status">
+          {notice}
+        </div>
       )}
     </div>
   )

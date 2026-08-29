@@ -5,7 +5,8 @@
 // resolves them to whatever the current release points at, which means this
 // list does not go stale every time a model ships.
 
-import type { Effort } from '../../shared/types'
+import type { Effort, PermissionMode } from '../../shared/types'
+import { DEFAULT_MODE, MODES, modeFromLabel, modeLabel, nearestMode } from '../../shared/modes.ts'
 
 export interface ModelChoice {
   model: string
@@ -15,6 +16,11 @@ export interface ModelChoice {
    * choice saved before other runtimes existed reads as.
    */
   provider?: string
+  /**
+   * How much the runtime is allowed to do. Absent means a choice saved before
+   * the mode picker existed, which reads as the safe middle: ask first.
+   */
+  mode?: PermissionMode
 }
 
 export const MODELS: { id: string; label: string }[] = [
@@ -26,7 +32,35 @@ export const MODELS: { id: string; label: string }[] = [
 
 export const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
-export const DEFAULT_CHOICE: ModelChoice = { model: 'opus', effort: 'high' }
+/**
+ * The built-in fallback, used until floe.toml has been read and whenever it says
+ * nothing useful. Not what a new session starts on — that is `defaultChoice()`.
+ */
+export const DEFAULT_CHOICE: ModelChoice = { model: 'opus', effort: 'high', mode: DEFAULT_MODE }
+
+// `[agent]` from floe.toml, pushed in at boot rather than read here: the config
+// arrives over async IPC and `loadChoice` is called synchronously from render.
+let configured: ModelChoice = DEFAULT_CHOICE
+
+/** Install the configured default. Called at boot and whenever the file changes. */
+export function setDefaultChoice(agent: {
+  model: string
+  effort: string
+  provider: string
+  mode: string
+}): void {
+  const effort = EFFORTS.includes(agent.effort as Effort) ? (agent.effort as Effort) : DEFAULT_CHOICE.effort
+  const provider = agent.provider && agent.provider !== 'claude' ? agent.provider : undefined
+  // Snapped, not trusted: floe.toml can name a mode the configured runtime
+  // cannot do, and a new session must not start on a flag that fails the turn.
+  const mode = nearestMode(modeFromLabel(agent.mode) ?? DEFAULT_MODE, provider)
+  configured = provider ? { model: agent.model, effort, provider, mode } : { model: agent.model, effort, mode }
+}
+
+/** What a new session starts on: the config, or the built-in fallback. */
+export function defaultChoice(): ModelChoice {
+  return configured
+}
 
 const KEY = 'floe.model'
 
@@ -34,24 +68,33 @@ const KEY = 'floe.model'
 export function loadChoice(): ModelChoice {
   try {
     const raw = localStorage.getItem(KEY)
-    if (!raw) return DEFAULT_CHOICE
+    if (!raw) return defaultChoice()
     const parsed = JSON.parse(raw) as Partial<ModelChoice>
     const effort = EFFORTS.includes(parsed.effort as Effort)
       ? (parsed.effort as Effort)
-      : DEFAULT_CHOICE.effort
+      : defaultChoice().effort
+    // No saved mode falls back to the CONFIGURED one, not to the built-in: a
+    // floe.toml that says `full` has to survive a choice saved before the mode
+    // picker existed, or the setting would look like it does nothing.
+    // Then snapped to the saved runtime, since the two are picked independently
+    // and a stale pair would otherwise send `plan` to gemini.
+    const wanted = MODES.some((m) => m.id === parsed.mode)
+      ? (parsed.mode as PermissionMode)
+      : (defaultChoice().mode ?? DEFAULT_MODE)
+    const mode = nearestMode(wanted, parsed.provider)
     // Another runtime's model cannot be checked against MODELS — that list is
     // Claude's. Trust it: it came from that tool's own catalogue when it was
     // picked, and the runtime itself is the only honest judge of it now.
     // An empty model is meaningful for another runtime: "whatever you are
     // configured for". Only Claude requires a named model.
     if (parsed.provider && parsed.provider !== 'claude')
-      return { model: parsed.model ?? '', effort, provider: parsed.provider }
+      return { model: parsed.model ?? '', effort, provider: parsed.provider, mode }
     // Claude's own aliases ARE checkable, and an id we no longer offer would be
     // passed to the CLI verbatim and fail the turn.
-    const model = MODELS.some((m) => m.id === parsed.model) ? parsed.model! : DEFAULT_CHOICE.model
-    return { model, effort }
+    const model = MODELS.some((m) => m.id === parsed.model) ? parsed.model! : defaultChoice().model
+    return { model, effort, mode }
   } catch {
-    return DEFAULT_CHOICE
+    return defaultChoice()
   }
 }
 
@@ -78,7 +121,7 @@ export function lastChoice(
   if (!last?.model) return null
   const effort = EFFORTS.includes(last.effort as Effort)
     ? (last.effort as Effort)
-    : DEFAULT_CHOICE.effort
+    : defaultChoice().effort
   // Another runtime logs the slug it was given, which is the same string the
   // picker sends back.
   if (last.provider && last.provider !== 'claude')
@@ -192,10 +235,12 @@ export function describeChoice(choice: ModelChoice): {
   harness: string
   model: string
   effort: string
+  mode: string
 } {
   const harness = choice.provider ?? 'claude'
   return {
     harness,
+    mode: modeLabel(choice.mode ?? DEFAULT_MODE),
     // Claude's aliases have proper labels; another runtime's slug is already
     // its own name. An empty model means the runtime's own configured one,
     // which has no name to show here — the harness alone is the answer.

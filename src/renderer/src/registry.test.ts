@@ -17,14 +17,21 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     rowsOf: () => [],
     makePanel: (kind: string, sub?: string) => panel(kind, sub),
     canOpen: () => true,
+    whyCannotOpen: () => 'not available',
     patchFor: () => '',
     openPalette: () => {},
     openCommands: () => {},
+    openFiles: () => {},
     openFind: () => {},
     findNext: () => {},
     addProject: () => {},
     createGroup: () => {},
     moveProject: () => {},
+    deleteProject: () => {},
+    startMoveProject: () => {},
+    stepMoveProject: () => {},
+    endMoveProject: () => {},
+    movingProject: false,
     deleteGroup: () => {},
     newWorktree: () => {},
     deleteSession: () => {},
@@ -86,4 +93,22 @@ test('listCommands reports what is available right now', () => {
   const compose = rows.find((r) => r.id === 'composer.focus')
   assert.equal(compose?.enabled, false, 'no chat panel open')
   assert.equal(rows.find((r) => r.id === 'panel.right')?.enabled, true)
+})
+
+test('panel.goto refuses with a reason instead of doing nothing', () => {
+  // A key press has no row to dim, so a silent refusal is indistinguishable from
+  // a broken binding — which is exactly how ⌘K F read before this.
+  const ctx = { ...context(), canOpen: () => false, whyCannotOpen: () => 'files — select a worktree first' }
+  const res = runCommand(REGISTRY, ctx, 'panel.goto', 'files')
+  assert.equal(res.ok, false)
+  assert.equal((res as { error: string }).error, 'files — select a worktree first')
+  assert.deepEqual(ctx.lane.panels.map((p) => p.kind), ['projects'], 'and opens nothing')
+})
+
+test('panel.goto is judged per argument, not per command', () => {
+  // `worktrees` is always reachable; `files` needs a checked-out tree. One
+  // command id, two answers — which is why `enabled` takes the argument.
+  const ctx = { ...context(), canOpen: (kind: string) => kind !== 'files' }
+  assert.equal(runCommand(REGISTRY, ctx, 'panel.goto', 'worktrees').ok, true)
+  assert.equal(runCommand(REGISTRY, ctx, 'panel.goto', 'files').ok, false)
 })

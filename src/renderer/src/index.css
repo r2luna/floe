@@ -64,6 +64,29 @@
      already asked for it, which without a value made `color-mix` invalid and
      fell back to a hard white outline. */
   --accent: #d3956d;
+  /* The find bar's match, as a wash behind the text. Amber rather than the
+     palette's blue: this marks text you are reading, not a row you are picking. */
+  --find-hit: #e0b34a40;
+
+  /* Greys that were literals in a dozen rules each. Tokens now, because a
+     light theme has to move them and hunting hex strings is how you miss one:
+     `faint` is text quieter than --dim, `dimmer` sits between the two, `edge`
+     is a border stronger than --line, and `well` is a recessed surface (inputs,
+     code blocks) that sits BELOW the panel it is in. */
+  --faint: #575d6a;
+  --dimmer: #7f8797;
+  --dimmest: #8f96a4;
+  --edge: #343a45;
+  --well: #1b1d23;
+
+  /* Hover and selection washes, as one scale. On dark they lighten; the light
+     theme swaps the whole ladder to black at the same alphas, which is the
+     only way a hover state survives the flip. */
+  --wash-1: #ffffff08;
+  --wash-2: #ffffff0a;
+  --wash-3: #ffffff0d;
+  --wash-4: #ffffff12;
+  --wash-5: #ffffff14;
 
   /* Every corner in the app comes from here. One knob: turn it and panels,
      popovers, rows, chips, buttons and inputs all follow together, because
@@ -75,6 +98,48 @@
      so they stay in proportion when --radius moves. */
   --radius-sm: calc(var(--radius) / 2);
   --head-h: 34px;
+}
+
+/* --- light --------------------------------------------------------------- */
+
+/* The same eleven roles, re-valued — not the dark theme with a filter over it.
+   The RELATIONSHIPS are what carry over: the background is the most tinted
+   surface, a panel sits above it, and the focused panel sits highest (white),
+   exactly as they step upward in dark. Text darkens rather than lightening, and
+   the three status hues move to the light tones in docs/ui-conventions.md, since
+   #6ea86e on white is a pale smear.
+
+   Set by main.tsx before the first paint, from `[appearance] theme` in
+   floe.toml — see appearance.ts. */
+:root[data-theme='light'] {
+  --bg: #eceef2;
+  --panel: #f8f9fb;
+  --panel-focused: #ffffff;
+  --line: #d7dae1;
+  --line-soft: #e4e7ec;
+
+  --text: #3d434e;
+  --text-strong: #1b1e25;
+  --dim: #767c88;
+  --faint: #939aa6;
+  --dimmer: #868d99;
+  --dimmest: #7d8490;
+  --edge: #c3c8d1;
+  --well: #eef0f4;
+
+  --live: #2f7d52;
+  --working: #3a64a8;
+  --accent: #a9631f;
+  /* Denser than dark's: the same alpha over white barely registers. */
+  --find-hit: #f6d76e99;
+
+  /* Black at the same alphas: a white wash on a white panel is invisible, so
+     the hover states would simply stop existing. */
+  --wash-1: #00000008;
+  --wash-2: #0000000a;
+  --wash-3: #0000000d;
+  --wash-4: #00000012;
+  --wash-5: #00000014;
 }
 
 *,
@@ -147,7 +212,7 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #ffffff14;
+  background: var(--wash-5);
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: var(--radius-sm);
@@ -273,7 +338,7 @@ button {
   width: 54px;
   height: 3px;
   border-radius: var(--radius-sm);
-  background: #ffffff14;
+  background: var(--wash-5);
   overflow: hidden;
 }
 
@@ -335,7 +400,7 @@ button {
 .panel-act:hover,
 .panel-act:focus-visible {
   color: var(--text-strong);
-  background: #ffffff0d;
+  background: var(--wash-3);
 }
 
 .panel-body {
@@ -375,7 +440,7 @@ button {
 .rail-btn:hover,
 .rail-btn:focus-visible {
   color: var(--text-strong);
-  background: #ffffff0d;
+  background: var(--wash-3);
 }
 
 /* Needs a worktree and there isn't one — visibly present, plainly unavailable. */
@@ -582,7 +647,7 @@ button {
 }
 
 .composer:focus-within {
-  border-color: #343a45;
+  border-color: var(--edge);
 }
 
 /* --- drop target --------------------------------------------------------- */
@@ -746,7 +811,7 @@ button {
 }
 
 .md-quote {
-  color: #8f96a4;
+  color: var(--dimmest);
 }
 
 .md-code {
@@ -778,7 +843,16 @@ button {
 .tool:hover,
 .tool:focus-visible {
   color: var(--text-strong);
-  background: #ffffff0d;
+  background: var(--wash-3);
+}
+
+/* A button whose click opened an OS dialog: the dialog covers the window and
+   no pointerleave ever arrives, so :hover stays true and the button stays lit
+   long after the pointer left. It lights again on the next pointer move over
+   it — see data-cold in Composer. */
+.tool[data-cold]:hover {
+  color: var(--dim);
+  background: none;
 }
 
 .model {
@@ -802,28 +876,62 @@ button {
 
 .model:hover,
 .model:focus-visible {
-  background: #ffffff0d;
+  background: var(--wash-3);
 }
 
-.model:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.model:disabled:hover,
-.model:disabled:focus-visible {
-  background: transparent;
-}
-
-/* Locked once the chat is open — nothing left to pick. */
-.model:disabled .model-harness,
-.model:disabled svg {
+/* Locked once the chat is open: the model and effort are settled, so they stop
+   announcing themselves. The mode is still live — it is the one part of the
+   choice that changes mid-chat — so the chevron stays. */
+.model[data-locked] .model-harness {
   display: none;
 }
 
 .model-effort {
   color: var(--dim);
   text-transform: capitalize;
+}
+
+/* What the agent may do — outline chip, because it is a state you selected and
+   not decoration. It is the last thing on the row and the first thing you look
+   for before pressing send, so it carries the same tone as the rail row it
+   mirrors (see "the mode tones" below). */
+.model-mode {
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.model-mode[data-tone='plan'] {
+  border-color: #282f3a;
+  color: #95a6c0;
+}
+
+.model-mode[data-tone='acceptEdits'] {
+  border-color: #283129;
+  color: #93b8a1;
+}
+
+.model-mode[data-tone='skip'] {
+  border-color: #352829;
+  color: #c49495;
+}
+
+:root[data-theme='light'] .model-mode[data-tone='plan'] {
+  border-color: #c2d4ef;
+  color: #3a64a8;
+}
+
+:root[data-theme='light'] .model-mode[data-tone='acceptEdits'] {
+  border-color: #b6d9c3;
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .model-mode[data-tone='skip'] {
+  border-color: #e3bdbf;
+  color: #b1454a;
 }
 
 /* The model picker. Anchored to the composer's bottom-right, above the tools
@@ -846,50 +954,60 @@ button {
   right: anchor(right);
   bottom: anchor(top);
   z-index: 41;
+  /* Two columns: the model list, then the rail. The row direction is the whole
+     point of the layout — one tall column was making a nine-row scroll out of
+     three short questions. */
   display: flex;
-  overflow-y: auto;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 10px;
   /* 42vh, because one side of the button always has at least half the window:
-     whichever side flip-block picks, the menu fits and scrolls the rest. */
+     whichever side flip-block picks, the menu fits and the LIST scrolls. */
   max-height: 42vh;
-  /* The efforts row is sticky over the list, so j/k's scrollIntoView must stop
-     short of it or the row it lands on ends up behind the chips. */
-  scroll-padding-bottom: 42px;
-  /* Wide enough that the five efforts sit as a row of chips rather than as one
-     run-on word — the narrower box was what made this look broken. */
-  min-width: 216px;
   margin-block: 6px;
-  padding: 6px;
+  padding: 8px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
   box-shadow: 0 12px 32px #00000059;
 }
 
+/* The half that grows: every harness and its models, one heading each. Only
+   this scrolls, so nothing you might want to compare against leaves the box. */
+.model-list {
+  display: flex;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 150px;
+  /* j/k's scrollIntoView lands the row under its own group heading rather than
+     flush against the top edge, where it reads as belonging to nothing. */
+  scroll-padding-top: 20px;
+}
+
+/* The half that stays: how the chosen model answers. Effort and mode apply to
+   every row in the list, so they sit beside it rather than under it. */
+.model-rail {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 9px;
+  width: 116px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line-soft);
+}
+
+/* The rail is the only thing left when the model is locked — no list to divide
+   it from, so no divider. */
+.model-menu > .model-rail:only-child {
+  padding-left: 0;
+  border-left: none;
+}
+
 .model-group {
   display: flex;
   flex-direction: column;
   gap: 2px;
-}
-
-.model-efforts {
-  /* Pinned to the bottom edge while the models scroll behind it: effort applies
-     to whichever model you pick, so it must stay reachable at any scroll
-     position. The negative offsets let it sit flush against the menu's own
-     padding instead of floating 6px above it. */
-  position: sticky;
-  bottom: -6px;
-  z-index: 1;
-  flex-direction: row;
-  flex-shrink: 0;
-  gap: 3px;
-  margin-top: 2px;
-  margin-bottom: -6px;
-  padding-top: 7px;
-  padding-bottom: 6px;
-  border-top: 1px solid var(--line-soft);
-  background: var(--panel);
 }
 
 .model-option {
@@ -902,13 +1020,6 @@ button {
   text-transform: capitalize;
 }
 
-.model-efforts .model-option {
-  flex: 1;
-  padding: 3px 2px;
-  font-size: 10px;
-  text-align: center;
-}
-
 .model-option:hover {
   color: var(--text);
 }
@@ -917,7 +1028,7 @@ button {
    wash is barely there on purpose: it marks the row without turning it into a
    button that shouts louder than the four beside it. */
 .model-option[data-at] {
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
 .model-option[data-on] {
@@ -934,6 +1045,85 @@ button {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: #a2603a;
+}
+
+/* --- the mode tones ------------------------------------------------------- */
+/* The canonical chip tones from docs/ui-conventions.md, and the reason the mode
+   rail is worth a colour at all: the setting that lets an agent rewrite your
+   worktree must not look like the one that cannot. The tone is on the word at
+   rest and on the outline once picked — never a fill. */
+
+.model-mode-option[data-tone='plan'] {
+  color: #95a6c0;
+}
+
+.model-mode-option[data-tone='acceptEdits'] {
+  color: #93b8a1;
+}
+
+.model-mode-option[data-tone='skip'] {
+  color: #c49495;
+}
+
+.model-mode-option[data-tone='plan'][data-on] {
+  border-color: #282f3a;
+  background: #1b1e25;
+  color: #95a6c0;
+}
+
+.model-mode-option[data-tone='acceptEdits'][data-on] {
+  border-color: #283129;
+  background: #1b201d;
+  color: #93b8a1;
+}
+
+.model-mode-option[data-tone='skip'][data-on] {
+  border-color: #352829;
+  background: #221b1c;
+  color: #c49495;
+}
+
+/* "ask" is the absence of a posture, so it is the absence of a tone too. */
+.model-mode-option[data-tone='default'][data-on] {
+  border-color: var(--line);
+  background: var(--wash-4);
+  color: var(--text-strong);
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='plan'],
+:root[data-theme='light'] .model-mode-option[data-tone='plan'][data-on] {
+  border-color: #c2d4ef;
+  color: #3a64a8;
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='plan'][data-on] {
+  background: #eef2f9;
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='acceptEdits'],
+:root[data-theme='light'] .model-mode-option[data-tone='acceptEdits'][data-on] {
+  border-color: #b6d9c3;
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='acceptEdits'][data-on] {
+  background: #eef6f1;
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='skip'],
+:root[data-theme='light'] .model-mode-option[data-tone='skip'][data-on] {
+  border-color: #e3bdbf;
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .model-mode-option[data-tone='skip'][data-on] {
+  background: #f9eef0;
+}
+
+/* An unpicked mode has no outline in either theme — only the word is toned. */
+.model-mode-option:not([data-on]) {
+  border-color: transparent;
+  background: none;
 }
 
 :root[data-theme='light'] .model-menu {
@@ -997,7 +1187,7 @@ button {
   flex: 1;
   height: 3px;
   border-radius: var(--radius-sm);
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
 .pipe-seg[data-state="done"] {
@@ -1038,7 +1228,7 @@ button {
 }
 
 .pipe-label {
-  color: #8f96a4;
+  color: var(--dimmest);
 }
 
 .pipe-step {
@@ -1157,7 +1347,7 @@ button {
 .irc-sys code {
   padding: 1px 5px;
   border-radius: var(--radius);
-  background: #ffffff12;
+  background: var(--wash-4);
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
@@ -1228,7 +1418,7 @@ button {
 
 .irc-sys {
   margin-top: 12px;
-  color: #7f8797;
+  color: var(--dimmer);
 }
 
 /* --- AskUserQuestion: options as numbered lines in the model's entry.
@@ -1442,7 +1632,7 @@ button {
 }
 
 .call-tool {
-  color: #7f8797;
+  color: var(--dimmer);
 }
 
 .call-arg {
@@ -1467,8 +1657,8 @@ button {
   margin: 2px 0 4px;
   padding: 6px 8px;
   border-radius: var(--radius);
-  background: #ffffff08;
-  color: #7f8797;
+  background: var(--wash-1);
+  color: var(--dimmer);
   font: inherit;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1528,7 +1718,7 @@ button {
 /* Every path in the list starts with the same prefix, so the directory is the
    part carrying no information — dim it and let the basename read. */
 .change-dir {
-  color: #575d6a;
+  color: var(--faint);
 }
 
 .change-stat {
@@ -1549,7 +1739,7 @@ button {
   margin: 10px 0 2px;
   padding: 2px 8px;
   border-radius: var(--radius);
-  background: #ffffff08;
+  background: var(--wash-1);
   color: #7f86d8;
   overflow-x: auto;
 }
@@ -1629,10 +1819,11 @@ button {
 
 /* Shiki emits the LIGHT colour as an inline style and the dark one as the
    --shiki-dark custom property. An inline style outranks any stylesheet rule,
-   so without !important the light palette wins and the code renders near-black
-   on a near-black panel. This is Shiki's own documented dual-theme override —
-   it stays until a light theme exists to switch against. */
-.diff-code span {
+   so on dark the swap needs !important — Shiki's own documented dual-theme
+   override. Scoped to dark on purpose: in light the inline colour is already
+   github-light, which is what the palette is for, and forcing --shiki-dark
+   there is what left code as washed-out pastels on white. */
+:root[data-theme='dark'] .diff-code span {
   color: var(--shiki-dark, currentColor) !important;
 }
 
@@ -1641,7 +1832,7 @@ button {
 }
 
 .change-row[data-active] {
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
 .change-row[data-active] .row-name {
@@ -1651,7 +1842,7 @@ button {
 /* The shared directory, shown once instead of on every row. */
 .changes-base {
   padding: 0 8px 6px;
-  color: #575d6a;
+  color: var(--faint);
   font-size: 11px;
 }
 
@@ -1801,29 +1992,126 @@ button {
   border-bottom: 1px solid var(--line-soft);
 }
 
+/* Depth shows in weight and colour, not in size: six sizes in a numbered,
+   monospaced document would fight the grid the panel is built on. */
+.md-row[data-md="heading"][data-level="3"] .md-text {
+  color: var(--text);
+}
+
+.md-row[data-md="heading"][data-level="4"] .md-text,
+.md-row[data-md="heading"][data-level="5"] .md-text,
+.md-row[data-md="heading"][data-level="6"] .md-text {
+  color: var(--dim);
+  font-weight: 600;
+}
+
 /* Inline code gets its pill here, the same one a chat message gets. The bare
    .md-code above is the composer's SOURCE colour, where a pill would be drawn
    around the backticks you are still typing. */
 .md-row .md-code {
   padding: 1px 5px;
   border-radius: var(--radius);
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
-/* Exactly the 2ch the hanging indent reserves. A wider number ("10.") pushes
-   its own text out, which is what a numbered list should do. */
+/* As wide as the hanging indent reserves (set inline, per list block). A number
+   is right-aligned in it with a character of air before the text, so 9. and 10.
+   line up on the period. */
 .md-bullet {
   display: inline-block;
-  min-width: 2ch;
+  /* The done-task tick is positioned against this box. */
+  position: relative;
+  padding-right: 1ch;
+  /* text-indent inherits, and the item's hanging indent would drag the drawn
+     marker out of its own column. The indent is the line's, not the marker's. */
+  text-indent: 0;
   color: #7f8ada;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 /* The unordered marker is drawn, not typed: a disc centred in its column and on
    the text's x-height. A font's bullet glyph is whatever size the face decided,
    sits on the baseline, and is a hollow box when the face has no bullet. */
-.md-bullet[data-dot] {
+/* A disc has no period to line up on, so it sits in the middle of its column
+   instead of against the text. */
+.md-bullet[data-dot],
+.md-bullet[data-task] {
+  padding-right: 0;
   text-align: center;
+}
+
+/* A task's checkbox: a real box, drawn at the same size as the text it labels
+   so a list of tasks reads as a list of tasks at a glance. */
+.md-bullet[data-task]::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* Done: filled, with the check cut out of it. The tick is a corner of a box
+   rotated 45°, which is the one shape CSS draws crisply at this size. */
+.md-bullet[data-task="done"] {
+  color: #6f9f78;
+}
+
+.md-bullet[data-task="done"]::before {
+  background: currentColor;
+}
+
+.md-bullet[data-task="done"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 5px;
+  border: solid var(--bg);
+  border-width: 0 1.5px 1.5px 0;
+  transform: translate(-50%, -60%) rotate(45deg);
+}
+
+/* Everything a document says but does not mean for you to read as prose: front
+   matter, link and footnote definitions, raw HTML. Present (the file has it,
+   and the line numbers must stay true) but never competing with the text. */
+.md-row[data-md="front"] .md-text,
+.md-def,
+.md-html {
+  color: var(--dimmer);
+}
+
+.md-row[data-md="front"] .md-text {
+  background: #ffffff05;
+  white-space: pre;
+}
+
+/* An image is not fetched and shown — this panel reads a file, it does not
+   render a page. Its alt text is what the author wrote for exactly this case. */
+.md-img {
+  color: #9a8fbf;
+  font-style: italic;
+}
+
+.md-img::before {
+  content: "▣ ";
+  font-style: normal;
+}
+
+.md-del {
+  color: var(--dim);
+  text-decoration: line-through;
+}
+
+/* A footnote marker: small and out of the way, but still a bracketed number you
+   can search the file for. */
+.md-note {
+  color: #8d94a4;
+  font-size: 10px;
+  vertical-align: super;
 }
 
 .md-bullet[data-dot]::before {
@@ -1864,7 +2152,7 @@ button {
 .md-row[data-md="quote"] .md-text {
   padding-left: 16px;
   border-left: 2px solid #3c4457;
-  color: #8f96a4;
+  color: var(--dimmest);
 }
 
 /* A fenced block reads as one slab: the fence rows carry the same background as
@@ -1872,7 +2160,7 @@ button {
    a border. */
 .md-row[data-md="fence"] .md-text,
 .md-row[data-md="code"] .md-text {
-  background: #ffffff08;
+  background: var(--wash-1);
   white-space: pre;
   color: #c8c9cd;
 }
@@ -1942,7 +2230,7 @@ button {
 }
 
 .panel[data-focused] [data-cursor] {
-  background: #ffffff0a;
+  background: var(--wash-2);
 }
 
 .panel[data-focused] [data-cursor]::before {
@@ -1952,6 +2240,40 @@ button {
 .panel[data-focused] [data-cursor] .row-name,
 .panel[data-focused] [data-cursor].diff-hunk,
 .panel[data-focused] [data-cursor].irc-fold {
+  color: var(--text-strong);
+}
+
+/* --- moving a project ----------------------------------------------------- */
+
+/* The row in flight while `m` carries a project between groups. Outlined rather
+   than filled, in the plan-blue tone, so it reads as the same row lifted out of
+   the list — not as a different kind of row. */
+.row[data-moving] {
+  color: #95a6c0;
+  border: 1px solid #282f3a;
+  background: #1b1e25;
+  /* The border is drawn inside the row's box so picking one up does not nudge
+     its neighbours by two pixels. */
+  padding: 3px 7px;
+}
+
+:root[data-theme='light'] .row[data-moving] {
+  color: #3a64a8;
+  border-color: #c2d4ef;
+  background: #eef2f9;
+}
+
+/* What the keys do while something is held — the move has no buttons, so the
+   panel says it. */
+.panel-hint {
+  margin: 10px 0 0;
+  padding: 6px 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.panel-hint kbd {
+  font-family: inherit;
   color: var(--text-strong);
 }
 
@@ -2037,7 +2359,7 @@ button {
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #1b1d23;
+  background: var(--well);
   box-shadow: 0 18px 48px #00000080;
   overflow: hidden;
 }
@@ -2073,7 +2395,7 @@ button {
 }
 
 .palette-row[data-at] {
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
 .palette-title {
@@ -2178,7 +2500,7 @@ kbd {
   width: min(620px, calc(100vw - 32px));
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #1b1d23;
+  background: var(--well);
   box-shadow: 0 18px 48px #00000080;
   overflow: hidden;
 }
@@ -2221,7 +2543,7 @@ kbd {
 }
 
 .dialog-select:focus {
-  border-color: #343a45;
+  border-color: var(--edge);
 }
 
 .chips-row {
@@ -2254,7 +2576,7 @@ kbd {
 
 .chip:hover {
   color: var(--text);
-  border-color: #343a45;
+  border-color: var(--edge);
 }
 
 .chip[data-on] {
@@ -2286,7 +2608,7 @@ kbd {
 }
 
 .dialog-input:focus {
-  border-color: #343a45;
+  border-color: var(--edge);
 }
 
 .dialog-input::placeholder {
@@ -2343,7 +2665,7 @@ kbd {
   padding: 5px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: #1b1d23;
+  background: var(--well);
   box-shadow: 0 12px 32px #00000066;
 }
 
@@ -2367,7 +2689,7 @@ kbd {
 }
 
 .composer-menu-row[data-at] {
-  background: #ffffff12;
+  background: var(--wash-4);
 }
 
 .composer-menu-title {
@@ -2459,7 +2781,7 @@ kbd {
 .md .md-code {
   padding: 1px 5px;
   border-radius: var(--radius);
-  background: #ffffff12;
+  background: var(--wash-4);
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
@@ -2524,7 +2846,7 @@ kbd {
 .md-copy:hover,
 .md-copy:focus-visible {
   color: var(--text-strong);
-  background: #ffffff0d;
+  background: var(--wash-3);
 }
 
 /* Run and Copy are actions, not list rows. Clicking one focuses it, which moves
@@ -2554,10 +2876,9 @@ kbd {
   white-space: pre;
 }
 
-/* Shiki emits the light colour inline and the dark one as --shiki-dark; an
-   inline style outranks any rule, so without !important the light palette wins
-   and the code renders near-black on a near-black block. */
-.md-pre span[style] {
+/* Same dual-theme swap as .diff-code above, and scoped the same way: dark takes
+   --shiki-dark, light keeps Shiki's own inline light colour. */
+:root[data-theme='dark'] .md-pre span[style] {
   color: var(--shiki-dark, currentColor) !important;
 }
 
@@ -2627,7 +2948,7 @@ kbd {
 .heat-cell {
   aspect-ratio: 1;
   border-radius: 1px;
-  background: #ffffff0a;
+  background: var(--wash-2);
 }
 
 /* One ramp, four steps. Tinted from the live green rather than a new hue: the
@@ -2737,17 +3058,16 @@ kbd {
 
 /* --- other AI runtimes in the model picker -------------------------------- */
 
-.model-agent {
-  margin-top: 2px;
-  padding-top: 7px;
-  border-top: 1px solid var(--line-soft);
-}
-
-.model-agent-head {
+/* One heading per group — a harness on the left, a setting on the right. It is
+   sticky so a long list always says which harness you are scrolled into. */
+.model-head {
+  position: sticky;
+  top: 0;
   display: flex;
   align-items: baseline;
   gap: 6px;
   padding: 1px 9px 3px;
+  background: var(--panel);
   color: var(--dim);
   font-size: 10px;
   letter-spacing: 0.04em;
@@ -2757,7 +3077,7 @@ kbd {
 /* Installed but with nothing we can enumerate — the row says so rather than
    leaving an empty group that reads as a bug. */
 .model-agent-note {
-  color: #575d6a;
+  color: var(--faint);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -2765,18 +3085,18 @@ kbd {
 /* Listed, not yet selectable: sending still goes through the claude CLI. Dim
    rather than hidden — knowing the model is there is the point. */
 .model-option:disabled {
-  color: #575d6a;
+  color: var(--faint);
   cursor: default;
 }
 
 .model-option:disabled:hover {
-  color: #575d6a;
+  color: var(--faint);
 }
 
 /* The IRC host: which model the nick is speaking from. Dim and unbolded, so
    `claude@opus-5` reads as one address with the name carrying the weight. */
 .irc-host {
-  color: #575d6a;
+  color: var(--faint);
   font-weight: 400;
 }
 
@@ -2834,7 +3154,7 @@ kbd {
 /* Signed out is a fact, not an error: it says so in the same quiet tone, and
    the button beside it is what draws the eye. */
 .account-detail[data-out] {
-  color: #575d6a;
+  color: var(--faint);
 }
 
 .account-do {
@@ -2856,7 +3176,7 @@ kbd {
 }
 
 .account-plan {
-  color: #575d6a;
+  color: var(--faint);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2909,7 +3229,7 @@ kbd {
 
 .ctx-meter[data-open] {
   color: var(--text);
-  background: #ffffff0d;
+  background: var(--wash-3);
 }
 
 /* Anchored under the gauge in the panel header, where the button that opens it
@@ -3048,4 +3368,82 @@ kbd {
   color: #b1454a;
   border-color: #e3bdbf;
   background: #f9eef0;
+}
+
+/* --- notice --------------------------------------------------------------- */
+
+/* What the app says to a keyboard user when a command refuses. Bottom centre so
+   it never covers the composer or a panel head, and above everything so a
+   palette does not hide the reason it just refused something. */
+.notice {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: notice-in 120ms ease-out;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 4px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+/* The panel surface reads as a raised card on dark; on light it needs the
+   shadow to lift off a background that is nearly the same value. */
+:root[data-theme='light'] .notice {
+  box-shadow: 0 2px 8px #0000001a;
+}
+
+/* The run of text the find bar matched, inside a line of code.
+   A BACKGROUND, never a colour: the line is syntax-highlighted, and recolouring
+   the match would erase the highlighting you read to find it. Amber rather than
+   the palette's blue because this marks text you are looking at, not a row you
+   are choosing. */
+.find-hit {
+  background: var(--find-hit);
+  border-radius: 2px;
+  /* Shiki writes its colour as an inline style, which outranks any rule here —
+     so the box is all this owns, and that is the intent. */
+}
+
+/* A search hit in the file tree: the filename, then its directory in grey.
+   The name never truncates and the path does — it is there to tell two files of
+   the same name apart, not to be read end to end. */
+.file-hit .row-name {
+  flex: none;
+}
+
+.file-hit-dir {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* The plan's age, at the right end of its row. Dim and never shrunk: the
+   filename is what you read, and the age is what tells the plan Claude just
+   wrote apart from last week's. */
+.plan-age {
+  flex: none;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
 }

@@ -149,6 +149,7 @@ import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } f
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
+import { launchEditor } from './editors'
 import type { TomlValue } from './config/toml'
 import {
   openTerminal,
@@ -172,7 +173,7 @@ import {
   reapOrphanCommands,
   runShellCapture
 } from './commandRunner'
-import { applyFileOps, listDir, readFileContent, resolveWikiLink } from './files'
+import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { executeHttp, listHttpFiles, loadEnv, readHttp, watchHttp } from './http'
 import { dbQuery, dbTables, watchDatabase } from './database'
@@ -402,7 +403,16 @@ function registerIpc(): void {
       // providers existed (a persisted model with no provider beside it).
       const provider = options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
       if (provider !== 'claude') {
-        void runRuntime(win, key, worktreePath, prompt, provider, options.model, options.effort)
+        void runRuntime(
+          win,
+          key,
+          worktreePath,
+          prompt,
+          provider,
+          options.model,
+          options.effort,
+          options.permissionMode
+        )
         return
       }
       sendToAgent(win, key, worktreePath, prompt, options, images, files)
@@ -599,10 +609,20 @@ function registerIpc(): void {
       return win ? openEditor(win, id, cwd, branch, file, cols, rows, line) : null
     }
   )
+  // `e` on a file: a GUI editor is launched here and the renderer is told so;
+  // a terminal editor reports `panel`, and the renderer opens the editor panel
+  // (which runs it on the PTY) instead. One place decides which.
+  ipcMain.handle('editor:launch', (_event, cwd: string, file: string, line?: number) =>
+    launchEditor(cwd, file, line)
+  )
   ipcMain.handle('files:list', (_event, worktreePath: string, relPath?: string) =>
     // The Home workspace's path is the user's home directory — not a git repo,
     // and it is terminal-only, with no file tree to fill. Hand back nothing.
     isHomePath(worktreePath) ? [] : listDir(worktreePath, relPath)
+  )
+  ipcMain.handle('files:all', (_event, worktreePath: string) =>
+    // Same rule as the tree: Home is the user's home directory, not a repo.
+    isHomePath(worktreePath) ? [] : searchableFiles(worktreePath)
   )
   ipcMain.handle('files:read', (_event, worktreePath: string, relPath: string) =>
     readFileContent(worktreePath, relPath)
@@ -1027,6 +1047,7 @@ function registerIpc(): void {
     const keymap = file.endsWith('keybindings.toml')
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue
+      if (!keymap) applyZoom(win)
       win.webContents.send(keymap ? 'keybindings:changed' : 'config:changed')
     }
   })
@@ -1097,6 +1118,20 @@ function openNewInstance(): void {
   spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref()
 }
 
+/**
+ * `[appearance] font-size`, applied as a window zoom.
+ *
+ * The stylesheet spells every size in px, so a CSS variable would scale nothing
+ * short of rewriting the sheet in rem. Zoom scales the whole surface — text,
+ * padding and rules together — which is what "font size" means in a terminal and
+ * in every app shaped like this one. 13 is the baseline the sheet is written at,
+ * so it is the 1.0 point.
+ */
+function applyZoom(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  win.webContents.setZoomFactor(floeConfig().appearance.fontSize / 13)
+}
+
 function createWindow(): void {
   const darwin = process.platform === 'darwin'
   // Non-opaque whenever the glass preference is on — NOT gated on the launch
@@ -1159,6 +1194,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.on('did-finish-load', () => {
+    applyZoom(mainWindow)
     setTimeout(() => void captureWindow(mainWindow), 400)
   })
   mainWindow.on('focus', () => {

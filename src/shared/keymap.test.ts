@@ -113,3 +113,27 @@ test('an open palette owns the keyboard, whatever is bound', () => {
   const map = compileKeymap([{ key: 'super+e', command: 'panel.goto', arg: 'worktrees' }])
   assert.equal(resolveIn(map, { key: 'e', meta: true }, { palette: true }), null)
 })
+
+test('a chord accepts its prefix modifier still being held', () => {
+  // Nobody lets go of Command between ⌘K and ⌘F, and every editor with chords
+  // accepts it. This was the bug: the tail arrived as `super+f` and the entry
+  // wanted `f`, so the whole chord silently did nothing.
+  const map = compileKeymap([{ key: 'super+k f', command: 'panel.goto', arg: 'files' }])
+  const opened = { id: 'panel.goto', arg: 'files' }
+  assert.deepEqual(resolveIn(map, { key: 'f' }, { chord: true }), opened, 'released')
+  assert.deepEqual(resolveIn(map, { key: 'f', meta: true }, { chord: true }), opened, 'still held')
+})
+
+test('only the prefix modifier is forgiven, not any other', () => {
+  // Shift changes which key you pressed, so ⌘K ⇧G is not ⌘K G — forgiving it
+  // would make two different chords collide.
+  const map = compileKeymap([{ key: 'super+k g', command: 'panel.goto', arg: 'changes' }])
+  assert.equal(resolveIn(map, { key: 'g', meta: true, shift: true }, { chord: true }), null)
+  assert.equal(resolveIn(map, { key: 'g', ctrl: true }, { chord: true }), null)
+})
+
+test('a ctrl-prefixed chord forgives ctrl, not cmd', () => {
+  const map = compileKeymap([{ key: 'ctrl+x s', command: 'session.new' }])
+  assert.deepEqual(resolveIn(map, { key: 's', ctrl: true }, { chord: true }), { id: 'session.new' })
+  assert.equal(resolveIn(map, { key: 's', meta: true }, { chord: true }), null)
+})

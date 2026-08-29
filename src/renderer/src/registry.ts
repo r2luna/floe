@@ -19,8 +19,9 @@ import {
   toggleDock,
   toggleKind
 } from './lane.ts'
-import { appendComment, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
+import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import type { Command, CommandContext } from './commands.ts'
+import { editSub } from './editorTarget.ts'
 
 /**
  * Scroll the focused panel's content.
@@ -91,6 +92,12 @@ function pageStep(c: CommandContext, rows: HTMLElement[]): number {
   return Math.max(1, Math.round((panel?.clientHeight ?? 400) / rowHeight / 2))
 }
 
+/** The file row the cursor is on, or null when it is somewhere else. */
+function fileRow(c: CommandContext): HTMLElement | null {
+  const active = document.activeElement as HTMLElement | null
+  return active && c.panelEl(c.lane.focus)?.contains(active) ? active : null
+}
+
 function moveCursor(c: CommandContext, delta: number): void {
   const panelEl = c.panelEl(c.lane.focus)
   const all = c.rowsOf(panelEl)
@@ -120,7 +127,42 @@ function moveCursor(c: CommandContext, delta: number): void {
   })
 }
 
-/** Quote the selected diff lines into the chat composer, ready to send. */
+/**
+ * Put the selected lines into the chat composer, ready to say something about.
+ *
+ * What lands there depends on the panel. A diff is quoted in full — the patch
+ * is not on disk, so the text is the only way the agent can see it. A file is
+ * referenced by `path:from-to` instead: the agent can open it, and a pasted
+ * copy would go stale the moment either of you edits the file.
+ */
+/**
+ * The file `e` would open, and the line to land on.
+ *
+ * Three panels can answer: the tree (the row under the cursor), the reader (its
+ * own file, on the cursor's line) and a diff (the file, on the line that row is
+ * in the NEW version — an editor has nothing to say about the old one). Null
+ * when the focused panel is none of those, which is what dims the command.
+ */
+function editTargetOf(c: CommandContext): { path: string; line?: number } | null {
+  const panel = c.lane.panels[c.lane.focus]
+  if (!panel) return null
+  if (panel.kind === 'files') {
+    const path = fileRow(c)?.dataset.file
+    return path ? { path } : null
+  }
+  if (panel.kind === 'file') return { path: panel.sub ?? '', line: (panel.cursor ?? 0) + 1 }
+  if (panel.kind === 'diff') {
+    const path = panel.sub ?? ''
+    // The parse, not the DOM, for the same reason the quote uses it: the row the
+    // cursor indexes has to be the row we read a line number off.
+    const { rows } = parseUnifiedDiff(c.patchFor(path))
+    const nav = c.rowsOf(c.panelEl(c.lane.focus))
+    const row = rows[(panel.cursor ?? 0) - (nav.length - rows.length)]
+    return { path, line: row?.newNo }
+  }
+  return null
+}
+
 function commentOnSelection(c: CommandContext): void {
   const panel = c.lane.panels[c.lane.focus]
   const r = selRange(panel?.selection)
@@ -128,10 +170,15 @@ function commentOnSelection(c: CommandContext): void {
 
   // Rows here must be the SAME list the cursor indexes: the parse, not the DOM,
   // so the quote cannot drift from what is highlighted.
-  const { rows } = parseUnifiedDiff(c.patchFor(panel.sub ?? ''))
-  const nav = c.rowsOf(c.panelEl(c.lane.focus))
-  const offset = nav.length - rows.length
-  const quote = quoteSelection(rows, r[0] - offset, r[1] - offset, panel.sub ?? '')
+  const quote =
+    panel.kind === 'file'
+      ? fileRef(panel.sub ?? '', r[0], r[1])
+      : (() => {
+          const { rows } = parseUnifiedDiff(c.patchFor(panel.sub ?? ''))
+          const nav = c.rowsOf(c.panelEl(c.lane.focus))
+          const offset = nav.length - rows.length
+          return quoteSelection(rows, r[0] - offset, r[1] - offset, panel.sub ?? '')
+        })()
   if (!quote) return
 
   // Any composer, not only the chat's: the launcher has one too, and a comment
@@ -267,12 +314,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Go to panel',
         group: 'Panels',
         keys: '⌘E / ⌘⇧E / ⌘K G',
+        // Some panels read the checked-out tree — git status, the file list, a
+        // patch — so without a worktree there is nothing for them to show. That
+        // is a refusal with a reason, not a no-op: this used to return silently,
+        // which made ⌘K F look like a broken binding.
+        enabled: (c, arg) => c.canOpen(arg ?? 'projects'),
+        unavailable: (c, arg) => c.whyCannotOpen(arg ?? 'projects'),
         // Open it, focus it, or — if it is already the focused one — put it away.
         run: (c, arg) => {
           const kind = arg ?? 'projects'
-          // Nothing to show without a worktree — silently, because this is one
-          // command behind several bindings and the palette dims it below.
-          if (!c.canOpen(kind)) return
           c.setLane((l) => toggleKind(l, kind, () => c.makePanel(kind)))
         }
       },
@@ -380,9 +430,12 @@ export const REGISTRY: Map<string, Command> = new Map(
       {
         id: 'selection.toggle',
         title: 'Start or end line selection',
-        group: 'Diff',
+        group: 'Selection',
         keys: 'v',
-        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'diff',
+        enabled: (c) => {
+          const kind = c.lane.panels[c.lane.focus]?.kind
+          return kind === 'diff' || kind === 'file'
+        },
         run: (c) =>
           c.setLane((l) => {
             const panel = l.panels[l.focus]
@@ -396,14 +449,14 @@ export const REGISTRY: Map<string, Command> = new Map(
       {
         id: 'selection.cancel',
         title: 'Cancel line selection',
-        group: 'Diff',
+        group: 'Selection',
         keys: 'Esc',
         run: (c) => c.setLane((l) => patchPanel(l, l.focus, { selection: null }))
       },
       {
         id: 'selection.comment',
-        title: 'Comment on selected lines',
-        group: 'Diff',
+        title: 'Send selected lines to the composer',
+        group: 'Selection',
         keys: 'c',
         enabled: (c) => !!c.lane.panels[c.lane.focus]?.selection,
         run: (c) => commentOnSelection(c)
@@ -423,6 +476,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.openCommands()
       },
       {
+        id: 'palette.files',
+        title: 'Find file…',
+        group: 'App',
+        keys: '⌘P',
+        // The list is the checked-out tree's, so it needs one — same refusal,
+        // and the same sentence, as opening the Files panel.
+        enabled: (c) => c.canOpen('file'),
+        unavailable: (c) => c.whyCannotOpen('file'),
+        run: (c) => c.openFiles()
+      },
+      {
         // The account panel IS the login flow, so "sign in" and "who am I"
         // are the same command — there is nothing to run behind your back.
         id: 'auth.account',
@@ -439,6 +503,60 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'editor.open',
+        title: 'Edit in your editor',
+        group: 'Files',
+        keys: 'e',
+        enabled: (c) => !!editTargetOf(c) && !!c.worktree,
+        run: (c) => {
+          const target = editTargetOf(c)
+          const cwd = c.worktree?.path
+          if (!target?.path || !cwd) return
+          // The main process owns the choice: a terminal editor answers `panel`
+          // and runs in the editor panel's PTY, a GUI one is already launching
+          // by the time this resolves. The renderer must not keep its own list
+          // of which editors are which.
+          void window.floe.editor.launch(cwd, target.path, target.line).then((result) => {
+            if (result.mode !== 'panel') return
+            c.setLane((l) => open(l, c.makePanel('edit', editSub(target.path, target.line))))
+          })
+        }
+      },
+      {
+        id: 'files.expand',
+        title: 'Open directory',
+        group: 'Cursor',
+        keys: 'l',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
+        run: (c) => {
+          // The row already draws whether it is open, so the DOM answers this —
+          // no need to lift a tree's expansion state into the lane just so a
+          // key can read it. Clicking is what a mouse does here too, so both
+          // routes go through exactly one toggle.
+          const row = fileRow(c)
+          if (row?.dataset.dir !== undefined && row.dataset.open === undefined) row.click()
+        }
+      },
+      {
+        id: 'files.collapse',
+        title: 'Close directory',
+        group: 'Cursor',
+        keys: 'h',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
+        run: (c) => {
+          const row = fileRow(c)
+          if (!row) return
+          if (row.dataset.dir !== undefined && row.dataset.open !== undefined) return row.click()
+          // Not on an open directory: go up to the one that contains this row.
+          // `h` should never be a no-op — walking out of a directory is the
+          // other half of walking into it.
+          const parent = row.dataset.parent
+          if (!parent) return
+          const up = c.panelEl(c.lane.focus)?.querySelector<HTMLElement>(`[data-dir="${CSS.escape(parent)}"]`)
+          up?.focus()
+        }
+      },
+      {
         id: 'settings.open',
         title: 'Settings…',
         group: 'App',
@@ -449,6 +567,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.add',
         title: 'Add project…',
         group: 'App',
+        keys: 'n',
         run: (c) => c.addProject()
       },
       {
@@ -462,6 +581,56 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Move project to group…',
         group: 'App',
         run: (c) => c.moveProject()
+      },
+      {
+        // The row the cursor is on, not the current project: `d` acts on what
+        // you are looking at, which is the only reading that matches the list.
+        id: 'project.delete',
+        title: 'Remove project from Floe…',
+        group: 'App',
+        keys: 'd',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
+        run: (c) => c.deleteProject()
+      },
+      {
+        id: 'project.move.start',
+        title: 'Move project between groups',
+        group: 'App',
+        keys: 'm',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
+        run: (c) => c.startMoveProject()
+      },
+      {
+        id: 'project.move.down',
+        title: 'Carry the held project down a group',
+        group: 'App',
+        keys: 'j',
+        enabled: (c) => c.movingProject,
+        run: (c) => c.stepMoveProject(1)
+      },
+      {
+        id: 'project.move.up',
+        title: 'Carry the held project up a group',
+        group: 'App',
+        keys: 'k',
+        enabled: (c) => c.movingProject,
+        run: (c) => c.stepMoveProject(-1)
+      },
+      {
+        id: 'project.move.commit',
+        title: 'Drop the held project in this group',
+        group: 'App',
+        keys: '↵',
+        enabled: (c) => c.movingProject,
+        run: (c) => c.endMoveProject(true)
+      },
+      {
+        id: 'project.move.cancel',
+        title: 'Put the held project back',
+        group: 'App',
+        keys: 'Esc',
+        enabled: (c) => c.movingProject,
+        run: (c) => c.endMoveProject(false)
       },
       {
         id: 'group.delete',

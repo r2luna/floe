@@ -7,7 +7,8 @@ import type {
   FileAttachment,
   ImageAttachment
 } from '../../shared/types'
-import { DEFAULT_CHOICE, type ModelChoice } from './models'
+import { defaultChoice, type ModelChoice } from './models'
+import { DEFAULT_MODE } from '../../shared/modes.ts'
 import { takeBatch, type Queued } from './queue'
 
 export type { Queued }
@@ -147,7 +148,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The model/effort last chosen, read at DELIVERY rather than at enqueue: a
   // message that waited should go out with the model in effect when it fires,
   // not the one that was selected minutes ago when it was typed.
-  const choiceRef = useRef<ModelChoice>(DEFAULT_CHOICE)
+  const choiceRef = useRef<ModelChoice>(defaultChoice())
   // The concrete model id the CLI resolved for the run in flight, so a live
   // message is labelled with what actually answered — not with whatever the
   // picker happens to say by the time you read it back.
@@ -327,8 +328,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           prompt,
           // `optionsKey` in the main process is built from these, so changing
           // the picker restarts the CLI rather than silently keeping the old
-          // model for the rest of the session.
-          { permissionMode: 'default', ...choice },
+          // model — or the old mode — for the rest of the session.
+          { ...choice, permissionMode: choice.mode ?? DEFAULT_MODE },
           images ?? [],
           files ?? []
         )

@@ -182,6 +182,20 @@ export function quoteSelection(rows: DiffRow[], from: number, to: number, path: 
 }
 
 /**
+ * The comment body for a selection in a FILE panel: a reference, not the text.
+ *
+ * A file the agent can open is already on disk, so pasting its lines would send
+ * it a second copy of something it can read — and a stale one the moment the
+ * file changes. `path:12-30` is the whole message; the agent reads the range
+ * itself. Rows here are source lines, so the row index IS the line number - 1.
+ */
+export function fileRef(path: string, from: number, to: number): string {
+  const first = Math.min(from, to) + 1
+  const last = Math.max(from, to) + 1
+  return `${path}:${first === last ? first : `${first}-${last}`}\n\n`
+}
+
+/**
  * Append a quoted block to whatever is already in the composer.
  *
  * Appending, not prepending: you build a review by picking a range, saying
