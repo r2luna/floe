@@ -17,10 +17,11 @@ import { invalidateEditorCache } from '../editors'
 import { readCommands } from './commandStore'
 import { ensureKeybindings } from '../keybindings'
 import { ensureSkills } from './skills'
+import { ensureSystemPrompt, systemPromptPath } from '../appSettings'
 
 /** Create anything missing. Never throws: a read-only home is not a crash. */
 export function initConfig(): void {
-  for (const step of [ensureFloeConfig, ensureKeybindings, ensureSkills]) {
+  for (const step of [ensureFloeConfig, ensureKeybindings, ensureSkills, ensureSystemPrompt]) {
     try {
       step()
     } catch (err) {
@@ -88,11 +89,14 @@ export function watchConfig(onChange: (file: string) => void): () => void {
 }
 
 /** Where the user's config lives, for "Reveal in Finder" and error messages. */
-export function configPaths(): { dir: string; floe: string; projects: string } {
+export function configPaths(): { dir: string; floe: string; projects: string; systemPrompt: string } {
   return {
     dir: configDir(),
     floe: floeConfigPath(),
-    projects: join(configDir(), 'projects')
+    projects: join(configDir(), 'projects'),
+    // Not necessarily inside `dir`: `[agent] system-prompt` may name a file the
+    // user keeps elsewhere, and Settings has to open the one actually in use.
+    systemPrompt: systemPromptPath()
   }
 }
 

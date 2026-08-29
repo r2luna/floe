@@ -20,8 +20,12 @@ import {
   toggleKind
 } from './lane.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
+import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
 import { editSub } from './editorTarget.ts'
+import { sendToTerminal } from './terminalBus.ts'
+import { startSkillDraft } from './skillDraft.ts'
+import { reason } from './ipcError.ts'
 import type { FileOp } from '../../shared/types.ts'
 
 /**
@@ -111,6 +115,19 @@ function fileTarget(c: CommandContext): string | undefined {
   return row?.dataset.file ?? row?.dataset.dir
 }
 
+/**
+ * The skill row the cursor is on, or null when the focus is somewhere else.
+ *
+ * Read from the DOM for the same reason `fileTarget` is: the row already knows
+ * which skill it is, and lifting the list into the lane just so three commands
+ * could ask would give the panel a second copy of itself to keep in step.
+ */
+function skillRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'skills') return null
+  const row = fileRow(c)
+  return row?.dataset.skill ? row : null
+}
+
 /** Join a directory and a name, where the directory may be the root (''). */
 function join(dir: string, name: string): string {
   const clean = name.replace(/^\/+|\/+$/g, '')
@@ -129,6 +146,17 @@ function applyOps(c: CommandContext, root: string, ops: FileOp[]): void {
   void window.floe.files.apply(root, ops).then((errors) => {
     if (errors.length) c.say(errors[0])
   })
+}
+
+/** The command on the shell row the cursor is on, if it is on one. */
+function bashCommand(c: CommandContext): string | undefined {
+  // The kind is checked first so this stays answerable without a DOM: the
+  // palette and the MCP tool ask every command whether it is available, from
+  // a node process with no document in sight.
+  if (c.lane.panels[c.lane.focus]?.kind !== 'chat') return undefined
+  const active = document.activeElement as HTMLElement | null
+  if (!active || !c.panelEl(c.lane.focus)?.contains(active)) return undefined
+  return active.closest<HTMLElement>('[data-cmd]')?.dataset.cmd
 }
 
 function moveCursor(c: CommandContext, delta: number): void {
@@ -209,7 +237,11 @@ function commentOnSelection(c: CommandContext): void {
   // so the quote cannot drift from what is highlighted.
   const quote =
     panel.kind === 'file'
-      ? fileRef(panel.sub ?? '', r[0], r[1])
+      ? // A file panel reading its own root — a skill, which lives in Floe's
+        // config — is not in the worktree, so a relative path would name
+        // nothing the agent can open. The full path is what gets sent; the
+        // composer only ever shows the short token standing for it.
+        shorten(fileRef(panel.root ? `${panel.root}/${panel.sub ?? ''}` : (panel.sub ?? ''), r[0], r[1]).trim()) + '\n\n'
       : (() => {
           const { rows } = parseUnifiedDiff(c.patchFor(panel.sub ?? ''))
           const nav = c.rowsOf(c.panelEl(c.lane.focus))
@@ -594,6 +626,37 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'bash.copy',
+        title: 'Copy this command',
+        group: 'Chat',
+        keys: 'y',
+        enabled: (c) => !!bashCommand(c),
+        run: (c) => {
+          const command = bashCommand(c)
+          if (!command) return
+          void navigator.clipboard.writeText(command)
+          c.say('Command copied.')
+        }
+      },
+      {
+        id: 'bash.run',
+        title: 'Run this command in the terminal',
+        group: 'Chat',
+        keys: 'x',
+        enabled: (c) => !!bashCommand(c) && !!c.worktree,
+        // The same thing the ▶ on the row does, and the same thing a shell block
+        // in a message does: open this worktree's terminal and type it in. The
+        // terminal queues it if it is still attaching, so the panel opening and
+        // the command arriving cannot race.
+        run: (c) => {
+          const command = bashCommand(c)
+          const cwd = c.worktree?.path
+          if (!command || !cwd) return
+          c.setLane((l) => open(l, c.makePanel('terminal', cwd)))
+          sendToTerminal(`term:${cwd}`, command)
+        }
+      },
+      {
         id: 'files.rename',
         title: 'Rename file…',
         group: 'Files',
@@ -655,10 +718,70 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The panel, not a palette: skills are things you keep, so the list has
+        // to be somewhere you can act on it, not somewhere that closes the
+        // moment you pick a row.
         id: 'skills.open',
         title: 'Skills…',
         group: 'App',
-        run: (c) => c.openSkills()
+        run: (c) => c.setLane((l) => toggleKind(l, 'skills', () => c.makePanel('skills')))
+      },
+      {
+        // Opens the panel if it is not up, then asks it for a draft row. The
+        // naming happens in the list — see skillDraft.ts for why the command
+        // only starts the flow.
+        id: 'skill.new',
+        title: 'New skill…',
+        group: 'Skills',
+        keys: 'n',
+        run: (c) => {
+          if (!c.lane.panels.some((p) => p.kind === 'skills')) {
+            c.setLane((l) => open(l, c.makePanel('skills')))
+          }
+          startSkillDraft({ kind: 'new' })
+        }
+      },
+      {
+        id: 'skill.rename',
+        title: 'Rename skill…',
+        group: 'Skills',
+        keys: 'r',
+        enabled: (c) => !!skillRow(c),
+        run: (c) => {
+          const name = skillRow(c)?.dataset.skill
+          // The row itself becomes the box. Renaming a skill renames the token
+          // you type, and the main process moves the file and rewrites its
+          // frontmatter so the two cannot disagree.
+          if (name) startSkillDraft({ kind: 'rename', name })
+        }
+      },
+      {
+        id: 'skill.delete',
+        title: 'Delete skill…',
+        group: 'Skills',
+        keys: 'd',
+        enabled: (c) => !!skillRow(c),
+        run: (c) => {
+          const name = skillRow(c)?.dataset.skill
+          if (!name) return
+          // Like a file and unlike a project: this one really does remove from
+          // disk, so it says the word.
+          if (!window.confirm(`Delete the skill "${name}"? This removes the file from disk.`)) return
+          void window.floe.skills.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'skill.edit',
+        title: 'Edit skill in your editor',
+        group: 'Skills',
+        keys: 'e',
+        enabled: (c) => !!skillRow(c),
+        run: (c) => {
+          const row = skillRow(c)
+          const root = row?.dataset.skillRoot
+          const file = row?.dataset.skillFile
+          if (root && file) c.editSkill(root, file)
+        }
       },
       {
         id: 'settings.open',

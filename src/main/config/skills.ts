@@ -15,8 +15,17 @@
 // with reference files beside it. A project skill wins over a global one of the
 // same name: the narrower answer is the one you meant.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { configDir } from '../dataDir'
 import { projectScan } from './projectStore'
 
@@ -176,3 +185,122 @@ A skill can be a directory instead of a file:
 The directory name is the skill name unless the frontmatter says otherwise, and
 anything beside \`SKILL.md\` is yours to reference from the text.
 `
+
+/* --- editing ------------------------------------------------------------- */
+//
+// The panel writes through these rather than through the file tree: a skill is
+// addressed by NAME (which is what the composer types and what the list shows),
+// and the name is not always the filename — frontmatter can override it, and a
+// bundled skill is a directory. Resolving through `listSkills` means the panel
+// acts on exactly the row it is showing, including the project-wins rule, and
+// no path from the renderer is ever written to.
+
+/** The token rule, matching what `expandSkills` will actually recognise. */
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9:_-]*$/
+
+function checkName(name: string): string {
+  const clean = name.trim()
+  if (!NAME_RE.test(clean)) {
+    throw new Error(`"${name}" is not a skill name — letters, digits, - _ : only`)
+  }
+  return clean
+}
+
+/** Where a new skill of this scope goes, created if it isn't there yet. */
+function dirFor(scope: Skill['scope'], projectPath?: string): string {
+  if (scope === 'global') return globalSkillsDir()
+  const dir = projectPath ? projectSkillsDir(projectPath) : null
+  if (!dir) throw new Error('no project here to keep a project skill in')
+  return dir
+}
+
+function find(name: string, projectPath?: string): Skill {
+  const skill = listSkills(projectPath).find((s) => s.name === name)
+  if (!skill) throw new Error(`no skill called "${name}"`)
+  return skill
+}
+
+// A bundled skill is a directory holding SKILL.md, so its `dir` is its own and
+// renaming or deleting it means moving the whole directory. A plain file skill's
+// `dir` is the skills root it sits in, which must never be touched.
+const isBundle = (skill: Skill): boolean => basename(skill.file) === 'SKILL.md'
+
+export function createSkill(name: string, scope: Skill['scope'], projectPath?: string): Skill {
+  const clean = checkName(name)
+  if (listSkills(projectPath).some((s) => s.name === clean && s.scope === scope)) {
+    throw new Error(`"${clean}" already exists`)
+  }
+  const dir = dirFor(scope, projectPath)
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, `${clean}.md`)
+  if (existsSync(file)) throw new Error(`${file} is already there`)
+  writeFileSync(file, template(clean))
+  return { name: clean, scope, file, dir }
+}
+
+/**
+ * Rename a skill — both halves of it.
+ *
+ * The file (or directory) moves AND the frontmatter `name:` follows, because
+ * that field is what the composer matches: renaming only the file would leave
+ * `/old-name` still working and the list still showing the old word.
+ */
+export function renameSkill(name: string, to: string, projectPath?: string): Skill {
+  const clean = checkName(to)
+  const skill = find(name, projectPath)
+  if (clean === skill.name) return skill
+  if (listSkills(projectPath).some((s) => s.name === clean)) throw new Error(`"${clean}" already exists`)
+
+  const bundle = isBundle(skill)
+  const root = bundle ? dirname(skill.dir) : skill.dir
+  const target = join(root, bundle ? clean : `${clean}.md`)
+  if (existsSync(target)) throw new Error(`${target} is already there`)
+  renameSync(bundle ? skill.dir : skill.file, target)
+
+  const file = bundle ? join(target, 'SKILL.md') : target
+  try {
+    const raw = readFileSync(file, 'utf8')
+    const named = withName(raw, clean)
+    if (named !== raw) writeFileSync(file, named)
+  } catch {
+    // The rename already happened; a frontmatter we could not rewrite is a
+    // skill that still lists under its old name, not a failed operation.
+  }
+  return { ...skill, name: clean, file, dir: bundle ? target : skill.dir }
+}
+
+/** Delete a skill: the file, or the whole directory a bundled one owns. */
+export function deleteSkill(name: string, projectPath?: string): void {
+  const skill = find(name, projectPath)
+  rmSync(isBundle(skill) ? skill.dir : skill.file, { recursive: true, force: true })
+}
+
+/** Rewrite the frontmatter's `name:`, when it has one. */
+function withName(raw: string, name: string): string {
+  if (!raw.startsWith('---')) return raw
+  const end = raw.indexOf('\n---', 3)
+  if (end < 0) return raw
+  const head = raw.slice(0, end)
+  if (!/^name:/m.test(head)) return raw
+  return head.replace(/^name:.*$/m, `name: ${name}`) + raw.slice(end)
+}
+
+/**
+ * What a brand-new skill starts as.
+ *
+ * Not empty: the frontmatter is the part you cannot guess, so the file that
+ * opens in the editor already has it, with the two fields filled in the way
+ * they will be read.
+ */
+function template(name: string): string {
+  return `---
+name: ${name}
+description: What this skill is for — shown beside it in the list.
+---
+
+# ${name}
+
+Everything below the frontmatter is the skill. Typing \`/${name}\` in the composer
+sends this whole text to whichever harness answers the turn.
+`
+}

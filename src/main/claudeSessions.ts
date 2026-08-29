@@ -66,6 +66,12 @@ export interface TranscriptItem {
    * reopening an old chat can show its fill without replaying the turn.
    */
   contextTokens?: number
+  /**
+   * How long the turn that produced this message took, in ms. Stamped on the
+   * assistant messages of a turn (from the user message's timestamp to this
+   * one) so the LAST message of a run can print what the turn cost.
+   */
+  ms?: number
 }
 
 function extractText(message: unknown): string {
@@ -536,6 +542,10 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
   // which reloads as a user line so the exchange survives — a bare tool chip
   // would strand tomorrow's reader with an answer to an invisible question.
   const askIds = new Set<string>()
+  // When the turn being read started, so an assistant message can carry how
+  // long it took. Set by a REAL user message only — a tool_result also arrives
+  // as `user` and would restart the clock in the middle of the turn it is part of.
+  let turnStartedAt: number | undefined
   let raw: string
   try {
     raw = readFileSync(file, 'utf8')
@@ -571,6 +581,21 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         : 0
     const before = items.length
     const content = (m.message as { content?: unknown } | null)?.content
+    if (
+      role === 'user' &&
+      at &&
+      (typeof content === 'string' ||
+        (Array.isArray(content) &&
+          (content as Array<Record<string, unknown>>).some((b) => b.type === 'text')))
+    ) {
+      turnStartedAt = at
+    }
+    // Stamped on every assistant message of the turn; the LAST one is the one
+    // the footer prints, and it is the one that holds the full elapsed.
+    const ms =
+      role === 'assistant' && at && turnStartedAt !== undefined && at >= turnStartedAt
+        ? at - turnStartedAt
+        : undefined
     if (typeof content === 'string') {
       if (role === 'user') items.push(...expandUserText(content))
       else if (content.trim()) items.push({ role, text: content })
@@ -579,6 +604,7 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         if (model) items[i].model = model
         if (effort) items[i].effort = effort
         if (used > 0) items[i].contextTokens = used
+        if (ms !== undefined) items[i].ms = ms
       }
       continue
     }
@@ -631,6 +657,7 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       if (model) items[i].model = model
       if (effort) items[i].effort = effort
       if (used > 0) items[i].contextTokens = used
+      if (ms !== undefined) items[i].ms = ms
     }
   }
   return items

@@ -35,11 +35,27 @@ the worktree's files, and picking one opens it in the file panel.`,
 it does not put on a row is a link to the file itself, which is documented in
 place, so nothing is reachable only through the UI.
 
-\`⌘K S\` lists your skills — the Markdown in \`~/.config/floe/skills\` that \`/name\`
-sends to whichever harness answers — and opens one in the file reader.`,
+\`⌘K S\` opens Skills — the Markdown in \`~/.config/floe/skills\` that \`/name\`
+sends to whichever harness answers. It is a panel rather than a palette because
+skills are things you keep: the list is where you write, rename and delete them.`,
     binds: [
       { key: 'super+,', command: 'settings.open' },
       { key: 'super+k s', command: 'skills.open' }
+    ]
+  },
+  {
+    title: 'Shell calls in the chat',
+    doc: `A run of shell commands in a transcript is a block of rows, and each row
+is a cursor row: \`j\`/\`k\` walks them and \`Enter\` opens the one you are on, which
+is how you read a command too long for its line. A command that already fits has
+nothing to open.
+
+\`y\` copies the command under the cursor and \`x\` runs it in this worktree's
+terminal — the same two things the icons on the row do, because the command an
+agent ran is often the one you want to run yourself.`,
+    binds: [
+      { key: 'y', command: 'bash.copy', when: 'panel == "chat"' },
+      { key: 'x', command: 'bash.run', when: 'panel == "chat"' }
     ]
   },
   {
@@ -120,6 +136,25 @@ key from the file tree, the plans list, the reader and a diff.`,
         command: 'editor.open',
         when: 'panel in ["files", "plans", "file", "diff", "edit"]'
       }
+    ]
+  },
+  {
+    title: 'Skills',
+    doc: `The skills panel's own letters, and deliberately the same four the file
+tree uses: \`n\` writes a new one, \`r\` renames it, \`d\` deletes it and \`e\` opens
+it in your editor. Enter reads it in the file panel beside the list.
+
+A skill is addressed by NAME, not by filename — renaming moves the file and
+rewrites its frontmatter together, so \`/old-name\` stops working exactly when
+the list stops showing it.
+
+Right-clicking a row offers the same four, because they are the same commands:
+the menu focuses the row it was opened on and dispatches an id.`,
+    binds: [
+      { key: 'n', command: 'skill.new', when: 'panel == "skills"' },
+      { key: 'r', command: 'skill.rename', when: 'panel == "skills"' },
+      { key: 'd', command: 'skill.delete', when: 'panel == "skills"' },
+      { key: 'e', command: 'skill.edit', when: 'panel == "skills"' }
     ]
   },
   {

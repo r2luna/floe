@@ -1,0 +1,451 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Bash no chat — bloco, linha expansível</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body {
+    margin: 0;
+    background: var(--bg);
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+  }
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  .bar button {
+    padding: 3px 10px;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--dim);
+    font: inherit;
+    cursor: pointer;
+  }
+  .stage {
+    display: flex;
+    justify-content: center;
+    padding: 20px;
+  }
+  .col {
+    width: 600px;
+    min-height: 90vh;
+    padding: 14px;
+    background: var(--panel-focused);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  body.narrow .col {
+    width: 430px;
+  }
+
+  /* --- highlight de shell -------------------------------------------------- */
+  .sh-cmd {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .sh-flag {
+    color: #8a6fbf;
+  }
+  .sh-str {
+    color: #a9631f;
+  }
+  .sh-path {
+    color: var(--text);
+  }
+  .sh-op {
+    color: var(--faint);
+  }
+  .sh-num {
+    color: #3a64a8;
+  }
+  :root:not([data-theme='light']) .sh-flag {
+    color: #a795d8;
+  }
+  :root:not([data-theme='light']) .sh-str {
+    color: #d0a06a;
+  }
+  :root:not([data-theme='light']) .sh-num {
+    color: #7fa3d8;
+  }
+
+  /* --- o bloco ------------------------------------------------------------- */
+  .blk {
+    margin: 8px 0;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .blk-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    background: var(--well);
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .blk-bar b {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .blk-bar .meta {
+    margin-left: auto;
+    color: var(--faint);
+  }
+  .blk-body {
+    padding: 5px 10px 6px;
+  }
+
+  /* Uma linha de comando: chevron, comando, e — aberta — as ações. */
+  .cmd {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 0;
+    background: none;
+    border: 0;
+    color: var(--dim);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .cmd:hover .chev,
+  .cmd:focus-visible .chev {
+    opacity: 1;
+  }
+  .cmd:focus-visible {
+    outline: none;
+  }
+  .cmd:focus-visible .code {
+    text-decoration: underline;
+    text-decoration-color: var(--line);
+    text-underline-offset: 3px;
+  }
+  .chev {
+    width: 14px;
+    height: 14px;
+    margin-top: 3px;
+    color: var(--faint);
+    opacity: 0.5;
+    transition: transform 0.12s ease;
+  }
+  .cmd[data-open] .chev {
+    transform: rotate(90deg);
+    opacity: 1;
+  }
+  .code {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  /* Aberta: o comando inteiro, quebrando, com o recuo alinhado ao fechado. */
+  .cmd[data-open] .code {
+    white-space: pre-wrap;
+    overflow: visible;
+    overflow-wrap: anywhere;
+  }
+
+  /* Uma linha que cabe inteira não tem o que expandir: o chevron sai (a coluna
+     fica, para os comandos continuarem alinhados) e as ações ficam sempre à
+     mão, na ponta direita da própria linha. */
+  .cmd[data-fit] {
+    cursor: default;
+  }
+  .cmd[data-fit] .chev {
+    visibility: hidden;
+  }
+
+  /* As ações: sem caixa, sem rótulo por padrão. Três estilos para comparar —
+     o switch na barra do topo troca entre eles. */
+  .acts {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 0 12px;
+  }
+  /* Sempre visíveis na linha que cabe; na truncada, só quando ela abre. */
+  .cmd[data-fit] .acts {
+    display: flex;
+    grid-column: 3;
+    align-self: center;
+  }
+  .cmd[data-open] .acts {
+    display: flex;
+    grid-column: 2;
+    margin: 2px 0 3px;
+  }
+  .act {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--faint);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .act:hover,
+  .act:focus-visible {
+    color: var(--text-strong);
+    outline: none;
+  }
+  .act svg {
+    width: 13px;
+    height: 13px;
+  }
+  .act[data-done] {
+    color: var(--live);
+  }
+
+  /* V1 — na linha aberta, os ícones sobem para a ponta direita da primeira
+     linha, onde já estão nas que cabem inteiras. */
+  body.v1 .cmd[data-open] .acts {
+    justify-content: flex-end;
+    margin-top: -18px;
+  }
+  body.v1 .act span.txt,
+  body.v2 .act span.txt {
+    display: none;
+  }
+  /* V2 — só os ícones, sob o comando. */
+  /* V3 — só as palavras, sem ícone. */
+  body.v3 .act svg {
+    display: none;
+  }
+
+  .hint {
+    margin: 20px auto 0;
+    max-width: 600px;
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  .hint b {
+    color: var(--text-strong);
+  }
+</style>
+
+<body>
+  <div class="bar">
+    <b style="color: var(--text-strong)">bloco de bash — linha expansível</b>
+    <span>clique numa linha (ou Enter nela)</span>
+    <button onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+    <button onclick="document.body.classList.toggle('narrow')">largura 430px</button>
+    <button onclick="cycle()">estilo das ações: <b id="vname" style="color:var(--text-strong)">V1 ícones à direita</b></button>
+  </div>
+
+  <div class="stage"><div class="col" id="chat"></div></div>
+
+  <script>
+    // Três estilos de ação, um switch — é mais rápido comparar do que descrever.
+    const VARIANTES = ['v1', 'v2', 'v3']
+    const NOMES = { v1: 'V1 ícones à direita', v2: 'V2 ícones sob o comando', v3: 'V3 só as palavras' }
+    let vi = 0
+    function cycle() {
+      document.body.classList.remove(...VARIANTES)
+      vi = (vi + 1) % VARIANTES.length
+      document.body.classList.add(VARIANTES[vi])
+      document.getElementById('vname').textContent = NOMES[VARIANTES[vi]]
+    }
+    document.body.classList.add('v1')
+
+    const CONVERSA = [
+      { role: 'user', nick: 'r2luna', at: '14:22', text: 'brain/o system prompt carregou? analisa a part' },
+      { role: 'assistant', at: '14:22', text: 'Vou olhar o projeto e o system prompt.' },
+      {
+        role: 'bash',
+        at: '14:22',
+        cmds: [
+          'ls /Users/r2luna; echo "---"; ls /Users/r2luna/.claude/projects/-Users-r2luna/memory/ 2>/dev/null; echo "---"; cat /Users/r2luna/CLAUDE.md 2>/dev/null | head -50',
+          'ls /Users/r2luna/code 2>/dev/null; echo "--- brain hits ---"; find /Users/r2luna/code /Users/r2luna/Obsidian -maxdepth 3 -iname "*brain*" 2>/dev/null | head -30'
+        ]
+      },
+      { role: 'assistant', at: '14:23', text: 'Achei o projeto em <code>~/code/01.r2luna/01.projects/brain</code>. Procurando onde ele imprime.' },
+      {
+        role: 'bash',
+        at: '14:23',
+        open: 2,
+        cmds: [
+          'cd /Users/r2luna/code/01.r2luna/01.projects/brain && ls && echo "--- print hits ---" && grep -ril "print" --include=*.php src app 2>/dev/null | head -40',
+          'grep -ril "print" src tests docs 2>/dev/null | head -40; echo "=== src tree ==="; find src -maxdepth 2 -type d | head -40',
+          'wc -l src/Console/ShowBrainCommand.php src/Console/Printer.php && sed -n 1,400p src/Console/Printer.php',
+          'sed -n 400,580p src/Console/Printer.php; echo "===== ShowBrainCommand ====="; cat src/Console/ShowBrainCommand.php',
+          'grep -n "tasks\\|actions\\|workflows\\|queries\\|group" src/Console/BrainMap.php | head -60'
+        ]
+      },
+      {
+        role: 'assistant',
+        at: '14:26',
+        text: 'Sim, o system prompt carregou (comunicação concisa, reference points, sem escopo extra).<br><br>Projeto analisado: <code>~/code/01.r2luna/01.projects/brain</code> — <code>src/Console/Printer.php</code> (580 linhas) + <code>src/Console/ShowBrainCommand.php</code>.',
+        cost: '3m 12s · ↓34.1k tokens'
+      },
+      { role: 'user', nick: 'r2luna', at: '14:27', text: 'e o BrainMap? é ele que agrupa?' },
+      { role: 'bash', at: '14:27', cmds: ['sed -n 1,160p src/Console/BrainMap.php'] },
+      {
+        role: 'assistant',
+        at: '14:27',
+        text: 'É ele. <code>BrainMap</code> agrupa por <b>tasks</b>, <b>actions</b> e <b>workflows</b>, e o Printer só desenha o que ele devolve.',
+        cost: '18s · ↓36.0k tokens'
+      }
+    ]
+
+    const ICON = {
+      chevron: `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
+      copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`,
+      play: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13-8z"/></svg>`
+    }
+
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    function highlight(src) {
+      const re = /("[^"]*"|'[^']*')|(\|\||&&|[|;])|(\d?>>?[^\s]*)|(--?[A-Za-z][\w-]*)|(\S+)/g
+      let out = ''
+      let atStart = true
+      let m
+      while ((m = re.exec(src))) {
+        if (m.index > 0 && src[m.index - 1] === ' ') out += ' '
+        const [, str, op, redir, flag, word] = m
+        if (str) out += `<span class="sh-str">${esc(str)}</span>`
+        else if (op) {
+          out += `<span class="sh-op">${esc(op)}</span>`
+          atStart = true
+          continue
+        } else if (redir) out += `<span class="sh-op">${esc(redir)}</span>`
+        else if (flag) out += `<span class="sh-flag">${esc(flag)}</span>`
+        else if (word) {
+          out += `<span class="${atStart ? 'sh-cmd' : /^\d+([.,]\d+)?p?$/.test(word) ? 'sh-num' : 'sh-path'}">${esc(word)}</span>`
+          atStart = false
+        }
+      }
+      return out
+    }
+
+    const ACTS = `<span class="acts">
+      <button class="act" data-copy title="Copiar">${ICON.copy}<span class="txt">copiar</span></button>
+      <button class="act" data-run title="Rodar no terminal">${ICON.play}<span class="txt">rodar</span></button>
+    </span>`
+
+    const bloco = (item) => `
+      <div class="blk">
+        <div class="blk-body">
+          ${item.cmds
+            .map(
+              (c, i) => `
+            <div class="cmd" tabindex="0" role="button" aria-expanded="${item.open === i}" ${item.open === i ? 'data-open' : ''} data-cmd="${esc(c).replace(/"/g, '&quot;')}">
+              ${ICON.chevron}
+              <span class="code">${highlight(c)}</span>
+              ${ACTS}
+            </div>`
+            )
+            .join('')}
+        </div>
+      </div>`
+
+    const entrada = (item) =>
+      item.role === 'user'
+        ? `<div class="irc-entry">
+             <div class="irc-head"><span class="irc-nick" style="color:#c9a26d">r2luna</span><span class="irc-time">${item.at}</span></div>
+             <div class="irc-body">${item.text}</div>
+           </div>`
+        : `<div class="irc-entry">
+             <div class="irc-head"><span class="irc-nick" style="color:#5fb3a1">claude<span class="irc-host">!medium</span><span class="irc-host">@opus-5</span></span><span class="irc-time">${item.at}</span></div>
+             <div class="irc-body" style="white-space:normal">${item.text}</div>
+             ${item.cost ? `<div class="irc-cost">${item.cost}</div>` : ''}
+           </div>`
+
+    const chat = document.getElementById('chat')
+    chat.innerHTML = CONVERSA.map((i) => (i.role === 'bash' ? bloco(i) : entrada(i))).join('')
+
+    const toggle = (row) => {
+      // Uma linha que já cabe inteira não tem o que expandir.
+      if (row.hasAttribute('data-fit')) return
+      const open = row.hasAttribute('data-open')
+      row.toggleAttribute('data-open', !open)
+      row.setAttribute('aria-expanded', String(!open))
+    }
+
+    /**
+     * Marca as linhas que cabem inteiras.
+     *
+     * É uma pergunta de layout, não de texto: o mesmo comando cabe num painel
+     * largo e não cabe num estreito, então isto roda depois de desenhar e de
+     * novo quando a largura muda.
+     */
+    function medir() {
+      for (const row of chat.querySelectorAll('.cmd')) {
+        const code = row.querySelector('.code')
+        const coube = row.hasAttribute('data-open')
+          ? code.scrollWidth <= code.clientWidth + 1
+          : code.scrollWidth <= code.clientWidth + 1
+        row.toggleAttribute('data-fit', coube)
+        if (coube) {
+          row.removeAttribute('data-open')
+          row.removeAttribute('aria-expanded')
+          row.removeAttribute('role')
+          row.tabIndex = -1
+        } else {
+          row.setAttribute('role', 'button')
+          row.tabIndex = 0
+        }
+      }
+    }
+
+    medir()
+    new ResizeObserver(medir).observe(chat)
+
+    chat.addEventListener('click', (e) => {
+      const act = e.target.closest('.act')
+      if (act) {
+        e.stopPropagation()
+        const cmd = act.closest('.cmd').dataset.cmd
+        if (act.hasAttribute('data-copy')) {
+          void navigator.clipboard?.writeText(cmd)
+          act.dataset.done = ''
+          act.querySelector('.txt').textContent = 'copiado'
+          setTimeout(() => {
+            delete act.dataset.done
+            act.querySelector('.txt').textContent = 'copiar'
+          }, 1200)
+        } else {
+          act.dataset.done = ''
+          act.querySelector('.txt').textContent = 'enviado'
+          setTimeout(() => {
+            delete act.dataset.done
+            act.querySelector('.txt').textContent = 'rodar'
+          }, 1600)
+        }
+        return
+      }
+      const row = e.target.closest('.cmd')
+      if (row) toggle(row)
+    })
+
+    chat.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return
+      const row = e.target.closest('.cmd')
+      if (!row || e.target.closest('.act')) return
+      e.preventDefault()
+      toggle(row)
+    })
+  </script>
+
+  <p class="hint">
+    A segunda rajada já vem com a <b>terceira linha aberta</b>, para ver o estado expandido sem clicar.
+    Fechada, o comando é uma linha truncada; aberta, ele quebra inteiro e aparecem <b>copiar</b> e
+    <b>rodar no terminal</b>.
+  </p>
+</body>

@@ -72,7 +72,8 @@ import type {
   TasksStatus,
   UsageStats,
   Worktree,
-  WorktreesUpdatedEvent
+  WorktreesUpdatedEvent,
+  WorktreeStatus
 } from '../shared/types'
 
 // The bridge the renderer talks to.
@@ -229,7 +230,7 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       set: (table: string, key: string, value: TomlValue): Promise<FloeConfig> =>
         ipcRenderer.invoke('config:set', table, key, value),
       errors: (): Promise<ConfigError[]> => ipcRenderer.invoke('config:errors'),
-      paths: (): Promise<{ dir: string; floe: string; projects: string }> =>
+      paths: (): Promise<{ dir: string; floe: string; projects: string; systemPrompt: string }> =>
         ipcRenderer.invoke('config:paths'),
       reveal: (path?: string): Promise<string> => ipcRenderer.invoke('config:reveal', path),
       onChange: (cb: () => void): (() => void) => {
@@ -287,6 +288,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     },
     worktrees: {
       list: (repoPath: string): Promise<Worktree[]> => ipcRenderer.invoke('worktrees:list', repoPath),
+      // The git dirt of each path, keyed by path. A worktree that isn't a repo
+      // (or is gone) is simply absent from the map.
+      status: (paths: string[]): Promise<Record<string, WorktreeStatus>> =>
+        ipcRenderer.invoke('worktrees:status', paths),
       branches: (repoPath: string): Promise<string[]> => ipcRenderer.invoke('branches:list', repoPath),
       remoteBranches: (repoPath: string): Promise<RemoteBranch[]> =>
         ipcRenderer.invoke('branches:listRemote', repoPath),
@@ -489,7 +494,16 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // main process at the moment a turn is sent, so a skill never has to travel
     // through the UI or sit in a message the chat would then have to hide.
     skills: {
-      list: (worktreePath?: string): Promise<Skill[]> => ipcRenderer.invoke('skills:list', worktreePath)
+      list: (worktreePath?: string): Promise<Skill[]> => ipcRenderer.invoke('skills:list', worktreePath),
+      // The Skills panel's three writes. Each one rejects with the reason —
+      // a taken name, a name that could not be typed after a slash — so the
+      // panel reports it instead of failing quietly.
+      create: (name: string, scope: 'global' | 'project', worktreePath?: string): Promise<Skill> =>
+        ipcRenderer.invoke('skills:create', name, scope, worktreePath),
+      rename: (name: string, to: string, worktreePath?: string): Promise<Skill> =>
+        ipcRenderer.invoke('skills:rename', name, to, worktreePath),
+      remove: (name: string, worktreePath?: string): Promise<void> =>
+        ipcRenderer.invoke('skills:delete', name, worktreePath)
     },
     slash: {
       list: (worktreePath: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', worktreePath)

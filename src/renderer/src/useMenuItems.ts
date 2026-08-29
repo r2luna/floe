@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { PaletteItem } from './fuzzy'
 import type { Trigger } from './trigger'
-import type { FileNode } from '../../shared/types'
+import { shorten } from './fileRefs'
 import type { Worktrees } from './useWorktrees'
 import type { Skill } from '../../main/config/skills'
 
@@ -42,9 +42,12 @@ export function useMenuItems(
       // The probe spawns a CLI; a worktree where it fails should cost you an
       // empty menu, not an error in the middle of a sentence.
       .catch(() => live && setSkills([]))
+    // `all`, not `list`: the tree call answers one directory, which offered the
+    // repo root and nothing under it. This is the same list ⌘P searches — every
+    // tracked and untracked file, at every depth.
     window.floe.files
-      .list(worktreePath)
-      .then((tree) => live && setFiles(flatten(tree)))
+      .all(worktreePath)
+      .then((paths) => live && setFiles(paths))
       .catch(() => live && setFiles([]))
     return () => {
       live = false
@@ -69,8 +72,19 @@ export function useMenuItems(
 
   // Sessions first: there are a handful of them and hundreds of files, and the
   // fuzzy filter keeps the order it is given.
+  //
+  // The row is searched by its whole path — `#comp` should find
+  // `src/renderer/Composer.tsx` — but what lands in the box is the short token,
+  // registered on the way in so the message still leaves with the full path.
   const paths = useMemo(
-    () => files.map((relPath) => ({ id: `#${relPath}`, title: relPath, detail: 'file' })),
+    () =>
+      files.map((relPath) => ({
+        id: `#${relPath}`,
+        insert: () => `#${shorten(relPath)}`,
+        title: relPath,
+        detail: 'file',
+        group: 'files'
+      })),
     [files]
   )
 
@@ -96,10 +110,4 @@ export function useMenuItems(
         : [...mentions, ...paths],
     [skills, floeSkills, mentions, paths]
   )
-}
-
-/** Every file in the tree, as worktree-relative paths. Directories are skipped:
- *  you mention a file, not the folder it sits in. */
-function flatten(nodes: FileNode[]): string[] {
-  return nodes.flatMap((n) => (n.type === 'dir' ? flatten(n.children ?? []) : [n.relPath]))
 }

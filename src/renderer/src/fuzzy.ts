@@ -18,6 +18,14 @@ export interface PaletteItem {
    * project you wanted isn't added yet.
    */
   pinned?: boolean
+  /**
+   * What to actually insert when this is picked, if it differs from `id`.
+   *
+   * A function, not a string: a file mention registers its full path the moment
+   * it is chosen (see fileRefs.ts), and doing that for every row of a tree the
+   * menu merely offered would fill the map with paths nobody asked for.
+   */
+  insert?: () => string
 }
 
 export interface Scored<T> {

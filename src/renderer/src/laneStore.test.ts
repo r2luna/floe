@@ -1,6 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { persistable, remember, scopedOf, sessionKeyOf, withScoped } from './laneStore.ts'
+import {
+  persistable,
+  remember,
+  rememberSession,
+  rememberWorktree,
+  scopedOf,
+  sessionKeyOf,
+  withScoped
+} from './laneStore.ts'
 import type { Lane, Panel } from './lane.ts'
 
 const panel = (kind: string, order: number, extra: Partial<Panel> = {}): Panel => ({
@@ -86,4 +94,27 @@ test('old sessions fall off the end', () => {
   assert.equal(Object.keys(by).length, 30)
   assert.equal('s0' in by, false)
   assert.equal('s34' in by, true)
+})
+
+test('a project remembers the worktree it was left on', () => {
+  let by: Record<string, string> = {}
+  by = rememberWorktree(by, '/proj', '/proj/wt-a')
+  by = rememberWorktree(by, '/proj', '/proj/wt-b')
+  assert.deepEqual(by, { '/proj': '/proj/wt-b' })
+})
+
+// The difference between "left empty" and "never been here": one restores the
+// launcher because you closed the chat, the other because there is nothing yet.
+test('a worktree remembers an empty chat as an answer, not as a gap', () => {
+  const by = rememberSession({ '/wt': 's1' }, '/wt', null)
+  assert.equal(by['/wt'], null)
+  assert.equal('/wt' in by, true)
+})
+
+test('the places you have not been in a hundred switches fall off', () => {
+  let by: Record<string, string | null> = {}
+  for (let i = 0; i < 105; i++) by = rememberSession(by, `/wt${i}`, `s${i}`)
+  assert.equal(Object.keys(by).length, 100)
+  assert.equal('/wt0' in by, false)
+  assert.equal(by['/wt104'], 's104')
 })

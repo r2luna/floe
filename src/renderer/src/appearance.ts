@@ -9,7 +9,7 @@
 // `applyZoom` in main/index.ts.
 
 import { useEffect } from 'react'
-import { setDefaultChoice } from './models'
+import { setDefaultChoice, setUserNick } from './models'
 
 type Theme = 'system' | 'dark' | 'light'
 
@@ -57,6 +57,9 @@ export async function applyConfig(): Promise<void> {
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
+    // Resolved in main — config first, then git/system — so the chat's nick and
+    // the launcher's greeting can never disagree about who you are.
+    setUserNick(await window.floe.userName())
   } catch {
     // No config is not a reason to show no app: the built-in defaults stand.
   }

@@ -20,24 +20,59 @@ const LIST = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/
 const INLINE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\n]+\*|_[^_\n]+_)|(\[[^\]\n]*\]\([^)\n]*\))/g
 
-function inline(text: string, out: Token[]): void {
+/**
+ * What could be a reference: a mention (`#name`, `@name`) or a path with an
+ * extension, each optionally carrying a line range.
+ *
+ * Deliberately generous — it only proposes. Whether a candidate IS a reference
+ * is `isRef`'s answer, because that depends on things this file must not know:
+ * which sessions exist, and which short tokens stand for a path.
+ */
+const REF =
+  /(^|[\s([])([#@][\w./:-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*(?::\d+(?:-\d+)?)?)/g
+
+/** Split a plain run into text and the references inside it. */
+function refs(text: string, out: Token[], isRef: (token: string) => boolean): void {
+  let last = 0
+  for (const m of text.matchAll(REF)) {
+    const token = m[2]
+    if (!isRef(token)) continue
+    const at = m.index + m[1].length
+    if (at > last) out.push({ text: text.slice(last, at), cls: '' })
+    out.push({ text: token, cls: 'md-ref' })
+    last = at + token.length
+  }
+  if (last < text.length) out.push({ text: text.slice(last), cls: '' })
+}
+
+function inline(text: string, out: Token[], isRef?: (token: string) => boolean): void {
+  const plain = (slice: string): void => {
+    if (!slice) return
+    if (isRef) refs(slice, out, isRef)
+    else out.push({ text: slice, cls: '' })
+  }
   let last = 0
   INLINE.lastIndex = 0
   let m: RegExpExecArray | null
   while ((m = INLINE.exec(text))) {
-    if (m.index > last) out.push({ text: text.slice(last, m.index), cls: '' })
+    if (m.index > last) plain(text.slice(last, m.index))
     const cls = m[1] ? 'md-code' : m[2] ? 'md-bold' : m[3] ? 'md-em' : 'md-link'
     out.push({ text: m[0], cls })
     last = m.index + m[0].length
   }
-  if (last < text.length) out.push({ text: text.slice(last), cls: '' })
+  if (last < text.length) plain(text.slice(last))
 }
 
 /**
  * Colour markdown source. The concatenation of every token's text always equals
  * the input — see the note above on why that matters.
+ *
+ * `isRef` is what turns a file or session reference into a chip in the
+ * composer. It is passed in rather than decided here: the file panel highlights
+ * the same markdown and has no references to draw, and the composer's answer
+ * depends on the sessions this project has and the paths it has shortened.
  */
-export function tokenizeMarkdown(text: string): Token[] {
+export function tokenizeMarkdown(text: string, isRef?: (token: string) => boolean): Token[] {
   const out: Token[] = []
   const lines = text.split('\n')
   let fence: string | null = null
@@ -81,11 +116,11 @@ export function tokenizeMarkdown(text: string): Token[] {
     if (list) {
       if (list[1]) out.push({ text: list[1], cls: '' })
       out.push({ text: list[2] + list[3], cls: 'md-marker' })
-      inline(list[4], out)
+      inline(list[4], out, isRef)
       return
     }
 
-    inline(line, out)
+    inline(line, out, isRef)
   })
 
   return out

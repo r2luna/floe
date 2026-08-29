@@ -27,12 +27,6 @@ interface Term {
   // only those PTYs receive notifyTheme()'s CSI ?997;n, so a shell that never
   // opted in (bash, plain scripts) can't get the report typed into its input.
   themeReports?: boolean
-  // The file this editor PTY was last pointed at (editor PTYs only). Re-opening
-  // the SAME file must not type `:edit` at it again: at best that is a no-op,
-  // and while the editor is still starting up the keys land before it reads the
-  // tty and get echoed as raw text — which is what a remount (React's dev
-  // double-invoke, a re-render) used to leave in the panel.
-  editing?: string
 }
 
 // Keyed by terminal id (the renderer uses the worktree path), so each worktree
@@ -225,16 +219,9 @@ export function openEditor(
     const buffer = replay(id, existing)
     // Tell the running editor to open this file — see editKeys. An editor we
     // have no command for keeps showing what it had; typing a guess into an
-    // unknown program is worse than one extra `:e`. Already on this file, and
-    // there is nothing to say either — see Term.editing.
-    const keys =
-      safeFile && safeFile !== existing.editing
-        ? editKeys(currentEditor(), safeFile, safeLine)
-        : null
-    if (keys) {
-      existing.editing = safeFile ?? undefined
-      existing.proc.write(keys)
-    }
+    // unknown program is worse than one extra `:e`.
+    const keys = safeFile ? editKeys(currentEditor(), safeFile, safeLine) : null
+    if (keys) existing.proc.write(keys)
     return buffer
   }
 
@@ -247,13 +234,7 @@ export function openEditor(
     env: { ...process.env, FLOE_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
   })
 
-  const term: Term = {
-    proc,
-    cwd: dir,
-    scrollback: newScrollback(),
-    pending: '',
-    editing: safeFile ?? undefined
-  }
+  const term: Term = { proc, cwd: dir, scrollback: newScrollback(), pending: '' }
   terms.set(id, term)
   wire(win, id, term)
   return null

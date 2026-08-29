@@ -1,0 +1,309 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Bash no chat — segunda rodada</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body {
+    margin: 0;
+    padding: 22px 26px 60px;
+    background: var(--bg);
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+  }
+  .frame {
+    max-width: 880px;
+    margin: 0 auto 26px;
+    padding: 14px 16px 18px;
+    background: var(--panel-focused);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .frame > h2 {
+    margin: 0 0 2px;
+    color: var(--text-strong);
+    font-size: 12.5px;
+  }
+  .frame > p {
+    margin: 0 0 14px;
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  .theme {
+    position: fixed;
+    top: 14px;
+    right: 18px;
+    padding: 4px 10px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--dim);
+    font: 11px var(--mono);
+    cursor: pointer;
+  }
+
+  /* --- highlight de shell (compartilhado por todas as opções) ------------- */
+  .sh-cmd {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .sh-flag {
+    color: #8a6fbf;
+  }
+  .sh-str {
+    color: #a9631f;
+  }
+  .sh-path {
+    color: var(--text);
+  }
+  .sh-op {
+    color: var(--faint);
+  }
+  .sh-num {
+    color: #3a64a8;
+  }
+  :root:not([data-theme='light']) .sh-flag {
+    color: #a795d8;
+  }
+  :root:not([data-theme='light']) .sh-str {
+    color: #d0a06a;
+  }
+  :root:not([data-theme='light']) .sh-num {
+    color: #7fa3d8;
+  }
+
+  /* chevron: ícone, alinhado à direita da linha */
+  .chev {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    color: var(--faint);
+    opacity: 0.55;
+    transition: transform 0.12s ease;
+  }
+  .row:hover .chev {
+    opacity: 1;
+  }
+  .row[data-open] .chev {
+    transform: rotate(90deg);
+  }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    width: 100%;
+    padding: 2px 0;
+    background: none;
+    border: 0;
+    color: var(--dim);
+    font: inherit;
+    text-align: left;
+  }
+  .row .code {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* --- F1: linha nua ------------------------------------------------------ */
+  .f1 .row + .row {
+    border-top: 1px solid transparent;
+  }
+
+  /* --- F2: cartão --------------------------------------------------------- */
+  .card {
+    margin: 6px 0;
+    padding: 6px 10px 7px;
+    background: var(--well);
+    border-radius: var(--radius);
+  }
+  .card .row {
+    padding: 1px 0;
+  }
+  .card .code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* --- F3: duas colunas --------------------------------------------------- */
+  .f3 .row {
+    display: grid;
+    grid-template-columns: 7ch minmax(0, 1fr) 14px;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .f3 .bin {
+    color: var(--text-strong);
+    font-weight: 700;
+    text-align: right;
+  }
+
+  /* --- F4: trilho --------------------------------------------------------- */
+  .rail {
+    position: relative;
+    margin: 4px 0;
+    padding-left: 14px;
+  }
+  .rail::before {
+    content: '';
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    left: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--line);
+  }
+
+  /* --- F5: primeira linha forte, resto esmaecido -------------------------- */
+  .f5 .lead {
+    color: var(--text);
+  }
+  .f5 .rest {
+    color: var(--faint);
+  }
+  .f5 .row + .row {
+    margin-top: 1px;
+  }
+
+  /* --- F6: pílula ---------------------------------------------------------- */
+  .pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    max-width: 100%;
+    padding: 2px 8px 2px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+  }
+  .pill .code {
+    max-width: 62ch;
+  }
+</style>
+
+<body>
+  <button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">
+    tema
+  </button>
+
+  <div class="frame f1">
+    <h2>F1 — linha nua, só o comando</h2>
+    <p>Sem prefixo nenhum: o highlight já diz que é shell. Chevron à direita abre o comando inteiro.</p>
+    <div id="f1"></div>
+  </div>
+
+  <div class="frame">
+    <h2>F2 — cartão, comando inteiro</h2>
+    <p>Nada é escondido: o comando quebra dentro de um cartão discreto. O chevron colapsa para uma linha.</p>
+    <div id="f2"></div>
+  </div>
+
+  <div class="frame f3">
+    <h2>F3 — binário em coluna</h2>
+    <p>O nome do programa alinhado numa coluna própria; o resto do comando ao lado. Varre-se a coluna da esquerda para saber o que o agente fez.</p>
+    <div id="f3"></div>
+  </div>
+
+  <div class="frame">
+    <h2>F4 — trilho da rajada</h2>
+    <p>Comandos seguidos ficam ligados por um trilho fino, sem moldura nem cabeçalho. O chevron do último abre a rajada inteira com as saídas.</p>
+    <div class="rail" id="f4"></div>
+  </div>
+
+  <div class="frame f5">
+    <h2>F5 — cabeça e cauda</h2>
+    <p>O primeiro segmento do pipeline em tom normal, o resto (redireções, <code>head</code>, <code>2&gt;/dev/null</code>) esmaecido. O comando fica inteiro na linha, mas só a parte que importa tem peso.</p>
+    <div id="f5"></div>
+  </div>
+
+  <div class="frame">
+    <h2>F6 — pílula</h2>
+    <p>Cada comando numa cápsula que acompanha o texto do comando, não a largura do painel. Uma rajada vira uma coluna de cápsulas curtas e desalinhadas — lê-se como fala, não como log.</p>
+    <div id="f6"></div>
+  </div>
+
+  <script>
+    const COMMANDS = [
+      'ls /Users/r2luna; echo "---"; ls /Users/r2luna/.claude/projects/-Users-r2luna/memory/ 2>/dev/null; echo "---"; cat /Users/r2luna/CLAUDE.md 2>/dev/null | head -50',
+      'ls /Users/r2luna/code 2>/dev/null; echo "--- brain hits ---"; find /Users/r2luna/code /Users/r2luna/Obsidian -maxdepth 3 -iname "*brain*" 2>/dev/null | head -30',
+      'grep -ril "print" src tests docs 2>/dev/null | head -40; echo "=== src tree ==="; find src -maxdepth 2 -type d | head -40',
+      'wc -l src/Console/ShowBrainCommand.php src/Console/Printer.php && sed -n 1,400p src/Console/Printer.php',
+      'grep -n "tasks\\|actions\\|workflows\\|queries" src/Console/BrainMap.php | head -60'
+    ]
+
+    const CHEVRON = `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`
+
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    // Tokenizador de shell suficiente para uma linha de transcrição: o primeiro
+    // token depois de um operador é o programa, o resto se classifica sozinho.
+    function highlight(src) {
+      const re = /("[^"]*"|'[^']*')|(\|\||&&|[|;])|(\d?>>?[^\s]*)|(--?[A-Za-z][\w-]*)|(\S+)/g
+      let out = ''
+      let atStart = true
+      let m
+      while ((m = re.exec(src))) {
+        if (m.index > 0 && src[m.index - 1] === ' ') out += ' '
+        const [, str, op, redir, flag, word] = m
+        if (str) out += `<span class="sh-str">${esc(str)}</span>`
+        else if (op) {
+          out += `<span class="sh-op">${esc(op)}</span>`
+          atStart = true
+          continue
+        } else if (redir) out += `<span class="sh-op">${esc(redir)}</span>`
+        else if (flag) out += `<span class="sh-flag">${esc(flag)}</span>`
+        else if (word) {
+          const cls = atStart
+            ? 'sh-cmd'
+            : /^\d+([.,]\d+)?p?$/.test(word)
+              ? 'sh-num'
+              : 'sh-path'
+          out += `<span class="${cls}">${esc(word)}</span>`
+          atStart = false
+        }
+      }
+      return out.replace(/;\s/g, '<span class="sh-op">;</span> ')
+    }
+
+    const binOf = (cmd) => cmd.split(/[\s;|&]/)[0]
+    const head = (cmd) => cmd.split(/(?=[;|]|&&)/)[0].trim()
+    const tail = (cmd) => cmd.slice(head(cmd).length)
+
+    const row = (inner, cls = '') => `<div class="row ${cls}">${inner}${CHEVRON}</div>`
+
+    document.getElementById('f1').innerHTML = COMMANDS.map((c) =>
+      row(`<span class="code">${highlight(c)}</span>`)
+    ).join('')
+
+    document.getElementById('f2').innerHTML = COMMANDS.slice(0, 3)
+      .map((c) => `<div class="card">${row(`<span class="code">${highlight(c)}</span>`)}</div>`)
+      .join('')
+
+    document.getElementById('f3').innerHTML = COMMANDS.map(
+      (c) =>
+        `<div class="row"><span class="bin">${binOf(c)}</span><span class="code">${highlight(
+          c.slice(binOf(c).length).trim()
+        )}</span>${CHEVRON}</div>`
+    ).join('')
+
+    document.getElementById('f4').innerHTML = COMMANDS.map((c) =>
+      row(`<span class="code">${highlight(c)}</span>`)
+    ).join('')
+
+    document.getElementById('f5').innerHTML = COMMANDS.map(
+      (c) =>
+        row(
+          `<span class="code"><span class="lead">${highlight(head(c))}</span><span class="rest">${esc(
+            tail(c)
+          )}</span></span>`
+        )
+    ).join('')
+
+    document.getElementById('f6').innerHTML = COMMANDS.map(
+      (c) =>
+        `<div><span class="pill"><span class="code">${highlight(c)}</span>${CHEVRON}</span></div>`
+    ).join('')
+  </script>
+</body>

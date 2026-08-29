@@ -35,12 +35,40 @@ export const FLOE_TOML = `# ====================================================
 # | the OS and flips live when it does; the other two pin the app to one theme.
 # | Light is a full palette of its own, not a filter over dark.
 # |
+# | \`penguin\` picks which pinguim head greets you on a new session. Same head,
+# | 24 faces — \`classic\`, \`sleepy\`, \`surprised\`, \`focused\`, \`skeptical\`,
+# | \`cool\`, \`wink\`, \`cute\`, \`zen\`, \`robot\`, \`punk\`, \`tired\`, \`happy\`,
+# | \`angry\`, \`dizzy\`, \`dreamer\`, \`ninja\`, \`scanner\`, \`spark\`, \`sad\`,
+# | \`crown\`, \`tuft\`, \`antenna\`, \`chipped\`. Settings shows them all.
+# |
+# | \`penguin-color\` tints that head: \`accent\` (the app's own orange), \`ice\`,
+# | \`green\`, \`blue\`, \`violet\`, \`amber\`, \`red\`, or \`plain\` (the text
+# | colour). Each tone carries a dark and a light value, so the choice survives
+# | the theme flipping under it.
+# |
 # ------------------------------------------------------------------------------
 
 [appearance]
-font-family = "CommitMonoPinguim"
-font-size   = 13
-theme       = "system"
+font-family   = "CommitMonoPinguim"
+font-size     = 13
+theme         = "system"
+penguin       = "classic"
+penguin-color = "accent"
+
+
+# ------------------------------------------------------------------------------
+# | You
+# ------------------------------------------------------------------------------
+# |
+# | \`name\` is who the launcher greets. Left empty, the app works it out from
+# | the machine: \`git config user.name\` first (the name you already chose to be
+# | known by here), then the macOS full name, then the login name. First name
+# | only — "Good evening, Ada Lovelace" reads like a form letter.
+# |
+# ------------------------------------------------------------------------------
+
+[user]
+name = ""
 
 
 # ------------------------------------------------------------------------------
@@ -65,6 +93,10 @@ theme       = "system"
 # | \`system-prompt\` names a Markdown file in this directory, injected into every
 # | CLI process Floe spawns, whatever project or worktree started it. It is
 # | prose, so it stays its own file instead of one escaped string in here.
+# |
+# | The name is always resolved inside this directory — a path climbing out of it
+# | falls back to \`system-prompt.md\`, so copying ~/.config/floe brings the
+# | prompt with it. HTML comments in that file are stripped before it is sent.
 # |
 # ------------------------------------------------------------------------------
 

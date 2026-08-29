@@ -42,6 +42,22 @@ export const DEFAULT_CHOICE: ModelChoice = { model: 'opus', effort: 'high', mode
 // arrives over async IPC and `loadChoice` is called synchronously from render.
 let configured: ModelChoice = DEFAULT_CHOICE
 
+// Who the user is called in the chat, on the same rule as the launcher's
+// greeting: `[user] name` from floe.toml, or what the machine says. Pushed in
+// from appearance.ts for the same reason as the choice above — the transcript
+// names its speaker from a synchronous render path.
+let nick = 'you'
+
+/** Install the user's nick. Lower-cased: these are IRC nicks, not signatures. */
+export function setUserNick(name: string): void {
+  nick = name.trim().toLowerCase() || 'you'
+}
+
+/** The user's nick, for the `nick!ident@host` a transcript entry is headed by. */
+export function userNick(): string {
+  return nick
+}
+
 /** Install the configured default. Called at boot and whenever the file changes. */
 export function setDefaultChoice(agent: {
   model: string

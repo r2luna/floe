@@ -1,10 +1,14 @@
 import {
+  IconCheck,
   IconChevronDown,
   IconChevronRight,
+  IconCopy,
+  IconPlayerPlay,
   IconFile,
   IconFolder,
   IconFolders,
   IconFileDiff,
+  IconFileText,
   IconGitBranch,
   IconGitCompare,
   IconMessage,
@@ -23,6 +27,7 @@ import {
   Fragment,
   memo,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -30,6 +35,7 @@ import {
   useState,
   type ComponentType,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode
 } from 'react'
 import { Composer } from './Composer'
@@ -37,10 +43,17 @@ import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { hitRanges, splitByHits } from './findHits.ts'
 import { usePlans } from './usePlans'
+import { useSkills } from './useSkills'
+import { RowMenu, type MenuAction } from './RowMenu'
+import { onSkillDraft } from './skillDraft.ts'
+import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
+import { describeRef, expand, splitRefs } from './fileRefs'
 import { renderMarkdown, type MdLine } from './markdown'
-import { PenguinHead } from './PenguinHead'
-import { TerminalPanel, sendToTerminal } from './Terminal'
+import { highlightShell } from './shell'
+import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
+import { TerminalPanel } from './Terminal'
+import { sendToTerminal } from './terminalBus'
 import { useSessionActivity } from './useRunning'
 import type { Projects } from './useProjects'
 import { moveTargets } from './projectMove'
@@ -48,7 +61,15 @@ import type { Worktrees } from './useWorktrees'
 import type { Changes } from './useChanges'
 import type { PaletteItem } from './fuzzy'
 import type { Trigger } from './trigger'
-import { addressOf, lastChoice, loadChoice, speakerKey, windowOf, type ModelChoice } from './models'
+import {
+  addressOf,
+  lastChoice,
+  loadChoice,
+  speakerKey,
+  userNick,
+  windowOf,
+  type ModelChoice
+} from './models'
 import { useDraft } from './drafts'
 import { useAuth } from './useAuth'
 import { useLocalAgents } from './useLocalAgents'
@@ -57,7 +78,14 @@ import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { MessageBody, RunInTerminal } from './MessageBody'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
-import type { ClaudeStats, FileContent, FileNode, HarnessUsage } from '../../shared/types'
+import {
+  PENGUIN_COLORS,
+  PENGUIN_HEADS,
+  type PenguinColorId,
+  type PenguinHeadId
+} from '../../shared/types'
+import type { ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
+import type { Skill } from '../../main/config/skills'
 
 /**
  * Every panel kind the lane can hold. The rail on the right is generated from
@@ -126,6 +154,22 @@ export const KINDS = {
   // width. Rows open a `file` panel, so a plan is read (and quoted, and
   // commented on) with exactly the machinery every other markdown file gets.
   plans: { icon: IconNotes, title: 'plans', width: 300, min: 220, order: 44, needsProject: true },
+  // The skills you can type after `/`. A narrow list whose rows open the reader
+  // beside it, like `plans` and `changes` — which is also why it is ordered
+  // here and not with Settings: a list whose rows open something wide has to
+  // sit LEFT of the thing it opens, or the skill's text lands behind the list.
+  // Deliberately NOT `needsProject`: global skills exist with no project open,
+  // and that is where you write one.
+  skills: {
+    icon: IconSparkles,
+    title: 'skills',
+    width: 300,
+    min: 220,
+    order: 46,
+    // Same command the `n` key and the context menu run: the header button is a
+    // third way in, not a third create flow.
+    action: { icon: IconPlus, title: 'New skill…', command: 'skill.new' }
+  },
   diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsProject: true },
   // What a file row opens: the file as it is on disk, not as a patch. Shares
   // the diff's slot — both are "the file you just picked", and two of them side
@@ -234,6 +278,8 @@ export function PanelBody({
   movingProject,
   worktrees,
   changes,
+  onEnterProject,
+  onEnterWorktree,
   cwd,
   root,
   session,
@@ -246,6 +292,8 @@ export function PanelBody({
   menuItems,
   onAddProject,
   onEditorExit,
+  onCommand,
+  onEditSkill,
   onOpen
 }: {
   kind: PanelKind
@@ -255,6 +303,13 @@ export function PanelBody({
   movingProject?: { path: string; group: string } | null
   worktrees: Worktrees
   changes: Changes
+  /**
+   * Go to a project, or to a worktree, restoring what it was left showing —
+   * App.enterProject / App.enterWorktree. A plain `select` would move the
+   * highlight and leave the rest of the lane belonging to where you just were.
+   */
+  onEnterProject?: (path: string) => void
+  onEnterWorktree?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
   cwd?: string
   /** Overrides `cwd` for this panel — see Panel.root. */
@@ -286,6 +341,16 @@ export function PanelBody({
    * read it from.
    */
   openSession?: string | null
+  /**
+   * Run a command by id — what a panel's own mouse affordances dispatch.
+   *
+   * A right-click menu must not contain behaviour: it focuses the row it was
+   * opened on and then runs the very command the key runs, so the two routes
+   * cannot drift. See the rule at the top of commands.ts.
+   */
+  onCommand?: (id: string) => void
+  /** Open a skill's file in your editor — see editSkill in App. */
+  onEditSkill?: (dir: string, rel: string) => void
   /** A brand-new chat's opening message. */
   firstPrompt?: string
   /** The model that opening message was addressed to. */
@@ -295,11 +360,20 @@ export function PanelBody({
   // Every panel with rows gets the query: the find bar is one feature, so it
   // has to look and behave the same wherever `/` is pressed.
   if (kind === 'projects')
-    return <ProjectsList projects={projects} moving={movingProject} onOpen={onOpen} find={find} />
+    return (
+      <ProjectsList
+        projects={projects}
+        moving={movingProject}
+        onEnter={onEnterProject}
+        onOpen={onOpen}
+        find={find}
+      />
+    )
   if (kind === 'worktrees')
     return (
       <WorktreesList
         worktrees={worktrees}
+        onEnter={onEnterWorktree}
         onOpen={onOpen}
         openSession={openSession}
         find={find}
@@ -349,10 +423,15 @@ export function PanelBody({
   // terminal. `sub` carries the file and the line — see editSub.
   if (kind === 'edit') {
     const target = editTarget(sub)
+    // `root` overrides the worktree, the same way the reader takes it: that is
+    // how Settings opens ~/.config/floe in your editor without pretending the
+    // config directory is a checkout. One editor per root, so the three config
+    // files land in one session just as a worktree's files do.
+    const base = root ?? cwd ?? HOME
     return (
       <TerminalPanel
-        termId={`edit:${cwd ?? HOME}`}
-        cwd={cwd ?? HOME}
+        termId={`edit:${base}`}
+        cwd={base}
         branch=""
         mode="editor"
         file={target.path}
@@ -374,7 +453,17 @@ export function PanelBody({
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />
   // Owns its own state for the same reason the account panel does: the config is
   // global, so nothing above it needs to know when a setting changes.
-  if (kind === 'settings') return <SettingsPanel />
+  if (kind === 'settings') return <SettingsPanel onOpen={onOpen} />
+  if (kind === 'skills')
+    return (
+      <SkillsList
+        cwd={cwd}
+        onOpen={onOpen}
+        onCommand={onCommand}
+        onEditSkill={onEditSkill}
+        find={find}
+      />
+    )
   return null
 }
 
@@ -397,7 +486,16 @@ function useGreeting(): string {
   const [name, setName] = useState('')
   const [part, setPart] = useState(() => partOfDay(new Date().getHours()))
   useEffect(() => {
-    void window.floe.userName().then(setName).catch(() => setName(''))
+    const read = (): void => {
+      void window.floe
+        .userName()
+        .then(setName)
+        .catch(() => setName(''))
+    }
+    read()
+    // `[user] name` overrides what the machine says, so a change to the file has
+    // to reach the greeting the same way the pinguim's does.
+    return window.floe.config.onChange(read)
   }, [])
   useEffect(() => {
     // Tick on the hour rather than every minute: leaving the launcher open
@@ -409,6 +507,32 @@ function useGreeting(): string {
     return () => clearTimeout(id)
   }, [part])
   return name ? `Good ${part}, ${name}` : `Good ${part}`
+}
+
+/**
+ * Which pinguim head greets you — `[appearance] penguin` in floe.toml.
+ *
+ * Re-read on `config:changed` like everything else that file drives, so picking
+ * a head in Settings changes the greeting behind you without a relaunch.
+ */
+function usePenguinMark(): { head: PenguinHeadId; color: PenguinColorId } {
+  const [mark, setMark] = useState<{ head: PenguinHeadId; color: PenguinColorId }>({
+    head: 'classic',
+    color: 'accent'
+  })
+  useEffect(() => {
+    const read = (): void => {
+      void window.floe.config
+        .get()
+        .then((config) =>
+          setMark({ head: config.appearance.penguin, color: config.appearance.penguinColor })
+        )
+        .catch(() => setMark({ head: 'classic', color: 'accent' }))
+    }
+    read()
+    return window.floe.config.onChange(read)
+  }, [])
+  return mark
 }
 
 /**
@@ -444,6 +568,7 @@ function Launcher({
   // typing for this branch is still waiting when you come back to it.
   const [text, setText] = useDraft(`branch:${cwd}`)
   const greeting = useGreeting()
+  const penguin = usePenguinMark()
 
   // Sending creates the session for real, then opens the ordinary chat panel
   // for it and hands over the first prompt. The launcher is a way in, not a
@@ -451,8 +576,13 @@ function Launcher({
   // rather than when the launcher opened, so an abandoned launcher leaves
   // nothing behind.
   const start = (choice: ModelChoice) => {
-    const prompt = text.trim()
-    if (!prompt) return
+    // Two forms of the same message: what was typed names files the short way,
+    // what is sent names them the way the agent can open. The title stays the
+    // typed one — a session called `/Users/…/skills/example.md:7-23` reads as
+    // nothing at all in the sidebar.
+    const typed = text.trim()
+    const prompt = expand(typed)
+    if (!typed) return
     const id = crypto.randomUUID()
     void window.floe.claude
       .createSession({ id, worktreePath: cwd, title: prompt.slice(0, 60) })
@@ -463,7 +593,7 @@ function Launcher({
         onCreated?.()
         onOpen({
           kind: 'chat',
-          sub: prompt.slice(0, 40),
+          sub: typed.slice(0, 40),
           session: { id, worktreePath: cwd },
           firstPrompt: prompt,
           firstChoice: choice
@@ -477,7 +607,11 @@ function Launcher({
   return (
     <div className="launcher">
       <h1 className="greet">
-        <PenguinHead size={24} className="greet-mark" />
+        <PenguinHead
+          variant={penguin.head}
+          size={26}
+          className={`greet-mark ${penguinTone(penguin.color)}`}
+        />
         {greeting}
       </h1>
 
@@ -629,9 +763,73 @@ const nickColor = (nick: string): string => {
 
 const clock = (at?: number): string => (at ? new Date(at).toTimeString().slice(0, 5) : '')
 
+/** Elapsed as the turn reads it: `46s`, `4m 46s`, `1h 04m`. */
+export function elapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const s = total % 60
+  const m = Math.floor(total / 60) % 60
+  const h = Math.floor(total / 3600)
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`
+  if (m) return `${m}m ${s}s`
+  return `${s}s`
+}
+
+/**
+ * How long this turn has been going and what it has spent: `(4m 46s · ↓ 89.6k
+ * tokens)`. Its own component with its own interval, so the second-by-second
+ * tick re-renders this line and not the transcript above it.
+ */
+function TypingMeter({ startedAt, tokens }: { startedAt?: number; tokens: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!startedAt) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+  const parts: string[] = []
+  if (startedAt) parts.push(elapsed(now - startedAt))
+  if (tokens > 0) parts.push(`↓ ${(tokens / 1000).toFixed(1)}k tokens`)
+  if (!parts.length) return null
+  return <span className="irc-dim">({parts.join(' · ')})</span>
+}
+
 // How far from the bottom still counts as "reading the latest" — a rounding
 // error or a half-line of overscroll must not be read as scrolling away.
 const PIN_SLOP = 80
+
+/**
+ * A worktree's git dirt: `+2 ~5 −1` for what is still uncommitted, `⇡2 ⇣3` for
+ * what is still unpushed (and unpulled), split by a hairline so the two
+ * questions never read as one number.
+ *
+ * Counted per file: `+` new, `~` edited, `−` removed. Nothing shows for a
+ * worktree that is clean and in sync — a row with nothing to say says nothing.
+ */
+function GitDirt({ status }: { status?: WorktreeStatus }) {
+  if (!status) return null
+  const { added, modified, deleted, ahead, behind } = status
+  const dirty = added + modified + deleted > 0
+  const sync = ahead + behind > 0
+  if (!dirty && !sync) return null
+  return (
+    <span className="wt-dirt">
+      {dirty && (
+        <span className="wt-dirt-g" title={`${added} novos · ${modified} modificados · ${deleted} apagados`}>
+          {added > 0 && <span className="wt-add">+{added}</span>}
+          {modified > 0 && <span className="wt-mod">~{modified}</span>}
+          {deleted > 0 && <span className="wt-del">−{deleted}</span>}
+        </span>
+      )}
+      {sync && (
+        <span className="wt-dirt-g" title={`${ahead} commits por enviar · ${behind} por trazer`}>
+          {ahead > 0 && <span className="wt-sync">⇡{ahead}</span>}
+          {behind > 0 && <span className="wt-sync">⇣{behind}</span>}
+        </span>
+      )}
+    </span>
+  )
+}
 
 /**
  * A session's transcript, in the IRC layout: who spoke on one line, what they
@@ -675,6 +873,7 @@ function ChatPanel({
     error,
     running,
     tokens,
+    startedAt,
     queued,
     send,
     unqueue,
@@ -879,7 +1078,7 @@ function ChatPanel({
               <i />
               <i />
             </span>
-            {tokens > 0 && <span className="irc-dim">↓ {(tokens / 1000).toFixed(1)}k</span>}
+            <TypingMeter startedAt={startedAt} tokens={tokens} />
             <button className="irc-stop" onClick={stop} title="Interrupt (⌘.)">
               stop
             </button>
@@ -898,7 +1097,9 @@ function ChatPanel({
               <IconX size={11} stroke={2} />
             </button>
             <span className="irc-queued-mark">{q.linked ? '↳' : '⟳'}</span>
-            <span className="irc-queued-text">{q.text}</span>
+            <span className="irc-queued-text">
+              <RefText text={q.text} />
+            </span>
           </div>
         ))}
       </div>
@@ -910,7 +1111,7 @@ function ChatPanel({
           repin()
           // Busy or idle, ⏎ means "this is what I want to say". The hook decides
           // whether that starts a turn now or waits for the current one to end.
-          send(text, choice, undefined, undefined, linking)
+          send(expand(text), choice, undefined, undefined, linking)
           setText('')
           setLinking(false)
         }}
@@ -965,7 +1166,7 @@ const LOG_PAGE = 100
 // always Claude.
 function whoOf(item: TranscriptItem): ReturnType<typeof addressOf> {
   return addressOf(
-    item.role === 'user' ? 'rafael' : (item.provider ?? 'claude'),
+    item.role === 'user' ? userNick() : (item.provider ?? 'claude'),
     item.model,
     item.effort
   )
@@ -982,13 +1183,52 @@ function lastSpeaker(items: TranscriptItem[]): string | null {
 }
 
 /** One spoken entry, shared by the settled Log and the streaming tail. */
+/**
+ * Your own words, with file references drawn as chips.
+ *
+ * The message on the wire carries the full path — that is the point of it — but
+ * a line of `/Users/…/.config/floe/skills/example.md:7-23` in the log is a wall
+ * you have to read to find the two things you care about: which file, which
+ * lines. The chip says exactly those, and the tooltip still has the path.
+ *
+ * Everything else is left alone: this is what the user typed, and rendering it
+ * as markdown would reformat their own sentence back at them.
+ */
+function RefText({ text }: { text: string }) {
+  return (
+    <>
+      {splitRefs(text).map((part, i) =>
+        part.ref === undefined ? (
+          <Fragment key={i}>{part.text}</Fragment>
+        ) : (
+          <FileChip ref_={part.ref} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+function FileChip({ ref_ }: { ref_: string }) {
+  const { name, lines, full } = describeRef(ref_)
+  return (
+    <span className="file-ref" title={full}>
+      <IconFileText size={12} stroke={1.6} />
+      <span className="file-ref-name">{name}</span>
+      {lines && <span className="file-ref-lines">{lines}</span>}
+    </span>
+  )
+}
+
 function Entry({
   item,
   isNew,
+  isLast,
   streaming
 }: {
   item: TranscriptItem
   isNew: boolean
+  /** Last spoken entry of this run — where the turn's footer goes. */
+  isLast?: boolean
   streaming?: boolean
 }) {
   const who = whoOf(item)
@@ -1013,9 +1253,31 @@ function Entry({
         {item.role === 'assistant' ? (
           <MessageBody text={item.text ?? ''} streaming={streaming} />
         ) : (
-          item.text
+          <RefText text={item.text ?? ''} />
         )}
       </div>
+      {isLast && item.role === 'assistant' && <TurnCost ms={item.ms} tokens={item.contextTokens} />}
+    </div>
+  )
+}
+
+/**
+ * What the turn cost, closing the answer: `4m 46s · ↓89.6k tokens`.
+ *
+ * A footer rather than a header field, because the cost is only known when the
+ * turn ends — and because a header already carries the address, and a long
+ * model name would push these numbers off the row.
+ *
+ * A conversation written before this shipped has neither number: the line is
+ * simply absent, never a zero it cannot vouch for.
+ */
+function TurnCost({ ms, tokens }: { ms?: number; tokens?: number }) {
+  if (!ms && !tokens) return null
+  return (
+    <div className="irc-cost">
+      {!!ms && <span>{elapsed(ms)}</span>}
+      {!!ms && !!tokens && <span className="irc-cost-sep">·</span>}
+      {!!tokens && <span>↓{(tokens / 1000).toFixed(1)}k tokens</span>}
     </div>
   )
 }
@@ -1106,30 +1368,185 @@ function QuestionBlock({
 const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
   let speaker: string | null = null
 
-  return (
-    <>
-      {items.map((item, i) => {
-        // Tool output, images and artifacts are the speaker working, not someone
-        // else talking: they never break the run and never take a header.
-        if (item.role !== 'user' && item.role !== 'assistant') {
-          return (
-            <div className="irc-body irc-act" key={i}>
-              <span className="irc-star">*</span>{' '}
-              {item.name && <span className="irc-by">{item.name} </span>}
-              {item.summary || item.text || item.role}
-            </div>
-          )
-        }
+  // The last spoken entry of each run — the one the turn footer closes. A run
+  // ends where the next speaker differs, so it can only be known by looking
+  // ahead, which is why it is a pass of its own.
+  const endsRun = new Set<number>()
+  let prev: number | null = null
+  let prevKey: string | null = null
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.role !== 'user' && item.role !== 'assistant') continue
+    const key = speakerKey(whoOf(item))
+    if (prev !== null && key !== prevKey) endsRun.add(prev)
+    prev = i
+    prevKey = key
+  }
+  if (prev !== null) endsRun.add(prev)
 
-        const from = speakerKey(whoOf(item))
-        const isNew = speaker !== from
-        speaker = from
+  const out: ReactNode[] = []
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
 
-        return <Entry item={item} isNew={isNew} key={i} />
-      })}
-    </>
-  )
+    // A run of shell calls is one block, not one line each: the agent exploring
+    // is a single act of work, and five bordered rows in a row would read as
+    // five separate things happening.
+    if (isBash(item)) {
+      const commands: string[] = []
+      const at = i
+      while (i < items.length && isBash(items[i])) commands.push(items[i++].summary as string)
+      i--
+      out.push(<BashBlock commands={commands} key={at} />)
+      continue
+    }
+
+    // Other tool output, images and artifacts are the speaker working, not
+    // someone else talking: they never break the run and never take a header.
+    if (item.role !== 'user' && item.role !== 'assistant') {
+      out.push(
+        <div className="irc-body irc-act" key={i}>
+          <span className="irc-star">*</span>{' '}
+          {item.name && <span className="irc-by">{item.name} </span>}
+          {item.summary || item.text || item.role}
+        </div>
+      )
+      continue
+    }
+
+    const from = speakerKey(whoOf(item))
+    const isNew = speaker !== from
+    speaker = from
+
+    out.push(<Entry item={item} isNew={isNew} isLast={endsRun.has(i)} key={i} />)
+  }
+
+  return <>{out}</>
 })
+
+/** A shell call, which is the only tool whose argument is worth showing whole. */
+const isBash = (item: TranscriptItem): boolean =>
+  item.role === 'tool' && item.name?.toLowerCase() === 'bash' && !!item.summary
+
+/**
+ * A run of shell commands, as rows.
+ *
+ * One frame around the whole run, and inside it one row per command — the row
+ * is the unit you act on (open it, copy it, run it), and the frame is what says
+ * these belong to the same piece of work.
+ */
+function BashBlock({ commands }: { commands: string[] }) {
+  return (
+    <div className="bash-blk">
+      {commands.map((command, i) => (
+        <BashRow command={command} key={i} />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One command.
+ *
+ * Closed it is a single truncated line; opening it wraps the whole thing. A
+ * command that already fits has nothing to open, so it loses its chevron and
+ * keeps its actions on show — pressing a key to reveal what is already there
+ * would be a step for nothing.
+ *
+ * Whether it fits is a question of LAYOUT, not of length: the same command fits
+ * a wide panel and not a narrow one, so it is measured after paint and again
+ * when the panel is resized.
+ */
+function BashRow({ command }: { command: string }) {
+  const run = useContext(RunInTerminal)
+  const code = useRef<HTMLSpanElement>(null)
+  const [open, setOpen] = useState(false)
+  const [fits, setFits] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  useLayoutEffect(() => {
+    const el = code.current
+    if (!el) return
+    // Open, the text wraps, so it always "fits" and measuring would close the
+    // row it was just asked to open. The measurement resumes when it closes.
+    if (open) return
+    const measure = (): void => setFits(el.scrollWidth <= el.clientWidth + 1)
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [command, open])
+
+  const copy = (): void => {
+    void navigator.clipboard.writeText(command)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1400)
+  }
+
+  return (
+    <div
+      className="bash-row"
+      // A cursor row like any other, so j/k walks the commands and Enter opens
+      // the one you are on. Not a <button>: the actions inside are buttons of
+      // their own, and one cannot nest inside another.
+      data-nav
+      tabIndex={-1}
+      role="button"
+      aria-expanded={fits ? undefined : open}
+      data-open={open || undefined}
+      data-fit={fits || undefined}
+      // Read by bash.copy and bash.run — the row already knows its command, so
+      // nothing has to be lifted into the lane for a key to find it.
+      data-cmd={command}
+      onClick={() => !fits && setOpen((o) => !o)}
+      onKeyDown={(e) => {
+        if (fits || (e.key !== 'Enter' && e.key !== ' ')) return
+        e.preventDefault()
+        setOpen((o) => !o)
+      }}
+    >
+      <IconChevronRight size={14} stroke={1.8} className="bash-chev" />
+      <span className="bash-code" ref={code}>
+        {highlightShell(command).map((t, i) =>
+          t.cls ? (
+            <span className={t.cls} key={i}>
+              {t.text}
+            </span>
+          ) : (
+            <Fragment key={i}>{t.text}</Fragment>
+          )
+        )}
+      </span>
+      <span className="bash-acts">
+        <span
+          className="bash-act"
+          role="button"
+          tabIndex={-1}
+          title="Copy (y)"
+          onClick={(e) => {
+            e.stopPropagation()
+            copy()
+          }}
+        >
+          {copied ? <IconCheck size={13} stroke={2} /> : <IconCopy size={13} stroke={1.6} />}
+        </span>
+        {run && (
+          <span
+            className="bash-act"
+            role="button"
+            tabIndex={-1}
+            title="Run in terminal (x)"
+            onClick={(e) => {
+              e.stopPropagation()
+              run(command)
+            }}
+          >
+            <IconPlayerPlay size={13} stroke={1.6} />
+          </span>
+        )}
+      </span>
+    </div>
+  )
+}
 
 /* --- changes + diff ------------------------------------------------------- */
 
@@ -1772,6 +2189,318 @@ function PlansList({
 }
 
 /**
+ * The skills panel: every skill this project can type after `/`, and the four
+ * things you do to one.
+ *
+ * Rows open the skill in the file reader — the same reader every other Markdown
+ * file gets, given the skill's own directory as its root, so a bundled skill's
+ * reference files sit beside it. Editing and deleting are commands, not
+ * handlers: `e` and `d` from the keyboard, and the right-click menu dispatches
+ * those same ids after focusing the row it was opened on.
+ *
+ * Naming, though, happens IN the list. `n` drops a menu under the header's `+`
+ * to pick the scope, then puts an empty row where the skill will be for you to
+ * type the name into; `r` turns the row you are on into the same box. Nothing
+ * opens over the app, and the row you are naming is drawn where it will live —
+ * which is the answer to "global or this project?" that a modal cannot give.
+ */
+function SkillsList({
+  cwd,
+  onOpen,
+  onCommand,
+  onEditSkill,
+  find
+}: {
+  cwd?: string
+  onOpen: OpenFn
+  onCommand?: (id: string) => void
+  /** Open a skill's file in your editor — see editSkill in App. */
+  onEditSkill?: (dir: string, rel: string) => void
+  find?: string
+}) {
+  const skills = useSkills(cwd)
+  // Where the right-click menu is, and the row that opened it — closing hands
+  // focus back so the list continues where it was rather than nowhere.
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+  // The scope menu under the `+`. Null when it is not up.
+  const [scoping, setScoping] = useState<{ x: number; y: number } | null>(null)
+  // The row being typed into: a new skill of this scope, or an existing one
+  // being renamed. One at a time — two open boxes would make Escape ambiguous.
+  const [draft, setDraft] = useState<SkillDraftRow | null>(null)
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  /**
+   * Put the cursor back on a row by name, or on the list at all.
+   *
+   * Every way out of the box ends here. A committed rename lands on the row
+   * under its new name, a cancel lands back where it was, and a create lands on
+   * the row that now exists — never on nothing, which is what would happen if
+   * the box simply disappeared.
+   */
+  /**
+   * Put the cursor on a row by name, once that row exists.
+   *
+   * Deferred, and retried for a few frames, because the row you just named is
+   * not in the DOM yet: the write returns, the watcher reports, the list
+   * refetches. Landing on the first row instead would be the cursor jumping to
+   * the top of the list every time you renamed something near the bottom.
+   */
+  const focusRow = useCallback((name?: string, tries = 12) => {
+    requestAnimationFrame(() => {
+      const panel = document.querySelector('.panel[data-kind="skills"]')
+      // Not while a box is open. This runs a frame late — long enough for the
+      // scope menu to have closed AND the draft row it opened to have mounted —
+      // and focusing a row behind that box would blur it, which is how a name
+      // half-typed used to vanish and the rest of the letters became commands.
+      if (panel?.querySelector('.skill-input')) return
+      const want = name ? panel?.querySelector<HTMLElement>(`[data-skill="${CSS.escape(name)}"]`) : null
+      if (!want && name && tries > 0) return focusRow(name, tries - 1)
+      // Out of tries, or nothing was named: the list itself, never nothing.
+      ;(want ?? panel?.querySelector<HTMLElement>('[data-skill]'))?.focus()
+    })
+  }, [])
+
+  // The `+` in the panel header is drawn by the lane, not by this component, so
+  // the menu it drops is positioned from that button's own rectangle. Falls back
+  // to the top of the list when the header is not there (a bare panel).
+  const askScope = useCallback(() => {
+    const plus = document.querySelector('.panel[data-kind="skills"] .panel-act')
+    const box = plus?.getBoundingClientRect()
+    setScoping({ x: box ? box.left : 12, y: box ? box.bottom + 4 : 40 })
+  }, [])
+
+  // What `n` and `r` reach. The panel owns the flow; the commands only start it.
+  useEffect(
+    () =>
+      onSkillDraft((req) => {
+        setMenu(null)
+        if (req.kind === 'new') {
+          // One scope to choose from is not a choice: with no project open,
+          // global is the only place a skill can go, so skip straight to typing.
+          if (!cwd) return setDraft({ scope: 'global', text: '' })
+          return askScope()
+        }
+        const found = skills.all.find((s) => s.name === req.name)
+        if (found) setDraft({ scope: found.scope, renaming: found.name, text: found.name })
+      }),
+    [askScope, cwd, skills.all]
+  )
+
+  const items: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('skill.edit') },
+    { label: 'Rename…', keys: 'r', run: () => onCommand?.('skill.rename') },
+    { label: 'Delete…', keys: 'd', run: () => onCommand?.('skill.delete') },
+    { label: 'New skill…', keys: 'n', run: () => onCommand?.('skill.new') }
+  ]
+
+  const scopes: MenuAction[] = [
+    { label: 'Global', keys: 'every project', run: () => setDraft({ scope: 'global', text: '' }) },
+    {
+      label: 'This project',
+      keys: 'here only',
+      // Nowhere to put it without a project. Shown and dimmed rather than
+      // hidden: the scope you cannot use is still a thing worth knowing about.
+      disabled: !cwd,
+      run: () => setDraft({ scope: 'project', text: '' })
+    }
+  ]
+
+  // One write at a time. Enter and the blur it causes are the same intent
+  // arriving twice, and the second one would ask for a name that now exists.
+  const writing = useRef(false)
+
+  /** Write the draft: a rename of the row it sits on, or a skill that is new. */
+  const commit = (): void => {
+    if (!draft || writing.current) return
+    const name = draft.text.trim()
+    if (!name || draft.renaming === name) return cancel()
+    const done = (): void => {
+      writing.current = false
+      setDraft(null)
+      // Our own write, so ask for the list now rather than waiting on the
+      // watcher — the cursor is trying to land on a row that has to exist.
+      skills.reload()
+      focusRow(name)
+    }
+    const fail = (err: unknown): void => {
+      writing.current = false
+      setDraft((d) => (d ? { ...d, error: reason(err) } : d))
+    }
+    writing.current = true
+    if (draft.renaming) {
+      void window.floe.skills.rename(draft.renaming, name, cwd).then(done, fail)
+      return
+    }
+    void window.floe.skills.create(name, draft.scope, cwd).then((made) => {
+      done()
+      // A skill you just named is a file you are about to write.
+      onEditSkill?.(made.dir, made.file.slice(made.dir.length + 1))
+    }, fail)
+  }
+
+  const cancel = (): void => {
+    if (writing.current) return
+    const back = draft?.renaming
+    setDraft(null)
+    focusRow(back)
+  }
+
+  if (skills.error) return <p className="empty error">{skills.error}</p>
+  if (skills.loading && !skills.all.length && !draft) return <p className="empty">Loading…</p>
+
+  // Grouped by scope, then by name inside it. The list from the main process is
+  // sorted by name alone — right for the composer's `/` menu, wrong here, where
+  // interleaved scopes would print a GLOBAL/PROJECT heading over every row.
+  const groups: Array<{ scope: Skill['scope']; rows: Skill[] }> = (['global', 'project'] as const).map(
+    (scope) => ({ scope, rows: skills.all.filter((s) => s.scope === scope) })
+  )
+
+  const empty = !skills.all.length && !draft
+
+  return (
+    <>
+      {empty && (
+        <p className="empty">
+          No skills yet — <kbd>n</kbd> to write one.
+        </p>
+      )}
+      {groups.map(({ scope, rows }) => {
+        const drafting = draft && !draft.renaming && draft.scope === scope
+        if (!rows.length && !drafting) return null
+        return (
+          <Fragment key={scope}>
+            <div className="group-label">{scope.toUpperCase()}</div>
+            {rows.map((skill) => {
+              // The reader takes a path relative to a root, which for a skill is
+              // its own directory — see the `root` override in PanelBody.
+              const rel = skill.file.slice(skill.dir.length + 1)
+              if (draft?.renaming === skill.name) return <DraftRow key={rel} draft={draft} set={setDraft} commit={commit} cancel={cancel} />
+              return (
+                <button
+                  key={rel}
+                  className="row"
+                  title={skill.file}
+                  // What the skill commands read: the name is the address (the
+                  // main process resolves it), the root and file are what the
+                  // editor and the reader open.
+                  data-skill={skill.name}
+                  data-skill-root={skill.dir}
+                  data-skill-file={rel}
+                  onClick={() => onOpen({ kind: 'file', sub: rel, root: skill.dir })}
+                  // Focus first: the commands the menu dispatches act on the row
+                  // the cursor is on, so right-clicking has to MOVE the cursor
+                  // there — exactly what clicking the row already does.
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    const row = e.currentTarget as HTMLElement
+                    row.focus()
+                    setMenu({ x: e.clientX, y: e.clientY, row })
+                  }}
+                >
+                  <span className="row-name">{markAll(skill.name, find)}</span>
+                  {skill.description && <span className="skill-note">{skill.description}</span>}
+                </button>
+              )
+            })}
+            {drafting && <DraftRow draft={draft} set={setDraft} commit={commit} cancel={cancel} />}
+          </Fragment>
+        )
+      })}
+      {scoping && (
+        <RowMenu
+          at={scoping}
+          items={scopes}
+          onClose={() => {
+            setScoping(null)
+            focusRow()
+          }}
+        />
+      )}
+      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
+    </>
+  )
+}
+
+/**
+ * The row you type a skill's name into.
+ *
+ * `.md` is drawn beside the box rather than sitting inside it: the extension is
+ * not a decision, and a suffix you can backspace into is one more thing the name
+ * check has to refuse. What you type is the token — `/name` — and the file is
+ * named after it.
+ */
+interface SkillDraftRow {
+  scope: Skill['scope']
+  /** The skill being renamed — absent when the row is a skill that is new. */
+  renaming?: string
+  text: string
+  /** Why the last attempt was refused, shown under the box. */
+  error?: string
+}
+
+function DraftRow({
+  draft,
+  set,
+  commit,
+  cancel
+}: {
+  draft: SkillDraftRow
+  set: (fn: (d: SkillDraftRow | null) => SkillDraftRow | null) => void
+  commit: () => void
+  cancel: () => void
+}) {
+  return (
+    <>
+      <div className="row row-draft">
+        <input
+          className="skill-input"
+          autoFocus
+          // Sized to the text: an input's default width is twenty characters,
+          // which parked `.md` halfway across the panel and made the suffix read
+          // as another column rather than as the end of the filename.
+          size={Math.max(draft.text.length, 4)}
+          value={draft.text}
+          placeholder="name"
+          spellCheck={false}
+          // Selected on the way in, so renaming to something else is typing and
+          // renaming a suffix is one arrow key.
+          onFocus={(e) => e.currentTarget.select()}
+          onChange={(e) => set((d) => (d ? { ...d, text: e.target.value, error: undefined } : d))}
+          // The box owns the keyboard while it is up. Escape especially: it
+          // must cancel the name, not close the panel behind it.
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commit()
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              cancel()
+            }
+          }}
+          // Clicking away keeps what you typed — a name is work, and losing it to
+          // a stray click is worse than a rename you did not mean, which `r`
+          // undoes in one keystroke. An empty box had nothing to keep.
+          onBlur={() => (draft.text.trim() ? commit() : cancel())}
+        />
+        <span className="skill-ext">.md</span>
+      </div>
+      {/* Under the box, and the box stays open: the name that was refused is
+          still there to edit, so the fix is a keystroke rather than starting
+          the row again. */}
+      {draft.error && <p className="skill-error">{draft.error}</p>}
+    </>
+  )
+}
+
+/**
  * The real project list from the main process.
  *
  * The group heading is a heading, not a row: it is not something you can be on,
@@ -1781,12 +2510,15 @@ function PlansList({
 function ProjectsList({
   projects,
   moving,
+  onEnter,
   onOpen,
   find
 }: {
   projects: Projects
   /** The project being moved and the group it is hovering over — see `project.move.start`. */
   moving?: { path: string; group: string } | null
+  /** Go to a project and to whatever it was left showing — see PanelBody. */
+  onEnter?: (path: string) => void
   onOpen: OpenFn
   find?: string
 }) {
@@ -1836,6 +2568,9 @@ function ProjectsList({
               // when this panel is focused with nothing remembered.
               data-active={p.path === projects.current?.path || undefined}
               onClick={() => {
+                // Entering opens the worktree list itself, and then the branch
+                // and chat this project was last on.
+                if (onEnter) return onEnter(p.path)
                 projects.select(p.path)
                 onOpen({ kind: 'worktrees', sub: p.name })
               }}
@@ -1867,11 +2602,14 @@ function ProjectsList({
  */
 function WorktreesList({
   worktrees,
+  onEnter,
   onOpen,
   openSession,
   find
 }: {
   worktrees: Worktrees
+  /** Go to a worktree and to the chat it was left showing — see PanelBody. */
+  onEnter?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
   onOpen: OpenFn
   /** The session the lane is showing, so the list can say which one that is. */
   openSession?: string | null
@@ -1908,13 +2646,17 @@ function WorktreesList({
             data-active={worktree.path === worktrees.currentPath || undefined}
             aria-expanded={!collapsed.has(worktree.path)}
             onClick={() => {
+              // Entering restores the chat this branch was left in, when it has
+              // one. The launcher is only offered for a branch with nothing to
+              // fold: it autoFocuses its composer, so offering it here would
+              // make every fold throw you into a new chat. ⌘T is how you ask.
+              if (onEnter) {
+                if (onEnter(worktree.path, sessions.length === 0) === 'chat') return
+                if (sessions.length) toggle(worktree.path)
+                return
+              }
               worktrees.select(worktree.path)
-              // Folding only. Opening the launcher here would pull the caret
-              // into its composer (it autoFocuses), so every fold would throw
-              // you into a new chat. ⌘T is how you ask for the launcher.
               if (sessions.length) return toggle(worktree.path)
-              // Nothing to fold: the only useful thing a bare branch does is
-              // start the first session on it.
               onOpen({ kind: 'branch', sub: worktree.branch })
             }}
           >
@@ -1931,6 +2673,7 @@ function WorktreesList({
                 underneath, each with its own mark, so a tally on the branch
                 only repeats what the next three rows already say. */}
             <span className="row-name">{markAll(worktree.branch, find)}</span>
+            <GitDirt status={worktrees.status[worktree.path]} />
           </button>
 
           {(collapsed.has(worktree.path) ? [] : sessions).map((s) => (
@@ -2422,6 +3165,15 @@ type SettingRow =
   | { kind: 'choice'; table: string; key: string; label: string; value: string; options: readonly string[]; hint?: string }
   | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
+  | { kind: 'penguin'; table: string; key: string; label: string; value: PenguinHeadId; hint?: string }
+  | {
+      kind: 'penguinColor'
+      table: string
+      key: string
+      label: string
+      value: PenguinColorId
+      hint?: string
+    }
 
 /**
  * Settings — a view of `~/.config/floe/floe.toml`.
@@ -2432,16 +3184,57 @@ type SettingRow =
  * its documentation. Anything the panel does not cover is a row that opens the
  * file, rather than a setting the user cannot reach.
  */
-function SettingsPanel() {
+function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   const settings = useSettings()
   const { config } = settings
+
+  /**
+   * Open one of the config files in your editor — `e`'s answer, from Settings.
+   *
+   * The main process decides which kind of editor it is, exactly as it does for
+   * the file tree: a terminal one reports `panel` and runs in the editor panel
+   * rooted at the config directory, a GUI one is already launching. When there
+   * is no editor to launch, the OS opens the file — the row must never be a
+   * click that does nothing.
+   */
+  const openInEditor = (abs?: string): void => {
+    const dir = settings.paths?.dir
+    if (!abs || !dir) return
+    const rel = abs.startsWith(`${dir}/`) ? abs.slice(dir.length + 1) : abs
+    void window.floe.editor.launch(dir, rel).then(
+      (result) => {
+        if (result.mode === 'panel') onOpen({ kind: 'edit', sub: rel, root: dir })
+        else if (result.error) settings.reveal(abs)
+      },
+      () => settings.reveal(abs)
+    )
+  }
   // Which row is mid-edit, by `table.key`. One at a time: two open boxes would
   // make Escape ambiguous.
   const [editing, setEditing] = useState<string | null>(null)
+  // The reset row asks once before it fires. It replaces a file the user may
+  // have spent an evening on, and this list is walked with `j` and Enter — one
+  // stray keypress must not be the whole edit. The old file is kept as a .bak
+  // either way, so the question is a speed bump, not a lock.
+  const [resetArmed, setResetArmed] = useState(false)
 
   if (!config) return <p className="empty">Loading…</p>
 
   const groups: Array<{ title: string; rows: SettingRow[] }> = [
+    {
+      title: 'You',
+      rows: [
+        {
+          kind: 'text',
+          table: 'user',
+          key: 'name',
+          label: 'Name',
+          value: config.user.name ?? '',
+          placeholder: 'from this machine',
+          hint: 'who the launcher greets — empty falls back to your git or system name'
+        }
+      ]
+    },
     {
       title: 'Appearance',
       rows: [
@@ -2462,6 +3255,22 @@ function SettingsPanel() {
           value: config.appearance.theme,
           options: ['dark', 'light', 'system'],
           hint: 'system follows the OS; dark and light stay put'
+        },
+        {
+          kind: 'penguin',
+          table: 'appearance',
+          key: 'penguin',
+          label: 'Avatar',
+          value: config.appearance.penguin,
+          hint: 'the head that greets you — Enter opens all twenty-four'
+        },
+        {
+          kind: 'penguinColor',
+          table: 'appearance',
+          key: 'penguin-color',
+          label: 'Avatar colour',
+          value: config.appearance.penguinColor,
+          hint: 'every tone carries a dark and a light value'
         }
       ]
     },
@@ -2610,15 +3419,34 @@ function SettingsPanel() {
         <div className="group-label">FILES</div>
         {/* Everything not on a row above still has a home: these open the files
             themselves, which are documented in place. */}
-        <button className="row" onClick={() => settings.reveal(settings.paths?.floe)}>
+        <button className="row" onClick={() => openInEditor(settings.paths?.floe)}>
           <span className="row-name">floe.toml</span>
           <span className="badge">all settings</span>
         </button>
-        <button className="row" onClick={() => void window.floe.keybindings.reveal()}>
+        <button className="row" onClick={() => openInEditor(settings.paths?.systemPrompt)}>
+          <span className="row-name">system-prompt.md</span>
+          <span className="badge">every session</span>
+        </button>
+        <button className="row" onClick={() => openInEditor(settings.keys?.path)}>
           <span className="row-name">keybindings.toml</span>
           <span className="badge">every binding</span>
         </button>
-        <button className="row" onClick={() => settings.reveal(settings.paths?.projects)}>
+        <button
+          className="row"
+          onClick={() => {
+            if (!resetArmed) {
+              setResetArmed(true)
+              return
+            }
+            setResetArmed(false)
+            settings.resetKeys()
+          }}
+          onBlur={() => setResetArmed(false)}
+        >
+          <span className="row-name">{resetArmed ? 'Replace your keybindings?' : 'Reset keybindings'}</span>
+          <span className="badge">{resetArmed ? 'yes, rewrite' : 'back to defaults'}</span>
+        </button>
+        <button className="row" onClick={() => openInEditor(settings.paths?.projects)}>
           <span className="row-name">projects/</span>
           <span className="badge">one dir each</span>
         </button>
@@ -2656,6 +3484,15 @@ function SettingRowView({
     if (editing) box.current?.focus()
   }, [editing])
 
+  // Coming back out of an editor, focus returns to the row it opened from. The
+  // ref is null while the row is swapped out, so this waits for the button to be
+  // back in the tree rather than calling focus() on the way past.
+  const wasEditing = useRef(false)
+  useEffect(() => {
+    if (wasEditing.current && !editing) button.current?.focus()
+    wasEditing.current = editing
+  }, [editing])
+
   const leave = (): void => {
     onDone()
     // Focus never gets stranded on a dismissed input: it goes back to the row it
@@ -2671,6 +3508,41 @@ function SettingRowView({
       onSet(row.table, row.key, draft.trim())
     }
     leave()
+  }
+
+  const pick = (id: string): void => {
+    onSet(row.table, row.key, id)
+    leave()
+  }
+
+  if (editing && row.kind === 'penguin') {
+    return (
+      <SwatchPicker
+        label={row.label}
+        value={row.value}
+        options={PENGUIN_HEADS}
+        title={(id) => PENGUIN_LABELS[id]}
+        render={(id) => <PenguinHead variant={id} size={26} />}
+        onPick={pick}
+        onCancel={leave}
+      />
+    )
+  }
+
+  if (editing && row.kind === 'penguinColor') {
+    return (
+      <SwatchPicker
+        label={row.label}
+        value={row.value}
+        options={PENGUIN_COLORS}
+        title={(id) => PENGUIN_COLOR_LABELS[id]}
+        // The same head in every tone: the choice is the colour, so nothing else
+        // about the swatch may change between them.
+        render={(id) => <PenguinHead variant="classic" size={26} className={penguinTone(id)} />}
+        onPick={pick}
+        onCancel={leave}
+      />
+    )
   }
 
   if (editing && (row.kind === 'text' || row.kind === 'number')) {
@@ -2702,6 +3574,7 @@ function SettingRowView({
       const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
       return onSet(row.table, row.key, next)
     }
+    if (row.kind === 'penguin' || row.kind === 'penguinColor') return onEdit()
     setDraft(row.kind === 'number' ? String(row.value) : row.value)
     onEdit()
   }
@@ -2714,7 +3587,110 @@ function SettingRowView({
         {row.kind === 'choice' && row.value}
         {row.kind === 'number' && `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
+        {row.kind === 'penguin' && (
+          <>
+            <PenguinHead variant={row.value} size={14} className="settings-penguin" />
+            {PENGUIN_LABELS[row.value].toLowerCase()}
+          </>
+        )}
+        {row.kind === 'penguinColor' && (
+          <>
+            <PenguinHead
+              variant="classic"
+              size={14}
+              className={`settings-penguin ${penguinTone(row.value)}`}
+            />
+            {PENGUIN_COLOR_LABELS[row.value].toLowerCase()}
+          </>
+        )}
       </span>
     </button>
+  )
+}
+
+/**
+ * Pick a pinguim — the head, or the tone it is drawn in.
+ *
+ * A grid rather than a cycling row: twenty-four heads is too many to walk one
+ * Enter at a time. Arrows move inside the grid, Enter picks, Escape leaves
+ * empty-handed — and focus opens on the value already in use, so the answer to
+ * "which one is this?" is where the cursor starts.
+ */
+function SwatchPicker<T extends string>({
+  label,
+  value,
+  options,
+  title,
+  render,
+  onPick,
+  onCancel
+}: {
+  label: string
+  value: T
+  options: readonly T[]
+  title: (id: T) => string
+  render: (id: T) => ReactNode
+  onPick: (id: T) => void
+  onCancel: () => void
+}) {
+  const grid = useRef<HTMLDivElement>(null)
+
+  const swatches = (): HTMLButtonElement[] =>
+    Array.from(grid.current?.querySelectorAll('button') ?? [])
+
+  // Read off the rendered grid rather than a constant: the columns come from
+  // `auto-fill`, so a narrower panel has fewer of them and Down has to follow.
+  const columns = (): number => {
+    const items = swatches()
+    const first = items[0]?.offsetTop
+    const wrapped = items.findIndex((item) => item.offsetTop !== first)
+    return wrapped === -1 ? Math.max(1, items.length) : wrapped
+  }
+
+  useEffect(() => {
+    // Mount only: after this the user is driving, and re-focusing on every
+    // change would fight the arrow keys.
+    const index = Math.max(0, options.indexOf(value))
+    swatches()[index]?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const keys = (event: ReactKeyboardEvent, index: number): void => {
+    // The lane binds j/k/Escape too; inside the grid the arrows are ours.
+    event.stopPropagation()
+    const step: Record<string, number> = {
+      ArrowRight: 1,
+      ArrowLeft: -1,
+      ArrowDown: columns(),
+      ArrowUp: -columns()
+    }
+    if (event.key === 'Escape') return onCancel()
+    const delta = step[event.key]
+    if (delta === undefined) return
+    event.preventDefault()
+    const next = index + delta
+    if (next >= 0 && next < options.length) swatches()[next]?.focus()
+  }
+
+  return (
+    <div className="row settings-row settings-editing penguin-pick">
+      <span className="row-name">{label}</span>
+      <div className="penguin-grid" ref={grid}>
+        {options.map((id, index) => (
+          <button
+            key={id}
+            type="button"
+            className={`penguin-swatch${id === value ? ' penguin-on' : ''}`}
+            title={title(id)}
+            aria-label={title(id)}
+            aria-pressed={id === value}
+            onKeyDown={(event) => keys(event, index)}
+            onClick={() => onPick(id)}
+          >
+            {render(id)}
+          </button>
+        ))}
+      </div>
+    </div>
   )
 }

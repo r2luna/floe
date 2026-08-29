@@ -5,11 +5,21 @@ import {
   IconPlus,
   IconX
 } from '@tabler/icons-react'
-import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from 'react'
 import type { FileAttachment, ImageAttachment } from '../../shared/types'
 import { previewUrl, readAttachment } from './attachments'
+import { isFileRef } from './fileRefs'
 import { continueList, tokenizeMarkdown } from './markdown'
-import { applyTrigger, triggerAt, type Trigger } from './trigger'
+import { applyTrigger, refBefore, triggerAt, type Trigger } from './trigger'
 import { capGroups, filterItems, type PaletteItem } from './fuzzy'
 import {
   describeChoice,
@@ -22,6 +32,29 @@ import {
 import { DEFAULT_MODE, MODES, modesFor, nearestMode } from '../../shared/modes.ts'
 import { useLocalAgents } from './useLocalAgents'
 import { pushHistory, readHistory } from './history'
+
+/**
+ * The model menu's two columns.
+ *
+ * Left: which harness answers. Right: how it answers — effort and mode. They
+ * are two different questions, so the cursor moves between them by name (h/l,
+ * or ← →) and never by running off the end of one into the other.
+ */
+const HARNESS = 0 as const
+const RAIL = 1 as const
+
+/** As tall as the `/` and `#` menu ever gets, and the gap it keeps from the
+ *  window edge — beyond this it scrolls rather than grows. */
+const MENU_MAX = 240
+const MENU_EDGE = 12
+
+/** One walkable row of the model menu, in the order the menu renders them. */
+type PickRow = {
+  run: () => void
+  /** Already the current pick — where a jump into this group lands. */
+  on: boolean
+  col: typeof HARNESS | typeof RAIL
+}
 
 /**
  * The one text input in the app — the branch launcher and the chat both mount
@@ -106,6 +139,13 @@ export function Composer({
   const [menuAt, setMenuAt] = useState(0)
   const menu = useRef<HTMLDivElement>(null)
   const modelMenu = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  // Which way the `/` and `#` menu opens, and how tall it may be. Measured
+  // rather than fixed: the chat's composer sits at the bottom of the window
+  // with a screenful above it, and the launcher's sits near the top with almost
+  // nothing — a menu that always dropped upwards runs off the top of one of
+  // them and covers what you were reading.
+  const [drop, setDrop] = useState<{ up: boolean; room: number }>({ up: true, room: MENU_MAX })
   // Where ↑/↓ currently sit in the sent-message history: -1 is the live text,
   // 0 the last message sent. `stash` holds what was typed before you left it.
   const at = useRef(-1)
@@ -157,9 +197,9 @@ export function Composer({
     input.current?.focus()
   }
 
-  // ⌃M's j/k-and-Enter cursor into the model menu. Flat, in the exact order
-  // the menu renders its groups (models, then each agent, then efforts) — the
-  // render below must stay in that same order or the highlight lands wrong.
+  // ⌃M's cursor into the model menu. Flat, in the exact order the menu renders
+  // its groups (models, then each agent, then efforts, then modes) — the render
+  // below must stay in that same order or the highlight lands wrong.
   const [modelAt, setModelAt] = useState(0)
   // Which modes this harness can honestly do. Empty for a runtime with no tools
   // (LM Studio, Ollama) — the row is then not rendered at all.
@@ -169,7 +209,7 @@ export function Composer({
   // Each row carries whether it is the current pick, so opening the menu can
   // put the cursor on what is already chosen instead of on the first row —
   // ⌃M then ⏎ should be a no-op, not a silent switch to Fable.
-  const modelFlat: { run: () => void; on: boolean }[] = [
+  const modelFlat: PickRow[] = [
     // The model half is locked once a chat is open, so it is not walkable
     // either — the cursor would otherwise stop on rows that do nothing.
     ...(pinned
@@ -177,30 +217,158 @@ export function Composer({
       : [
           ...MODELS.map((m) => ({
             run: () => choose({ model: m.id, provider: 'claude' }),
-            on: claude && m.id === choice.model
+            on: claude && m.id === choice.model,
+            col: HARNESS
           })),
           ...agents.flatMap((agent) =>
             agent.models.length
               ? agent.models.map((m) => ({
                   run: () => choose({ model: m.slug, provider: agent.id }),
-                  on: choice.provider === agent.id && m.slug === choice.model
+                  on: choice.provider === agent.id && m.slug === choice.model,
+                  col: HARNESS
                 }))
               : [
                   {
                     run: () => choose({ model: '', provider: agent.id }),
-                    on: choice.provider === agent.id && !choice.model
+                    on: choice.provider === agent.id && !choice.model,
+                    col: HARNESS
                   }
                 ]
           ),
-          ...EFFORTS.map((e) => ({ run: () => choose({ effort: e }), on: e === choice.effort }))
+          ...EFFORTS.map((e) => ({
+            run: () => choose({ effort: e }),
+            on: e === choice.effort,
+            col: RAIL
+          }))
         ]),
-    ...modes.map((m) => ({ run: () => choose({ mode: m }), on: m === mode }))
+    ...modes.map((m) => ({
+      run: () => choose({ mode: m }),
+      on: m === mode,
+      col: RAIL
+    }))
   ]
+
   /** Where the cursor lands when the menu opens: on the current pick. */
   const openAt = (): number => Math.max(0, modelFlat.findIndex((r) => r.on))
+
+  /** The rows of one column, as indexes into modelFlat — top to bottom. */
+  const colRows = (col: PickRow['col']): number[] =>
+    modelFlat.flatMap((r, i) => (r.col === col ? [i] : []))
+
+  /**
+   * hjkl and the arrows, in one move.
+   *
+   * The menu is a grid: left is which harness answers, right is how (effort,
+   * then mode). j/k walk the column you are in and wrap at its ends; h/l cross
+   * to the other column, keeping the row you were on and clamping when that
+   * column is shorter. Nothing jumps anywhere by name — every key moves one
+   * step in the direction it points.
+   */
+  const moveModel = (dx: -1 | 0 | 1, dy: -1 | 0 | 1): void =>
+    setModelAt((i) => {
+      const col = modelFlat[i]?.col ?? HARNESS
+      const rows = colRows(col)
+      const row = rows.indexOf(i)
+      if (dy !== 0) {
+        if (!rows.length) return i
+        return rows[(row + dy + rows.length) % rows.length]
+      }
+      const want = dx < 0 ? HARNESS : RAIL
+      if (want === col) return i // already there — the edge column does not wrap
+      const to = colRows(want)
+      if (!to.length) return i
+      return to[Math.min(Math.max(row, 0), to.length - 1)]
+    })
   useEffect(() => {
     modelMenu.current?.querySelector('[data-at]')?.scrollIntoView({ block: 'nearest' })
   }, [modelAt, picking])
+
+  /**
+   * The model menu's keyboard, and the key that opens it.
+   *
+   * On the window rather than on the textarea because ⌃M has to work wherever
+   * you are in this panel — reading the transcript, sitting on a message row —
+   * not only when the caret happens to be in the box. Capture phase, so the keys
+   * the menu owns reach neither the textarea underneath (space would type one)
+   * nor the app's own bindings (j would move the panel cursor).
+   *
+   * Re-registered every render on purpose: it reads the cursor and the row list
+   * as they are now, and a stale closure here would pick the wrong row.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const el = input.current
+      if (!el) return
+      // This composer's keyboard: its own box, or anywhere in the panel it
+      // belongs to. Two composers are never in one panel, so which one a key
+      // means is never in question.
+      const scope = el.closest('.panel') ?? el.parentElement
+      const target = e.target as Node | null
+      if (target !== el && !(target && scope?.contains(target))) return
+      // A bare letter, not a chord — ⌃J and ⌥E are somebody else's keys.
+      const plain = !e.metaKey && !e.ctrlKey && !e.altKey
+      const take = (): void => {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+
+      // ⌃M opens it and closes it. ⌃⇧M is a different key — it cycles the mode
+      // in place — and has to fall through to the composer.
+      if (
+        e.key.toLowerCase() === 'm' &&
+        e.ctrlKey &&
+        !e.shiftKey &&
+        !e.metaKey &&
+        modelFlat.length
+      ) {
+        take()
+        setModelAt(openAt())
+        setPicking((p) => !p)
+        return
+      }
+      if (!picking) return
+
+      if (e.key === 'Escape') {
+        take()
+        return setPicking(false)
+      }
+      // hjkl and the arrows, the same four moves either way.
+      const dir: Record<string, [-1 | 0 | 1, -1 | 0 | 1]> = {
+        ArrowDown: [0, 1],
+        ArrowUp: [0, -1],
+        ArrowLeft: [-1, 0],
+        ArrowRight: [1, 0]
+      }
+      const vim: Record<string, [-1 | 0 | 1, -1 | 0 | 1]> = {
+        j: [0, 1],
+        k: [0, -1],
+        h: [-1, 0],
+        l: [1, 0]
+      }
+      const move = dir[e.key] ?? (plain ? vim[e.key] : undefined)
+      if (move) {
+        take()
+        return moveModel(move[0], move[1])
+      }
+      // Space picks and STAYS. Model, effort and mode are three parts of one
+      // answer, and closing after the first would make setting all three three
+      // trips.
+      if (plain && e.key === ' ') {
+        take()
+        return modelFlat[modelAt]?.run()
+      }
+      // Enter submits what space chose — it does NOT pick the row under the
+      // cursor. Once space is how you choose, a cursor is just where you are
+      // looking, and closing the menu must not silently take it as an answer.
+      if (e.key === 'Enter') {
+        take()
+        setPicking(false)
+        return input.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  })
 
   const offered = menuItems && trigger ? menuItems(trigger) : []
   // Scoring alone would interleave sessions and files once you type. Sorting by
@@ -215,6 +383,27 @@ export function Composer({
   )
   const menuOpen = matches.length > 0
 
+  // Above if it fits, below if it does not — and never taller than the side it
+  // ended up on. Measured on open and whenever the list changes, since a
+  // shorter list can fit where the longer one could not.
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!menuOpen || !el) return
+    const rect = el.getBoundingClientRect()
+    // Against the box that would CLIP it, not the window: the launcher's
+    // composer sits inside a scrolling panel, and a menu sized to the screen is
+    // still cut off at that panel's edge.
+    const limit = clipRect(el)
+    const above = rect.top - limit.top - MENU_EDGE
+    const below = limit.bottom - rect.bottom - MENU_EDGE
+    // Upwards is the default because the composer is usually at the bottom of a
+    // conversation: the menu then covers the oldest lines rather than the reply
+    // you are writing about. It only flips when there is genuinely more room
+    // the other way.
+    const up = above >= Math.min(MENU_MAX, below) || above >= below
+    setDrop({ up, room: Math.max(120, Math.min(MENU_MAX, up ? above : below)) })
+  }, [menuOpen, matches.length])
+
   /** Re-read the trigger from wherever the caret ended up. */
   const syncTrigger = (el: HTMLTextAreaElement) => {
     if (!menuItems) return
@@ -223,10 +412,37 @@ export function Composer({
     setMenuAt(0)
   }
 
+  /**
+   * Is this token a reference the input should draw as a chip?
+   *
+   * Two sources, because there are two kinds. A file is one the path map knows
+   * — inserting from `#` puts the file NAME in the box and remembers the path
+   * behind it, so only that map can tell `Composer.tsx` from a word. A session
+   * is one the `#` menu is currently offering, since a session mention is just
+   * its title and nothing about the text says so.
+   *
+   * Memoised on the menu, not on the text: this runs for every token on every
+   * keystroke, and rebuilding the set each time would rebuild it per character.
+   */
+  const mentions = useMemo(() => {
+    const ids = new Set<string>()
+    for (const item of menuItems?.({ char: '#', query: '', start: 0 }) ?? []) ids.add(item.id)
+    return ids
+  }, [menuItems])
+
+  const isRef = useCallback(
+    (token: string): boolean => {
+      if (mentions.has(token)) return true
+      const bare = token[0] === '#' || token[0] === '@' ? token.slice(1) : token
+      return !!bare && isFileRef(bare)
+    },
+    [mentions]
+  )
+
   const pick = (item: PaletteItem) => {
     const el = input.current
     if (!el || !trigger) return
-    const next = applyTrigger(value, trigger, el.selectionStart, item.id)
+    const next = applyTrigger(value, trigger, el.selectionStart, item.insert?.() ?? item.id)
     onChange(next.text)
     setCaret(next.caret)
     setTrigger(null)
@@ -281,35 +497,7 @@ export function Composer({
       return choose({ mode: modes[(modes.indexOf(mode) + 1) % modes.length] })
     }
 
-    // ⌃M opens the model menu without leaving the keyboard; j/k or the arrows
-    // then walk it and Enter picks, same shape as the trigger menu above.
-    // It opens in a pinned chat too: the model is locked there, the mode is not.
-    if (e.key.toLowerCase() === 'm' && e.ctrlKey && modelFlat.length) {
-      e.preventDefault()
-      setModelAt(openAt())
-      return setPicking((p) => !p)
-    }
-
-    if (picking) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        return setPicking(false)
-      }
-      if (e.key === 'ArrowDown' || e.key === 'j') {
-        e.preventDefault()
-        return setModelAt((i) => (i + 1) % modelFlat.length)
-      }
-      if (e.key === 'ArrowUp' || e.key === 'k') {
-        e.preventDefault()
-        return setModelAt((i) => (i - 1 + modelFlat.length) % modelFlat.length)
-      }
-      if (e.key === 'Enter') {
-        e.preventDefault()
-        modelFlat[modelAt].run()
-        return setPicking(false)
-      }
-      return
-    }
+    // ⌃M and the menu's own keys live on the window — see the effect above.
 
     // A question is up and the composer is empty: a bare digit answers (or
     // toggles) the matching option directly. Any text present means a free-form
@@ -325,6 +513,23 @@ export function Composer({
     ) {
       e.preventDefault()
       return
+    }
+
+    // A reference is one thing on screen, so it is one thing to erase. Only at
+    // its end and only on a plain Backspace — with a selection the user has
+    // already said what to delete, and ⌥⌫ is the word-wise key people reach for
+    // when they mean to take the token apart.
+    if (e.key === 'Backspace' && !e.altKey && !e.metaKey && !e.ctrlKey) {
+      const el = e.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        const cut = refBefore(value, el.selectionStart, isRef)
+        if (cut) {
+          e.preventDefault()
+          onChange(value.slice(0, cut.start) + value.slice(cut.end))
+          setCaret(cut.start)
+          return
+        }
+      }
     }
 
     // ⌘. interrupts. ⏎ used to do this, but ⏎ now queues — and the two are
@@ -433,6 +638,7 @@ export function Composer({
   return (
     <div
       className="composer"
+      ref={box}
       data-dropping={dropping || undefined}
       onDragEnter={(e) => {
         e.preventDefault()
@@ -480,7 +686,7 @@ export function Composer({
 
       <div className="composer-stack">
         <pre ref={mirror} className="composer-mirror" aria-hidden="true">
-          {tokenizeMarkdown(value).map((t, i) => (
+          {tokenizeMarkdown(value, isRef).map((t, i) => (
             <span key={i} className={t.cls}>
               {t.text}
             </span>
@@ -600,7 +806,12 @@ export function Composer({
       </div>
 
       {menuOpen && (
-        <div className="composer-menu" ref={menu}>
+        <div
+          className="composer-menu"
+          ref={menu}
+          data-drop={drop.up ? 'up' : 'down'}
+          style={{ maxHeight: drop.room }}
+        >
           {matches.map(({ item, hits }, i) => (
             <Fragment key={item.id}>
               {item.group && item.group !== matches[i - 1]?.item.group && (
@@ -813,4 +1024,19 @@ function mark(text: string, hits: number[]) {
       ch
     )
   )
+}
+
+/**
+ * The rectangle the menu has to live inside: the nearest scrolling or clipping
+ * ancestor, or the window when there isn't one.
+ */
+function clipRect(el: HTMLElement): { top: number; bottom: number } {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node)
+    if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') {
+      const r = node.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom }
+    }
+  }
+  return { top: 0, bottom: window.innerHeight }
 }

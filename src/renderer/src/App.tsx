@@ -30,6 +30,8 @@ import { Palette } from './Palette'
 import {
   load as loadLane,
   remember,
+  rememberSession,
+  rememberWorktree,
   save as saveLane,
   scopedOf,
   sessionKeyOf,
@@ -299,6 +301,11 @@ export default function App() {
   // --- lane memory ---------------------------------------------------------
   // What each session had open. See laneStore.ts.
   const bySession = useRef(restored.current?.bySession ?? {})
+  // The two levels above it: which branch each project was left on, and which
+  // chat each branch was left showing. Refs rather than state — nothing renders
+  // from them, they are read at the moment a switch happens.
+  const byProject = useRef(restored.current?.byProject ?? {})
+  const byWorktree = useRef(restored.current?.byWorktree ?? {})
   // The chat panel you were on before this one (vim's ⌃^). The whole panel, not
   // just an id: it carries the worktree the session lives in, so the jump works
   // even when that chat belongs to another branch than the one selected.
@@ -375,7 +382,10 @@ export default function App() {
   // What that tree has changed, watched so an agent editing behind the UI shows
   // up without a click.
   const changes = useChanges(here)
-  const menuItems = useMenuItems(worktrees.currentPath, worktrees)
+  // `here`, not the sidebar's selection: at the launcher nothing is selected
+  // yet, and a `#` menu that offered sessions but no files was reading a
+  // worktree the app already knew how to name.
+  const menuItems = useMenuItems(here, worktrees)
   // After a turn ends, adopt Claude's auto-generated title (or a Haiku-written
   // one for headless runs) so a session stops reading "Session N". The main
   // process only applies it while the title is still a placeholder and the
@@ -506,34 +516,59 @@ export default function App() {
   useEffect(() => {
     const by = sessionKey ? remember(bySession.current, sessionKey, scopedOf(lane)) : bySession.current
     bySession.current = by
+    // Only while the list on screen belongs to the project on screen: during a
+    // switch they disagree for a render, and writing then would file the old
+    // project's branch under the new project.
+    const project = worktrees.repo === projects.current?.path ? projects.current?.path : undefined
+    if (project && worktrees.currentPath)
+      byProject.current = rememberWorktree(byProject.current, project, worktrees.currentPath)
+    // Which chat this branch is showing — `null` when it is showing none, which
+    // is a thing to remember rather than an absence of one. Keyed off the OPEN
+    // CHAT's own worktree, not the sidebar selection: for one render after a
+    // switch the two disagree, and that render would file a session under the
+    // wrong branch.
+    const chat = lane.panels.find((p) => p.session)?.session
+    const worktree = chat?.worktreePath ?? worktrees.currentPath
+    if (worktree)
+      byWorktree.current = rememberSession(byWorktree.current, worktree, chat?.id ?? null)
     saveLane({
       lane,
       bySession: by,
-      project: projects.current?.path,
+      byProject: byProject.current,
+      byWorktree: byWorktree.current,
+      project,
       worktree: worktrees.currentPath
     })
   }, [lane, sessionKey, projects.current?.path, worktrees.currentPath])
 
-  // Put the app back where it was, once. Both lists arrive asynchronously and
-  // each hook picks its own default in the meantime, so this waits for the
-  // saved path to actually BE in the list rather than selecting it blind — and
-  // never fires twice, or switching away by hand would snap back.
-  const landed = useRef({ project: false, worktree: false })
-  useEffect(() => {
-    const want = restored.current?.project
-    if (landed.current.project || !want) return
-    if (!projects.all.some((p) => p.path === want)) return
-    landed.current.project = true
-    projects.select(want)
-  }, [projects])
+  /**
+   * A project whose worktree list has not arrived yet, and why we are waiting.
+   *
+   * Set on boot (put the app back where it was) and on every project switch
+   * (put that project back where IT was). The list is a fetch, so the intent has
+   * to outlive the wait somewhere; the effect below is where it lands.
+   *
+   * `boot` separates the two cases. On boot the saved lane already holds the
+   * chat and the panels it opened, so landing must only re-select the branch
+   * underneath it — reopening anything would fight the lane it just restored. A
+   * switch has no lane to inherit and opens the branch's chat itself.
+   */
+  const pending = useRef<{ project?: string; boot: boolean } | null>({
+    project: restored.current?.project,
+    boot: true
+  })
 
+  // The saved project, once the list actually contains it — selecting it blind
+  // would race the load. A project that is gone, or a first run with none saved,
+  // releases the wait instead of holding it open forever.
+  const landedProject = useRef(false)
   useEffect(() => {
-    const want = restored.current?.worktree
-    if (landed.current.worktree || !want) return
-    if (!worktrees.rows.some((r) => r.worktree.path === want)) return
-    landed.current.worktree = true
-    worktrees.select(want)
-  }, [worktrees])
+    if (landedProject.current || projects.loading) return
+    landedProject.current = true
+    const want = restored.current?.project
+    if (want && projects.all.some((p) => p.path === want)) projects.select(want)
+    else if (pending.current) pending.current = { ...pending.current, project: undefined }
+  }, [projects.loading, projects.all])
 
   // Delete the session the lane is showing. "Delete" is Floe's record of it:
   // the Claude transcript stays on disk and `claude --resume` still finds it,
@@ -649,6 +684,79 @@ export default function App() {
     return root ? { ...panel, root } : panel
   }
 
+  /**
+   * Go to a worktree and put back what it was showing.
+   *
+   * A branch is where conversations live, so arriving at one means arriving at
+   * its conversation: the chat you left it in comes back, and with it — through
+   * setLane — the panels that chat had open and the text you never sent. A
+   * branch nobody has opened yet gets the launcher instead, because the greeting
+   * IS its empty state; guessing at its newest session would drop the user into
+   * a conversation they did not ask for.
+   *
+   * `launcher` is how the caller says whether that empty state is wanted here.
+   * The sidebar turns it off for a branch that has sessions to fold: the
+   * launcher autofocuses its composer, and a fold that threw the caret into a
+   * new chat would make the list unusable.
+   *
+   * Returns what it did, so a caller can fall back to its own behaviour.
+   */
+  const enterWorktree = (path: string, launcher = true): 'chat' | 'launcher' | 'none' => {
+    worktrees.select(path)
+    const row = worktrees.rows.find((r) => r.worktree.path === path)
+    const want = byWorktree.current[path]
+    // Only a session that is still there: a transcript deleted behind the app
+    // would otherwise restore a chat with nothing in it.
+    const session = want ? row?.sessions.find((s) => (s.claudeId ?? s.id) === want) : undefined
+    if (session) {
+      const id = session.claudeId ?? session.id
+      setLane((l) => open(l, mkPanel('chat', session.title, { id, worktreePath: path })))
+      return 'chat'
+    }
+    if (!launcher) return 'none'
+    setLane((l) => open(l, panelOf('branch', row?.worktree.branch)))
+    return 'launcher'
+  }
+
+  /** Go to a project, then on to the branch it was left on — see enterWorktree. */
+  const enterProject = (path: string): void => {
+    projects.select(path)
+    // Its worktrees are a fetch away, so the rest of the restore happens when
+    // they arrive.
+    pending.current = { project: path, boot: false }
+    // Switching project is only ever a step towards a worktree, so the list
+    // comes with you rather than leaving you on whatever was on screen.
+    setLane((l) => open(l, panelOf('worktrees', projects.all.find((p) => p.path === path)?.name)))
+  }
+
+  // The wait `pending` describes, resolved: the worktrees are here, so land on
+  // the branch this project was left on — or on its first one, which is what a
+  // project with no memory should open on rather than an empty lane.
+  useEffect(() => {
+    const want = pending.current
+    const project = projects.current?.path
+    if (!want || !project || worktrees.loading || !worktrees.rows.length) return
+    // The rows have to be THIS project's. For one render after a switch they are
+    // still the previous project's — loading has not been set yet — and landing
+    // then would select a branch belonging to where you just left.
+    if (worktrees.repo !== project) return
+    if (want.project && want.project !== project) return // a different list is still coming
+    pending.current = null
+    const saved = want.boot ? restored.current?.worktree : byProject.current[project]
+    const row = worktrees.rows.find((r) => r.worktree.path === saved)
+    if (want.boot) {
+      // The saved lane is the authority on boot. Its chat names the branch when
+      // the saved selection is gone, so a restored conversation is never left
+      // sitting over the wrong sidebar row.
+      const chat = restored.current?.lane.panels.find((p) => p.session)?.session?.worktreePath
+      const path =
+        row?.worktree.path ??
+        worktrees.rows.find((r) => r.worktree.path === chat)?.worktree.path
+      if (path) return worktrees.select(path)
+    }
+    enterWorktree((row ?? worktrees.rows[0]).worktree.path)
+  }, [worktrees.rows, worktrees.repo, worktrees.loading, projects.current?.path])
+
   // ⌃I / ⌃O walk this branch's sessions. Newest first — the same order the
   // sidebar lists them in, so "older" and "newer" mean what you can see. It
   // wraps, because a list you can walk off the end of needs a second key to get
@@ -734,43 +842,22 @@ export default function App() {
   }
 
   /**
-   * The skills palette: every skill this project can use, opened in the reader.
+   * Open a skill's Markdown in your editor.
    *
-   * The list is fetched when the palette opens rather than held in state —
-   * skills are files a person edits in another window all day, and a list read
-   * at the moment you ask for it cannot be stale.
-   *
-   * Picking one opens its Markdown in the file panel. The reader already knows
-   * how to render Markdown with line numbers and a cursor; giving it a root
-   * outside the worktree was cheaper, and better, than a second viewer that
-   * would then have to be kept looking the same.
+   * Rooted at the skill's own directory, exactly as Settings roots the config
+   * files at ~/.config/floe: a skill lives outside every worktree, and one
+   * editor session per skill directory is what puts a bundled skill's reference
+   * files in reach of the editor already on screen.
    */
-  const openSkills = (): void => {
-    void window.floe.skills.list(cwd).then((list) => {
-      if (!list.length) {
-        say('no skills yet — see ~/.config/floe/skills')
-        return
-      }
-      setPicker({
-        placeholder: 'Read a skill…',
-        items: list.map((skill) => ({
-          id: skill.name,
-          title: skill.name,
-          detail: skill.description ?? skill.scope,
-          group: skill.scope
-        })),
-        onPick: (name) => {
-          const skill = list.find((s) => s.name === name)
-          if (!skill) return
-          setLane((l) =>
-            open(
-              l,
-              mkPanel('file', skill.file.slice(skill.dir.length + 1), undefined, undefined, undefined, skill.dir)
-            )
-          )
-        }
-      })
-    })
+  const editSkill = (dir: string, rel: string): void => {
+    void window.floe.editor.launch(dir, rel).then(
+      (result) => {
+        if (result.mode === 'panel') setLane((l) => open(l, mkPanel('edit', rel, undefined, undefined, undefined, dir)))
+        // No editor on this machine is not a dead key: show the file instead.
+        else if (result.error) setLane((l) => open(l, mkPanel('file', rel, undefined, undefined, undefined, dir)))
+      },
+      () => setLane((l) => open(l, mkPanel('file', rel, undefined, undefined, undefined, dir)))
+    )
   }
 
   /**
@@ -926,10 +1013,10 @@ export default function App() {
   ctxRef.current = {
     lane,
     setLane,
-    openSkills,
+    editSkill,
     panelEl: panelAt,
     rowsOf,
-    makePanel: (kind, sub) => mkPanel(kind as PanelKind, sub),
+    makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
     // The registry quotes from the same patch the panel is showing; reading it
@@ -1171,6 +1258,21 @@ export default function App() {
       .join('/')
 
   // The rail opens a tool; the lane decides where it sits.
+  /**
+   * The key that opens each panel, for the rail's tooltip.
+   *
+   * Read from the live keymap rather than written down here, so a rebind shows
+   * up in the tooltip instead of leaving the rail teaching a key that no longer
+   * works. Only context-free bindings: `h` and `l` also run `panel.goto`, but
+   * only from inside the two list panels, and a rail promising `h` everywhere
+   * would be teaching a key that does something else where you are standing.
+   */
+  const railKeys = new Map<string, string>()
+  for (const b of binds) {
+    if (b.command !== 'panel.goto' || !b.arg || b.when) continue
+    if (!railKeys.has(b.arg)) railKeys.set(b.arg, formatChord(b.key))
+  }
+
   const openFromRail = (kind: PanelKind) => {
     if (!canOpen(kind)) return
     setLane((l) => open(l, mkPanel(kind)))
@@ -1362,6 +1464,10 @@ export default function App() {
                     movingProject={moving}
                     worktrees={worktrees}
                     changes={changes}
+                    // Picking a project or a branch is never just a selection:
+                    // it restores everything that place was left showing.
+                    onEnterProject={enterProject}
+                    onEnterWorktree={enterWorktree}
                     cwd={cwd}
                     root={panel.root}
                     onPatch={(patch) => (lastPatch.current = patch)}
@@ -1387,6 +1493,11 @@ export default function App() {
                     onEditorExit={() =>
                       setLane((l) => close(l, l.panels.findIndex((p) => p.id === panel.id)))
                     }
+                    // A panel's own mouse affordances run command ids, the same
+                    // way the header button and the keymap do — see onCommand
+                    // in PanelBody.
+                    onCommand={(id) => runCommand(REGISTRY, ctxRef.current, id)}
+                    onEditSkill={editSkill}
                     session={panel.session}
                     openSession={sessionKey}
                     // Only the panel the bar is searching: a query tinting rows
@@ -1500,10 +1611,21 @@ export default function App() {
                 // move around is harder to aim at than one that greys out.
                 data-off={off || undefined}
                 disabled={off}
-                title={off ? whyCannotOpen(kind) : KINDS[kind].title}
+                aria-label={off ? whyCannotOpen(kind) : KINDS[kind].title}
                 onClick={() => openFromRail(kind)}
               >
                 <Icon size={17} stroke={1.5} />
+                {/* The app's own tooltip rather than the OS `title`, for two
+                    reasons: it can carry the key that opens the panel — which
+                    is the thing a keyboard-first app most wants to teach, and
+                    the one moment the user is already asking "what is this" —
+                    and it opens inward, so it is not clipped by the window edge
+                    the native one sat against. aria-hidden: the button's own
+                    label already says all of this to a screen reader. */}
+                <span className="rail-tip" aria-hidden="true">
+                  {off ? whyCannotOpen(kind) : KINDS[kind].title}
+                  {!off && railKeys.has(kind) && <kbd>{railKeys.get(kind)}</kbd>}
+                </span>
               </button>
             )
           })}
@@ -1627,11 +1749,9 @@ export default function App() {
           onPick={(id) => {
             setPaletteOpen(false)
             if (id === 'project.add') return ctxRef.current.addProject()
-            projects.select(id)
-            // Same move as clicking the project row: switching project is only
-            // ever a step towards a worktree, so the palette hands you over to
-            // the list instead of closing onto whatever was on screen before.
-            setLane((l) => open(l, panelOf('worktrees', projects.all.find((p) => p.path === id)?.name)))
+            // Same move as clicking the project row: it hands you over to the
+            // worktree list and on to the branch that project was left on.
+            enterProject(id)
           }}
         />
       )}

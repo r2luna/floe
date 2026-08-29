@@ -5,6 +5,12 @@ import type { Lane, Panel } from './lane'
 //  - PER SESSION: the panels a session opened (its terminal, its changes, the
 //    diff it was showing) belong to that session, not to the window. Switching
 //    to another session puts its own set back, and coming back restores yours.
+//  - PER WORKTREE: which session you were in. A branch is where conversations
+//    live, so returning to one has to return to the conversation, not to a
+//    branch with an empty column beside it.
+//  - PER PROJECT: which worktree you were on. Switching project is the same
+//    move one level up — it restores the branch, which restores the session,
+//    which restores its panels.
 //  - ACROSS RESTARTS: the whole thing is written to localStorage on every
 //    change, so quitting is just the last change and launching resumes from it.
 //
@@ -30,6 +36,10 @@ const SESSION_ORDER = 30
 // forever; a real cap belongs here rather than in a cleanup task nobody runs.
 const MAX_SESSIONS = 30
 
+/** Same ceiling, for the two path-keyed maps: a branch or a project you last
+ *  touched hundreds of switches ago is not a place you are coming back to. */
+const MAX_PLACES = 100
+
 export interface LaneMemory {
   version: number
   /** The lane as it was last seen — what a relaunch restores. */
@@ -43,6 +53,15 @@ export interface LaneMemory {
    */
   project?: string
   worktree?: string
+  /** The worktree each project was last left on, keyed by project path. */
+  byProject: Record<string, string>
+  /**
+   * The session each worktree was last left showing, keyed by worktree path.
+   * `null` is a real answer — it means the launcher, i.e. you closed the chat
+   * and left the branch empty — and must not be confused with "never been
+   * here", which is a missing key and gets the launcher for a different reason.
+   */
+  byWorktree: Record<string, string | null>
 }
 
 /** The session a lane is showing, or null when it is showing none. */
@@ -84,13 +103,27 @@ export function persistable(panels: Panel[]): Panel[] {
   return panels.map(({ firstPrompt: _p, firstChoice: _c, ...rest }) => rest)
 }
 
-/** Keep the newest N sessions; the rest are older than anyone's memory. */
-function prune(bySession: Record<string, Panel[]>): Record<string, Panel[]> {
-  const keys = Object.keys(bySession)
-  if (keys.length <= MAX_SESSIONS) return bySession
-  // Insertion order is recency: writing a session re-inserts it at the end
-  // (see remember), so the oldest keys are the ones at the front.
-  return Object.fromEntries(keys.slice(keys.length - MAX_SESSIONS).map((k) => [k, bySession[k]]))
+/**
+ * Write `value` under `key`, keeping only the newest `max` entries.
+ *
+ * Key order IS recency order: the delete-then-set is what re-inserts a touched
+ * key at the end, so dropping from the front drops the least recently used.
+ * One function for all three maps — panels, worktrees, sessions — because the
+ * ageing rule is the same and three copies of it would be three chances to
+ * forget the delete.
+ */
+export function rememberIn<T>(
+  map: Record<string, T>,
+  key: string,
+  value: T,
+  max: number
+): Record<string, T> {
+  const next = { ...map }
+  delete next[key]
+  next[key] = value
+  const keys = Object.keys(next)
+  if (keys.length <= max) return next
+  return Object.fromEntries(keys.slice(keys.length - max).map((k) => [k, next[k]]))
 }
 
 /** Record one session's panels, moving it to the most-recent end. */
@@ -99,10 +132,25 @@ export function remember(
   key: string,
   panels: Panel[]
 ): Record<string, Panel[]> {
-  const next = { ...bySession }
-  delete next[key] // re-insert at the end so key order stays recency order
-  next[key] = persistable(panels)
-  return prune(next)
+  return rememberIn(bySession, key, persistable(panels), MAX_SESSIONS)
+}
+
+/** Record which worktree a project was last left on. */
+export function rememberWorktree(
+  byProject: Record<string, string>,
+  project: string,
+  worktree: string
+): Record<string, string> {
+  return rememberIn(byProject, project, worktree, MAX_PLACES)
+}
+
+/** Record which session a worktree was last left showing — null for the launcher. */
+export function rememberSession(
+  byWorktree: Record<string, string | null>,
+  worktree: string,
+  session: string | null
+): Record<string, string | null> {
+  return rememberIn(byWorktree, worktree, session, MAX_PLACES)
 }
 
 /** A lane is only usable if it still looks like one. Anything else is discarded. */
@@ -124,7 +172,15 @@ export function load(): LaneMemory | null {
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (!valid(parsed)) return null
-    return { ...parsed, bySession: parsed.bySession ?? {} }
+    // Each map defaulted on read rather than on write: a lane saved before it
+    // existed is still a good lane, and refusing it would cost the user the
+    // whole layout to gain one empty object.
+    return {
+      ...parsed,
+      bySession: parsed.bySession ?? {},
+      byProject: parsed.byProject ?? {},
+      byWorktree: parsed.byWorktree ?? {}
+    }
   } catch {
     // A corrupt lane is not worth a broken launch — start fresh.
     return null

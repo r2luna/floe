@@ -17,7 +17,7 @@ import { TableReader, subTable } from './read'
 import { editToml, parseToml, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
 import { FLOE_TOML } from './template'
-import { DEFAULT_GROUP } from '../../shared/types'
+import { DEFAULT_GROUP, PENGUIN_COLORS, PENGUIN_HEADS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -30,7 +30,13 @@ export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', '
 export const MODES = ['plan', 'ask', 'auto', 'full'] as const
 
 export interface FloeConfig {
-  appearance: { fontFamily?: string; fontSize: number; theme: (typeof THEMES)[number] }
+  appearance: {
+    fontFamily?: string
+    fontSize: number
+    theme: (typeof THEMES)[number]
+    penguin: (typeof PENGUIN_HEADS)[number]
+    penguinColor: (typeof PENGUIN_COLORS)[number]
+  }
   agent: {
     model: (typeof MODELS)[number]
     effort: (typeof EFFORTS)[number]
@@ -38,6 +44,8 @@ export interface FloeConfig {
     mode: (typeof MODES)[number]
     systemPromptFile: string
   }
+  /** Who the launcher greets. Empty means "whoever this machine says I am". */
+  user: { name?: string }
   terminal: { shell?: string }
   editor: { command: string }
   sandbox: { enabled: boolean }
@@ -50,7 +58,7 @@ export const DEFAULTS: FloeConfig = {
   // `dark` rather than `system`: dark is what the app has always been and what
   // it is designed at, so following the OS by default would flip an existing
   // user into light on the next launch without them asking for it.
-  appearance: { fontFamily: undefined, fontSize: 13, theme: 'system' },
+  appearance: { fontFamily: undefined, fontSize: 13, theme: 'system', penguin: 'classic', penguinColor: 'accent' },
   agent: {
     model: 'opus',
     effort: 'high',
@@ -58,6 +66,7 @@ export const DEFAULTS: FloeConfig = {
     mode: 'ask',
     systemPromptFile: 'system-prompt.md'
   },
+  user: { name: undefined },
   terminal: { shell: undefined },
   editor: { command: 'nvim' },
   sandbox: { enabled: true },
@@ -115,6 +124,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
 
   const appearance = subTable(sink, raw, root, 'appearance')
   const agent = subTable(sink, raw, root, 'agent')
+  const user = subTable(sink, raw, root, 'user')
   const terminal = subTable(sink, raw, root, 'terminal')
   const editor = subTable(sink, raw, root, 'editor')
   const sandbox = subTable(sink, raw, root, 'sandbox')
@@ -129,7 +139,11 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
       appearance: {
         fontFamily: appearance?.optStr('font-family'),
         fontSize: appearance?.num('font-size', d.appearance.fontSize, { min: 6, max: 48 }) ?? d.appearance.fontSize,
-        theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme
+        theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme,
+        penguin: appearance?.oneOf('penguin', PENGUIN_HEADS, d.appearance.penguin) ?? d.appearance.penguin,
+        penguinColor:
+          appearance?.oneOf('penguin-color', PENGUIN_COLORS, d.appearance.penguinColor) ??
+          d.appearance.penguinColor
       },
       agent: {
         model: agent?.oneOf('model', MODELS, d.agent.model) ?? d.agent.model,
@@ -138,6 +152,9 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         mode: agent?.oneOf('mode', MODES, d.agent.mode) ?? d.agent.mode,
         systemPromptFile: agent?.str('system-prompt', d.agent.systemPromptFile) ?? d.agent.systemPromptFile
       },
+      // Blank is not a name: an emptied box means "go back to the machine's",
+      // which is the same state as never having set one.
+      user: { name: user?.optStr('name')?.trim() || undefined },
       terminal: { shell: terminal?.optStr('shell') },
       // Not `oneOf`: the known ids are what Settings offers, not the whole set —
       // any editor binary on the machine is a valid answer here.

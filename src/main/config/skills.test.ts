@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './hook.test-helper.ts'
@@ -120,4 +120,113 @@ test('ensureSkills never overwrites a directory you already have', () => {
   skill(skills.globalSkillsDir(), 'mine', 'my instructions')
   skills.ensureSkills()
   assert.deepEqual(skills.listSkills().map((s) => s.name), ['mine'], 'no example dropped on top')
+})
+
+/* --- creating, renaming, deleting from the panel ------------------------- */
+
+test('a new skill is created ready to edit, with its frontmatter filled in', () => {
+  reset()
+  const made = skills.createSkill('ship', 'global')
+  assert.equal(made.file, join(skills.globalSkillsDir(), 'ship.md'))
+  const [listed] = skills.listSkills()
+  assert.equal(listed.name, 'ship')
+  assert.ok(listed.description, 'a description the list can show')
+  assert.ok(skills.readSkill('ship')?.includes('/ship'), 'the body names its own token')
+})
+
+test('a project skill is created inside that project', () => {
+  reset()
+  const project = projects.createProject('/code/app')
+  const made = skills.createSkill('migrate', 'project', '/code/app')
+  assert.equal(made.file, join(project.dir, 'skills', 'migrate.md'))
+  assert.deepEqual(skills.listSkills('/code/app').map((s) => s.name), ['migrate'])
+  assert.deepEqual(skills.listSkills().map((s) => s.name), [], 'and nowhere else')
+})
+
+test('a project skill needs a project', () => {
+  reset()
+  assert.throws(() => skills.createSkill('migrate', 'project'), /no project/)
+})
+
+test('names that could not be typed after a slash are refused', () => {
+  reset()
+  for (const bad of ['', 'two words', 'has/slash', '-leading', 'dot.name']) {
+    assert.throws(() => skills.createSkill(bad, 'global'), /not a skill name/)
+  }
+  assert.deepEqual(skills.listSkills(), [])
+})
+
+test('creating a name that is taken is refused rather than overwriting it', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'deploy', 'mine, do not lose this')
+  assert.throws(() => skills.createSkill('deploy', 'global'), /already exists/)
+  assert.equal(skills.readSkill('deploy'), 'mine, do not lose this')
+})
+
+test('renaming moves the file and rewrites the frontmatter name', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'old', 'body', 'name: old\ndescription: Ship it')
+  const renamed = skills.renameSkill('old', 'new')
+  assert.equal(renamed.name, 'new')
+  assert.equal(renamed.file, join(skills.globalSkillsDir(), 'new.md'))
+  assert.deepEqual(skills.listSkills().map((s) => s.name), ['new'], 'the token follows the file')
+  assert.equal(skills.listSkills()[0].description, 'Ship it', 'and nothing else changed')
+  assert.equal(skills.readSkill('new'), 'body')
+})
+
+test('renaming a skill with no frontmatter just moves the file', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'old', 'body')
+  skills.renameSkill('old', 'new')
+  assert.deepEqual(skills.listSkills().map((s) => s.name), ['new'])
+})
+
+test('renaming a bundled skill carries its directory, reference files and all', () => {
+  reset()
+  const dir = join(skills.globalSkillsDir(), 'deploy')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), '---\nname: deploy\n---\n\nCut a release.')
+  writeFileSync(join(dir, 'checklist.md'), 'sign it')
+  const renamed = skills.renameSkill('deploy', 'release')
+  assert.equal(renamed.file, join(skills.globalSkillsDir(), 'release', 'SKILL.md'))
+  assert.deepEqual(skills.listSkills().map((s) => s.name), ['release'])
+  assert.equal(readFileSync(join(skills.globalSkillsDir(), 'release', 'checklist.md'), 'utf8'), 'sign it')
+})
+
+test('renaming onto a name that exists is refused', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'a', 'first')
+  skill(skills.globalSkillsDir(), 'b', 'second')
+  assert.throws(() => skills.renameSkill('a', 'b'), /already exists/)
+  assert.equal(skills.readSkill('b'), 'second')
+})
+
+test('deleting removes the file, and a bundled skill its whole directory', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'plain', 'x')
+  const dir = join(skills.globalSkillsDir(), 'bundle')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), 'y')
+  writeFileSync(join(dir, 'ref.md'), 'z')
+
+  skills.deleteSkill('plain')
+  assert.deepEqual(skills.listSkills().map((s) => s.name), ['bundle'])
+  skills.deleteSkill('bundle')
+  assert.deepEqual(skills.listSkills(), [])
+  assert.ok(existsSync(skills.globalSkillsDir()), 'the skills directory itself stays')
+})
+
+test('the project copy is what a project-scoped delete removes', () => {
+  reset()
+  const project = projects.createProject('/code/app')
+  skill(skills.globalSkillsDir(), 'deploy', 'the generic one')
+  skill(join(project.dir, 'skills'), 'deploy', 'the local one')
+  skills.deleteSkill('deploy', '/code/app')
+  assert.equal(skills.readSkill('deploy', '/code/app'), 'the generic one', 'the global one falls back in')
+})
+
+test('acting on a skill that is not there says so', () => {
+  reset()
+  assert.throws(() => skills.deleteSkill('ghost'), /no skill called/)
+  assert.throws(() => skills.renameSkill('ghost', 'other'), /no skill called/)
 })

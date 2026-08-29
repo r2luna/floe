@@ -43,6 +43,8 @@ export interface Transcript {
   running: boolean
   /** Live token count for the turn in flight. */
   tokens: number
+  /** Epoch ms the turn in flight started, for the "is typing" clock. */
+  startedAt?: number
   /**
    * Typed while a ONE-SHOT runtime (codex, opencode…) was busy, not sent yet;
    * drains one entry per turn boundary. Claude never queues — a mid-turn send
@@ -83,6 +85,9 @@ type LiveAction =
   // A text delta: grows the tail, or opens one from `item` if none is running.
   | { type: 'text'; item: TranscriptItem }
   | { type: 'settle' }
+  // The turn ended: settle the tail, then stamp what it cost onto the LAST
+  // assistant entry of the run — the one the footer prints under.
+  | { type: 'finish'; ms?: number; tokens: number }
 
 function liveReducer(state: LiveState, action: LiveAction): LiveState {
   switch (action.type) {
@@ -101,6 +106,17 @@ function liveReducer(state: LiveState, action: LiveAction): LiveState {
         : { ...state, tail: action.item }
     case 'settle':
       return state.tail ? { live: [...state.live, state.tail], tail: null } : state
+    case 'finish': {
+      const live = state.tail ? [...state.live, state.tail] : [...state.live]
+      // A turn that only ran tools has no assistant entry to stamp, and the
+      // cost of a turn that said nothing has nowhere to be printed.
+      for (let i = live.length - 1; i >= 0; i--) {
+        if (live[i].role !== 'assistant') continue
+        live[i] = { ...live[i], ms: action.ms, contextTokens: action.tokens || live[i].contextTokens }
+        break
+      }
+      return { live, tail: null }
+    }
   }
 }
 
@@ -123,6 +139,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   const [{ live, tail }, dispatch] = useReducer(liveReducer, { live: [], tail: null })
   const [running, setRunning] = useState(false)
   const [tokens, setTokens] = useState(0)
+  const [startedAt, setStartedAt] = useState<number | undefined>(undefined)
+  // `apply` is built once — its identity must not change mid-turn — so the two
+  // numbers the turn footer needs are mirrored here for it to read on `done`.
+  const startedRef = useRef<number | undefined>(undefined)
+  const tokensRef = useRef(0)
   const [items, setItems] = useState<TranscriptItem[]>([])
   // Starts true when there is something to read: on a fresh mount the effect
   // that fetches has not run yet, and a `false` here says "nothing is coming"
@@ -222,6 +243,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     } else if (event.kind === 'tool') {
       dispatch({ type: 'push', item: { role: 'tool', name: event.name, summary: event.summary } })
     } else if (event.kind === 'tokens') {
+      tokensRef.current = event.tokens
       setTokens(event.tokens)
     } else if (event.kind === 'error') {
       dispatch({ type: 'push', item: { role: 'tool', name: 'error', summary: event.message } })
@@ -239,7 +261,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       })
       setRunning(false)
     } else if (event.kind === 'done') {
-      dispatch({ type: 'settle' })
+      dispatch({
+        type: 'finish',
+        ms: startedRef.current ? Date.now() - startedRef.current : undefined,
+        tokens: tokensRef.current
+      })
       setQuestion(null)
       setRunning(false)
       // The count is NOT cleared: the context does not empty when the turn
@@ -257,6 +283,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     setRunning(false)
     setQuestion(null)
     setTokens(0)
+    tokensRef.current = 0
+    setStartedAt(undefined)
+    startedRef.current = undefined
     // Events that arrive before the replay snapshot resolves. Applying them
     // right away would double the text the snapshot already folded in; the
     // envelope's seq says which ones the snapshot has seen.
@@ -275,6 +304,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           if (replay.model) runModel.current = replay.model
           for (const event of replay.events) apply(event)
           setRunning(true)
+          // The turn started before this panel existed: time it from main's
+          // mark, not from now, or a session you open late reads "0s".
+          startedRef.current = replay.startedAt ?? Date.now()
+          setStartedAt(startedRef.current)
           // The seeded turn must still produce a true→false edge for the queue.
           wasRunning.current = true
         }
@@ -308,6 +341,12 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // takes to answer.
       dispatch({ type: 'push', item: { role: 'user', text: prompt, at: Date.now() } })
       setRunning(true)
+      // A steer (send while running) joins the turn in flight, so the clock
+      // keeps counting from when that turn began.
+      if (!running) {
+        startedRef.current = Date.now()
+        setStartedAt(startedRef.current)
+      }
       // Mark the turn as started HERE, not when a render observes `running`.
       // A turn that fails before it ever paints — the CLI refusing, the process
       // dying on spawn — would otherwise never produce a true→false edge, and
@@ -484,6 +523,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     error,
     running,
     tokens,
+    startedAt,
     queued,
     send,
     unqueue,

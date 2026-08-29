@@ -67,6 +67,9 @@
   /* The find bar's match, as a wash behind the text. Amber rather than the
      palette's blue: this marks text you are reading, not a row you are picking. */
   --find-hit: #e0b34a40;
+  /* The chat's quietest grey: the message clock and the turn's cost footer,
+     which are the same class of information — about the message, not in it. */
+  --time-dim: #4e5460;
 
   /* Greys that were literals in a dozen rules each. Tokens now, because a
      light theme has to move them and hunting hex strings is how you miss one:
@@ -132,6 +135,7 @@
   --accent: #a9631f;
   /* Denser than dark's: the same alpha over white barely registers. */
   --find-hit: #f6d76e99;
+  --time-dim: #9aa1ad;
 
   /* Black at the same alphas: a white wash on a white panel is invisible, so
      the hover states would simply stop existing. */
@@ -211,11 +215,15 @@ button {
   height: 9px;
 }
 
+/* A pill, not a bar with square ends. At 5px visible the app's 2.5px corner
+   rounds nothing you can see, so the thumb read as a hard-edged block with a
+   pointed tip sitting under the panel header — the one square thing in a window
+   where every surface is rounded. */
 ::-webkit-scrollbar-thumb {
   background: var(--wash-5);
   border: 2px solid transparent;
   background-clip: padding-box;
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -429,29 +437,86 @@ button {
 }
 
 .rail-btn {
+  position: relative;
   display: grid;
   place-items: center;
   width: 32px;
   height: 32px;
+  /* Transparent rather than absent, so the outline appearing on hover does not
+     move the icon by a pixel. */
+  border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--dim);
 }
 
+/* The outline-chip pattern the rest of the app uses: the icon brightens and a
+   soft border appears over a barely-there wash — never a solid fill. */
 .rail-btn:hover,
 .rail-btn:focus-visible {
+  border-color: var(--line);
+  background: var(--wash-2);
   color: var(--text-strong);
-  background: var(--wash-3);
 }
 
-/* Needs a worktree and there isn't one — visibly present, plainly unavailable. */
+/* Needs a worktree and there isn't one — visibly present, plainly unavailable.
+   Its tooltip still opens: "why not" is the one thing worth saying here. */
 .rail-btn[data-off] {
   opacity: 0.32;
   cursor: default;
 }
 
 .rail-btn[data-off]:hover {
+  border-color: transparent;
   color: var(--dim);
   background: none;
+}
+
+/* The tooltip: what the panel is, and the key that opens it.
+
+   Opens to the LEFT — the rail sits against the window edge, which is what
+   clipped the native tooltip in half. It is a sibling of nothing: absolutely
+   positioned inside the button, so it cannot push the rail around. */
+.rail-tip {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  box-shadow: 0 8px 20px #00000038;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+  text-transform: capitalize;
+  opacity: 0;
+  pointer-events: none;
+  /* Slides the last few pixels in from the button it belongs to, so it reads as
+     coming OUT of the icon rather than appearing beside it. */
+  transform: translate(6px, -50%);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+  z-index: 6;
+}
+
+.rail-btn:hover .rail-tip,
+.rail-btn:focus-visible .rail-tip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+/* The key chip is the quiet half: you read the name first and the key second,
+   which is the order you need them in. */
+.rail-tip kbd {
+  border-color: var(--line-soft);
+  background: var(--wash-2);
+  color: var(--dim);
+  font-size: 10.5px;
+  text-transform: none;
 }
 
 /* --- rows ---------------------------------------------------------------- */
@@ -621,6 +686,8 @@ button {
   color: var(--text-strong);
 }
 
+/* Painted by its `penguin-tone-*` class — see `[appearance] penguin-color`.
+   The accent stays as the fallback for any mark rendered without a tone. */
 .greet-mark {
   color: var(--accent);
 }
@@ -830,6 +897,25 @@ button {
 
 .md-link {
   color: #6fa8c9;
+}
+
+/* A file or session reference, drawn as a chip in the composer's mirror.
+   
+   Everything here is paint. No padding, no margin, no font change: the mirror
+   has to agree with the textarea on every metric that affects wrapping, or the
+   colours slide out from under the glyphs and the caret lands in the wrong
+   place. `box-shadow` gives the chip its breathing room by painting OUTSIDE the
+   box without taking any space, which is the one way to fake padding here. */
+.md-ref {
+  border-radius: 3px;
+  background: #ffffff0f;
+  box-shadow: 0 0 0 3px #ffffff0f;
+  color: var(--text-strong);
+}
+
+:root[data-theme='light'] .md-ref {
+  background: #0000000d;
+  box-shadow: 0 0 0 3px #0000000d;
 }
 
 .tool {
@@ -1126,6 +1212,14 @@ button {
   background: none;
 }
 
+/* …but the cursor still has to show on it. The rule above clears the box of
+   every unpicked mode and comes after the generic `[data-at]` wash, so walking
+   into the mode group would otherwise lose the cursor entirely — you would be
+   moving with no idea where you are. */
+.model-mode-option[data-at]:not([data-on]) {
+  background: var(--wash-4);
+}
+
 :root[data-theme='light'] .model-menu {
   box-shadow: 0 12px 32px #0000001f;
 }
@@ -1267,6 +1361,65 @@ button {
   opacity: 0.4;
 }
 
+/* --- worktree git dirt --------------------------------------------------- */
+
+/* `+2 ~5 −1 ⇡2 ⇣3` on the branch row. Set off from the branch name and split
+   into two groups, because "still to commit" and "still to push" are two
+   questions — run together they read as one meaningless run of digits. */
+.wt-dirt {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 10px;
+  font-size: 10.5px;
+}
+
+.wt-dirt-g {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.wt-dirt-g + .wt-dirt-g {
+  margin-left: 9px;
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+}
+
+.wt-add {
+  color: #93b8a1;
+}
+
+.wt-mod {
+  color: #c9a05f;
+}
+
+.wt-del {
+  color: #c49495;
+}
+
+.wt-sync {
+  color: #95a6c0;
+}
+
+/* The four hues on a pale surface: the same tones the mode chips use for
+   light, since the dark ones smear out to nothing on white. */
+:root[data-theme='light'] .wt-add {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .wt-mod {
+  color: #8a6314;
+}
+
+:root[data-theme='light'] .wt-del {
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .wt-sync {
+  color: #3a64a8;
+}
+
 /* --- chat ---------------------------------------------------------------- */
 
 /* Transcript scrolls, composer stays pinned at the bottom of the panel. */
@@ -1320,8 +1473,24 @@ button {
 }
 
 .irc-time {
-  color: #4e5460;
+  color: var(--time-dim);
   font-size: 11px;
+}
+
+/* What the turn cost, closing the answer: `4m 46s · ↓89.6k tokens`. Right-
+   aligned and in the timestamp's grey — it is the same class of information as
+   the clock in the header, and it must never compete with the answer itself. */
+.irc-cost {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--time-dim);
+  font-size: 10.5px;
+}
+
+.irc-cost-sep {
+  opacity: 0.5;
 }
 
 .irc-body {
@@ -1606,6 +1775,139 @@ button {
 
 .irc-by {
   font-weight: 700;
+}
+
+/* --- shell calls ----------------------------------------------------------- */
+
+/* A run of shell commands: one frame, one row per command. The frame is what
+   says these belong to the same piece of work — without it five commands read
+   as five separate things happening in the conversation. */
+.bash-blk {
+  margin: 6px 0;
+  padding: 4px 10px 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+}
+
+/* chevron · command · actions. The chevron keeps its column even where it is
+   hidden, so every command in the block starts in the same place. */
+.bash-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+  padding: 2px 0;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.bash-row:focus-visible {
+  outline: none;
+}
+
+.bash-chev {
+  margin-top: 3px;
+  color: var(--faint);
+  opacity: 0.5;
+  transition: transform 0.12s ease;
+}
+
+.bash-row:hover .bash-chev,
+.bash-row[data-cursor] .bash-chev {
+  opacity: 1;
+}
+
+.bash-row[data-open] .bash-chev {
+  transform: rotate(90deg);
+  opacity: 1;
+}
+
+/* Closed, the command is one line and the rest is an ellipsis: a transcript is
+   read down the left edge, and a command that wraps three times buries the
+   sentence after it. */
+.bash-code {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bash-row[data-open] .bash-code {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A command that already fits has nothing to open. The chevron goes (its column
+   stays), and the actions stop hiding — there is no state to reveal them. */
+.bash-row[data-fit] {
+  cursor: default;
+}
+
+.bash-row[data-fit] .bash-chev {
+  visibility: hidden;
+}
+
+.bash-acts {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+
+.bash-row[data-fit] .bash-acts,
+.bash-row[data-open] .bash-acts {
+  display: flex;
+}
+
+/* No border, no label: two icons that stay out of the way until you look for
+   them. The row is already the frame they sit in. */
+.bash-act {
+  display: inline-flex;
+  align-items: center;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.bash-act:hover {
+  color: var(--text-strong);
+}
+
+/* Shell highlighting: the program, its flags, quoted strings and the plumbing.
+   Four roles, because those are the four things you actually look for in a
+   command you are scanning past. */
+.sh-cmd {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.sh-flag {
+  color: #a795d8;
+}
+
+.sh-str {
+  color: #d0a06a;
+}
+
+.sh-num {
+  color: #7fa3d8;
+}
+
+/* Pipes, semicolons and redirects: structure, not content. */
+.sh-op {
+  color: var(--faint);
+}
+
+:root[data-theme='light'] .sh-flag {
+  color: #6f4fa8;
+}
+
+:root[data-theme='light'] .sh-str {
+  color: #a9631f;
+}
+
+:root[data-theme='light'] .sh-num {
+  color: #3a64a8;
 }
 
 /* --- expanded tool calls -------------------------------------------------- */
@@ -1894,6 +2196,11 @@ button {
    lane it simply sits where it is. */
 .lane-col[data-sticky] {
   position: sticky;
+  /* The shadow below is cast by this box, and a square box around a rounded
+     panel casts a square shadow — which is what put a hard corner beside the
+     chat while every other panel had a round one. The column is invisible
+     otherwise; this radius exists only so its shadow has the panel's shape. */
+  border-radius: var(--radius);
   /* 0, not the gutter: Chromium measures the sticky offset from the lane's
      CONTENT box, which the lane's own 8px padding has already inset. Repeating
      it here pinned the column 8px further right — over the gap — so the chat and
@@ -1901,6 +2208,12 @@ button {
   left: 0;
   z-index: 3;
   box-shadow: 6px 0 16px #0000004d;
+}
+
+/* Light gets a fraction of that: 30% black over a pale surface is a bruise, and
+   the shadow only has to say "this column is in front", not draw a wall. */
+:root[data-theme='light'] .lane-col[data-sticky] {
+  box-shadow: 6px 0 16px #00000014;
 }
 
 /* Navigable rows suppress the UA focus ring — the browser draws its own on top
@@ -2654,6 +2967,9 @@ kbd {
 
 /* Above the composer, not below: the composer sits at the bottom of its panel,
    so a menu underneath would open off-screen. */
+/* Opens upwards by default and downwards when there is no room above — the
+   side is decided in Composer.tsx, which is the only place that can measure it,
+   and comes in as `data-drop`. */
 .composer-menu {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -2667,6 +2983,11 @@ kbd {
   border-radius: var(--radius);
   background: var(--well);
   box-shadow: 0 12px 32px #00000066;
+}
+
+.composer-menu[data-drop='down'] {
+  top: calc(100% + 6px);
+  bottom: auto;
 }
 
 .composer-menu-group {
@@ -3348,6 +3669,103 @@ kbd {
   font-size: 11px;
 }
 
+/* The pinguim's tones. Each one is a pair — the dark value is what the app is
+   drawn at, the light value is the same hue pulled darker and cleaner so it
+   holds against a pale surface. `plain` is not a colour: it follows the text,
+   which is the only way to say "no tint" that survives a theme flip.
+   The four named after mode chips reuse those exact tones — see
+   docs/ui-conventions.md — so the mark never introduces a colour of its own. */
+:root {
+  --pen-accent: var(--accent);
+  --pen-ice: #7cc0d6;
+  --pen-green: #93b8a1;
+  --pen-blue: #95a6c0;
+  --pen-violet: #a99ac9;
+  --pen-amber: #d0b06a;
+  --pen-red: #c49495;
+  --pen-plain: var(--text);
+}
+
+:root[data-theme='light'] {
+  --pen-ice: #167a9c;
+  --pen-green: #2f7d52;
+  --pen-blue: #3a64a8;
+  --pen-violet: #6b4fa8;
+  --pen-amber: #96690f;
+  --pen-red: #b1454a;
+}
+
+.penguin-tone-accent { color: var(--pen-accent); }
+.penguin-tone-ice { color: var(--pen-ice); }
+.penguin-tone-green { color: var(--pen-green); }
+.penguin-tone-blue { color: var(--pen-blue); }
+.penguin-tone-violet { color: var(--pen-violet); }
+.penguin-tone-amber { color: var(--pen-amber); }
+.penguin-tone-red { color: var(--pen-red); }
+.penguin-tone-plain { color: var(--pen-plain); }
+
+/* The head shown beside the Pinguim row's value, so the name is not the only
+   thing telling you which one is on. */
+.settings-penguin {
+  vertical-align: -3px;
+  margin-right: 5px;
+  color: var(--accent);
+}
+
+/* The Pinguim picker. Twenty-four heads is too many to cycle one Enter at a
+   time, so the row opens into a grid — arrows move, Enter picks, Escape leaves.
+   The column count comes from the panel's width, and the keyboard reads it back
+   off the layout, so a narrow panel still walks correctly. */
+.penguin-pick {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.penguin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(38px, 1fr));
+  gap: 4px;
+}
+
+/* Outline chips, like every other button here — never a fill. */
+.penguin-swatch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0;
+  color: var(--dim);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.penguin-swatch:hover {
+  color: var(--text);
+  border-color: var(--edge);
+}
+
+.penguin-swatch:focus-visible {
+  outline: none;
+  color: var(--text-strong);
+  border-color: var(--edge);
+}
+
+/* The one in force: the app's accent as outline and text, over a wash faint
+   enough to stay a chip. */
+.penguin-on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--well));
+}
+
+:root[data-theme='light'] .penguin-on {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+  background: color-mix(in srgb, var(--accent) 6%, #fff);
+}
+
 /* A problem is the one row that has to pull the eye — the muted danger outline
    from the mode chips, never a fill. */
 .settings-problem .row-name {
@@ -3446,4 +3864,168 @@ kbd {
   font-size: 11px;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+}
+
+/* --- skills --------------------------------------------------------------- */
+
+/* A skill's description, after its name. It takes the leftover width AND is the
+   half that gives it back: a row's name is the part you scan and the part `/`
+   matches, so the description is what ellipsizes — never the name. That is why
+   the name drops the flex:1 every other row's name carries; with both growing
+   from a zero basis, a long description squeezed the name to nothing. */
+.row[data-skill] .row-name {
+  /* Never shrinks: the description is the half that gives width back, all of it
+     if it has to. Capped so a pathological name still ellipsizes inside the row
+     rather than pushing past it. */
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.skill-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* The row you type a name into. Same box as a row, not a dialog over one: the
+   skill is drawn where it will live, under the heading that answers "global or
+   this project?" before you have typed anything. */
+.row-draft {
+  gap: 4px;
+}
+
+.skill-input {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-strong);
+  font: inherit;
+  outline: none;
+}
+
+.skill-input::placeholder {
+  color: var(--dim);
+}
+
+/* The extension, beside the box rather than inside it: `.md` is not a decision,
+   so it is not something you can type over or backspace into. */
+.skill-ext {
+  flex: none;
+  color: var(--dim);
+}
+
+/* Why the name was refused — taken, or not a token you could type after `/`.
+   Under the box it belongs to, so it needs no other way of pointing at it, and
+   in the row's own rhythm rather than as a block of red: the box above is still
+   open and still holds the name, so this is a note, not an alarm. */
+.skill-error {
+  margin: 0;
+  padding: 0 8px 5px 8px;
+  color: #c08c86;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+:root[data-theme='light'] .skill-error {
+  color: #b1454a;
+}
+
+/* --- row menu ------------------------------------------------------------- */
+
+/* The right-click menu. Same surface as the palette — it is the same kind of
+   thing, a small floating list you pick from — sized to its items rather than
+   to a grid. */
+.row-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  box-shadow: 0 14px 36px #00000080;
+  outline: none;
+}
+
+.row-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  width: 100%;
+  padding: 5px 9px;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-align: left;
+}
+
+/* One highlight, driven by the menu's own cursor — the pointer moves it, and so
+   do j/k. Hover and keyboard must not be able to light up two different rows. */
+.row-menu-item[data-at] {
+  background: var(--wash-4);
+  color: var(--text-strong);
+}
+
+.row-menu-item:disabled {
+  color: var(--dim);
+}
+
+.row-menu-label {
+  flex: 1;
+}
+
+/* The key that does the same thing, in the column every list of bindings in the
+   app puts them: the menu teaches its way out of itself. The scope menu puts a
+   short hint in the same slot — one column, read the same way. */
+.row-menu-keys {
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+
+.row-menu-item[data-at] .row-menu-keys {
+  color: var(--text);
+}
+
+:root[data-theme='light'] .row-menu {
+  box-shadow: 0 14px 36px #0000001f;
+}
+
+/* A file reference inside a message — `docs/plan.md:12-30` drawn as one thing.
+   Inline, so it sits in the middle of a sentence without breaking the line box:
+   the name is what you read, the range rides along dim, and the full path is
+   the tooltip. Outline only, per the chip pattern. */
+.file-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text-strong);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.file-ref svg {
+  align-self: center;
+  color: var(--dim);
+  flex: none;
+}
+
+.file-ref-lines {
+  color: var(--accent);
+}
+
+:root[data-theme='light'] .file-ref {
+  border-color: var(--edge);
+  background: var(--well);
 }

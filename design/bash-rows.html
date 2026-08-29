@@ -1,0 +1,297 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Bash no chat — variantes de layout</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  /* Só o andaime da página de comparação — nada aqui é proposta de UI. */
+  body {
+    margin: 0;
+    padding: 24px 28px 60px;
+    background: var(--bg);
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+  }
+  .frame {
+    max-width: 860px;
+    margin: 0 auto 28px;
+    padding: 14px 16px 18px;
+    background: var(--panel-focused);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .frame > h2 {
+    margin: 0 0 2px;
+    color: var(--text-strong);
+    font-size: 12.5px;
+  }
+  .frame > p {
+    margin: 0 0 14px;
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+
+  /* --- A: como está hoje ------------------------------------------------- */
+  /* (usa .irc-act / .irc-star / .irc-by direto do index.css) */
+
+  /* --- B: uma linha por comando, truncada -------------------------------- */
+  .bash-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+    color: var(--dim);
+  }
+  .bash-sigil {
+    flex: none;
+    color: var(--faint);
+  }
+  .bash-cmd {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--text);
+  }
+  .bash-verb {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+
+  /* --- C: bloco de terminal ---------------------------------------------- */
+  .bash-block {
+    margin: 4px 0;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .bash-block-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    background: var(--well);
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .bash-block-count {
+    margin-left: auto;
+    color: var(--faint);
+  }
+  .bash-block-body {
+    padding: 5px 10px 6px;
+  }
+  .bash-block-body .bash-line {
+    padding: 1px 0;
+  }
+
+  /* --- D: resumo semântico ----------------------------------------------- */
+  .bash-say {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 0;
+    color: var(--dim);
+  }
+  .bash-say b {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .bash-arg {
+    padding: 1px 5px;
+    border-radius: var(--radius);
+    background: var(--wash-2, rgba(0, 0, 0, 0.05));
+    color: var(--text);
+  }
+  .bash-more {
+    color: var(--faint);
+  }
+
+  /* --- E: agrupado e colapsado ------------------------------------------- */
+  .bash-fold {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    width: 100%;
+    padding: 3px 0;
+    background: none;
+    border: 0;
+    color: var(--dim);
+    font: inherit;
+    text-align: left;
+    cursor: default;
+  }
+  .bash-chip {
+    flex: none;
+    padding: 0 5px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--dim);
+    font-size: 10px;
+  }
+  .bash-targets {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .bash-targets em {
+    color: var(--text);
+    font-style: normal;
+  }
+</style>
+
+<body>
+  <div class="frame">
+    <h2>A — como está hoje</h2>
+    <p>Cada chamada é uma linha de "ação", o comando inteiro, quebrando em 2–3 linhas.</p>
+
+    <div class="irc-body irc-act">
+      <span class="irc-star">*</span> <span class="irc-by">Bash </span>ls /Users/r2luna; echo "---"; ls
+      /Users/r2luna/.claude/projects/-Users-r2luna/memory/ 2&gt;/dev/null; echo "---"; cat
+      /Users/r2luna/CLAUDE.md 2&gt;/dev/null | head -50
+    </div>
+    <div class="irc-body irc-act">
+      <span class="irc-star">*</span> <span class="irc-by">Bash </span>ls /Users/r2luna/code
+      2&gt;/dev/null; echo "--- brain hits ---"; find /Users/r2luna/code /Users/r2luna/Obsidian -maxdepth
+      3 -iname "*brain*" 2&gt;/dev/null | head -30
+    </div>
+    <div class="irc-body irc-act">
+      <span class="irc-star">*</span> <span class="irc-by">Bash </span>grep -ril "print" src tests docs
+      2&gt;/dev/null | head -40; echo "=== src tree ==="; find src -maxdepth 2 -type d | head -40
+    </div>
+  </div>
+
+  <div class="frame">
+    <h2>B — uma linha por comando, truncada</h2>
+    <p>
+      O comando nunca quebra: cabe numa linha e o resto vira reticências. O primeiro token fica em
+      negrito, porque é o que você lê para saber o que aconteceu.
+    </p>
+
+    <div class="bash-line">
+      <span class="bash-sigil">$</span>
+      <span class="bash-cmd"
+        ><span class="bash-verb">ls</span> /Users/r2luna; echo "---"; ls
+        /Users/r2luna/.claude/projects/-Users-r2luna/memory/ 2&gt;/dev/null; echo "---"; cat
+        /Users/r2luna/CLAUDE.md 2&gt;/dev/null | head -50</span
+      >
+    </div>
+    <div class="bash-line">
+      <span class="bash-sigil">$</span>
+      <span class="bash-cmd"
+        ><span class="bash-verb">ls</span> /Users/r2luna/code 2&gt;/dev/null; echo "--- brain hits ---";
+        find /Users/r2luna/code /Users/r2luna/Obsidian -maxdepth 3 -iname "*brain*"</span
+      >
+    </div>
+    <div class="bash-line">
+      <span class="bash-sigil">$</span>
+      <span class="bash-cmd"
+        ><span class="bash-verb">grep</span> -ril "print" src tests docs 2&gt;/dev/null | head -40; echo
+        "=== src tree ==="; find src -maxdepth 2 -type d | head -40</span
+      >
+    </div>
+    <div class="bash-line">
+      <span class="bash-sigil">$</span>
+      <span class="bash-cmd"
+        ><span class="bash-verb">wc</span> -l src/Console/ShowBrainCommand.php src/Console/Printer.php</span
+      >
+    </div>
+  </div>
+
+  <div class="frame">
+    <h2>C — bloco de terminal</h2>
+    <p>
+      Comandos seguidos viram um bloco só, com a worktree no cabeçalho e a contagem à direita. Dentro,
+      o mesmo truncamento de B.
+    </p>
+
+    <div class="bash-block">
+      <div class="bash-block-head">
+        <span>bash</span>
+        <span style="color: var(--faint)">brain</span>
+        <span class="bash-block-count">7 comandos · 14:26</span>
+      </div>
+      <div class="bash-block-body">
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">ls /Users/r2luna; echo "---"; ls /Users/r2luna/.claude/projects/…</span>
+        </div>
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">ls /Users/r2luna/code 2&gt;/dev/null; echo "--- brain hits ---"; find …</span>
+        </div>
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">grep -ril "print" src tests docs 2&gt;/dev/null | head -40</span>
+        </div>
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">wc -l src/Console/ShowBrainCommand.php src/Console/Printer.php</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frame">
+    <h2>D — resumo semântico</h2>
+    <p>
+      A linha diz o que o comando fez, não como. O comando cru fica atrás do hover/expandir. Custa uma
+      tabela de verbos (ls, grep, find, cat, sed, wc…) e cai para B no que não reconhecer.
+    </p>
+
+    <div class="bash-say">
+      <span class="bash-sigil">$</span>
+      <span><b>listou</b> <span class="bash-arg">~/</span> <span class="bash-more">+2 comandos</span></span>
+    </div>
+    <div class="bash-say">
+      <span class="bash-sigil">$</span>
+      <span
+        ><b>procurou</b> <span class="bash-arg">*brain*</span> em
+        <span class="bash-arg">~/code</span> <span class="bash-more">+1</span></span
+      >
+    </div>
+    <div class="bash-say">
+      <span class="bash-sigil">$</span>
+      <span><b>buscou</b> <span class="bash-arg">"print"</span> em <span class="bash-arg">src tests docs</span></span>
+    </div>
+    <div class="bash-say">
+      <span class="bash-sigil">$</span>
+      <span><b>leu</b> <span class="bash-arg">src/Console/Printer.php</span> <span class="bash-more">linhas 400–580</span></span>
+    </div>
+  </div>
+
+  <div class="frame">
+    <h2>E — agrupado e colapsado</h2>
+    <p>
+      Uma linha para o bloco inteiro, com os alvos em vez dos comandos. Abre com Enter/clique e vira C.
+      É o mais silencioso: sete chamadas ocupam o espaço de uma.
+    </p>
+
+    <button class="bash-fold">
+      <span class="bash-sigil">›</span>
+      <span class="bash-chip">bash ×7</span>
+      <span class="bash-targets"
+        >leu <em>~/CLAUDE.md</em>, procurou <em>*brain*</em>, <em>src/Console/Printer.php</em>,
+        <em>ShowBrainCommand.php</em>, <em>BrainMap.php</em></span
+      >
+    </button>
+
+    <div style="margin-top: 10px">
+      <button class="bash-fold">
+        <span class="bash-sigil">⌄</span>
+        <span class="bash-chip">bash ×7</span>
+        <span class="bash-targets">aberto</span>
+      </button>
+      <div style="padding-left: 18px">
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">ls /Users/r2luna; echo "---"; ls /Users/r2luna/.claude/projects/…</span>
+        </div>
+        <div class="bash-line">
+          <span class="bash-sigil">$</span>
+          <span class="bash-cmd">grep -ril "print" src tests docs 2&gt;/dev/null | head -40</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>

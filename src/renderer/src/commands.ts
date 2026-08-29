@@ -18,8 +18,12 @@ export interface CommandContext {
   panelEl: (index: number) => HTMLElement | null | undefined
   /** Every row a panel offers the cursor, in document order. */
   rowsOf: (panel: HTMLElement | null | undefined) => HTMLElement[]
-  /** Build a panel of a kind — the registry must not know how panels are made. */
-  makePanel: (kind: string, sub?: string) => Panel
+  /**
+   * Build a panel of a kind — the registry must not know how panels are made.
+   * `root` reads `sub` relative to somewhere other than the worktree, which is
+   * how a skill opens in the same reader every other file gets.
+   */
+  makePanel: (kind: string, sub?: string, root?: string) => Panel
   /**
    * Whether a panel of this kind can be opened right now. Some read the checked
    * out tree and are meaningless without one — which kinds those are is the
@@ -62,8 +66,12 @@ export interface CommandContext {
   say: (text: string) => void
   /** Name a new project group. */
   createGroup: () => void
-  /** The skills palette: pick one and read it. */
-  openSkills: () => void
+  /**
+   * Open a skill's Markdown in your editor, rooted at the skill's own
+   * directory. Lives in App because launching the editor is the same two-step
+   * dance the file tree does, and the registry must not learn it twice.
+   */
+  editSkill: (dir: string, rel: string) => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
   /** Forget the project the cursor is on, after asking. */

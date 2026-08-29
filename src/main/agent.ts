@@ -153,7 +153,7 @@ const seqs = new Map<string, number>()
 const replays = new Map<string, AgentReplay>()
 
 export function markTurnStart(key: string): void {
-  replays.set(key, { running: true, lastSeq: seqs.get(key) ?? 0, events: [] })
+  replays.set(key, { running: true, lastSeq: seqs.get(key) ?? 0, events: [], startedAt: Date.now() })
 }
 
 export function replaySnapshot(key: string): AgentReplay {

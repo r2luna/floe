@@ -50,6 +50,7 @@ import {
   startCdpRelay
 } from './browserPane'
 import { log } from './log'
+import { worktreeStatus } from './gitStatus'
 import {
   changedFiles,
   lastCommit,
@@ -147,7 +148,7 @@ import {
 import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
-import { listSkills, readSkill } from './config/skills'
+import { createSkill, deleteSkill, listSkills, readSkill, renameSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
 import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
@@ -778,6 +779,17 @@ function registerIpc(): void {
     if (win) void refreshWorktreeDescs(win, repoPath, worktrees)
     return worktrees
   })
+  // The sidebar's git dirt, asked for AFTER the list is on screen so a slow
+  // `git status` never delays landing on a session. One call for the whole
+  // project; the worktrees run in parallel.
+  ipcMain.handle('worktrees:status', async (_event, paths: string[]) => {
+    const entries = await Promise.all(
+      paths
+        .filter((path) => !isHomePath(path))
+        .map(async (path) => [path, await worktreeStatus(path)] as const)
+    )
+    return Object.fromEntries(entries.filter(([, status]) => status))
+  })
   ipcMain.handle('branches:list', (_event, repoPath: string) => listBranches(repoPath))
   ipcMain.handle('branches:listRemote', (_event, repoPath: string) => listRemoteBranches(repoPath))
   ipcMain.handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
@@ -920,6 +932,19 @@ function registerIpc(): void {
   ipcMain.handle('skills:list', (_event, worktreePath?: string) =>
     listSkills(worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
   )
+  // What the Skills panel writes through. A skill is addressed by NAME, never by
+  // a path from the renderer: the name is what the row shows and what `/name`
+  // sends, and resolving it here is what keeps the UI unable to write anywhere
+  // but the two skills directories. Refusals throw, so the panel can say why.
+  ipcMain.handle('skills:create', (_event, name: string, scope: 'global' | 'project', worktreePath?: string) =>
+    createSkill(name, scope, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+  )
+  ipcMain.handle('skills:rename', (_event, name: string, to: string, worktreePath?: string) =>
+    renameSkill(name, to, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+  )
+  ipcMain.handle('skills:delete', (_event, name: string, worktreePath?: string) =>
+    deleteSkill(name, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+  )
   ipcMain.handle('config:get', () => floeConfig())
   ipcMain.handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
     setFloeValue(table, key, value)
@@ -979,6 +1004,11 @@ function registerIpc(): void {
   // mount.
   let userName: string | null = null
   ipcMain.handle('user:name', async () => {
+    // The config wins outright — it is the user saying what to call them — and
+    // is read on every call rather than cached, so editing the file (or the
+    // Settings row) changes the greeting without a relaunch.
+    const chosen = floeConfig().user.name
+    if (chosen) return chosen
     if (userName !== null) return userName
     const pexec = promisify(execFile)
     const tryRun = async (cmd: string, args: string[]): Promise<string> => {
@@ -1335,10 +1365,20 @@ app.on('window-all-closed', () => {
 
 // Confirm before quitting (⌘Q), then tear down every shell/command so nothing
 // (dev servers, queues, watchers) is left running after the app exits.
-let quitConfirmed = false
+//
+// The prompt is for the INSTALLED app, where ⌘Q lands on a day's work by
+// accident. A dev run is restarted every few minutes on purpose, and a dialog
+// in the way of that is only ever an extra keystroke — so it asks nothing and
+// tears down just the same.
+let quitConfirmed = !app.isPackaged
 
 app.on('before-quit', (event) => {
-  if (quitConfirmed) return // confirmed pass — let the quit through
+  if (quitConfirmed) {
+    // Dev quits skip the dialog, not the cleanup: a PTY left behind outlives
+    // the app either way.
+    if (!app.isPackaged) stopEverything()
+    return
+  }
   event.preventDefault()
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const opts = {
@@ -1352,9 +1392,14 @@ app.on('before-quit', (event) => {
   const choice = win ? dialog.showMessageBoxSync(win, opts) : dialog.showMessageBoxSync(opts)
   if (choice !== 1) return // cancelled — stay open
   quitConfirmed = true
+  stopEverything()
+  app.quit()
+})
+
+/** Everything spawned on this app's behalf, stopped. */
+function stopEverything(): void {
   killAllTerminals()
   killAllCommands()
   killAllMcpAuths()
   cancelLogin()
-  app.quit()
-})
+}

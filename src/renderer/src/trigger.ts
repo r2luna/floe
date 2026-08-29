@@ -54,3 +54,32 @@ export function applyTrigger(
     caret: trigger.start + insert.length
   }
 }
+
+/**
+ * The reference that ends exactly at the caret, if there is one.
+ *
+ * What Backspace uses. A reference is one thing on screen — a chip — so it has
+ * to be one thing to erase: taking a character off the end would leave a broken
+ * path that still looks like a chip until the next keystroke, which is the worst
+ * of both readings.
+ *
+ * Only when the caret is at its END. Inside the token you are editing text, and
+ * a Backspace that ate the whole thing from the middle would be a key that
+ * behaves differently depending on where you happen to be standing.
+ */
+export function refBefore(
+  text: string,
+  caret: number,
+  isRef: (token: string) => boolean
+): { start: number; end: number } | null {
+  if (caret <= 0) return null
+  // Walk back over what a reference is allowed to contain, then take the mark
+  // with it: the `#` is part of the chip, not punctuation in front of it.
+  let start = caret
+  while (start > 0 && /[\w./:-]/.test(text[start - 1])) start--
+  if (start > 0 && (text[start - 1] === '#' || text[start - 1] === '@')) start--
+  if (start === caret) return null
+  // A reference stands on its own — after a space, a bracket, or nothing.
+  if (start > 0 && !/[\s([]/.test(text[start - 1])) return null
+  return isRef(text.slice(start, caret)) ? { start, end: caret } : null
+}

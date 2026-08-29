@@ -14,7 +14,7 @@ import type { KeybindingsConfig } from '../../main/keybindings'
 export interface Settings {
   config: FloeConfig | null
   errors: ConfigError[]
-  paths: { dir: string; floe: string; projects: string } | null
+  paths: { dir: string; floe: string; projects: string; systemPrompt: string } | null
   /** The keymap file's state, for the one thing Settings has to say about it. */
   keys: KeybindingsConfig | null
   /** Regenerate keybindings.toml from the built-in table, keeping a .bak. */

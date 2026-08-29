@@ -6,7 +6,9 @@ import {
   hostOf,
   lastChoice,
   loadChoice,
+  setUserNick,
   speakerKey,
+  userNick,
   windowOf
 } from './models.ts'
 
@@ -178,4 +180,13 @@ test('a session answers as whoever answered it last', () => {
   // Nothing to go on: leave the picker alone rather than guess.
   assert.equal(lastChoice([{ role: 'user' }]), null)
   assert.equal(lastChoice([{ role: 'assistant', model: 'some-model-we-cannot-map' }]), null)
+})
+
+test('the nick follows the configured name, lower-cased, and never goes empty', () => {
+  setUserNick('Rafael')
+  assert.equal(userNick(), 'rafael')
+  setUserNick('  Ada  ')
+  assert.equal(userNick(), 'ada')
+  setUserNick('   ')
+  assert.equal(userNick(), 'you', 'a blank name still has to head an entry')
 })

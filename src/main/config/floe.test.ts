@@ -75,3 +75,32 @@ test('theme takes only the two themes and system, and names them when it does no
   assert.equal(config.appearance.theme, 'system', 'an unknown theme falls back to following the OS')
   assert.match(errors[0].reason, /system, dark, light/)
 })
+
+test('penguin picks one of the known heads, and defaults to the original', () => {
+  const picked = parseFloeConfig('[appearance]\npenguin = "ninja"\n', 'floe.toml')
+  assert.equal(picked.config.appearance.penguin, 'ninja')
+  assert.equal(picked.errors.length, 0)
+
+  const unknown = parseFloeConfig('[appearance]\npenguin = "pigeon"\n', 'floe.toml')
+  assert.equal(unknown.config.appearance.penguin, 'classic', 'an unknown head falls back to the original')
+  assert.match(unknown.errors[0].reason, /classic/)
+})
+
+test('penguin-color takes only the named tones', () => {
+  const picked = parseFloeConfig('[appearance]\npenguin-color = "ice"\n', 'floe.toml')
+  assert.equal(picked.config.appearance.penguinColor, 'ice')
+  assert.equal(picked.errors.length, 0)
+
+  const unknown = parseFloeConfig('[appearance]\npenguin-color = "chartreuse"\n', 'floe.toml')
+  assert.equal(unknown.config.appearance.penguinColor, 'accent', 'an unknown tone falls back to the accent')
+})
+
+test('the greeting name is optional, and blank means "use the machine\'s"', () => {
+  assert.equal(parseFloeConfig('', 'floe.toml').config.user.name, undefined)
+  assert.equal(parseFloeConfig('[user]\nname = "Ada"\n', 'floe.toml').config.user.name, 'Ada')
+  assert.equal(
+    parseFloeConfig('[user]\nname = "   "\n', 'floe.toml').config.user.name,
+    undefined,
+    'an emptied box is the same as never having set one'
+  )
+})

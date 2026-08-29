@@ -10,6 +10,59 @@ export type { ArtifactSpec } from './artifact'
  */
 export const DEFAULT_GROUP = 'Projects'
 
+/**
+ * The pinguim heads a user can pick as the app's mark, in the order Settings
+ * shows them. Shared because `[appearance] penguin` is validated against this
+ * list in main and drawn from it in the renderer — the art itself lives in
+ * `renderer/src/PenguinHead.tsx` and `renderer/src/assets/penguins/`.
+ */
+export const PENGUIN_HEADS = [
+  'classic',
+  'sleepy',
+  'surprised',
+  'focused',
+  'skeptical',
+  'cool',
+  'wink',
+  'cute',
+  'zen',
+  'robot',
+  'punk',
+  'tired',
+  'happy',
+  'angry',
+  'dizzy',
+  'dreamer',
+  'ninja',
+  'scanner',
+  'spark',
+  'sad',
+  'crown',
+  'tuft',
+  'antenna',
+  'chipped'
+] as const
+
+export type PenguinHeadId = (typeof PENGUIN_HEADS)[number]
+
+/**
+ * The tones a pinguim head can be drawn in. Each one is a CSS variable with a
+ * dark and a light value (see `--pen-*` in index.css), so a pick that reads well
+ * at night still reads well when the OS flips at sunrise.
+ */
+export const PENGUIN_COLORS = [
+  'accent',
+  'ice',
+  'green',
+  'blue',
+  'violet',
+  'amber',
+  'red',
+  'plain'
+] as const
+
+export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
+
 export interface Project {
   path: string
   name: string
@@ -68,6 +121,22 @@ export interface Worktree {
   blocked?: boolean
   // The single synthetic worktree of the Home workspace (see Project.home).
   home?: boolean
+}
+
+/**
+ * A worktree's git dirt, for the sidebar row: `+2 ~5 −1 ⇡2 ⇣3`.
+ *
+ * Counted per file and by what happened to the file (new / edited / removed),
+ * not by staged vs unstaged: the row answers "what do I still have to commit,
+ * and what do I still have to push".
+ */
+export interface WorktreeStatus {
+  added: number // new files — untracked or staged-new
+  modified: number
+  deleted: number
+  ahead: number // commits to push
+  behind: number // commits to pull
+  upstream: boolean // has a tracking branch at all
 }
 
 // The live status the projects rail shows for a project the user worked today:
@@ -760,6 +829,7 @@ export interface AgentEventEnvelope {
 export interface AgentReplay {
   running: boolean
   lastSeq: number // seq of the last event folded into `events`
+  startedAt?: number // epoch ms the turn began — a panel opening mid-turn times from here
   model?: string // concrete model id the CLI resolved for this turn
   events: AgentEvent[]
 }

@@ -4,6 +4,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
+import { attachTerminal, detachTerminal } from './terminalBus'
 
 // The panel's colours, as xterm wants them. Kept next to the terminal rather
 // than derived from the CSS variables: xterm needs concrete values at
@@ -48,21 +49,6 @@ const rgbChannels = (hex: string): string =>
     })
     .join('/')
 
-/**
- * Commands sent from outside the panel — the Run button on a shell code block.
- * A panel that is mounted and done repainting takes them straight away; anything
- * sent before that waits here, because bytes typed while the scrollback is being
- * replayed come out interleaved with the repaint.
- */
-const sinks = new Map<string, (data: string) => void>()
-const waiting = new Map<string, string[]>()
-
-export function sendToTerminal(termId: string, command: string): void {
-  const data = `${command}\r`
-  const sink = sinks.get(termId)
-  if (sink) sink(data)
-  else waiting.set(termId, [...(waiting.get(termId) ?? []), data])
-}
 
 /**
  * A live shell. The PTY lives in the main process keyed by `termId`, so the
@@ -256,9 +242,7 @@ export function TerminalPanel({
     const arm = () => {
       if (gone) return
       const sink = (data: string) => void window.floe.terminal.write(termId, data)
-      sinks.set(termId, sink)
-      for (const data of waiting.get(termId) ?? []) sink(data)
-      waiting.delete(termId)
+      attachTerminal(termId, sink)
     }
 
     void (mode === 'editor'
@@ -283,7 +267,7 @@ export function TerminalPanel({
 
     return () => {
       gone = true
-      sinks.delete(termId)
+      detachTerminal(termId)
       off()
       input.dispose()
       resize.disconnect()

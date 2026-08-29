@@ -1,0 +1,489 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Bash no chat — a mesma conversa, cinco tratamentos</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+  }
+
+  .bar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  .bar button {
+    padding: 3px 10px;
+    background: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    color: var(--dim);
+    font: inherit;
+    cursor: pointer;
+  }
+  .bar button:hover {
+    color: var(--text-strong);
+  }
+
+  .cols {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+    overflow-x: auto;
+  }
+
+  /* Cada coluna é um painel de chat na largura real do app (600px). */
+  .col {
+    flex: none;
+    width: 600px;
+    min-height: 100vh;
+    border-right: 1px solid var(--line);
+    background: var(--panel-focused);
+  }
+  .col-head {
+    position: sticky;
+    top: 37px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    height: var(--head-h);
+    padding: 0 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .col-head b {
+    color: var(--text-strong);
+    font-size: 12.5px;
+  }
+  .col-head span {
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .chat {
+    padding: 14px;
+  }
+
+  /* --- highlight de shell, comum a todas ---------------------------------- */
+  .sh-cmd {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .sh-flag {
+    color: #8a6fbf;
+  }
+  .sh-str {
+    color: #a9631f;
+  }
+  .sh-path {
+    color: var(--text);
+  }
+  .sh-op {
+    color: var(--faint);
+  }
+  .sh-num {
+    color: #3a64a8;
+  }
+  :root:not([data-theme='light']) .sh-flag {
+    color: #a795d8;
+  }
+  :root:not([data-theme='light']) .sh-str {
+    color: #d0a06a;
+  }
+  :root:not([data-theme='light']) .sh-num {
+    color: #7fa3d8;
+  }
+
+  .chev {
+    flex: none;
+    align-self: center;
+    width: 14px;
+    height: 14px;
+    color: var(--faint);
+    opacity: 0.5;
+  }
+  .row:hover .chev {
+    opacity: 1;
+  }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 0;
+    background: none;
+    border: 0;
+    color: var(--dim);
+    font: inherit;
+    text-align: left;
+  }
+  .row .code {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  /* A rajada inteira é um bloco, com o mesmo respiro de um parágrafo. */
+  .burst {
+    margin: 6px 0;
+  }
+
+  /* F3 — binário em coluna */
+  .f3 .row {
+    display: grid;
+    grid-template-columns: 14px 6ch minmax(0, 1fr);
+    gap: 10px;
+  }
+  .f3 .bin {
+    color: var(--text-strong);
+    font-weight: 700;
+    text-align: right;
+  }
+
+  /* F4 — trilho */
+  .f4 .burst {
+    position: relative;
+    padding-left: 14px;
+  }
+  .f4 .burst::before {
+    content: '';
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    left: 3px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--line);
+  }
+
+  /* F5 — cabeça e cauda */
+  .f5 .lead {
+    color: var(--text);
+  }
+  .f5 .rest {
+    color: var(--faint);
+  }
+
+  /* C — bloco com barra em cima */
+  .blk {
+    margin: 8px 0;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .blk-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    background: var(--well);
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .blk-bar b {
+    color: var(--text-strong);
+    font-weight: 700;
+  }
+  .blk-bar .meta {
+    margin-left: auto;
+    color: var(--faint);
+  }
+  .blk-body {
+    padding: 4px 10px 6px;
+  }
+  .blk-body .row {
+    padding: 1px 0;
+  }
+
+  /* C2 — a barra é a própria linha de resumo, e abre */
+  .blk-bar[data-fold] {
+    cursor: default;
+  }
+  .blk-bar .chev {
+    margin-right: 2px;
+  }
+
+  /* C3 — barra sem moldura: só um rótulo acima da rajada */
+  .lbl {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 8px 0 1px;
+    color: var(--faint);
+    font-size: 11px;
+  }
+  .lbl b {
+    color: var(--dim);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .lbl::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--line-soft);
+  }
+
+  /* F6 — pílula */
+  .f6 .pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    max-width: 100%;
+    margin: 1px 0;
+    padding: 1px 8px 1px 10px;
+    border: 1px solid var(--line-soft);
+    border-radius: 999px;
+  }
+  .f6 .pill .code {
+    flex: 0 1 auto;
+  }
+</style>
+
+<body>
+  <div class="bar">
+    <b style="color: var(--text-strong)">a mesma conversa, cinco tratamentos</b>
+    <span>role para o lado →</span>
+    <button
+      onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'"
+    >
+      tema
+    </button>
+    <button onclick="document.body.classList.toggle('narrow')">largura 430px</button>
+  </div>
+
+  <div class="cols" id="cols"></div>
+
+  <script>
+    // A conversa: a do screenshot, com as rajadas onde elas de fato aconteceram.
+    const CONVERSA = [
+      { role: 'user', nick: 'r2luna', at: '14:22', text: 'brain/o system prompt carregou? analisa a part' },
+      {
+        role: 'assistant',
+        nick: 'claude',
+        ident: 'medium',
+        host: 'opus-5',
+        at: '14:22',
+        text: 'Vou olhar o projeto e o system prompt.'
+      },
+      {
+        role: 'bash',
+        cmds: [
+          'ls /Users/r2luna; echo "---"; ls /Users/r2luna/.claude/projects/-Users-r2luna/memory/ 2>/dev/null; echo "---"; cat /Users/r2luna/CLAUDE.md 2>/dev/null | head -50',
+          'ls /Users/r2luna/code 2>/dev/null; echo "--- brain hits ---"; find /Users/r2luna/code /Users/r2luna/Obsidian -maxdepth 3 -iname "*brain*" 2>/dev/null | head -30'
+        ]
+      },
+      {
+        role: 'assistant',
+        nick: 'claude',
+        ident: 'medium',
+        host: 'opus-5',
+        at: '14:23',
+        text: 'Achei o projeto em <code>~/code/01.r2luna/01.projects/brain</code>. Procurando onde ele imprime.'
+      },
+      {
+        role: 'bash',
+        cmds: [
+          'cd /Users/r2luna/code/01.r2luna/01.projects/brain && ls && echo "--- print hits ---" && grep -ril "print" --include=*.php src app 2>/dev/null | head -40',
+          'grep -ril "print" src tests docs 2>/dev/null | head -40; echo "=== src tree ==="; find src -maxdepth 2 -type d | head -40',
+          'wc -l src/Console/ShowBrainCommand.php src/Console/Printer.php && sed -n 1,400p src/Console/Printer.php',
+          'sed -n 400,580p src/Console/Printer.php; echo "===== ShowBrainCommand ====="; cat src/Console/ShowBrainCommand.php',
+          'grep -n "tasks\\|actions\\|workflows\\|queries\\|group" src/Console/BrainMap.php | head -60'
+        ]
+      },
+      {
+        role: 'assistant',
+        nick: 'claude',
+        ident: 'medium',
+        host: 'opus-5',
+        at: '14:26',
+        text:
+          'Sim, o system prompt carregou (comunicação concisa, reference points, sem escopo extra).\n\nProjeto analisado: <code>/Users/r2luna/code/01.r2luna/01.projects/brain</code> — <code>src/Console/Printer.php</code> (580 linhas) + <code>src/Console/ShowBrainCommand.php</code>.',
+        cost: '3m 12s · ↓34.1k tokens'
+      },
+      { role: 'user', nick: 'r2luna', at: '14:27', text: 'e o BrainMap? é ele que agrupa?' },
+      {
+        role: 'bash',
+        cmds: ['sed -n 1,160p src/Console/BrainMap.php']
+      },
+      {
+        role: 'assistant',
+        nick: 'claude',
+        ident: 'medium',
+        host: 'opus-5',
+        at: '14:27',
+        text: 'É ele. <code>BrainMap</code> agrupa por <b>tasks</b>, <b>actions</b> e <b>workflows</b>, e o Printer só desenha o que ele devolve.',
+        cost: '18s · ↓36.0k tokens'
+      }
+    ]
+
+    const CHEVRON = `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+    function highlight(src) {
+      const re = /("[^"]*"|'[^']*')|(\|\||&&|[|;])|(\d?>>?[^\s]*)|(--?[A-Za-z][\w-]*)|(\S+)/g
+      let out = ''
+      let atStart = true
+      let m
+      while ((m = re.exec(src))) {
+        if (m.index > 0 && src[m.index - 1] === ' ') out += ' '
+        const [, str, op, redir, flag, word] = m
+        if (str) out += `<span class="sh-str">${esc(str)}</span>`
+        else if (op) {
+          out += `<span class="sh-op">${esc(op)}</span>`
+          atStart = true
+          continue
+        } else if (redir) out += `<span class="sh-op">${esc(redir)}</span>`
+        else if (flag) out += `<span class="sh-flag">${esc(flag)}</span>`
+        else if (word) {
+          out += `<span class="${atStart ? 'sh-cmd' : /^\d+([.,]\d+)?p?$/.test(word) ? 'sh-num' : 'sh-path'}">${esc(word)}</span>`
+          atStart = false
+        }
+      }
+      return out
+    }
+
+    const binOf = (c) => c.split(/[\s;|&]/)[0]
+    const head = (c) => c.split(/(?=[;|]|&&)/)[0].trim()
+    const tail = (c) => c.slice(head(c).length)
+
+    const linha = (c, apaga) =>
+      apaga
+        ? `<div class="row">${CHEVRON}<span class="code"><span class="lead">${highlight(head(c))}</span><span class="rest">${esc(tail(c))}</span></span></div>`
+        : `<div class="row">${CHEVRON}<span class="code">${highlight(c)}</span></div>`
+
+    // Um tratamento por coluna: recebe a lista de comandos da rajada e devolve HTML.
+    const TRATAMENTOS = [
+      {
+        id: 'c1',
+        nome: 'C1 · barra + bloco',
+        nota: 'a barra nomeia a rajada e conta',
+        render: (cmds) =>
+          `<div class="blk">
+            <div class="blk-bar"><b>bash</b><span>brain</span><span class="meta">${cmds.length} comando${cmds.length > 1 ? 's' : ''} · 14:26</span></div>
+            <div class="blk-body">${cmds.map((c) => linha(c, false)).join('')}</div>
+          </div>`
+      },
+      {
+        id: 'c2',
+        nome: 'C2 · barra que abre',
+        nota: 'colapsada, o chevron na barra',
+        render: (cmds) =>
+          `<div class="blk">
+            <div class="blk-bar" data-fold><b>bash</b><span>${cmds.map(binOf).join(' · ')}</span>${CHEVRON}</div>
+            <div class="blk-body">${cmds.map((c) => linha(c, true)).join('')}</div>
+          </div>`
+      },
+      {
+        id: 'c3',
+        nome: 'C3 · barra sem moldura',
+        nota: 'rótulo e filete, sem caixa',
+        render: (cmds) =>
+          `<div class="burst">
+            <div class="lbl"><b>bash</b><span>${cmds.length}</span></div>
+            ${cmds.map((c) => linha(c, true)).join('')}
+          </div>`
+      },
+      {
+        id: 'f1',
+        nome: 'F1 · linha nua',
+        nota: 'uma linha por comando, truncada',
+        render: (cmds) =>
+          `<div class="burst">${cmds
+            .map((c) => `<div class="row">${CHEVRON}<span class="code">${highlight(c)}</span></div>`)
+            .join('')}</div>`
+      },
+      {
+        id: 'f3',
+        nome: 'F3 · binário em coluna',
+        nota: 'o programa alinhado à esquerda',
+        render: (cmds) =>
+          `<div class="burst">${cmds
+            .map(
+              (c) =>
+                `<div class="row">${CHEVRON}<span class="bin">${binOf(c)}</span><span class="code">${highlight(
+                  c.slice(binOf(c).length).trim()
+                )}</span></div>`
+            )
+            .join('')}</div>`
+      },
+      {
+        id: 'f4',
+        nome: 'F4 · trilho',
+        nota: 'a rajada ligada por um trilho',
+        render: (cmds) =>
+          `<div class="burst">${cmds
+            .map((c) => `<div class="row">${CHEVRON}<span class="code">${highlight(c)}</span></div>`)
+            .join('')}</div>`
+      },
+      {
+        id: 'f5',
+        nome: 'F5 · cabeça e cauda',
+        nota: 'o primeiro segmento com peso, o resto apagado',
+        render: (cmds) =>
+          `<div class="burst">${cmds
+            .map(
+              (c) =>
+                `<div class="row">${CHEVRON}<span class="code"><span class="lead">${highlight(
+                  head(c)
+                )}</span><span class="rest">${esc(tail(c))}</span></span></div>`
+            )
+            .join('')}</div>`
+      },
+      {
+        id: 'f6',
+        nome: 'F6 · pílula',
+        nota: 'cápsula do tamanho do comando',
+        render: (cmds) =>
+          `<div class="burst">${cmds
+            .map(
+              (c) =>
+                `<div><span class="pill">${CHEVRON}<span class="code">${highlight(c)}</span></span></div>`
+            )
+            .join('')}</div>`
+      }
+    ]
+
+    const entrada = (item) => {
+      if (item.role === 'user')
+        return `<div class="irc-entry">
+          <div class="irc-head"><span class="irc-nick" style="color:#c9a26d">${item.nick}</span><span class="irc-time">${item.at}</span></div>
+          <div class="irc-body">${item.text}</div>
+        </div>`
+      return `<div class="irc-entry">
+        <div class="irc-head"><span class="irc-nick" style="color:#5fb3a1">${item.nick}<span class="irc-host">!${item.ident}</span><span class="irc-host">@${item.host}</span></span><span class="irc-time">${item.at}</span></div>
+        <div class="irc-body" style="white-space:normal">${item.text.replace(/\n\n/g, '<br><br>')}</div>
+        ${item.cost ? `<div class="irc-cost">${item.cost}</div>` : ''}
+      </div>`
+    }
+
+    document.getElementById('cols').innerHTML = TRATAMENTOS.map(
+      (t) => `
+        <div class="col ${t.id}">
+          <div class="col-head"><b>${t.nome}</b><span>${t.nota}</span></div>
+          <div class="chat">
+            ${CONVERSA.map((item) => (item.role === 'bash' ? t.render(item.cmds) : entrada(item))).join('')}
+          </div>
+        </div>`
+    ).join('')
+
+    // Largura estreita: o mesmo chat espremido, que é onde um layout falha.
+    const style = document.createElement('style')
+    style.textContent = '.narrow .col { width: 430px }'
+    document.head.appendChild(style)
+  </script>
+</body>
