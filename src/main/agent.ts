@@ -959,7 +959,8 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
             kind: 'subagent-start',
             toolUseId: block.id,
             agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
-            description: typeof input.description === 'string' ? input.description : ''
+            description: typeof input.description === 'string' ? input.description : '',
+            harness: 'claude'
           })
           continue
         }

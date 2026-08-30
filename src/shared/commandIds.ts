@@ -71,6 +71,7 @@ export const COMMAND_IDS: string[] = [
   'skill.delete',
   'skill.edit',
   'keybindings.reset',
+  'update.install',
   // Sessions & worktrees
   'session.prev',
   'session.next',

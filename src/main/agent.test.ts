@@ -233,7 +233,7 @@ test('handleLine: Task tool_use starts a tracked subagent', () => {
     conn
   )
   assert.deepEqual(only(events, 'subagent-start'), [
-    { kind: 'subagent-start', toolUseId: 't1', agentType: 'Explore', description: 'look' }
+    { kind: 'subagent-start', toolUseId: 't1', agentType: 'Explore', description: 'look', harness: 'claude' }
   ])
   assert.ok(conn.subagents.has('t1'))
 })

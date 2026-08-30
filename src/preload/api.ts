@@ -10,10 +10,8 @@ import type {
 } from '../main/git'
 import type { ClaudeSessionMeta, ResumableSession, TranscriptItem } from '../main/claudeSessions'
 import type { ViewState, WorktreeView, ProjectUiState, WorktreeUiState } from '../main/sessionStore'
-import type { PersistedWorkflow } from '../main/workflowStore'
 import type { DevCommand, DevEvent } from '../main/devServer'
 import type { ProjectCommand, CommandScope, CommandPatch } from '../main/commands'
-import type { ScheduleEntry } from '../main/schedules'
 import type { CommandEvent } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
@@ -29,16 +27,10 @@ import type {
   ClaudeInfo,
   ContextUsage,
   CodexModel,
-  DbResult,
-  DbTablesResult,
   Effort,
   FileAttachment,
   FileContent,
   FileNode,
-  HttpEnv,
-  HttpFile,
-  HttpRequest,
-  HttpResponse,
   ImageAttachment,
   ImplementPhase,
   JumpSession,
@@ -53,13 +45,10 @@ import type {
   NeedsYouSession,
   PlanFile,
   ThreadComment,
-  PrFile,
   Project,
   ProjectActivity,
   ProjectEnvConfig,
   ProvisionEvent,
-  PrStatus,
-  PullRequest,
   RemoteBranch,
   DropDatabaseResult,
   FileOp,
@@ -67,9 +56,6 @@ import type {
   RemovePreflight,
   ReviewCommit,
   SlashCommand,
-  Task,
-  TaskCloseResult,
-  TasksStatus,
   UsageStats,
   Worktree,
   WorktreesUpdatedEvent,
@@ -106,23 +92,6 @@ export interface BackendInfo {
   remote: boolean
 }
 
-// Live state of the embedded browser pane, pushed on every navigation.
-export interface BrowserPaneState {
-  url: string
-  title: string
-  canGoBack: boolean
-  canGoForward: boolean
-}
-
-// An app chord forwarded out of the native browser view (see browser:key).
-export interface BrowserKey {
-  key: string
-  code: string
-  meta: boolean
-  control: boolean
-  shift: boolean
-  alt: boolean
-}
 
 // The bridge the renderer talks to.
 export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
@@ -163,20 +132,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // Settings read-only detection (Claude CLI binary/version, gh auth state).
     settingsProbe: (): Promise<{
       claude: { path: string | null; version: string | null }
-      github: { authed: boolean; user: string | null }
     }> => ipcRenderer.invoke('settings:probe'),
     // System prompt appended to every spawned Claude session (agent.ts, --append-system-prompt).
     getSystemPrompt: (): Promise<string> => ipcRenderer.invoke('settings:getSystemPrompt'),
     setSystemPrompt: (value: string): Promise<void> => ipcRenderer.invoke('settings:setSystemPrompt', value),
-    // Jira integration — token encrypted at rest in the main process (safeStorage).
-    // `get` never returns the token, only whether one is stored.
-    jira: {
-      get: (): Promise<{ baseUrl: string; email: string; hasToken: boolean }> =>
-        ipcRenderer.invoke('integrations:getJira'),
-      set: (input: { baseUrl: string; email: string; token?: string }): Promise<void> =>
-        ipcRenderer.invoke('integrations:setJira', input),
-      test: (): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke('integrations:testJira')
-    },
     notify: (payload: { title: string; body: string; sessionId: string }): Promise<void> =>
       ipcRenderer.invoke('notify:show', payload),
     onNotificationClick: (cb: (sessionId: string) => void): (() => void) => {
@@ -185,8 +144,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       return () => ipcRenderer.removeListener('notification:click', listener)
     },
     // An auto-update has been downloaded and will install on next restart; the
-    // payload carries the version that's waiting. Used to surface "vX available"
-    // in the titlebar logo hover.
+    // payload carries the version that's waiting. Drives the in-app update
+    // banner and the `update.install` command.
     onUpdateDownloaded: (cb: (version: string) => void): (() => void) => {
       const listener = (_event: IpcRendererEvent, payload: { version: string }): void => cb(payload.version)
       ipcRenderer.on('update:downloaded', listener)
@@ -458,37 +417,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('claude:auth:event', listener)
       }
     },
-    // Embedded browser pane — a native WebContentsView the renderer positions
-    // over its browser area.
-    browser: {
-      open: (url: string): Promise<BrowserPaneState> => ipcRenderer.invoke('browser:open', url),
-      // Render a local file (absolute path) as file://.
-      openFile: (absPath: string): Promise<BrowserPaneState> => ipcRenderer.invoke('browser:openFile', absPath),
-      navigate: (url: string): Promise<void> => ipcRenderer.invoke('browser:navigate', url),
-      back: (): Promise<void> => ipcRenderer.invoke('browser:back'),
-      forward: (): Promise<void> => ipcRenderer.invoke('browser:forward'),
-      reload: (): Promise<void> => ipcRenderer.invoke('browser:reload'),
-      devtools: (): Promise<void> => ipcRenderer.invoke('browser:devtools'),
-      setBounds: (b: { x: number; y: number; width: number; height: number }): Promise<void> =>
-        ipcRenderer.invoke('browser:setBounds', b),
-      setVisible: (visible: boolean): Promise<void> => ipcRenderer.invoke('browser:setVisible', visible),
-      close: (): Promise<void> => ipcRenderer.invoke('browser:close'),
-      // The worktree's own APP_URL from its .env, if any.
-      defaultUrl: (worktreePath: string): Promise<string | null> =>
-        ipcRenderer.invoke('browser:defaultUrl', worktreePath),
-      onEvent: (cb: (state: BrowserPaneState) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, state: BrowserPaneState): void => cb(state)
-        ipcRenderer.on('browser:event', listener)
-        return () => ipcRenderer.removeListener('browser:event', listener)
-      },
-      // App chords the native page view would otherwise swallow (⌘Y, ⌘K, Esc, …),
-      // forwarded from main so the renderer's global key handler can run.
-      onKey: (cb: (k: BrowserKey) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, k: BrowserKey): void => cb(k)
-        ipcRenderer.on('browser:key', listener)
-        return () => ipcRenderer.removeListener('browser:key', listener)
-      }
-    },
     // Floe's own skills — Markdown in ~/.config/floe, global or per project.
     // The renderer only ever needs the LIST: the text itself is expanded in the
     // main process at the moment a turn is sent, so a skill never has to travel
@@ -507,15 +435,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     },
     slash: {
       list: (worktreePath: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', worktreePath)
-    },
-    // Pipeline persistence: save the runner's progress per worktree so a relaunch
-    // can reattach the trilho at the right step.
-    workflow: {
-      save: (worktreePath: string, wf: PersistedWorkflow): Promise<void> =>
-        ipcRenderer.invoke('workflow:save', worktreePath, wf),
-      load: (worktreePath: string): Promise<PersistedWorkflow | null> =>
-        ipcRenderer.invoke('workflow:load', worktreePath),
-      clear: (worktreePath: string): Promise<void> => ipcRenderer.invoke('workflow:clear', worktreePath)
     },
     // Topbar memory is pushed every ~2s. Claude usage is only probed through an
     // explicit refresh; setUsageCwd chooses where that throwaway process runs.
@@ -602,9 +521,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.on('command:event', listener)
         return () => ipcRenderer.removeListener('command:event', listener)
       }
-    },
-    schedules: {
-      list: (projectPath: string): Promise<ScheduleEntry[]> => ipcRenderer.invoke('schedules:list', projectPath)
     },
     dev: {
       detect: (worktreePath: string): Promise<DevCommand | null> => ipcRenderer.invoke('dev:detect', worktreePath),
@@ -705,62 +621,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('plans:event', listener)
       }
     },
-    // External tracker work items (GitHub Issues today; Jira later). `status` says
-    // whether a tracker applies to the project root and is usable; `list` pulls the
-    // normalized tasks. Both take the project root (issues are repo-level).
-    tasks: {
-      status: (root: string): Promise<TasksStatus> => ipcRenderer.invoke('tasks:status', root),
-      list: (root: string, opts: { state: 'open' | 'all' }): Promise<Task[]> =>
-        ipcRenderer.invoke('tasks:list', root, opts),
-      // Merge flow: mark the branch's linked task done (Jira "Done" / GitHub close).
-      closeForBranch: (root: string, branch: string): Promise<TaskCloseResult> =>
-        ipcRenderer.invoke('tasks:closeForBranch', root, branch),
-      // Jira connection (global token) + per-repo project key. The token is set
-      // here but only ever read back as "connected" — it never leaves the main process.
-      jiraGetConnection: (): Promise<{ connected: boolean; site?: string; email?: string }> =>
-        ipcRenderer.invoke('tasks:jiraGetConnection'),
-      jiraSetCreds: (c: { site: string; email: string; token: string }): Promise<void> =>
-        ipcRenderer.invoke('tasks:jiraSetCreds', c),
-      jiraClearCreds: (): Promise<void> => ipcRenderer.invoke('tasks:jiraClearCreds'),
-      jiraTestCreds: (c: {
-        site: string
-        email: string
-        token: string
-      }): Promise<{ ok: boolean; displayName?: string; reason?: string }> =>
-        ipcRenderer.invoke('tasks:jiraTestCreds', c),
-      getProjectKey: (root: string): Promise<string | undefined> =>
-        ipcRenderer.invoke('tasks:getProjectKey', root),
-      setProjectKey: (root: string, key: string): Promise<void> =>
-        ipcRenderer.invoke('tasks:setProjectKey', root, key)
-    },
-    // Pull requests (GitHub via `gh`, or Bitbucket Cloud via REST — picked by the
-    // origin remote). Repo-level like tasks: every call takes the project root.
-    // `status` reports whether the PR workflow is usable; `list`/`files` read;
-    // `approve`/`merge` act; `bitbucket*` manage the global Bitbucket connection.
-    pr: {
-      status: (root: string): Promise<PrStatus> => ipcRenderer.invoke('pr:status', root),
-      list: (root: string): Promise<PullRequest[]> => ipcRenderer.invoke('pr:list', root),
-      files: (root: string, number: number): Promise<PrFile[]> => ipcRenderer.invoke('pr:files', root, number),
-      addComment: (
-        root: string,
-        number: number,
-        c: { relPath: string; side: 'new' | 'old'; startLine: number; endLine: number; body: string }
-      ): Promise<void> => ipcRenderer.invoke('pr:addComment', root, number, c),
-      approve: (root: string, number: number, body?: string): Promise<void> =>
-        ipcRenderer.invoke('pr:approve', root, number, body),
-      merge: (root: string, number: number, method: 'merge' | 'squash' | 'rebase'): Promise<void> =>
-        ipcRenderer.invoke('pr:merge', root, number, method),
-      bitbucketGetConnection: (): Promise<{ connected: boolean; email?: string }> =>
-        ipcRenderer.invoke('pr:bitbucketGetConnection'),
-      bitbucketSetCreds: (c: { email: string; token: string }): Promise<void> =>
-        ipcRenderer.invoke('pr:bitbucketSetCreds', c),
-      bitbucketClearCreds: (): Promise<void> => ipcRenderer.invoke('pr:bitbucketClearCreds'),
-      bitbucketTestCreds: (c: {
-        email: string
-        token: string
-      }): Promise<{ ok: boolean; displayName?: string; reason?: string }> =>
-        ipcRenderer.invoke('pr:bitbucketTestCreds', c)
-    },
     editor: {
       open: (
         id: string,
@@ -786,39 +646,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         line?: number
       ): Promise<{ mode: 'panel' | 'external'; error?: string }> =>
         ipcRenderer.invoke('editor:launch', cwd, file, line)
-    },
-    // The `.http` client: discover files for the right-pane list, parse one file's
-    // requests for the center view, load the environments (http-client.env.json),
-    // and send a request (built-in fetch, in the main process). `onChanged` fires
-    // when a .http/env file changes on disk so the list can refresh.
-    http: {
-      list: (worktreePath: string): Promise<HttpFile[]> => ipcRenderer.invoke('http:list', worktreePath),
-      parse: (worktreePath: string, relPath: string): Promise<HttpRequest[]> =>
-        ipcRenderer.invoke('http:parse', worktreePath, relPath),
-      env: (worktreePath: string, relPath?: string): Promise<HttpEnv> =>
-        ipcRenderer.invoke('http:env', worktreePath, relPath),
-      execute: (worktreePath: string, relPath: string, index: number, envName?: string): Promise<HttpResponse> =>
-        ipcRenderer.invoke('http:execute', worktreePath, relPath, index, envName),
-      watch: (worktreePath: string): Promise<void> => ipcRenderer.invoke('http:watch', worktreePath),
-      onChanged: (cb: (event: { worktreePath: string }) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, event: { worktreePath: string }): void => cb(event)
-        ipcRenderer.on('http:changed', listener)
-        return () => ipcRenderer.removeListener('http:changed', listener)
-      }
-    },
-    // The read-only database viewer: detect the connection + list the worktree's
-    // tables, run a read-only query, and watch .env/sqlite so the view refreshes
-    // when the connection or data changes on disk.
-    database: {
-      tables: (worktreePath: string): Promise<DbTablesResult> => ipcRenderer.invoke('db:tables', worktreePath),
-      query: (worktreePath: string, sql: string, limit?: number): Promise<DbResult> =>
-        ipcRenderer.invoke('db:query', worktreePath, sql, limit),
-      watch: (worktreePath: string): Promise<void> => ipcRenderer.invoke('db:watch', worktreePath),
-      onChanged: (cb: (event: { worktreePath: string }) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, event: { worktreePath: string }): void => cb(event)
-        ipcRenderer.on('db:changed', listener)
-        return () => ipcRenderer.removeListener('db:changed', listener)
-      }
     },
     terminal: {
       // Resolves with the scrollback to repaint when re-attaching to a live PTY

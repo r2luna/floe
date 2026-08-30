@@ -1,0 +1,65 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — subagentes em linhas soltas (DOM real do SubagentGroup)</title>
+<link rel="stylesheet" href="./src/renderer/src/index.css" />
+<style>
+  .mock-page { max-width: 860px; margin: 0 auto; padding: 20px 18px 60px; }
+  .mock-top { display:flex; align-items:baseline; gap:12px; margin-bottom:10px; }
+  .mock-top h1 { font-size:13px; margin:0; color:var(--text-strong); }
+  .mock-top p { margin:0; color:var(--dim); font-size:11px; }
+  .panel { border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:10px 14px 16px; }
+</style>
+</head>
+<body>
+<div class="mock-page">
+  <div class="mock-top"><h1>Subagentes — linhas soltas</h1><p>markup idêntico ao SubagentGroup · index.css real</p></div>
+  <div class="panel"><div class="chat" id="chat"></div></div>
+</div>
+<script>
+const NICK_COLORS = ['#7fb3d5', '#c9a05f', '#8fc98f', '#c48fb8', '#6fc3c3', '#c98f7f']
+const nickColor = (n) => { let h=0; for (const c of n) h=(h*31+c.charCodeAt(0))>>>0; return NICK_COLORS[h%NICK_COLORS.length] }
+const el = (h) => { const d=document.createElement('div'); d.innerHTML=h.trim(); return d.firstElementChild }
+const fmt = (ms) => { const t=Math.floor(ms/1000), s=t%60, m=Math.floor(t/60)%60, h=Math.floor(t/3600)
+  return h?`${h}h ${String(m).padStart(2,'0')}m`:m?`${m}m ${s}s`:`${s}s` }
+
+function line(it, peak) {
+  const tk = it.agentTokens||0
+  const meta = it.running
+    ? `(${fmt(Date.now()-it.at)}${tk?` · ↓ ${(tk/1000).toFixed(1)}k tokens`:''})`
+    : `(${[it.ms?fmt(it.ms):null, tk?`↓ ${(tk/1000).toFixed(1)}k tokens`:null].filter(Boolean).join(' · ')})`
+  return `<div class="irc-body irc-act ag-line">`
+    + `<span class="irc-star">*</span>`
+    + `<span class="ag-dot"${it.running?'':' data-state="done"'}>${it.running?'◆':'◇'}</span>`
+    + `<span class="ag-desc"><span class="ag-type">${it.agentType}</span> ${it.summary}`
+    + (it.running && it.lastTool ? ` · <span class="ag-tool">${it.lastTool}</span>` : '')
+    + ` <span class="irc-dim">${meta}</span></span>`
+    + `<span class="ag-h" data-h="${it.harness}">${it.harness}</span>`
+    + `<span class="ag-meter"${it.running?'':' data-state="done"'}>${tk?`<i style="width:${Math.max(6,(tk/peak)*100)}%"></i>`:''}</span>`
+    + `</div>`
+}
+
+const now = Date.now()
+const agents = [
+  {agentType:'Explore', harness:'claude', summary:'mapear o pipeline do transcript', lastTool:'Grep', running:true, agentTokens:18200, at:now-41000},
+  {agentType:'general-purpose', harness:'claude', summary:'portar o renderer de linhas do codex', lastTool:'Edit', running:true, agentTokens:46900, at:now-63000},
+  {agentType:'Explore', harness:'claude', summary:'achar todo caller de irc-act', lastTool:'Read', running:true, agentTokens:4100, at:now-8000},
+  {agentType:'Plan', harness:'claude', summary:'desenhar a migração do bloco de agentes', running:false, ms:58000, agentTokens:22400, at:now-120000},
+  {agentType:'general-purpose', harness:'claude', summary:'rodar a suíte e reportar', running:false, ms:104000, at:now-104000},
+  {agentType:'codex', harness:'codex', summary:'revisar o guard de turno segurado', running:false, ms:22000, agentTokens:1800, at:now-22000,
+   text:'O guard segura o turno mas não limpa <code class="md-code">heldForSubagentsAt</code> quando o filho morre sem tool_result.'}
+]
+const peak = Math.max(...agents.map(a=>a.agentTokens||0), 1)
+const chat = document.getElementById('chat')
+chat.append(
+  el(`<div class="irc-entry"><div class="irc-head"><span class="irc-nick" style="color:${nickColor('r2luna')}">r2luna</span><span class="irc-time">14:21</span></div><div class="irc-body">revisa o transcript inteiro e me diz o que quebra com 6 agentes ao mesmo tempo</div></div>`),
+  el(`<div class="irc-entry"><div class="irc-head"><span class="irc-nick" style="color:${nickColor('claude')}">claude<span class="irc-host">@opus-5</span></span><span class="irc-time">14:22</span></div><div class="irc-body">Abrindo seis frentes em paralelo e cruzando com o Codex.</div></div>`),
+  el(`<div class="ag-group">${agents.map(a=>line(a,peak)).join('')
+    + `<div class="ag-reply">${agents[5].text}</div>`}</div>`),
+  el(`<div class="irc-body irc-act" style="margin-top:10px"><span class="irc-star">*</span> claude está escrevendo…</div>`),
+  el(`<div class="irc-entry" data-cont><div class="irc-body">Os seis voltaram. O único ponto real é o do Codex: o turno segurado só se resolve pelo watchdog.</div><div class="irc-cost"><span>3m 12s</span><span class="irc-cost-sep">·</span><span>↓142.8k tokens</span></div></div>`)
+)
+</script>
+</body>
+</html>

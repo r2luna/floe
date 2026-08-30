@@ -36,7 +36,7 @@ export interface ClaudeSessionMeta {
 }
 
 export interface TranscriptItem {
-  role: 'user' | 'assistant' | 'tool' | 'image' | 'artifact'
+  role: 'user' | 'assistant' | 'tool' | 'image' | 'artifact' | 'subagent'
   text?: string
   name?: string
   summary?: string
@@ -72,6 +72,22 @@ export interface TranscriptItem {
    * one) so the LAST message of a run can print what the turn cost.
    */
   ms?: number
+  // --- role 'subagent' only -------------------------------------------------
+  // A subagent speaks in the transcript as a participant of its own: nick =
+  // `agentType`, badge = `harness`, body = what it is doing (live) or what it
+  // answered (`text`, which only the Codex bridge carries). `summary` holds the
+  // task description it was launched with.
+  //
+  // These fields never mix with the message ones above: `agentTokens` is the
+  // subagent's OWN context fill, deliberately not `contextTokens` — that one is
+  // the parent turn's gauge and stamping a child's number on it would move the
+  // status bar to a window it does not describe.
+  toolUseId?: string
+  agentType?: string
+  harness?: string
+  running?: boolean
+  lastTool?: string
+  agentTokens?: number
 }
 
 function extractText(message: unknown): string {
@@ -542,6 +558,9 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
   // which reloads as a user line so the exchange survives — a bare tool chip
   // would strand tomorrow's reader with an answer to an invisible question.
   const askIds = new Set<string>()
+  // Task/Agent tool_use id → the index of the subagent row it opened, so its
+  // tool_result (arriving lines later) can close the row it belongs to.
+  const agentRows = new Map<string, number>()
   // When the turn being read started, so an assistant message can carry how
   // long it took. Set by a REAL user message only — a tool_result also arrives
   // as `user` and would restart the clock in the middle of the turn it is part of.
@@ -562,6 +581,10 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       continue
     }
     if (m.type !== 'user' && m.type !== 'assistant') continue
+    // A subagent's own steps are written into the SAME file, flagged as a
+    // sidechain. They are the child's transcript, not the parent's: replaying
+    // them here would paste another agent's whole session into this one.
+    if (m.isSidechain === true) continue
     const role = m.type as 'user' | 'assistant'
     // The claude CLI stamps each line with an ISO `timestamp`; carry it onto every
     // item this line produces so the transcript can show a "time ago" per message.
@@ -633,6 +656,27 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
             continue
           }
         }
+        // A Task/Agent call rebuilds as the subagent's own line in the channel,
+        // the same shape the live stream pushes — so a reopened chat still shows
+        // who was called and what for. What cannot come back is the live part
+        // (tokens, the tool it was on): those existed only while it ran.
+        if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string') {
+          const input = (block.input ?? {}) as Record<string, unknown>
+          agentRows.set(block.id, items.length)
+          items.push({
+            role: 'subagent',
+            toolUseId: block.id,
+            agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
+            summary: typeof input.description === 'string' ? input.description : '',
+            harness: 'claude',
+            // Still open until its tool_result shows up below. A session that
+            // was killed mid-Task keeps a running row, which is the truth: it
+            // never finished.
+            running: true,
+            at
+          })
+          continue
+        }
         items.push({ role: 'tool', name: String(block.name ?? 'tool'), summary: summarizeTool(block.input) })
       } else if (
         block.type === 'tool_result' &&
@@ -641,6 +685,15 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       ) {
         const text = resultText(block.content)
         if (text) items.push({ role: 'user', text })
+      } else if (
+        block.type === 'tool_result' &&
+        typeof block.tool_use_id === 'string' &&
+        agentRows.has(block.tool_use_id)
+      ) {
+        const row = items[agentRows.get(block.tool_use_id) as number]
+        row.running = false
+        if (at && row.at && at >= row.at) row.ms = at - row.at
+        agentRows.delete(block.tool_use_id)
       } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
         // Images returned by a tool (e.g. Read of a PNG) — show what Claude saw.
         for (const part of block.content as Array<Record<string, unknown>>) {
@@ -653,6 +706,9 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       }
     }
     for (let i = before; i < items.length; i++) {
+      // A subagent row carries its own clock and its own fill; the turn's
+      // numbers belong to the parent that launched it.
+      if (items[i].role === 'subagent') continue
       items[i].at = at
       if (model) items[i].model = model
       if (effort) items[i].effort = effort

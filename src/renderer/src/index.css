@@ -1777,6 +1777,134 @@ button {
   font-weight: 700;
 }
 
+/* --- subagents: one line each ---------------------------------------------
+   An agent is work the speaker set running, so its line is an act line
+   (.irc-act) with three fixed columns added: the state glyph, the harness chip
+   and the meter. The description is the only elastic one — it is the part that
+   can afford to be cut. */
+.ag-group {
+  margin-top: 10px;
+}
+
+.ag-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+/* Everything except the description holds its width, so five agents line up as
+   a column you can read straight down. */
+.ag-line > .irc-star,
+.ag-dot,
+.ag-h,
+.ag-meter {
+  flex: none;
+}
+
+.ag-desc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ag-type {
+  color: var(--text-strong);
+}
+
+/* Working pulses, finished does not — the glyph carries the state, so a line
+   read at a glance never needs its words. */
+.ag-dot {
+  color: var(--live);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.ag-dot[data-state='done'] {
+  color: var(--faint);
+  animation: none;
+}
+
+/* The tool it is on right now, in the same blue the app already uses for "a
+   turn in flight". */
+.ag-tool {
+  color: var(--working);
+}
+
+/* Which runtime ran it. An outline chip, so it ships its light variant — and
+   one tone per harness, from the canonical mode-chip palette. */
+.ag-h {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dimmest);
+  font-size: 10px;
+}
+
+.ag-h[data-h='claude'] {
+  border-color: #282f3a;
+  background: #1b1e25;
+  color: #95a6c0;
+}
+
+.ag-h[data-h='codex'] {
+  border-color: #283129;
+  background: #1b201d;
+  color: #93b8a1;
+}
+
+:root[data-theme='light'] .ag-h {
+  background: var(--wash-1);
+  color: var(--dim);
+}
+
+:root[data-theme='light'] .ag-h[data-h='claude'] {
+  border-color: #c2d4ef;
+  background: #eef2f9;
+  color: #3a64a8;
+}
+
+:root[data-theme='light'] .ag-h[data-h='codex'] {
+  border-color: #b6d9c3;
+  background: #eef6f1;
+  color: #2f7d52;
+}
+
+/* How much this agent has chewed against the busiest of its group. A hairline,
+   the same 3px the pipeline segments use — it is a comparison, not a reading. */
+.ag-meter {
+  width: 54px;
+  height: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--wash-4);
+  overflow: hidden;
+}
+
+.ag-meter i {
+  display: block;
+  height: 100%;
+  background: var(--live);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.ag-meter[data-state='done'] i {
+  background: #4d5f4d;
+  animation: none;
+}
+
+:root[data-theme='light'] .ag-meter[data-state='done'] i {
+  background: #9dbaa6;
+}
+
+/* The Codex bridge's answer, quoted under the line that ran it. */
+.ag-reply {
+  margin: 2px 0 4px 22px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  color: var(--dim);
+}
+
 /* --- shell calls ----------------------------------------------------------- */
 
 /* A run of shell commands: one frame, one row per command. The frame is what
@@ -3786,6 +3914,61 @@ kbd {
   color: #b1454a;
   border-color: #e3bdbf;
   background: #f9eef0;
+}
+
+/* --- update banner -------------------------------------------------------- */
+
+/* A downloaded update, waiting for the restart that applies it. Bottom RIGHT so
+   it never sits where the notice does — the two can be on screen at once, and
+   the notice is the one that must stay readable. Persistent by design: this is
+   the only surface that offers the restart. */
+.update-banner {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  animation: notice-in 120ms ease-out;
+}
+
+/* Outline chip, plan-blue tone — the same tint the mode buttons use for the
+   active-but-not-destructive state. */
+.update-restart {
+  padding: 4px 10px;
+  border: 1px solid #282f3a;
+  border-radius: 1px;
+  background: #1b1e25;
+  color: #95a6c0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.update-restart:hover {
+  border-color: #37415a;
+}
+
+:root[data-theme='light'] .update-banner {
+  box-shadow: 0 2px 8px #0000001a;
+}
+
+:root[data-theme='light'] .update-restart {
+  border-color: #c2d4ef;
+  background: #eef2f9;
+  color: #3a64a8;
+}
+
+:root[data-theme='light'] .update-restart:hover {
+  border-color: #a8c2e6;
 }
 
 /* --- notice --------------------------------------------------------------- */

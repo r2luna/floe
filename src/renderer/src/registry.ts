@@ -564,6 +564,19 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.setLane((l) => toggleKind(l, 'account', () => c.makePanel('account')))
       },
       {
+        // The only way a downloaded update ever gets applied: the main process
+        // refuses to swap the bundle on quit, so quitting and reopening keeps
+        // you on the old version. The banner's button dispatches this id.
+        id: 'update.install',
+        title: 'Restart to update…',
+        group: 'App',
+        enabled: (c) => !!c.pendingUpdate,
+        unavailable: () => 'no update downloaded yet',
+        run: () => {
+          void window.floe.installUpdate()
+        }
+      },
+      {
         id: 'keybindings.reset',
         title: 'Reset keybindings to defaults…',
         group: 'App',

@@ -1,6 +1,6 @@
 {
   "name": "floe",
-  "version": "5.24.0",
+  "version": "0.0.0",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
   "main": "./out/main/index.js",
@@ -16,7 +16,7 @@
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "release": "electron-vite build && electron-builder --mac --publish always",
-    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications — abra com duplo-clique.'",
+    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications \u2014 abra com duplo-clique.'",
     "postinstall": "electron-rebuild -f -w node-pty,better-sqlite3"
   },
   "dependencies": {
@@ -35,9 +35,7 @@
     "js-yaml": "^4.2.0",
     "mdast-util-find-and-replace": "^3.0.2",
     "mermaid": "^11.15.0",
-    "mysql2": "^3.23.0",
     "node-pty": "^1.0.0",
-    "pg": "^8.22.0",
     "react-markdown": "^9.1.0",
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
@@ -45,7 +43,6 @@
     "shiki": "^4.2.0",
     "smol-toml": "^1.8.0",
     "tiptap-markdown": "^0.8.10",
-    "ws": "^8.21.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
@@ -53,10 +50,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.0",
-    "@types/pg": "^8.20.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
-    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-builder": "^26.15.2",

@@ -150,7 +150,8 @@ export async function askCodex(
     kind: 'subagent-start',
     toolUseId,
     agentType: 'codex',
-    description: prompt.slice(0, 120)
+    description: prompt.slice(0, 120),
+    harness: 'codex'
   })
 
   // Set the machine-to-machine contract once, at the top of a fresh thread — a

@@ -1219,6 +1219,86 @@ function FileChip({ ref_ }: { ref_: string }) {
   )
 }
 
+/**
+ * The agents a turn set running, one line each.
+ *
+ * A subagent is not another voice in the conversation — it is work the speaker
+ * put in motion — so it reads as an act line, the same shape the transcript
+ * already uses for everything the agent does rather than says. One line holds
+ * all of it: who, what for, what it is on right now, whose runtime, and how
+ * much it has chewed. Five agents cost five lines, which is the whole point.
+ *
+ * The bar is relative to the busiest agent in the group, not to a context
+ * window: the question it answers is "which of these is doing the heavy work",
+ * and that is a comparison between the lines you are looking at.
+ */
+function SubagentGroup({ items }: { items: TranscriptItem[] }) {
+  const peak = Math.max(...items.map((i) => i.agentTokens ?? 0), 1)
+  return (
+    <div className="ag-group">
+      {items.map((item, i) => (
+        <SubagentLine item={item} peak={peak} key={i} />
+      ))}
+    </div>
+  )
+}
+
+function SubagentLine({ item, peak }: { item: TranscriptItem; peak: number }) {
+  const running = !!item.running
+  const tokens = item.agentTokens ?? 0
+  return (
+    <>
+      <div className="irc-body irc-act ag-line">
+        <span className="irc-star">*</span>
+        <span className="ag-dot" data-state={running ? undefined : 'done'}>
+          {running ? '◆' : '◇'}
+        </span>
+        <span className="ag-desc">
+          <span className="ag-type">{item.agentType || 'agent'}</span> {item.summary}
+          {running && item.lastTool && (
+            <>
+              {' · '}
+              <span className="ag-tool">{item.lastTool}</span>
+            </>
+          )}{' '}
+          {running ? (
+            <TypingMeter startedAt={item.at} tokens={tokens} />
+          ) : (
+            <AgentCost ms={item.ms} tokens={tokens} />
+          )}
+        </span>
+        {item.harness && (
+          <span className="ag-h" data-h={item.harness}>
+            {item.harness}
+          </span>
+        )}
+        {/* No fill for an agent that never reported a number — a bar drawn at
+            zero and a bar drawn for a runtime that stays silent look the same,
+            and only one of them is true. */}
+        <span className="ag-meter" data-state={running ? undefined : 'done'}>
+          {tokens > 0 && <i style={{ width: `${Math.max(6, (tokens / peak) * 100)}%` }} />}
+        </span>
+      </div>
+      {/* Only the Codex bridge answers in words; a Task subagent's output lands
+          as the parent's own work, so there is nothing to quote here. */}
+      {!running && !!item.text && (
+        <div className="ag-reply">
+          <MessageBody text={item.text} />
+        </div>
+      )}
+    </>
+  )
+}
+
+/** What a finished agent cost, inline: `(58s · ↓22.4k tokens)`. */
+function AgentCost({ ms, tokens }: { ms?: number; tokens?: number }) {
+  const parts: string[] = []
+  if (ms) parts.push(elapsed(ms))
+  if (tokens) parts.push(`↓ ${(tokens / 1000).toFixed(1)}k tokens`)
+  if (!parts.length) return null
+  return <span className="irc-dim">({parts.join(' · ')})</span>
+}
+
 function Entry({
   item,
   isNew,
@@ -1397,6 +1477,19 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
       while (i < items.length && isBash(items[i])) commands.push(items[i++].summary as string)
       i--
       out.push(<BashBlock commands={commands} key={at} />)
+      continue
+    }
+
+    // Agents launched together are one act of work, so they are gathered into
+    // one group — like the run of shell calls above, and for the same reason.
+    // They do NOT break the speaker run: these are lines about what the speaker
+    // set in motion, not another voice taking over the conversation.
+    if (item.role === 'subagent') {
+      const run: TranscriptItem[] = []
+      const at = i
+      while (i < items.length && items[i].role === 'subagent') run.push(items[i++])
+      i--
+      out.push(<SubagentGroup items={run} key={at} />)
       continue
     }
 

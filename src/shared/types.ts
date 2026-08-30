@@ -352,66 +352,6 @@ export interface ReviewComment {
   author?: string
 }
 
-// --- Pull requests (GitHub via `gh`, or Bitbucket Cloud via REST) -----------
-
-// Which host backs the PR panel for a project — picked by the origin remote
-// (github.com vs bitbucket.org). See main/pr/ for the provider registry.
-export type PrProviderName = 'github' | 'bitbucket'
-
-// One open PR in the PR review panel, normalized across providers. Some fields
-// are GitHub-shaped and inert on Bitbucket Cloud: `isDraft` is always false and
-// `mergeable` always null there (no cheap equivalents), and `reviewDecision` is
-// derived from Bitbucket's per-participant approvals into the same string set.
-export interface PullRequest {
-  number: number
-  title: string
-  author: string
-  headRefName: string
-  baseRefName: string
-  isDraft: boolean
-  // GitHub's overall review decision: APPROVED / CHANGES_REQUESTED / REVIEW_REQUIRED
-  // (or null when none applies). Surfaced as a chip in the list.
-  reviewDecision: string | null
-  // MERGEABLE / CONFLICTING / UNKNOWN — gates whether merge is worth offering.
-  mergeable: string | null
-  updatedAt: string
-  url: string
-  additions: number
-  deletions: number
-  changedFiles: number
-  // Viewer-relative flags that drive the panel's review-queue grouping. Both are
-  // false when the viewer can't be identified (e.g. a Bitbucket token without the
-  // `read:account` scope) — then the panel falls back to a flat list.
-  isAuthor: boolean // the viewer opened this PR
-  needsMyReview: boolean // the viewer is a requested reviewer who hasn't reviewed yet
-}
-
-// One changed file in a PR, carrying its unified-diff `patch` so the diff view
-// can render it without a checkout. `status` is GitHub's
-// (added/modified/removed/renamed), mapped to the ChangedFile status set.
-export interface PrFile {
-  relPath: string
-  status: 'added' | 'modified' | 'deleted' | 'untracked'
-  additions: number
-  deletions: number
-  // The unified diff hunks for this file (the REST API's `patch` field). Starts
-  // at the first `@@` — parseUnifiedDiff skips the file-header preamble anyway.
-  patch: string
-}
-
-// Whether a PR workflow applies to a project root and is usable. Mirrors
-// TasksStatus so the panel can show the same actionable empty states.
-export interface PrStatus {
-  available: boolean
-  provider?: PrProviderName // which host resolved (absent when none applies)
-  source?: string // "owner/repo" or "workspace/repo"
-  reason?: string // why it's unavailable (no remote, not authed, …)
-  // The resolved viewer's display name. Present only when the panel could
-  // identify "you" — its presence switches the list into review-queue grouping
-  // (needs-your-review → your-PRs → other). Absent → flat list.
-  viewer?: string
-}
-
 // --- Plans (Claude Code plan-mode files saved under .floe/plans/) --------
 
 // A plan markdown file Claude saved while in plan mode (see the `plansDirectory`
@@ -480,158 +420,6 @@ export interface ThreadComment {
   // visible — the thread doubles as the record of the review, so unlike
   // submitReview()/submitPlanReview() this list is never drained.
   sentAt?: number
-}
-
-// --- HTTP client (.http files, PhpStorm-style) ------------------------------
-
-// One .http file discovered under the worktree. Like PlanFile, `relPath` is
-// POSIX and worktree-relative. `group` is the top-level directory (e.g. "api"
-// for api/users.http; absent for files sitting at the worktree root), which the
-// HTTP list headers on. `isEnv` marks the http-client.env.json /
-// http-client.private.env.json environment files so the list can badge them.
-export interface HttpFile {
-  name: string
-  relPath: string
-  mtime: number
-  group?: string
-  isEnv?: boolean
-}
-
-// One request parsed out of a .http file (requests are separated by a `###`
-// line). `startLine` is 1-based — the line the request begins on — so pressing
-// E can drop the nvim cursor straight onto the selected request.
-export interface HttpRequest {
-  name: string
-  method: string
-  url: string
-  headers: [string, string][]
-  body?: string
-  startLine: number
-  // The inline response-handler script (`> {% … %}` after the request), if any.
-  // Runs after the response arrives; `client.global.set(name, value)` there
-  // persists a variable back into the environment (e.g. capture an auth token).
-  script?: string
-}
-
-// The result of sending an HttpRequest. `size` is the response body's byte
-// length and `duration` the round-trip in ms. `error` is set (with status 0)
-// when the request never completed (DNS/connection/timeout).
-export interface HttpResponse {
-  status: number
-  statusText: string
-  headers: [string, string][]
-  body: string
-  duration: number
-  size: number
-  error?: string
-  // Output of the response-handler script, when the request had one: names of
-  // variables it saved (client.global.set) and any client.log() lines.
-  savedVars?: string[]
-  log?: string[]
-}
-
-// Environments loaded from http-client.env.json (with .private.env.json merged
-// over it): environment name → variable map. `{{var}}` references in a request
-// resolve against the selected environment's map.
-export type HttpEnv = Record<string, Record<string, string>>
-
-// --- Database viewer (read-only, per-worktree) ------------------------------
-
-// The connection detected from the worktree's Laravel `.env`, minus the password
-// (which stays in the main process). `via` records how the last query reached it:
-// 'direct' = an in-process driver to host:port; 'docker' = the DB's CLI inside a
-// `docker compose exec` container (the fallback when the host isn't reachable).
-export interface DbConfig {
-  driver: 'mysql' | 'postgres' | 'sqlite'
-  host?: string
-  port?: number
-  database: string
-  username?: string
-  via?: 'direct' | 'docker'
-}
-
-// One table in the connected database.
-export interface DbTable {
-  name: string
-}
-
-// The connection info + table list for the right-pane panel. `config` is null
-// when the worktree has no recognizable DB config; `error` explains a reachable-
-// but-failing connection (auth, unreachable host) with an empty table list.
-export interface DbTablesResult {
-  config: DbConfig | null
-  tables: DbTable[]
-  error?: string
-}
-
-// One cell value, normalized for the grid (Dates → ISO, Buffers → hex, etc.).
-export type DbCell = string | number | boolean | null
-
-// The result of a read-only query. `rowCount` is the total the query produced;
-// `rows` may be shorter (capped) with `truncated` set. `error` is set (with empty
-// columns/rows) when the guard rejected it or the query/connection failed.
-export interface DbResult {
-  columns: string[]
-  rows: DbCell[][]
-  rowCount: number
-  duration: number
-  truncated?: boolean
-  error?: string
-}
-
-// --- Tasks (external tracker work items: GitHub Issues, Jira, …) ------------
-
-// The normalized work item the renderer and the worktree flow ever see. Each
-// tracker is a TaskProvider (see main/tasks/provider.ts) that maps its own issue
-// shape into this — so GitHub Issues today and Jira tomorrow share one UI.
-export interface Task {
-  id: string // stable provider id, e.g. "gh:123" or "jira:PROJ-45"
-  key: string // display key, e.g. "#123" or "PROJ-45"
-  title: string
-  state: 'open' | 'closed'
-  labels: TaskLabel[]
-  assignees: string[]
-  author?: string
-  updatedAt: string // ISO timestamp — newest-first ordering + "time ago"
-  url: string // opened in the browser with `o`/Enter
-  body: string
-  provider: TaskProviderName
-  // Optional, richer fields some trackers (Jira) carry. GitHub leaves them unset.
-  epic?: TaskEpic | null // the parent epic, when the issue belongs to one
-  type?: string // issue type display name (Story, Bug, Task, Epic, …)
-  status?: string // human status name (To Do, In Progress, Done, …)
-}
-
-// The epic an issue rolls up to — used to group/filter the Tasks list.
-export interface TaskEpic {
-  key: string // e.g. "PROJ-12"
-  name: string // the epic's summary/title
-}
-
-export interface TaskLabel {
-  name: string
-  color?: string // 6-hex (no '#'); providers without colors leave it unset
-}
-
-export type TaskProviderName = 'github' | 'jira'
-
-// Outcome of marking a worktree's linked task done/closed during the merge flow
-// (the `closetask` step). `skipped` = nothing to do (no linked task, or the
-// provider can't close); `ok:false` = we tried and failed. `detail` is a short
-// human label for the merge panel ("DOS-219 → Done", "Closed #123", or an error).
-export interface TaskCloseResult {
-  ok: boolean
-  skipped?: boolean
-  detail?: string
-}
-
-// What resolveProvider learned about the active project: whether a tracker
-// applies and is usable, and if not, why (shown verbatim in the empty state).
-export interface TasksStatus {
-  available: boolean
-  provider?: TaskProviderName
-  source?: string // human label, e.g. "owner/repo" or a Jira project key
-  reason?: string // why unavailable: no remote / cli missing / not authed / …
 }
 
 // --- Attachments (images pasted or dropped into the composer) --------------
@@ -804,7 +592,17 @@ export type AgentEvent =
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
-  | { kind: 'subagent-start'; toolUseId: string; agentType: string; description: string }
+  // `harness` names the runtime that actually runs it — 'claude' for a Task
+  // subagent, 'codex' for the bridge. Stated by the emitter rather than guessed
+  // from the type: the transcript badges it, and a wrong badge is a lie about
+  // where the work happened.
+  | {
+      kind: 'subagent-start'
+      toolUseId: string
+      agentType: string
+      description: string
+      harness?: string
+    }
   | { kind: 'subagent-progress'; toolUseId: string; tokens: number; tool?: string }
   // `reply`/`ms` are carried only by the Codex bridge: unlike a Task subagent
   // (whose work lands in the transcript as the parent's own tool calls), a Codex

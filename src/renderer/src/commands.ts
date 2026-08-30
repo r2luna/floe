@@ -106,6 +106,12 @@ export interface CommandContext {
    * no other chat yet, which is how the command dims itself.
    */
   alternateSession?: () => void
+  /**
+   * The version an auto-update has downloaded and is waiting to install, when
+   * there is one. Absent the rest of the time, which is how the restart command
+   * dims itself — there is nothing to restart into.
+   */
+  pendingUpdate?: string
 }
 
 export interface Command {

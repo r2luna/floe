@@ -10,6 +10,7 @@ import type {
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
 import { takeBatch, type Queued } from './queue'
+import { liveReducer } from './transcriptState'
 
 export type { Queued }
 
@@ -69,57 +70,6 @@ export interface Transcript {
   togglePick: (label: string) => void
 }
 
-// Everything this panel has streamed, split in two: `live` holds the settled
-// entries (user turns, tool rows, finished assistant runs), `tail` the one
-// assistant run still growing. Only the tail changes per delta.
-interface LiveState {
-  live: TranscriptItem[]
-  tail: TranscriptItem | null
-}
-
-type LiveAction =
-  | { type: 'reset' }
-  // A settled entry (user turn, tool row): settles the tail first, so a tool
-  // call that interrupts the text keeps its place in the conversation.
-  | { type: 'push'; item: TranscriptItem }
-  // A text delta: grows the tail, or opens one from `item` if none is running.
-  | { type: 'text'; item: TranscriptItem }
-  | { type: 'settle' }
-  // The turn ended: settle the tail, then stamp what it cost onto the LAST
-  // assistant entry of the run — the one the footer prints under.
-  | { type: 'finish'; ms?: number; tokens: number }
-
-function liveReducer(state: LiveState, action: LiveAction): LiveState {
-  switch (action.type) {
-    case 'reset':
-      return { live: [], tail: null }
-    case 'push': {
-      const live = state.tail ? [...state.live, state.tail] : state.live
-      return { live: [...live, action.item], tail: null }
-    }
-    case 'text':
-      return state.tail
-        ? {
-            ...state,
-            tail: { ...state.tail, text: (state.tail.text ?? '') + (action.item.text ?? '') }
-          }
-        : { ...state, tail: action.item }
-    case 'settle':
-      return state.tail ? { live: [...state.live, state.tail], tail: null } : state
-    case 'finish': {
-      const live = state.tail ? [...state.live, state.tail] : [...state.live]
-      // A turn that only ran tools has no assistant entry to stamp, and the
-      // cost of a turn that said nothing has nowhere to be printed.
-      for (let i = live.length - 1; i >= 0; i--) {
-        if (live[i].role !== 'assistant') continue
-        live[i] = { ...live[i], ms: action.ms, contextTokens: action.tokens || live[i].contextTokens }
-        break
-      }
-      return { live, tail: null }
-    }
-  }
-}
-
 /**
  * A session's messages: what was on disk when the panel opened, plus everything
  * this panel has streamed since.
@@ -174,6 +124,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // message is labelled with what actually answered — not with whatever the
   // picker happens to say by the time you read it back.
   const runModel = useRef<string>()
+  // The session this panel has already been cleared for; see the subscribe
+  // effect below.
+  const clearedFor = useRef<string | null>(null)
   // The running true→false edge is the barrier, so the previous value has to be
   // remembered — `running === false` is true on every idle render.
   const wasRunning = useRef(false)
@@ -242,6 +195,36 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       })
     } else if (event.kind === 'tool') {
       dispatch({ type: 'push', item: { role: 'tool', name: event.name, summary: event.summary } })
+    } else if (event.kind === 'subagent-start') {
+      // The subagent joins the channel as a speaker of its own: nick, badge and
+      // a body that is its work while it runs. It settles the tail first, so it
+      // lands where it was launched instead of after the answer it interrupted.
+      dispatch({
+        type: 'push',
+        item: {
+          role: 'subagent',
+          toolUseId: event.toolUseId,
+          agentType: event.agentType,
+          summary: event.description,
+          harness: event.harness ?? 'claude',
+          running: true,
+          at: Date.now()
+        }
+      })
+    } else if (event.kind === 'subagent-progress') {
+      dispatch({
+        type: 'agent',
+        toolUseId: event.toolUseId,
+        patch: { agentTokens: event.tokens, lastTool: event.tool }
+      })
+    } else if (event.kind === 'subagent-done') {
+      dispatch({
+        type: 'agent',
+        toolUseId: event.toolUseId,
+        // `lastTool: ''` rather than undefined: the patch merge skips undefined,
+        // and a finished row must not keep advertising the tool it died on.
+        patch: { running: false, lastTool: '', text: event.reply, ms: event.ms }
+      })
     } else if (event.kind === 'tokens') {
       tokensRef.current = event.tokens
       setTokens(event.tokens)
@@ -279,13 +262,24 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     if (!key) return
     // A fresh key starts clean — the previous session's stream must not leak
     // into this one, and its `running` even less.
-    dispatch({ type: 'reset' })
-    setRunning(false)
-    setQuestion(null)
-    setTokens(0)
-    tokensRef.current = 0
-    setStartedAt(undefined)
-    startedRef.current = undefined
+    //
+    // Guarded by the key it was last cleared for, not by "this effect ran".
+    // React mounts effects twice in dev, and the second, unconditional pass
+    // threw away what had been pushed in between — which for a session started
+    // from the launcher is the opening message itself: the panel greeted you
+    // with "Nothing said yet." while the model was already answering it. The
+    // line is local (the replay snapshot only holds what MAIN has seen), so
+    // once dropped nothing brings it back.
+    if (clearedFor.current !== key) {
+      clearedFor.current = key
+      dispatch({ type: 'reset' })
+      setRunning(false)
+      setQuestion(null)
+      setTokens(0)
+      tokensRef.current = 0
+      setStartedAt(undefined)
+      startedRef.current = undefined
+    }
     // Events that arrive before the replay snapshot resolves. Applying them
     // right away would double the text the snapshot already folded in; the
     // envelope's seq says which ones the snapshot has seen.

@@ -41,8 +41,12 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
   })
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`[auto-update] ${info.version} ready — installs on next restart.`)
-    getWindow()?.webContents.send('update:downloaded', { version: info.version })
-    if (Notification.isSupported()) {
+    const window = getWindow()
+    window?.webContents.send('update:downloaded', { version: info.version })
+    // The in-app banner is the primary surface, so the OS notification is only
+    // for the case it can't cover: Floe in the background, where the banner is
+    // behind another window and would go unseen until the next time you look.
+    if (!window?.isFocused() && Notification.isSupported()) {
       const note = new Notification({
         title: 'Floe atualizado',
         body: `A versão ${info.version} está pronta — clique para reiniciar e aplicar agora.`

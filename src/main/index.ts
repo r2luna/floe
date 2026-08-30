@@ -16,8 +16,6 @@ import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import { userInfo } from 'node:os'
-import { githubAuth } from './pr/github'
-import { getJira, setJira, testJira } from './integrations'
 import {
   addGroup,
   deleteGroup,
@@ -36,19 +34,6 @@ import {
   setProjectReadOnly
 } from './projects'
 import { setSharedDataDir } from './dataDir'
-import {
-  openBrowser,
-  openBrowserFile,
-  navigateBrowser,
-  browserBack,
-  browserForward,
-  browserReload,
-  browserDevtools,
-  setBrowserBounds,
-  setBrowserVisible,
-  closeBrowser,
-  startCdpRelay
-} from './browserPane'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
 import {
@@ -85,7 +70,6 @@ import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion } from './codexServer'
 import { isCodexModel } from '../shared/types'
 import { ensureAgentHookInstalled } from './hooks'
-import { initScheduler, readSchedules } from './schedules'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
 import { listClaudeSessions, listResumableSessions, loadClaudeTranscript, computeProjectActivity, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, sessionHasUnansweredQuestion } from './claudeSessions'
@@ -124,7 +108,6 @@ import {
   type ProjectUiState,
   type WorktreeUiState
 } from './sessionStore'
-import { saveWorkflow, loadWorkflow, clearWorkflow, type PersistedWorkflow } from './workflowStore'
 import { discoverSlashCommands } from './slashCommands'
 import { getClaudeInfo, getContextUsage } from './claudeInfo'
 import { sampleMemory, startMemoryStats, stopMemoryStats } from './systemStats'
@@ -179,24 +162,6 @@ import {
 } from './commandRunner'
 import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
-import { executeHttp, listHttpFiles, loadEnv, readHttp, watchHttp } from './http'
-import { dbQuery, dbTables, watchDatabase } from './database'
-import { tasksCloseForBranch, tasksList, tasksStatus } from './tasks'
-import { addPrComment, approvePr, listPrs, mergePr, prFiles, prStatus } from './pr'
-import {
-  getJiraConnection,
-  setJiraCreds,
-  clearJiraCreds,
-  getProjectKey,
-  setProjectKey
-} from './tasks/jiraConfig'
-import { jiraTestCreds } from './tasks/jira'
-import {
-  getBitbucketConnection,
-  setBitbucketCreds,
-  clearBitbucketCreds
-} from './pr/bitbucketConfig'
-import { bitbucketTestCreds } from './pr/bitbucket'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
 import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
@@ -518,13 +483,6 @@ function registerIpc(): void {
     setWorktreeUi(worktreePath, ui)
   )
 
-  // Pipeline persistence — survive an app restart and reattach the trilho.
-  ipcMain.handle('workflow:save', (_event, worktreePath: string, wf: PersistedWorkflow) =>
-    saveWorkflow(worktreePath, wf)
-  )
-  ipcMain.handle('workflow:load', (_event, worktreePath: string) => loadWorkflow(worktreePath))
-  ipcMain.handle('workflow:clear', (_event, worktreePath: string) => clearWorkflow(worktreePath))
-
   ipcMain.handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
   ipcMain.handle('claude:info', async (_event, worktreePath: string) => {
     const [info, codexUsage] = await Promise.all([getClaudeInfo(worktreePath), getCodexUsage()])
@@ -586,8 +544,6 @@ function registerIpc(): void {
     (_event, projectPath: string, worktreePath: string, id: string, scope: CommandScope) =>
       setCommandScope(projectPath, worktreePath, id, scope)
   )
-
-  ipcMain.handle('schedules:list', (_event, projectPath: string) => readSchedules(projectPath))
 
   ipcMain.handle('dev:detect', (_event, worktreePath: string) => detectDevCommand(worktreePath))
   ipcMain.handle('dev:start', (event, worktreePath: string, branch: string) => {
@@ -675,63 +631,6 @@ function registerIpc(): void {
   ipcMain.handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )
-  ipcMain.handle('http:list', (_event, worktreePath: string) => listHttpFiles(worktreePath))
-  ipcMain.handle('http:parse', (_event, worktreePath: string, relPath: string) => readHttp(worktreePath, relPath))
-  ipcMain.handle('http:env', (_event, worktreePath: string, relPath?: string) => loadEnv(worktreePath, relPath))
-  ipcMain.handle('http:execute', (_event, worktreePath: string, relPath: string, index: number, envName?: string) =>
-    executeHttp(worktreePath, relPath, index, envName)
-  )
-  ipcMain.handle('http:watch', (event, worktreePath: string) => watchHttp(event.sender, worktreePath))
-
-  // Database viewer — read-only: detect the connection + list tables, run a
-  // single read-only query, watch .env/sqlite for changes.
-  ipcMain.handle('db:tables', (_event, worktreePath: string) => dbTables(worktreePath))
-  ipcMain.handle('db:query', (_event, worktreePath: string, sql: string, limit?: number) =>
-    dbQuery(worktreePath, sql, limit)
-  )
-  ipcMain.handle('db:watch', (event, worktreePath: string) => watchDatabase(event.sender, worktreePath))
-
-  // Tasks — external tracker work items (GitHub Issues today; provider-agnostic).
-  ipcMain.handle('tasks:status', (_event, root: string) => tasksStatus(root))
-  ipcMain.handle('tasks:list', (_event, root: string, opts: { state: 'open' | 'all' }) => tasksList(root, opts))
-  // Merge flow: mark the worktree's linked Jira issue / GitHub issue done.
-  ipcMain.handle('tasks:closeForBranch', (_event, root: string, branch: string) =>
-    tasksCloseForBranch(root, branch)
-  )
-  // Jira connection + per-repo project key. The token is encrypted main-side and
-  // never returned to the renderer; `jiraGetConnection` only reports identity.
-  ipcMain.handle('tasks:jiraGetConnection', () => getJiraConnection())
-  ipcMain.handle('tasks:jiraSetCreds', (_event, c: { site: string; email: string; token: string }) =>
-    setJiraCreds(c)
-  )
-  ipcMain.handle('tasks:jiraClearCreds', () => clearJiraCreds())
-  ipcMain.handle('tasks:jiraTestCreds', (_event, c: { site: string; email: string; token: string }) =>
-    jiraTestCreds(c)
-  )
-  ipcMain.handle('tasks:getProjectKey', (_event, root: string) => getProjectKey(root))
-  ipcMain.handle('tasks:setProjectKey', (_event, root: string, key: string) => setProjectKey(root, key))
-
-  // Pull requests — GitHub PRs via the `gh` CLI. Repo-level, so keyed by project
-  // root like tasks. `status` reports usability; `files` carries each file's diff.
-  ipcMain.handle('pr:status', (_event, root: string) => prStatus(root))
-  ipcMain.handle('pr:list', (_event, root: string) => listPrs(root))
-  ipcMain.handle('pr:files', (_event, root: string, number: number) => prFiles(root, number))
-  ipcMain.handle(
-    'pr:addComment',
-    (_event, root: string, number: number, c: { relPath: string; side: 'new' | 'old'; startLine: number; endLine: number; body: string }) =>
-      addPrComment(root, number, c)
-  )
-  ipcMain.handle('pr:approve', (_event, root: string, number: number, body?: string) => approvePr(root, number, body))
-  ipcMain.handle('pr:merge', (_event, root: string, number: number, method: 'merge' | 'squash' | 'rebase') =>
-    mergePr(root, number, method)
-  )
-  // Bitbucket connection (global API token). Encrypted main-side and never
-  // returned to the renderer; `getConnection` only reports the email.
-  ipcMain.handle('pr:bitbucketGetConnection', () => getBitbucketConnection())
-  ipcMain.handle('pr:bitbucketSetCreds', (_event, c: { email: string; token: string }) => setBitbucketCreds(c))
-  ipcMain.handle('pr:bitbucketClearCreds', () => clearBitbucketCreds())
-  ipcMain.handle('pr:bitbucketTestCreds', (_event, c: { email: string; token: string }) => bitbucketTestCreds(c))
-
   ipcMain.handle('terminal:write', (_event, id: string, data: string) => writeTerminal(id, data))
   ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows)
@@ -970,22 +869,6 @@ function registerIpc(): void {
     if (win && !win.isDestroyed()) applyVibrancy(win, on)
   })
 
-  // Embedded browser pane (WebContentsView over the renderer's browser area):
-  // the view lives in THIS window.
-  ipcMain.handle('browser:open', (event, url: string) => openBrowser(event, url))
-  ipcMain.handle('browser:openFile', (event, absPath: string) => openBrowserFile(event, absPath))
-  ipcMain.handle('browser:navigate', (event, url: string) => navigateBrowser(event, url))
-  ipcMain.handle('browser:back', (event) => browserBack(event))
-  ipcMain.handle('browser:forward', (event) => browserForward(event))
-  ipcMain.handle('browser:reload', (event) => browserReload(event))
-  ipcMain.handle('browser:devtools', (event) => browserDevtools(event))
-  ipcMain.handle('browser:setBounds', (event, b: { x: number; y: number; width: number; height: number }) =>
-    setBrowserBounds(event, b)
-  )
-  ipcMain.handle('browser:setVisible', (event, visible: boolean) => setBrowserVisible(event, visible))
-  ipcMain.handle('browser:close', (event) => closeBrowser(event))
-  ipcMain.handle('browser:defaultUrl', (_event, worktreePath: string) => getAppUrl(worktreePath))
-
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
   ipcMain.handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
@@ -1042,26 +925,13 @@ function registerIpc(): void {
     } catch {
       claude = { path: null, version: null }
     }
-    let github = { authed: false, user: null as string | null }
-    try {
-      github = await githubAuth()
-    } catch {
-      github = { authed: false, user: null }
-    }
-    return { claude, github }
+    return { claude }
   })
 
   // Settings → Advanced: system prompt appended to every spawned Claude session
   // (agent.ts reads it directly at spawn time — this is just the read/write UI seam).
   ipcMain.handle('settings:getSystemPrompt', () => getSystemPrompt())
   ipcMain.handle('settings:setSystemPrompt', (_event, value: string) => setSystemPrompt(value))
-
-  // Settings → Integrations: Jira credential store (token encrypted at rest).
-  ipcMain.handle('integrations:getJira', () => getJira())
-  ipcMain.handle('integrations:setJira', (_event, input: { baseUrl: string; email: string; token?: string }) =>
-    setJira(input)
-  )
-  ipcMain.handle('integrations:testJira', () => testJira())
 
   // Drive live light/dark switches from the main process. The renderer's
   // `matchMedia('(prefers-color-scheme: dark)')` `change` event is unreliable in
@@ -1294,17 +1164,9 @@ isolateUserDataPerWorktree()
 
 // Dev-only escape hatch for GUI verification: opt in with FLOE_CDP_PORT to
 // expose Chromium's own debugger and keyboard-drive the app over CDP. Never on
-// by default (the scoped relay in browserPane is what Claude sessions get, so a
-// session still can't reach this window).
+// by default — it exposes the app's own privileged window.
 if (!app.isPackaged && process.env.FLOE_CDP_PORT)
   app.commandLine.appendSwitch('remote-debugging-port', process.env.FLOE_CDP_PORT)
-
-// "Claude drives the browser": each concurrently-running instance (⌘⇧N "New
-// Window" is a genuinely separate process, see openNewInstance) needs its own
-// CDP relay port — see browserPane.startCdpRelay for why this is a hand-built
-// relay and not Chromium's own --remote-debugging-port switch (that would
-// expose the app's own privileged window, not just the browser pane).
-let cdpPort = 0
 
 void app.whenReady().then(async () => {
   fixPath()
@@ -1320,16 +1182,6 @@ void app.whenReady().then(async () => {
   buildAppMenu(openNewInstance)
   registerIpc()
   ensureAgentHookInstalled()
-  // Same lazy-getter pattern, for the cron-triggered scheduler (see schedules.ts).
-  initScheduler(() => localWindow ?? BrowserWindow.getAllWindows()[0])
-  // Start the scoped CDP relay so Claude sessions can drive the embedded browser
-  // pane — never the app's own window. Non-critical: a port race (see
-  // startCdpRelay) must never block the window, so guard it and carry on.
-  try {
-    cdpPort = await startCdpRelay(() => localWindow ?? BrowserWindow.getAllWindows()[0])
-  } catch (err) {
-    log('cdp:relay-failed', { error: err instanceof Error ? err.message : String(err) })
-  }
   createWindow()
   // Background auto-update: polls the GitHub release feed, installs on next quit.
   initAutoUpdate(() => localWindow ?? BrowserWindow.getAllWindows()[0])

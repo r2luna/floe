@@ -48,6 +48,7 @@ import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
 import { useMenuItems } from './useMenuItems'
+import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { DEFAULT_GROUP, type ContextUsage, type Project } from '../../shared/types'
 
@@ -437,6 +438,9 @@ export default function App() {
   // indistinguishable from a broken binding — which is exactly how ⌘K F read
   // before this existed.
   const [notice, setNotice] = useState<string | null>(null)
+  // Stays on screen until it is acted on: the update installs on no other
+  // path, so a message that faded would strand the user on the old version.
+  const pendingUpdate = usePendingUpdate()
   const noticeTimer = useRef<number | null>(null)
   const say = useCallback((text: string) => {
     setNotice(text)
@@ -1113,6 +1117,7 @@ export default function App() {
     // Undefined until there IS one, which is also how the command knows to dim
     // itself: on the first chat of a session there is nowhere to go back to.
     alternateSession: alternate.current?.session ? alternateSession : undefined,
+    pendingUpdate: pendingUpdate ?? undefined,
     newWorktree: () => {
       if (!projects.current) return
       // Branches with no worktree yet: checking one out is a valid answer, and
@@ -1754,6 +1759,23 @@ export default function App() {
             enterProject(id)
           }}
         />
+      )}
+
+      {/* An update is downloaded and waiting. Nothing else in the app applies
+          it — the main process never swaps the bundle on quit — so this sits
+          there until the restart happens. The button only dispatches the id, so
+          the palette row and the click are the same one action. */}
+      {pendingUpdate && (
+        <div className="update-banner" role="status">
+          <span>Floe {pendingUpdate} is ready</span>
+          <button
+            type="button"
+            className="update-restart"
+            onClick={() => runCommand(REGISTRY, ctxRef.current, 'update.install')}
+          >
+            Restart
+          </button>
+        </div>
       )}
 
       {/* One line, bottom centre, gone in two seconds. Deliberately not a

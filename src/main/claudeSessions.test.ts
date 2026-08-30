@@ -75,3 +75,73 @@ test('generateWorktreeDesc: no spec returns null', async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+// --- subagents, rebuilt from the JSONL -------------------------------------
+// A reopened chat has to show WHO was called and for what. The live part (the
+// tool it was on, its token fill) only ever existed while it ran, so the row
+// comes back as a finished line — never as a fabricated one.
+
+const { loadClaudeTranscript } = await import('./claudeSessions.ts')
+
+/** Write a session file where the loader looks for it, and point HOME at it. */
+function seedSession(worktree: string, id: string, lines: unknown[]): string {
+  const home = mkdtempSync(join(tmpdir(), 'floe-home-'))
+  const dir = join(home, '.claude', 'projects', worktree.replace(/[/.]/g, '-'))
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n'))
+  process.env.HOME = home
+  return home
+}
+
+test('two parallel Task calls reload as two subagent rows, the finished one closed', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-08-29T10:00:00.000Z', message: { content: 'faz aí' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-08-29T10:00:05.000Z',
+      message: {
+        model: 'claude-opus-5',
+        content: [
+          { type: 'text', text: 'abrindo duas frentes' },
+          { type: 'tool_use', id: 't1', name: 'Task', input: { subagent_type: 'Explore', description: 'mapear o pipeline' } },
+          { type: 'tool_use', id: 't2', name: 'Task', input: { subagent_type: 'general-purpose', description: 'portar o renderer' } }
+        ]
+      }
+    },
+    // The child's own work, written into the same file: not this transcript.
+    {
+      type: 'assistant',
+      isSidechain: true,
+      timestamp: '2026-08-29T10:00:06.000Z',
+      message: { content: [{ type: 'text', text: 'segredo do subagente' }] }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-08-29T10:00:47.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'achei' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    const subs = items.filter((i) => i.role === 'subagent')
+    assert.deepEqual(
+      subs.map((s) => [s.toolUseId, s.agentType, s.summary, s.harness, s.running]),
+      [
+        ['t1', 'Explore', 'mapear o pipeline', 'claude', false],
+        ['t2', 'general-purpose', 'portar o renderer', 'claude', true]
+      ]
+    )
+    // The one that returned carries how long it took; the one still open does not.
+    assert.deepEqual([subs[0].ms, subs[1].ms], [42_000, undefined])
+    // The parent's numbers stay the parent's.
+    assert.ok(subs.every((s) => s.contextTokens === undefined && s.model === undefined))
+    assert.ok(!items.some((i) => i.text === 'segredo do subagente'), 'sidechain lines are the child transcript')
+    // The launching line is still the assistant's own text, not a tool chip.
+    assert.equal(items[1].text, 'abrindo duas frentes')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
