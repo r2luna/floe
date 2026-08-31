@@ -3304,8 +3304,27 @@ function ProjectsList({
  *
  * Working outranks unread: a session answering right now is not something you
  * failed to read, and it becomes unread on its own the moment the turn ends.
+ *
+ * Waiting outranks working: the turn is technically still in flight while a
+ * question or permission prompt sits unanswered, but a spinner there promises
+ * progress that will never come — the session is blocked on YOU, and the mark
+ * has to say so.
  */
-function SessionMark({ working, seen }: { working: boolean; seen: boolean }) {
+function SessionMark({
+  working,
+  waiting,
+  seen
+}: {
+  working: boolean
+  waiting: boolean
+  seen: boolean
+}) {
+  if (waiting)
+    return (
+      <span className="mark-ask" title="waiting for your answer">
+        ?
+      </span>
+    )
   if (working) return <Spinner />
   return (
     <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
@@ -3341,7 +3360,7 @@ function WorktreesList({
   // Work happening in sessions this list is only showing, not hosting: the
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
-  const { busy, unread } = useSessionActivity(openSession)
+  const { busy, waiting, unread } = useSessionActivity(openSession)
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -3446,7 +3465,13 @@ function WorktreesList({
               {(() => {
                 const id = s.claudeId ?? s.id
                 const working = !!(busy.has(id) || s.running)
-                return <SessionMark working={working} seen={!working && unread.has(id)} />
+                return (
+                  <SessionMark
+                    working={working}
+                    waiting={waiting.has(id)}
+                    seen={!working && unread.has(id)}
+                  />
+                )
               })()}
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>

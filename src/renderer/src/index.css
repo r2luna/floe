@@ -649,6 +649,24 @@ button {
   line-height: 1;
 }
 
+/* A session blocked on the user — an unanswered question or permission prompt.
+   The spinner would keep turning here (the turn IS in flight), but that says
+   "wait for it" when the truth is "it is waiting for YOU", so the mark stops
+   moving and takes the accent: warm means "needs you", same as unread. Keeps
+   the dot's 6px box so the column never shifts. `--accent` flips with the
+   theme, so no light override is needed. */
+.mark-ask {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 6px;
+  height: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .badge {
   flex: none;
   padding: 0 6px;

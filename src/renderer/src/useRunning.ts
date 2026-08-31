@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentEventEnvelope, NotifySoundId } from '../../shared/types'
+import type { AgentEvent, AgentEventEnvelope, NotifySoundId } from '../../shared/types'
 import { playDoneSound } from './sounds'
 
 // Sessions with an answer you have not seen. Kept in the same store as the
@@ -31,8 +31,17 @@ function writeUnread(keys: Set<string>): void {
 export interface SessionActivity {
   /** Sessions with a turn in flight, right now. */
   busy: Set<string>
+  /** Sessions blocked on YOU — an unanswered question or permission prompt. */
+  waiting: Set<string>
   /** Sessions whose turn ended while you were looking somewhere else. */
   unread: Set<string>
+}
+
+// The events that stop the turn until the user answers. Everything else a live
+// session emits means it moved past the prompt (the answer went through), so
+// any other event clears the flag.
+export function isWaitingEvent(kind: AgentEvent['kind']): boolean {
+  return kind === 'question' || kind === 'permission'
 }
 
 /**
@@ -49,6 +58,7 @@ export interface SessionActivity {
  */
 export function useSessionActivity(openKey?: string | null): SessionActivity {
   const [busy, setBusy] = useState<Set<string>>(() => new Set())
+  const [waiting, setWaiting] = useState<Set<string>>(() => new Set())
   const [unread, setUnread] = useState<Set<string>>(() => new Set(readUnread()))
 
   // Read inside the listener rather than resubscribed on every change: which
@@ -85,6 +95,18 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
           else next.delete(key)
           return next
         })
+        // Blocked on the user: the spinner would keep turning (the turn IS in
+        // flight), but nothing is going to happen until they answer — so the
+        // mark must say "you", not "working". Any later event on the session
+        // means the answer went through.
+        const waits = live && isWaitingEvent(event.kind)
+        setWaiting((prev) => {
+          if (prev.has(key) === waits) return prev
+          const next = new Set(prev)
+          if (waits) next.add(key)
+          else next.delete(key)
+          return next
+        })
         // A turn ended somewhere you were not looking.
         if (live || key === open.current) return
         setUnread((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
@@ -106,5 +128,5 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
 
   useEffect(() => writeUnread(unread), [unread])
 
-  return { busy, unread }
+  return { busy, waiting, unread }
 }
