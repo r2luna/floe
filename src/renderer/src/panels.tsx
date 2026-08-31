@@ -57,6 +57,7 @@ import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from '
 import { TerminalPanel } from './Terminal'
 import { sendToTerminal } from './terminalBus'
 import { useSessionActivity } from './useRunning'
+import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
 import type { Projects } from './useProjects'
 import { moveTargets } from './projectMove'
 import type { Worktrees } from './useWorktrees'
@@ -80,7 +81,7 @@ import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { MessageBody, RunInTerminal } from './MessageBody'
 import { MergePanel } from './MergePanel'
-import { Lightbox } from './Lightbox'
+import { Lightbox, type GalleryImage } from './Lightbox'
 import type { Merge } from './useMerge'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
@@ -292,6 +293,7 @@ export function PanelBody({
   merge,
   onEnterProject,
   onEnterWorktree,
+  newWorktree,
   cwd,
   root,
   session,
@@ -325,6 +327,11 @@ export function PanelBody({
    */
   onEnterProject?: (path: string) => void
   onEnterWorktree?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
+  /**
+   * The new-worktree form's props, while ⌘N has one open — the flow lives
+   * inline at the top of the worktrees panel, not in a modal.
+   */
+  newWorktree?: NewWorktreeProps | null
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
   cwd?: string
   /** Overrides `cwd` for this panel — see Panel.root. */
@@ -391,6 +398,7 @@ export function PanelBody({
       <WorktreesList
         worktrees={worktrees}
         onEnter={onEnterWorktree}
+        creating={newWorktree}
         onOpen={onOpen}
         openSession={openSession}
         find={find}
@@ -1326,13 +1334,13 @@ function AgentCost({ ms, tokens }: { ms?: number; tokens?: number }) {
 function Entry({
   item,
   isNew,
-  isLast,
+  cost,
   streaming
 }: {
   item: TranscriptItem
   isNew: boolean
-  /** Last spoken entry of this run — where the turn's footer goes. */
-  isLast?: boolean
+  /** What the whole run cost, shown on the header this entry opens. */
+  cost?: TranscriptItem
   streaming?: boolean
 }) {
   const who = whoOf(item)
@@ -1349,6 +1357,7 @@ function Entry({
             {who.host && <span className="irc-host">@{who.host}</span>}
           </span>
           <span className="irc-time">{clock(item.at)}</span>
+          {cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />}
         </div>
       )}
       <div className="irc-body">
@@ -1360,20 +1369,18 @@ function Entry({
           <RefText text={item.text ?? ''} />
         )}
       </div>
-      {isLast && item.role === 'assistant' && <TurnCost ms={item.ms} tokens={item.contextTokens} />}
     </div>
   )
 }
 
 /**
- * What the turn cost, closing the answer: `4m 46s · ↓89.6k tokens`.
+ * What the turn cost: `4m 46s · ↓89.6k tokens`, pushed to the right end of the
+ * run's header row. It rides the header rather than taking a line of its own so
+ * a short answer does not carry a whole extra row of grey below it — the number
+ * is only known when the turn ends, but the header re-renders when it lands.
  *
- * A footer rather than a header field, because the cost is only known when the
- * turn ends — and because a header already carries the address, and a long
- * model name would push these numbers off the row.
- *
- * A conversation written before this shipped has neither number: the line is
- * simply absent, never a zero it cannot vouch for.
+ * A conversation written before this shipped has neither number: nothing is
+ * drawn, never a zero it cannot vouch for.
  */
 function TurnCost({ ms, tokens }: { ms?: number; tokens?: number }) {
   if (!ms && !tokens) return null
@@ -1472,21 +1479,38 @@ function QuestionBlock({
 const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
   let speaker: string | null = null
 
-  // The last spoken entry of each run — the one the turn footer closes. A run
-  // ends where the next speaker differs, so it can only be known by looking
-  // ahead, which is why it is a pass of its own.
-  const endsRun = new Set<number>()
+  // Each run's header carries the cost of its last spoken entry, so the row that
+  // opens a run has to know how the run ends. That is only knowable by looking
+  // ahead, which is why it is a pass of its own: it maps first index → last.
+  const runEnd = new Map<number, number>()
   let prev: number | null = null
   let prevKey: string | null = null
+  let start: number | null = null
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
     if (item.role !== 'user' && item.role !== 'assistant') continue
     const key = speakerKey(whoOf(item))
-    if (prev !== null && key !== prevKey) endsRun.add(prev)
+    if (start === null || (prev !== null && key !== prevKey)) {
+      if (start !== null && prev !== null) runEnd.set(start, prev)
+      start = i
+    }
     prev = i
     prevKey = key
   }
-  if (prev !== null) endsRun.add(prev)
+  if (start !== null && prev !== null) runEnd.set(start, prev)
+
+  // Every image in the transcript, in the order they arrived: opening one opens
+  // the whole run, so the arrows can walk from a screenshot to the one it is
+  // meant to be compared against. Built here because only this pass sees them
+  // all — a row on its own has no idea what came before it.
+  const gallery: GalleryImage[] = []
+  const galleryAt = new Map<number, number>()
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (item.role !== 'image' || !item.data) continue
+    galleryAt.set(i, gallery.length)
+    gallery.push({ src: `data:${item.mediaType ?? 'image/png'};base64,${item.data}`, alt: item.name })
+  }
 
   const out: ReactNode[] = []
   for (let i = 0; i < items.length; i++) {
@@ -1525,7 +1549,12 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
         <div className="irc-body irc-act" key={i}>
           {/* A button, which is what makes it a cursor row: j/k walks onto the
               image and Enter opens it full size, same as a shell row. */}
-          <Zoomable src={`data:${item.mediaType ?? 'image/png'};base64,${item.data}`} />
+          <Zoomable
+            src={`data:${item.mediaType ?? 'image/png'};base64,${item.data}`}
+            alt={item.name}
+            gallery={gallery}
+            index={galleryAt.get(i) ?? 0}
+          />
         </div>
       )
       continue
@@ -1548,7 +1577,15 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
     const isNew = speaker !== from
     speaker = from
 
-    out.push(<Entry item={item} isNew={isNew} isLast={endsRun.has(i)} key={i} />)
+    const last = isNew ? items[runEnd.get(i) ?? i] : undefined
+    out.push(
+      <Entry
+        item={item}
+        isNew={isNew}
+        cost={last?.role === 'assistant' ? last : undefined}
+        key={i}
+      />
+    )
   }
 
   return <>{out}</>
@@ -1559,7 +1596,20 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
  * you ask — a screenshot at 260px is there to tell you a screenshot happened,
  * not to be read.
  */
-function Zoomable({ src, alt, className }: { src: string; alt?: string; className?: string }): ReactNode {
+function Zoomable({
+  src,
+  alt,
+  className,
+  gallery,
+  index = 0
+}: {
+  src: string
+  alt?: string
+  className?: string
+  /** Every image in the transcript, so opening one opens all of them. */
+  gallery?: GalleryImage[]
+  index?: number
+}): ReactNode {
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -1570,7 +1620,13 @@ function Zoomable({ src, alt, className }: { src: string; alt?: string; classNam
       >
         <img src={src} alt={alt ?? ''} />
       </button>
-      {open && <Lightbox src={src} alt={alt} onClose={() => setOpen(false)} />}
+      {open && (
+        <Lightbox
+          images={gallery ?? [{ src, alt }]}
+          start={gallery ? index : 0}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </>
   )
 }

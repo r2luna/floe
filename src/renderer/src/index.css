@@ -1542,14 +1542,14 @@ button {
   font-size: 11px;
 }
 
-/* What the turn cost, closing the answer: `4m 46s · ↓89.6k tokens`. Right-
-   aligned and in the timestamp's grey — it is the same class of information as
-   the clock in the header, and it must never compete with the answer itself. */
+/* What the turn cost, at the right end of the header: `4m 46s · ↓89.6k tokens`.
+   In the timestamp's grey — it is the same class of information as the clock
+   beside it, and it must never compete with the answer itself. */
 .irc-cost {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
-  margin-top: 4px;
+  margin-left: auto;
+  padding-left: 12px;
   color: var(--time-dim);
   font-size: 10.5px;
 }
@@ -2515,13 +2515,117 @@ button {
   max-width: 100%;
 }
 
-/* An attached or read image, inline in the transcript. Capped so a screenshot
-   does not take the whole scrollback. */
+/* An attached or read image, inline in the transcript. A thumbnail, not a view:
+   it is there to say a screenshot happened and to be clicked, so the cap is on
+   the picture itself — the button only wraps it. */
 .irc-image {
-  max-width: min(420px, 100%);
-  max-height: 260px;
+  display: inline-block;
+  max-width: 100%;
+  padding: 0;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 6px;
+  background: none;
+  line-height: 0;
+  cursor: zoom-in;
+}
+
+.irc-image img {
+  display: block;
+  max-width: min(240px, 100%);
+  max-height: 130px;
+  object-fit: contain;
+}
+
+.irc-image:hover,
+.irc-image:focus-visible {
+  border-color: var(--muted-2);
+  outline: none;
+}
+
+/* --- lightbox ------------------------------------------------------------- */
+
+/* The gallery, over everything. Above the palette and the row menu: it is the
+   thing you are looking at, and nothing else should sit on top of it. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 74px 52px;
+  background: #050608e6;
+  outline: none;
+  cursor: zoom-out;
+}
+
+.lightbox-image {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 4px;
+  object-fit: contain;
+  cursor: default;
+}
+
+/* Chevrons, in the outline-chip tone: a click target for the mouse, while the
+   arrow keys do the same job for the keyboard. Over the sides rather than
+   beside the picture, so the picture gets the whole window either way. */
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 46px;
+  border: 1px solid var(--muted-2);
+  border-radius: 1px;
+  background: #16181d99;
+  color: var(--text-strong);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.lightbox-prev {
+  left: 22px;
+}
+
+.lightbox-next {
+  right: 22px;
+}
+
+.lightbox-nav:hover {
+  border-color: var(--text-strong);
+}
+
+.lightbox-hint {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lightbox-count {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+
+/* The scrim stays dark in light mode — a picture is read against a dark
+   surround — so only the chip tones need flipping. */
+:root[data-theme='light'] .lightbox-nav {
+  border-color: #ffffff4d;
+  background: #ffffff1a;
+  color: #f2f4f7;
+}
+
+:root[data-theme='light'] .lightbox-hint {
+  color: #b6bcc7;
+}
+
+:root[data-theme='light'] .lightbox-count {
+  color: #f2f4f7;
 }
 
 .diff-no {
