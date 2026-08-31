@@ -430,6 +430,26 @@ function buildContent(prompt: string, images: ImageAttachment[], files: FileAtta
 }
 
 // Send a user turn — (re)spawning the process if needed or if options changed.
+/**
+ * Kill the conns that are this same session under an older name.
+ *
+ * Two keys name one session — see anyActiveTurn. A live turn is never reaped:
+ * the only way two keys are both active is a real steer in flight, and killing
+ * that would abort the turn the user is watching.
+ */
+function reapSiblings(key: string): void {
+  const claudeId = getCreatedSessionClaudeId(key)
+  for (const [k, c] of conns) {
+    if (k === key) continue
+    const same = c.sessionId === key || (!!claudeId && (k === claudeId || c.sessionId === claudeId))
+    if (!same || c.turnActive) continue
+    log('reap-alias', { key, stale: k })
+    clearDeltas(c)
+    c.child.kill('SIGTERM')
+    conns.delete(k)
+  }
+}
+
 export function sendToAgent(
   win: BrowserWindow,
   key: string,
@@ -467,6 +487,12 @@ export function sendToAgent(
     conn = undefined
   }
   const freshSpawn = !conn
+  // Spawning under a name this session has not used before: retire the child it
+  // ran under the old one. The renderer switches from the Floe id to the
+  // claudeId the moment the CLI reports it, and without this the first child is
+  // left alive forever — a second `claude` per session, and two conns whose
+  // `turnActive` disagree about the one session they both claim to be.
+  if (!conn) reapSiblings(key)
   if (!conn) conn = spawnConn(win, key, worktreePath, options)
   // A new user turn starts: clear the accumulator so send_message(wait) returns
   // only this turn's reply, and record the prompt in the live transcript buffer.
@@ -579,6 +605,26 @@ export function isClaudeIdConnected(claudeId: string): boolean {
 // kill the live turn (options-change respawn) it can't see.
 export function hasActiveTurn(key: string): boolean {
   return conns.get(key)?.turnActive ?? false
+}
+
+/**
+ * Whether ANY of a session's names has a turn in flight.
+ *
+ * One session answers to two keys: the renderer keys a brand-new session by its
+ * Floe id and every send after the CLI reports its own id by that claudeId, so
+ * the conn is filed under whichever name was current when it spawned. A caller
+ * holding only one of the two (the session list holds the Floe id) would read
+ * `false` straight through a running turn, and the row's spinner would then be
+ * decided by the renderer's live event set alone — with nothing to correct it if
+ * a `done` is ever missed.
+ */
+export function anyActiveTurn(keys: (string | undefined)[]): boolean {
+  return keys.some((k) => !!k && hasActiveTurn(k))
+}
+
+/** Every key with a turn in flight, for the renderer to reconcile against. */
+export function activeTurnKeys(): string[] {
+  return [...conns].filter(([, c]) => c.turnActive).map(([k]) => k)
 }
 
 // Everything Fleet needs about one session's live process, in a single read: the

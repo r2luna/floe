@@ -22,7 +22,7 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, PANEL_KIND_LIST, PanelBody, needsProject, type PanelKind } from './panels'
+import { KINDS, RAIL, PanelBody, needsProject, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { runCommand, type CommandContext } from './commands'
@@ -1867,36 +1867,41 @@ export default function App() {
           })}
         </div>
         <nav className="rail">
-          {PANEL_KIND_LIST.map((kind) => {
-            const Icon = KINDS[kind].icon
-            const off = !canOpen(kind)
-            return (
-              <button
-                key={kind}
-                className="rail-btn"
-                // Dimmed and inert rather than hidden: the rail's shape is how
-                // you learn what the app has, and a row that reshuffles as you
-                // move around is harder to aim at than one that greys out.
-                data-off={off || undefined}
-                disabled={off}
-                aria-label={off ? whyCannotOpen(kind) : KINDS[kind].title}
-                onClick={() => openFromRail(kind)}
-              >
-                <Icon size={17} stroke={1.5} />
-                {/* The app's own tooltip rather than the OS `title`, for two
-                    reasons: it can carry the key that opens the panel — which
-                    is the thing a keyboard-first app most wants to teach, and
-                    the one moment the user is already asking "what is this" —
-                    and it opens inward, so it is not clipped by the window edge
-                    the native one sat against. aria-hidden: the button's own
-                    label already says all of this to a screen reader. */}
-                <span className="rail-tip" aria-hidden="true">
-                  {off ? whyCannotOpen(kind) : KINDS[kind].title}
-                  {!off && railKeys.has(kind) && <kbd>{railKeys.get(kind)}</kbd>}
-                </span>
-              </button>
-            )
-          })}
+          {RAIL.map((group) => (
+            // Grouped so related panels read as one block — see RAIL in panels.
+            <div className="rail-group" key={group.join()}>
+              {group.map((kind) => {
+                const Icon = KINDS[kind].icon
+                const off = !canOpen(kind)
+                return (
+                  <button
+                    key={kind}
+                    className="rail-btn"
+                    // Dimmed and inert rather than hidden: the rail's shape is how
+                    // you learn what the app has, and a row that reshuffles as you
+                    // move around is harder to aim at than one that greys out.
+                    data-off={off || undefined}
+                    disabled={off}
+                    aria-label={off ? whyCannotOpen(kind) : KINDS[kind].title}
+                    onClick={() => openFromRail(kind)}
+                  >
+                    <Icon size={17} stroke={1.5} />
+                    {/* The app's own tooltip rather than the OS `title`, for two
+                        reasons: it can carry the key that opens the panel — which
+                        is the thing a keyboard-first app most wants to teach, and
+                        the one moment the user is already asking "what is this" —
+                        and it opens inward, so it is not clipped by the window edge
+                        the native one sat against. aria-hidden: the button's own
+                        label already says all of this to a screen reader. */}
+                    <span className="rail-tip" aria-hidden="true">
+                      {off ? whyCannotOpen(kind) : KINDS[kind].title}
+                      {!off && railKeys.has(kind) && <kbd>{railKeys.get(kind)}</kbd>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ))}
         </nav>
       </div>
 

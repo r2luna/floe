@@ -317,9 +317,38 @@ export function needsProject(kind: string): boolean {
 // Putting them there would offer "open a branch" with no branch chosen.
 const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog']
 
-export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
-  (k) => !CONTEXTUAL.includes(k)
+/**
+ * The rail, grouped. A flat column of twelve icons is twelve things to read;
+ * grouped, you aim at a block first and an icon second. Each group is one
+ * question: where am I, what changed, what is the harness made of, what is
+ * running, who am I. The order inside a group is the order you meet them in.
+ *
+ * Deliberately not `order`: that is where a panel SITS in the lane, and the two
+ * do not agree — the terminal opens at the far right but belongs beside the
+ * commands that spawn processes like it.
+ */
+export const RAIL_GROUPS: PanelKind[][] = [
+  // Where the work lives.
+  ['projects', 'worktrees'],
+  // What the work did to the tree — read it, review it, land it.
+  ['changes', 'merge', 'files', 'plans'],
+  // What the agents are made of: the skills they can run and the servers they
+  // get. Both are global, both are edited the same way, so they sit together.
+  ['skills', 'mcp'],
+  // Things that run: the project's own processes, and a shell for everything
+  // else.
+  ['commands', 'terminal'],
+  // The app itself.
+  ['account', 'settings']
+]
+
+// A new panel joins a group above; until it does it lands in a trailing group of
+// its own rather than dropping off the rail entirely.
+const UNGROUPED: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
+  (k) => !CONTEXTUAL.includes(k) && !RAIL_GROUPS.some((g) => g.includes(k))
 )
+
+export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED] : RAIL_GROUPS
 
 /** Opens `child` to the right of the panel that asked for it. */
 export type OpenFn = (child: {
@@ -3383,8 +3412,27 @@ function ProjectsList({
  *
  * Working outranks unread: a session answering right now is not something you
  * failed to read, and it becomes unread on its own the moment the turn ends.
+ *
+ * Waiting outranks working: the turn is technically still in flight while a
+ * question or permission prompt sits unanswered, but a spinner there promises
+ * progress that will never come — the session is blocked on YOU, and the mark
+ * has to say so.
  */
-function SessionMark({ working, seen }: { working: boolean; seen: boolean }) {
+function SessionMark({
+  working,
+  waiting,
+  seen
+}: {
+  working: boolean
+  waiting: boolean
+  seen: boolean
+}) {
+  if (waiting)
+    return (
+      <span className="mark-ask" title="waiting for your answer">
+        ?
+      </span>
+    )
   if (working) return <Spinner />
   return (
     <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
@@ -3420,7 +3468,7 @@ function WorktreesList({
   // Work happening in sessions this list is only showing, not hosting: the
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
-  const { busy, unread } = useSessionActivity(openSession)
+  const { busy, waiting, unread } = useSessionActivity(openSession)
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -3524,8 +3572,17 @@ function WorktreesList({
             >
               {(() => {
                 const id = s.claudeId ?? s.id
-                const working = !!(busy.has(id) || s.running)
-                return <SessionMark working={working} seen={!working && unread.has(id)} />
+                // Both names: the agent conn is keyed by whichever the session
+                // last spawned under, so its events arrive tagged with one or
+                // the other and a lookup on a single id misses half the turns.
+                const working = !!(busy.has(id) || busy.has(s.id) || s.running)
+                return (
+                  <SessionMark
+                    working={working}
+                    waiting={waiting.has(id) || waiting.has(s.id)}
+                    seen={!working && unread.has(id)}
+                  />
+                )
               })()}
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>
