@@ -3681,6 +3681,14 @@ kbd {
   white-space: normal;
 }
 
+/* The raw text shown while the markdown chunk loads (the <Suspense> fallback in
+   panels.tsx). `.md` turns pre-wrap off because rendered markdown carries its
+   structure in block elements — unparsed text has nothing but its newlines, so
+   it has to keep them or the whole message collapses into one paragraph. */
+.md-plain {
+  white-space: pre-wrap;
+}
+
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
 
