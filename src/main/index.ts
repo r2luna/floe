@@ -70,6 +70,7 @@ import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion } from './codexServer'
 import { isCodexModel } from '../shared/types'
 import { ensureAgentHookInstalled } from './hooks'
+import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
 import { listClaudeSessions, listResumableSessions, loadClaudeTranscript, computeProjectActivity, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, sessionHasUnansweredQuestion } from './claudeSessions'
@@ -133,6 +134,14 @@ import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } f
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
 import { createSkill, deleteSkill, listSkills, readSkill, renameSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
+import {
+  addMcpServer,
+  listMcpServers,
+  removeMcpServer,
+  updateMcpServer,
+  type McpServerPatch,
+  type NewMcpServer
+} from './config/mcpServers'
 import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
@@ -164,7 +173,7 @@ import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFile
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
-import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
+import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
 // wouldn't be found. Prepend the usual locations.
@@ -414,9 +423,28 @@ function registerIpc(): void {
     if (win) stopAgent(win, key)
   })
 
-  // The renderer's reply to a create_session command from the MCP server; resolves
-  // the waiting tool with the new session id (or an error).
-
+  // The renderer's reply to a run_command/list_commands pushed by the MCP
+  // server; resolves the waiting tool with the outcome.
+  ipcMain.handle('mcp:command-result', (_event, result: McpCommandResult) => resolveCommandResult(result))
+  // Register Floe's MCP server in the user's global Claude config — the ⌘K
+  // "Install Floe MCP globally" command (also auto-run at boot when the server
+  // holds its preferred port; see mcpServer.ts ensureGlobalRegistered).
+  ipcMain.handle('mcp:installGlobal', () => installMcpGlobal())
+  // Floe's own MCP registry (config/mcpServers.ts) — the panel's CRUD. The
+  // worktree path resolves to its project for the project-scope file, same as
+  // skills.
+  ipcMain.handle('mcp:servers:list', (_event, worktreePath?: string) =>
+    listMcpServers(worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+  )
+  ipcMain.handle('mcp:servers:add', (_event, scope: 'global' | 'project', server: NewMcpServer, worktreePath?: string) =>
+    addMcpServer(scope, server, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+  )
+  ipcMain.handle('mcp:servers:update', (_event, name: string, patch: McpServerPatch, worktreePath?: string) =>
+    updateMcpServer(name, patch, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+  )
+  ipcMain.handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
+    removeMcpServer(name, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+  )
 
   ipcMain.handle('claude:sessions', (_event, worktreePath: string) =>
     listClaudeSessions(worktreePath).map((m) => ({ ...m, running: hasActiveTurn(m.id) }))
@@ -490,7 +518,12 @@ function registerIpc(): void {
 
   ipcMain.handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
   ipcMain.handle('claude:info', async (_event, worktreePath: string) => {
-    const [info, codexUsage] = await Promise.all([getClaudeInfo(worktreePath), getCodexUsage()])
+    const [info, codexUsage] = await Promise.all([
+      // The merged --mcp-config makes the probe's /mcp report Floe's own
+      // registry with live connection state — what the MCP panel shows.
+      getClaudeInfo(worktreePath, mcpConfigFor('info-probe', worktreePath)),
+      getCodexUsage()
+    ])
     return { ...info, codexUsage }
   })
   ipcMain.handle('claude:contextUsage', (_event, worktreePath: string, claudeId?: string) =>
@@ -1189,6 +1222,9 @@ void app.whenReady().then(async () => {
   registerIpc()
   ensureAgentHookInstalled()
   createWindow()
+  // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
+  // window getter so ordering vs. createWindow doesn't matter.
+  startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Background auto-update: polls the GitHub release feed, installs on next quit.
   initAutoUpdate(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Watchdog: log any turn that gets stuck "Thinking…" (never emits done) so a
@@ -1260,4 +1296,5 @@ function stopEverything(): void {
   killAllCommands()
   killAllMcpAuths()
   cancelLogin()
+  shutdownMcpServer()
 }

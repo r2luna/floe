@@ -4646,6 +4646,63 @@ kbd {
   color: #b1454a;
 }
 
+/* --- MCP panel ------------------------------------------------------------ */
+
+/* A disabled server's row: still there, still actionable (`t` turns it back
+   on), just visibly not part of what a session gets. */
+.row.row-off .row-name {
+  color: var(--dim);
+}
+
+/* The connection state, as an outline chip in the canonical mode-chip tones
+   (docs/ui-conventions.md) — never a solid fill, and each tint ships its light
+   override. */
+.mcp-status {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--muted-2);
+  border-radius: 1px;
+  font-size: 10px;
+  color: var(--dim);
+  background: none;
+}
+
+.mcp-ok {
+  color: #93b8a1;
+  border-color: #283129;
+  background: #1b201d;
+}
+
+.mcp-auth {
+  color: #95a6c0;
+  border-color: #282f3a;
+  background: #1b1e25;
+}
+
+.mcp-bad {
+  color: #c49495;
+  border-color: #352829;
+  background: #221b1c;
+}
+
+:root[data-theme='light'] .mcp-ok {
+  color: #2f7d52;
+  border-color: #b6d9c3;
+  background: #eef6f1;
+}
+
+:root[data-theme='light'] .mcp-auth {
+  color: #3a64a8;
+  border-color: #c2d4ef;
+  background: #eef2f9;
+}
+
+:root[data-theme='light'] .mcp-bad {
+  color: #b1454a;
+  border-color: #e3bdbf;
+  background: #f9eef0;
+}
+
 /* --- row menu ------------------------------------------------------------- */
 
 /* The right-click menu. Same surface as the palette — it is the same kind of

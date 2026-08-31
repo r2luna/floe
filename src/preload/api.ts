@@ -35,6 +35,9 @@ import type {
   ImplementPhase,
   JumpSession,
   McpAuthEnvelope,
+  McpCommand,
+  McpCommandResult,
+  McpServerEntry,
   AuthStatus,
   ClaudeAuthEvent,
   ClaudeStats,
@@ -415,6 +418,41 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, payload: ClaudeAuthEvent): void => cb(payload)
         ipcRenderer.on('claude:auth:event', listener)
         return () => ipcRenderer.removeListener('claude:auth:event', listener)
+      }
+    },
+    // Floe's own MCP control server (main/mcpServer.ts) — agents drive Floe.
+    // UI-driving tools arrive here as an `mcp:command`; commands that carry a
+    // requestId (run_command / list_commands) are answered back over
+    // `mcp:command-result` so the waiting tool gets a real result.
+    mcp: {
+      onCommand: (cb: (command: McpCommand) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, command: McpCommand): void => cb(command)
+        ipcRenderer.on('mcp:command', listener)
+        return () => ipcRenderer.removeListener('mcp:command', listener)
+      },
+      commandResult: (result: McpCommandResult): Promise<void> =>
+        ipcRenderer.invoke('mcp:command-result', result),
+      // Register Floe's MCP server in the user's global Claude config so any
+      // claude session (in-app or a plain terminal) gets the floe tools.
+      installGlobal: (): Promise<{ ok: boolean; message: string }> =>
+        ipcRenderer.invoke('mcp:installGlobal'),
+      // Floe's own MCP registry — the third-party servers projected into every
+      // spawned session (config/mcpServers.ts). The MCP panel's CRUD.
+      servers: {
+        list: (worktreePath?: string): Promise<McpServerEntry[]> =>
+          ipcRenderer.invoke('mcp:servers:list', worktreePath),
+        add: (
+          scope: 'global' | 'project',
+          server: { name: string; transport: 'http' | 'stdio'; url?: string; command?: string; args?: string[]; enabled?: boolean },
+          worktreePath?: string
+        ): Promise<McpServerEntry> => ipcRenderer.invoke('mcp:servers:add', scope, server, worktreePath),
+        update: (
+          name: string,
+          patch: { name?: string; transport?: 'http' | 'stdio'; url?: string; command?: string; args?: string[]; enabled?: boolean },
+          worktreePath?: string
+        ): Promise<McpServerEntry> => ipcRenderer.invoke('mcp:servers:update', name, patch, worktreePath),
+        remove: (name: string, worktreePath?: string): Promise<void> =>
+          ipcRenderer.invoke('mcp:servers:remove', name, worktreePath)
       }
     },
     // Floe's own skills — Markdown in ~/.config/floe, global or per project.

@@ -322,3 +322,27 @@ export const COMMANDS_TOML = `# ================================================
 #    worktree = "/code/app-feat-billing"
 # ==============================================================================
 `
+
+/** An MCP registry file. Written only once a scope actually has a server. */
+export const MCP_TOML = `# ==============================================================================
+#  Floe — MCP servers
+# ==============================================================================
+#  Third-party MCP servers Floe hands to every harness it spawns, so the same
+#  server works whichever CLI answers the turn (like skills: one copy, every
+#  harness). Global file: ~/.config/floe/mcp.toml — every project. A project's
+#  own projects/<dir>/mcp.toml adds to it, and a project server wins over a
+#  global one of the same name.
+#
+#  Each [[server]] entry:
+#    name      = "context7"                # required, unique in its file
+#    transport = "http"                    # "http" or "stdio"
+#    url       = "https://mcp.example/…"   # http only
+#    command   = "npx"                     # stdio only
+#    args      = ["-y", "@some/mcp"]       # stdio only, optional
+#    enabled   = true                      # optional, defaults to true
+#
+#  A server that needs environment variables can wrap them:
+#    command = "env"
+#    args    = ["KEY=value", "npx", "-y", "@some/mcp"]
+# ==============================================================================
+`

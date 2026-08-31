@@ -52,7 +52,7 @@ import { useMerge } from './useMerge'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
-import { DEFAULT_GROUP, type ContextUsage, type Project } from '../../shared/types'
+import { DEFAULT_GROUP, type ContextUsage, type McpCommand, type Project } from '../../shared/types'
 
 
 /**
@@ -1213,6 +1213,101 @@ export default function App() {
       setLane((l) => open(l, panelOf('worktrees')))
     }
   }
+
+  // --- MCP control server -----------------------------------------------------
+  // Commands an agent's tool pushed from main over mcp:command. run_command and
+  // list_commands go through the SAME registry the keymap and the palette use —
+  // that is the whole contract: one command written once behaves the same for
+  // all three callers. Kept behind a ref so the one subscription (mounted once
+  // below) always calls the render's current closure.
+  const handleMcpCommandRef = useRef<(command: McpCommand) => void>(() => {})
+  useEffect(() => window.floe.mcp.onCommand((c) => handleMcpCommandRef.current(c)), [])
+  handleMcpCommandRef.current = (command: McpCommand): void => {
+    switch (command.kind) {
+      case 'run_command': {
+        const res = runCommand(REGISTRY, ctxRef.current, command.commandId, command.arg)
+        void window.floe.mcp.commandResult({
+          requestId: command.requestId,
+          ok: res.ok,
+          error: res.ok ? undefined : res.error
+        })
+        return
+      }
+      case 'list_commands': {
+        void window.floe.mcp.commandResult({
+          requestId: command.requestId,
+          ok: true,
+          commands: listCommands(REGISTRY, ctxRef.current)
+        })
+        return
+      }
+      case 'select_session': {
+        // Same restore machinery a project/worktree switch uses: file the target
+        // under the memory refs and enter. A cross-project target lands via
+        // enterProject's pending restore (its worktree list is a fetch away);
+        // the current project's opens the chat panel directly — the just-created
+        // session may not be in the sidebar rows yet, and the panel doesn't
+        // need it to be.
+        byWorktree.current[command.worktreePath] = command.sessionId
+        const current = projects.current?.path
+        if (command.projectPath && command.projectPath !== current) {
+          byProject.current[command.projectPath] = command.worktreePath
+          enterProject(command.projectPath)
+          return
+        }
+        worktrees.select(command.worktreePath)
+        setLane((l) =>
+          open(l, mkPanel('chat', command.title, { id: command.sessionId, worktreePath: command.worktreePath }))
+        )
+        worktrees.reload()
+        return
+      }
+      case 'open_plan': {
+        // The same reader every file gets, rooted at the plan's worktree so it
+        // opens correctly even when a different worktree is on screen.
+        setLane((l) =>
+          open(l, mkPanel('file', command.relPath, undefined, undefined, undefined, command.worktreePath))
+        )
+        return
+      }
+      case 'start_merge': {
+        // The guided merge starts from a Worktree row of the OPEN project
+        // (useMerge keys flows by projects.current). On the right project with
+        // the row loaded it starts now; otherwise park the request and navigate
+        // — the effect below fires it once the rows arrive. The tool's timeout
+        // answers the caller if they never do.
+        const row = worktrees.rows.find((r) => r.worktree.path === command.worktreePath)
+        if (row && projects.current?.path === command.projectPath && worktrees.repo === command.projectPath) {
+          worktrees.select(command.worktreePath)
+          const why = merge.start(row.worktree)
+          void window.floe.mcp.commandResult({ requestId: command.requestId, ok: !why, error: why ?? undefined })
+          return
+        }
+        pendingMerge.current = { worktreePath: command.worktreePath, requestId: command.requestId }
+        if (projects.current?.path !== command.projectPath) {
+          byProject.current[command.projectPath] = command.worktreePath
+          enterProject(command.projectPath)
+        } else {
+          worktrees.reload()
+        }
+        return
+      }
+    }
+  }
+
+  // A start_merge whose project/worktree list wasn't on screen yet: fires once
+  // the target project's rows are loaded, then answers the waiting tool.
+  const pendingMerge = useRef<{ worktreePath: string; requestId: string } | null>(null)
+  useEffect(() => {
+    const p = pendingMerge.current
+    if (!p) return
+    const row = worktrees.rows.find((r) => r.worktree.path === p.worktreePath)
+    if (!row || worktrees.repo !== projects.current?.path) return // still loading
+    pendingMerge.current = null
+    worktrees.select(p.worktreePath)
+    const why = merge.start(row.worktree)
+    void window.floe.mcp.commandResult({ requestId: p.requestId, ok: !why, error: why ?? undefined })
+  }, [worktrees.rows, worktrees.repo])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

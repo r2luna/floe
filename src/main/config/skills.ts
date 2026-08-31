@@ -275,6 +275,29 @@ export function deleteSkill(name: string, projectPath?: string): void {
   rmSync(isBundle(skill) ? skill.dir : skill.file, { recursive: true, force: true })
 }
 
+/**
+ * One skill with its raw markdown (frontmatter included) — the editing view,
+ * as opposed to `readSkill`, which strips to the body a harness receives.
+ * Throws when there is no such skill.
+ */
+export function readSkillFile(name: string, projectPath?: string): { skill: Skill; raw: string } {
+  const skill = find(name, projectPath)
+  return { skill, raw: readFileSync(skill.file, 'utf8') }
+}
+
+/**
+ * Replace a skill's markdown wholesale (frontmatter included). The file is
+ * resolved by NAME through the same project-wins lookup every other edit uses,
+ * so the caller can never write outside a skills directory. A frontmatter
+ * `name:` that disagrees with the filename re-labels the skill — same rule as
+ * hand-editing the file.
+ */
+export function updateSkill(name: string, content: string, projectPath?: string): Skill {
+  const skill = find(name, projectPath)
+  writeFileSync(skill.file, content)
+  return skill
+}
+
 /** Rewrite the frontmatter's `name:`, when it has one. */
 function withName(raw: string, name: string): string {
   if (!raw.startsWith('---')) return raw

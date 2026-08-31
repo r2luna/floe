@@ -70,6 +70,13 @@ export const COMMAND_IDS: string[] = [
   'skill.rename',
   'skill.delete',
   'skill.edit',
+  'mcp.install',
+  'mcp.open',
+  'mcp.new',
+  'mcp.edit',
+  'mcp.toggle',
+  'mcp.auth',
+  'mcp.delete',
   'keybindings.reset',
   'update.install',
   // Sessions & worktrees

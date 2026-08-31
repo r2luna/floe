@@ -8,6 +8,9 @@ import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttac
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
 import { getSystemPrompt } from './appSettings'
+// Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
+// sides only call the other's functions at runtime, never at module top level.
+import { mcpConfigFor } from './mcpServer'
 import { log } from './log'
 
 export interface Conn {
@@ -289,6 +292,14 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   if (resumeId) args.push('--resume', resumeId)
   const systemPrompt = getSystemPrompt()
   if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
+
+  // Wire the in-app MCP control server: a per-session config whose HTTP url
+  // carries this session's key as a token (/mcp/<key>), so a tool call knows its
+  // caller. Auto-permit the floe tools — the wildcard covers all mcp__floe__*
+  // without raising a permission prompt. These two argv entries are also what
+  // the managed hooks' ps-ancestry walk detects (hooks.ts DETECT_FLOE).
+  args.push('--mcp-config', mcpConfigFor(key, worktreePath))
+  args.push('--allowedTools', 'mcp__floe')
 
   const child = spawn('claude', args, { cwd: worktreePath, env: process.env })
   const conn: Conn = {
@@ -933,7 +944,9 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
         // lands in order) and skip the default tool chip. On a malformed spec,
         // fall through to the plain tool card so nothing silently disappears.
         if (block.name === 'mcp__floe__present_decision') {
-          const spec = parseArtifactSpec(block.input)
+          // The tool's input carries title/groups/items only — the discriminant
+          // is implied by the tool name, so inject it before validating.
+          const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
           if (spec) {
             flushDeltas(win, key, conn)
             send(win, key, { kind: 'artifact', spec })
