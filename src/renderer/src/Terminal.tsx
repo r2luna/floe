@@ -4,51 +4,8 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
+import { SOLID_BG, XTERM_THEME, rgbChannels } from './xtermTheme'
 import { attachTerminal, detachTerminal } from './terminalBus'
-
-// The panel's colours, as xterm wants them. Kept next to the terminal rather
-// than derived from the CSS variables: xterm needs concrete values at
-// construction, and reading computed styles at mount would tie the shell's
-// palette to whatever had painted first.
-const THEME = {
-  background: '#00000000', // transparent — the panel's own fill shows through
-  foreground: '#c9ccd2',
-  cursor: '#c9ccd2',
-  selectionBackground: '#35496e88',
-  black: '#22252c',
-  red: '#c07a72',
-  green: '#6ea86e',
-  yellow: '#c9a05f',
-  blue: '#7f9fd8',
-  magenta: '#c07fb8',
-  cyan: '#6fc3c3',
-  white: '#c9ccd2',
-  brightBlack: '#6d7280',
-  brightRed: '#d3948c',
-  brightGreen: '#8cc48c',
-  brightYellow: '#dcbb7f',
-  brightBlue: '#9db8e4',
-  brightMagenta: '#d29ac9',
-  brightCyan: '#8fd6d6',
-  brightWhite: '#e8eaee'
-}
-
-// The solid colour to answer OSC 11 with. The theme background above is
-// transparent so the panel shows through, but a program asking "what colour is
-// the background?" must not be told "none": xterm's own answer is the
-// transparent fill, which every program reads as black.
-const SOLID_BG = '#141519'
-
-// xterm's OSC colour replies use 16-bit channels — `rgb:rrrr/gggg/bbbb`. A plain
-// hex answer is not the format the query asks for and programs ignore it.
-const rgbChannels = (hex: string): string =>
-  [1, 3, 5]
-    .map((i) => {
-      const b = hex.slice(i, i + 2)
-      return b + b
-    })
-    .join('/')
-
 
 /**
  * A live shell. The PTY lives in the main process keyed by `termId`, so the
@@ -101,7 +58,7 @@ export function TerminalPanel({
       // gaps between box-drawing characters.
       lineHeight: 1.25,
       cursorBlink: true,
-      theme: THEME,
+      theme: XTERM_THEME,
       allowProposedApi: true,
       // A TUI with mouse reporting on (claude, nvim, lazygit) eats drag —
       // ⌥-drag forces a local selection anyway.
@@ -153,7 +110,7 @@ export function TerminalPanel({
       term.input(`\x1b]${osc};rgb:${rgbChannels(hex)}\x07`, false)
       return true
     }
-    term.parser.registerOscHandler(10, (d) => (d === '?' ? reply(10, THEME.foreground) : false))
+    term.parser.registerOscHandler(10, (d) => (d === '?' ? reply(10, XTERM_THEME.foreground) : false))
     term.parser.registerOscHandler(11, (d) => (d === '?' ? reply(11, SOLID_BG) : false))
 
     term.open(host)

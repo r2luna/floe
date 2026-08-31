@@ -1,0 +1,304 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Commands panel — 4 layouts</title>
+<link rel="stylesheet" href="./src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. Everything below the divider reuses the app's own
+   tokens — no new colours, no solid-filled buttons. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:24px 28px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 22px; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 10px; max-width:70ch; }
+.opt{ margin:0 0 30px; }
+.stage{ background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius);
+  padding:0; height:280px; display:flex; max-width:1000px; overflow:hidden; }
+.stage .lane{ padding:8px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* --- the commands list row ------------------------------------------------
+   Two lines: dot + name + scope + state, then the command with its RSS or its
+   last exit. Same .row rhythm the other lists use, one line taller. */
+.cmd-row{ display:block; width:100%; padding:5px 8px; border-radius:var(--radius);
+  text-align:left; background:none; border:none; color:inherit; font:inherit; cursor:pointer; }
+.cmd-row[data-cursor]{ background:var(--wash-3); }
+.cmd-l1{ display:flex; align-items:center; gap:7px; }
+.cmd-name{ color:var(--text-strong); flex:none; }
+.cmd-scope{ color:var(--faint); font-size:11px; border:1px solid var(--line);
+  border-radius:var(--radius-sm); padding:0 4px; }
+.cmd-state{ margin-left:auto; color:var(--dim); font-size:12px; }
+.cmd-state[data-run]{ color:var(--live); }
+.cmd-l2{ display:flex; align-items:center; gap:8px; padding-left:14px; color:var(--dim); font-size:12px; }
+.cmd-cmd{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cmd-meta{ margin-left:auto; color:var(--time-dim); flex:none; }
+.cmd-meta[data-err]{ color:var(--pen-red,#c49495); }
+.dot-err{ background:#c49495; border-color:#c49495; }
+
+/* Read-only log. A stand-in for the xterm: same well, same leading. */
+.cmd-log{ background:var(--well); border-radius:var(--radius); padding:8px 10px;
+  color:var(--dim); font-size:12px; height:100%; box-sizing:border-box; overflow:hidden; }
+.cmd-log b{ color:var(--text-strong); font-weight:700; }
+.cmd-log i{ color:var(--live); font-style:normal; }
+
+/* The hint strip every list already ends with. */
+.cmd-hints{ border-top:1px solid var(--line-soft); padding:5px 10px;
+  color:var(--faint); font-size:11px; flex:none; }
+
+/* Outline chip, per the app's button rule — never a solid fill. */
+.cmd-act{ background:transparent; border:1px solid var(--edge); border-radius:var(--radius);
+  color:var(--dim); font:inherit; font-size:11px; padding:1px 7px; cursor:pointer; }
+.cmd-act:hover{ color:var(--text-strong); border-color:var(--dimmer); }
+
+/* O2 — one panel, the log docked under the list inside it. */
+.split-list{ flex:0 0 auto; overflow:auto; padding:8px; }
+.split-log{ flex:1; min-height:0; border-top:1px solid var(--line-soft); padding:8px; }
+
+/* O3 — the section header inside the worktrees panel. */
+.sec-head{ display:flex; align-items:center; gap:7px; padding:6px 8px 2px;
+  color:var(--faint); font-size:11px; }
+.sec-head span{ margin-left:auto; }
+
+/* O4 — the palette overlay, on a dimmed lane. */
+.o4-stage{ position:relative; }
+.o4-scrim{ position:absolute; inset:0; background:#0006; display:flex;
+  align-items:flex-start; justify-content:center; padding-top:34px; }
+.o4-box{ width:440px; background:var(--panel); border:1px solid var(--line);
+  border-radius:var(--radius); box-shadow:0 12px 32px #0007; overflow:hidden; }
+.o4-input{ padding:8px 11px; border-bottom:1px solid var(--line-soft); color:var(--text-strong); }
+.o4-input em{ color:var(--faint); font-style:normal; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">theme</button>
+
+<h1>Commands — 4 layouts</h1>
+<p class="sub">Mesmo CSS do app (src/renderer/src/index.css). Clique em <b>theme</b> para conferir o light.</p>
+
+<!-- ─────────────────────────────── O1 ─────────────────────────────── -->
+<div class="opt">
+  <h2>O1 — Lista estreita + log ao lado</h2>
+  <p class="note">Painel <code>commands</code> de 300px na lane; ⏎ abre o log num painel próprio à
+  direita, no mesmo slot do diff. Segue changes/files/plans, e ganha rail, palette e
+  <code>panel.goto commands</code> sem código novo.</p>
+  <div class="stage">
+    <div class="lane" style="flex:1">
+      <div class="lane-col" style="--panel-w:300px">
+        <div class="panel" data-focused>
+          <div class="panel-head">
+            <span class="panel-icon">▤</span>
+            <span class="panel-name">commands</span>
+            <span class="panel-sub">2/4 running</span>
+            <button class="cmd-act">Run all</button>
+          </div>
+          <div class="panel-body" style="padding:8px 6px">
+            <button class="cmd-row" data-cursor>
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Dev</span>
+                <span class="cmd-scope">PROJECT</span><span class="cmd-state" data-run>running</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">pnpm run dev</span><span class="cmd-meta">184 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Queue</span>
+                <span class="cmd-scope">PROJECT</span><span class="cmd-state" data-run>running</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">php artisan queue:work</span><span class="cmd-meta">42 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-err"></span><span class="cmd-name">Scheduler</span>
+                <span class="cmd-scope">PROJECT</span><span class="cmd-state">stopped</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">php artisan schedule:work</span>
+                <span class="cmd-meta" data-err>exit 1 · 3h ago</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot"></span><span class="cmd-name">Stripe listen</span>
+                <span class="cmd-state">stopped</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">stripe listen --forward-to …</span></span>
+            </button>
+          </div>
+          <div class="cmd-hints">j/k move · ⏎ logs · r run · s stop · a add</div>
+        </div>
+      </div>
+      <div class="lane-col" data-grow style="--panel-w:420px">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-icon">▶</span>
+            <span class="panel-name">Dev</span>
+            <span class="panel-sub">pnpm run dev</span>
+            <button class="cmd-act">↻</button><button class="cmd-act">■</button>
+          </div>
+          <div class="panel-body" style="padding:6px">
+            <div class="cmd-log">
+              <div><b>VITE v5.4.11</b>  ready in 312 ms</div>
+              <div>&nbsp;</div>
+              <div>➜  Local:   <i>http://localhost:5173/</i></div>
+              <div>➜  Network: use --host to expose</div>
+              <div>➜  press h + enter to show help</div>
+              <div>&nbsp;</div>
+              <div>12:04:31 [vite] hmr update /src/App.tsx</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────── O2 ─────────────────────────────── -->
+<div class="opt">
+  <h2>O2 — Um painel só, lista em cima e log embaixo</h2>
+  <p class="note">Gasta um slot da lane em vez de dois e mantém lista e saída sempre visíveis
+  juntas. O log fica mais estreito, e a divisória é ajustável.</p>
+  <div class="stage">
+    <div class="lane" style="flex:1">
+      <div class="lane-col" data-grow style="--panel-w:520px">
+        <div class="panel" data-focused>
+          <div class="panel-head">
+            <span class="panel-icon">▤</span>
+            <span class="panel-name">commands</span>
+            <span class="panel-sub">2/4 running · Dev</span>
+            <button class="cmd-act">Run all</button>
+          </div>
+          <div class="split-list">
+            <button class="cmd-row" data-cursor>
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Dev</span>
+                <span class="cmd-scope">PROJECT</span><span class="cmd-state" data-run>running</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">pnpm run dev</span><span class="cmd-meta">184 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Queue</span>
+                <span class="cmd-state" data-run>running</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">php artisan queue:work</span><span class="cmd-meta">42 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-err"></span><span class="cmd-name">Scheduler</span>
+                <span class="cmd-state">stopped</span></span>
+              <span class="cmd-l2"><span class="cmd-cmd">php artisan schedule:work</span>
+                <span class="cmd-meta" data-err>exit 1 · ran 2s</span></span>
+            </button>
+          </div>
+          <div class="split-log">
+            <div class="cmd-log">
+              <div><b>VITE v5.4.11</b>  ready in 312 ms</div>
+              <div>➜  Local:   <i>http://localhost:5173/</i></div>
+              <div>➜  press h + enter to show help</div>
+            </div>
+          </div>
+          <div class="cmd-hints">j/k move · ⏎ foca o log · r run · s stop · a add</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────── O3 ─────────────────────────────── -->
+<div class="opt">
+  <h2>O3 — Faixa dentro do painel worktrees</h2>
+  <p class="note">Os comandos viram uma seção abaixo das sessões da branch: o estado fica
+  visível sem abrir nada. O log reusa o painel <code>terminal</code> que já existe. Nenhum painel
+  novo — em troca, o worktrees carrega mais uma responsabilidade.</p>
+  <div class="stage">
+    <div class="lane" style="flex:1">
+      <div class="lane-col" style="--panel-w:330px">
+        <div class="panel" data-focused>
+          <div class="panel-head">
+            <span class="panel-icon">⑂</span>
+            <span class="panel-name">worktrees</span>
+            <span class="panel-sub">floe</span>
+          </div>
+          <div class="panel-body" style="padding:8px 6px">
+            <div class="row"><span class="dot dot-live"></span><span class="row-name">feat/billing</span></div>
+            <div class="row row-session" data-active><span class="dot dot-working"></span><span class="row-name">refactor checkout</span></div>
+            <div class="row row-session"><span class="dot"></span><span class="row-name">write tests</span></div>
+            <div class="sec-head">commands <span>2/4 running</span></div>
+            <button class="cmd-row" data-cursor>
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Dev</span>
+                <span class="cmd-state" data-run>184 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Queue</span>
+                <span class="cmd-state" data-run>42 MB</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot dot-err"></span><span class="cmd-name">Scheduler</span>
+                <span class="cmd-state">exit 1</span></span>
+            </button>
+            <button class="cmd-row">
+              <span class="cmd-l1"><span class="dot"></span><span class="cmd-name">Migrate on change</span>
+                <span class="cmd-state">watching</span></span>
+            </button>
+          </div>
+          <div class="cmd-hints">j/k move · ⏎ logs no terminal · r run · s stop</div>
+        </div>
+      </div>
+      <div class="lane-col" data-grow style="--panel-w:400px">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-icon">›_</span>
+            <span class="panel-name">terminal</span>
+            <span class="panel-sub">Dev · pnpm run dev</span>
+          </div>
+          <div class="panel-body" style="padding:6px">
+            <div class="cmd-log">
+              <div><b>VITE v5.4.11</b>  ready in 312 ms</div>
+              <div>➜  Local:   <i>http://localhost:5173/</i></div>
+              <div>12:04:31 [vite] hmr update /src/App.tsx</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─────────────────────────────── O4 ─────────────────────────────── -->
+<div class="opt">
+  <h2>O4 — Overlay tipo palette (⌘K C)</h2>
+  <p class="note">Busca por nome, run/stop inline, fecha e devolve o foco ao composer. Ocupa
+  zero espaço permanente na lane — o custo é que o estado dos processos só existe enquanto
+  o overlay está aberto.</p>
+  <div class="stage o4-stage">
+    <div class="lane" style="flex:1">
+      <div class="lane-col" data-grow style="--panel-w:520px">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-icon">💬</span>
+            <span class="panel-name">chat</span>
+            <span class="panel-sub">refactor checkout</span>
+          </div>
+          <div class="panel-body"></div>
+        </div>
+      </div>
+    </div>
+    <div class="o4-scrim">
+      <div class="o4-box">
+        <div class="o4-input">dev<em>▏</em></div>
+        <div style="padding:6px">
+          <button class="cmd-row" data-cursor>
+            <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Dev</span>
+              <span class="cmd-scope">PROJECT</span><span class="cmd-state" data-run>running · 184 MB</span></span>
+            <span class="cmd-l2"><span class="cmd-cmd">pnpm run dev</span></span>
+          </button>
+          <button class="cmd-row">
+            <span class="cmd-l1"><span class="dot dot-live"></span><span class="cmd-name">Queue</span>
+              <span class="cmd-state" data-run>running · 42 MB</span></span>
+            <span class="cmd-l2"><span class="cmd-cmd">php artisan queue:work</span></span>
+          </button>
+          <button class="cmd-row">
+            <span class="cmd-l1"><span class="dot dot-err"></span><span class="cmd-name">Scheduler</span>
+              <span class="cmd-state">stopped</span></span>
+            <span class="cmd-l2"><span class="cmd-cmd">php artisan schedule:work</span>
+              <span class="cmd-meta" data-err>exit 1 · 3h ago</span></span>
+          </button>
+        </div>
+        <div class="cmd-hints">⏎ logs · r run · s stop · esc fecha</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

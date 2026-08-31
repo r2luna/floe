@@ -95,6 +95,7 @@ stay free everywhere else.`,
       { key: 'super+k g', command: 'panel.goto', arg: 'changes' },
       { key: 'super+k f', command: 'panel.goto', arg: 'files' },
       { key: 'super+k p', command: 'panel.goto', arg: 'plans' },
+      { key: 'super+k c', command: 'panel.goto', arg: 'commands' },
       { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel in ["projects", "worktrees"]' },
       { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel in ["projects", "worktrees"]' }
     ]
@@ -121,6 +122,28 @@ from disk.`,
       { key: 'r', command: 'files.rename', when: 'panel == "files"' },
       { key: 'm', command: 'files.move', when: 'panel == "files"' },
       { key: 'd', command: 'files.delete', when: 'panel == "files"' }
+    ]
+  },
+  {
+    title: 'Commands',
+    doc: `The worktree's registered processes — what \`commands.toml\` lists. The keys
+are the same letters the file tree uses, on the same principle: they act on the
+row the cursor is on. \`r\` runs it, or restarts it if it is already running, so
+one key answers "run this" whatever state it is in. \`s\` stops it, \`⏎\` opens its
+output beside the list.
+
+\`a\` adds one, \`e\` edits the command line, \`d\` deletes it after asking.
+Renaming has no key on purpose: a command's id is the slug of its name, so a
+rename re-keys it and orphans the output of a process that is still running —
+\`command.rename\` is in the palette, and it refuses while the command runs.`,
+    binds: [
+      { key: 'r', command: 'command.run', when: 'panel == "commands"' },
+      { key: 's', command: 'command.stop', when: 'panel == "commands"' },
+      { key: 'shift+r', command: 'command.restart', when: 'panel == "commands"' },
+      { key: 'enter', command: 'command.logs', when: 'panel == "commands"' },
+      { key: 'a', command: 'command.add', when: 'panel == "commands"' },
+      { key: 'e', command: 'command.edit', when: 'panel == "commands"' },
+      { key: 'd', command: 'command.delete', when: 'panel == "commands"' }
     ]
   },
   {

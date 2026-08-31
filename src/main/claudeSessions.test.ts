@@ -177,3 +177,45 @@ test('an attached image reloads under the message it came with', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// A background agent reports back by injecting its whole result as a user
+// message to resume the turn. It must never reload as something you said.
+test('a task-notification does not reload as a user message', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-notify'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-08-31T00:56:00.000Z', message: { content: 'mapeia as duas coisas' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-08-31T00:56:02.000Z',
+      message: { content: [{ type: 'tool_use', id: 't1', name: 'Agent', input: { subagent_type: 'Explore', description: 'Map rookery MCP server' } }] }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-08-31T00:58:00.000Z',
+      message: {
+        content:
+          '<task-notification>\n<task-id>a4521fc</task-id>\n<tool-use-id>t1</tool-use-id>\n<status>completed</status>\n<result>Here is the complete picture…</result>\n</task-notification>'
+      }
+    },
+    {
+      type: 'assistant',
+      timestamp: '2026-08-31T00:58:10.000Z',
+      message: { content: [{ type: 'text', text: 'pronto, achei' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => i.role),
+      ['user', 'subagent', 'assistant']
+    )
+    assert.ok(!items.some((i) => (i.text ?? '').includes('task-notification')))
+    // The notification did not restart the turn clock: the answer is still
+    // timed from the message that was actually sent.
+    assert.equal(items[2].ms, 130_000)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
