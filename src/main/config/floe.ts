@@ -17,7 +17,7 @@ import { TableReader, subTable } from './read'
 import { editToml, parseToml, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
 import { FLOE_TOML } from './template'
-import { DEFAULT_GROUP, PENGUIN_COLORS, PENGUIN_HEADS } from '../../shared/types'
+import { DEFAULT_GROUP, NOTIFY_SOUNDS, PENGUIN_COLORS, PENGUIN_HEADS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -49,6 +49,7 @@ export interface FloeConfig {
   terminal: { shell?: string }
   editor: { command: string }
   sandbox: { enabled: boolean }
+  notifications: { sound: (typeof NOTIFY_SOUNDS)[number] }
   update: { checkIntervalHours: number }
   projects: { groups: string[] }
   integrations: { jira: { site?: string; email?: string }; bitbucket: { email?: string } }
@@ -70,6 +71,7 @@ export const DEFAULTS: FloeConfig = {
   terminal: { shell: undefined },
   editor: { command: 'nvim' },
   sandbox: { enabled: true },
+  notifications: { sound: 'chime' },
   update: { checkIntervalHours: 6 },
   projects: { groups: [DEFAULT_GROUP] },
   // The optional keys are spelled out rather than omitted so this object has the
@@ -128,6 +130,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const terminal = subTable(sink, raw, root, 'terminal')
   const editor = subTable(sink, raw, root, 'editor')
   const sandbox = subTable(sink, raw, root, 'sandbox')
+  const notifications = subTable(sink, raw, root, 'notifications')
   const update = subTable(sink, raw, root, 'update')
   const projects = subTable(sink, raw, root, 'projects')
   const integrations = (root.integrations ?? {}) as Record<string, unknown>
@@ -160,6 +163,11 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
       // any editor binary on the machine is a valid answer here.
       editor: { command: editor?.str('command', d.editor.command) ?? d.editor.command },
       sandbox: { enabled: sandbox?.bool('enabled', d.sandbox.enabled) ?? d.sandbox.enabled },
+      notifications: {
+        sound:
+          notifications?.oneOf('sound', NOTIFY_SOUNDS, d.notifications.sound) ??
+          d.notifications.sound
+      },
       update: {
         checkIntervalHours:
           update?.num('check-interval-hours', d.update.checkIntervalHours, { min: 0.25, max: 168 }) ??

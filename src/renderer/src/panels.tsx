@@ -84,11 +84,14 @@ import { Lightbox } from './Lightbox'
 import type { Merge } from './useMerge'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
+  NOTIFY_SOUNDS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
+  type NotifySoundId,
   type PenguinColorId,
   type PenguinHeadId
 } from '../../shared/types'
+import { previewSound } from './sounds'
 import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
 import type { Skill } from '../../main/config/skills'
 
@@ -3498,6 +3501,20 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
       ]
     },
     {
+      title: 'Notifications',
+      rows: [
+        {
+          kind: 'choice',
+          table: 'notifications',
+          key: 'sound',
+          label: 'Turn-done sound',
+          value: config.notifications.sound,
+          options: NOTIFY_SOUNDS,
+          hint: 'plays when an agent finishes a turn — each pick previews itself'
+        }
+      ]
+    },
+    {
       title: 'Updates',
       rows: [
         {
@@ -3511,6 +3528,13 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
       ]
     }
   ]
+
+  // Hearing the pick is the only honest way to choose a sound, so cycling the
+  // row plays what it just set.
+  const setValue: typeof settings.set = (table, key, value) => {
+    settings.set(table, key, value)
+    if (table === 'notifications' && key === 'sound') previewSound(value as NotifySoundId)
+  }
 
   return (
     <div className="settings">
@@ -3547,7 +3571,7 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
               editing={editing === `${row.table}.${row.key}`}
               onEdit={() => setEditing(`${row.table}.${row.key}`)}
               onDone={() => setEditing(null)}
-              onSet={settings.set}
+              onSet={setValue}
             />
           ))}
         </div>

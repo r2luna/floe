@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { AgentEventEnvelope } from '../../shared/types'
+import type { AgentEventEnvelope, NotifySoundId } from '../../shared/types'
+import { playDoneSound } from './sounds'
 
 // Sessions with an answer you have not seen. Kept in the same store as the
 // drafts and the lane — a reply that landed before you quit is still unread
@@ -56,10 +57,24 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
   const open = useRef(openKey)
   open.current = openKey
 
+  // Which sound a finished turn plays, from `[notifications]` in floe.toml. A
+  // ref for the same reason `open` is one: the subscription below must not be
+  // torn down when the user changes the pick mid-turn.
+  const sound = useRef<NotifySoundId>('off')
+  useEffect(() => {
+    const load = (): void =>
+      void window.floe.config.get().then((c) => (sound.current = c.notifications.sound))
+    load()
+    return window.floe.config.onChange(load)
+  }, [])
+
   useEffect(
     () =>
       window.floe.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
         const live = event.kind !== 'done' && event.kind !== 'error'
+        // Any turn ending is the news the sound carries — including the session
+        // you are watching, since the window may be behind another app.
+        if (!live) playDoneSound(sound.current)
         setBusy((prev) => {
           // Most events are text deltas in a session already known to be
           // working: returning the same Set keeps the list from re-rendering
