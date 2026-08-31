@@ -379,6 +379,11 @@ function hasUnansweredQuestion(file: string): boolean {
     }
     const content = (m.message as { content?: unknown } | null)?.content
     if (!Array.isArray(content)) continue
+    // Images you attached ride in the same message as the text, but ahead of it
+    // (see buildContent in agent.ts). Held back and appended after the blocks so
+    // a reopened chat shows what the live stream showed: your line, then the
+    // thumbnails under it — instead of the picture floating above the sentence.
+    const attached: TranscriptItem[] = []
     for (const block of content as Array<Record<string, unknown>>) {
       if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && typeof block.id === 'string') {
         asked.push(block.id)
@@ -632,6 +637,11 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       continue
     }
     if (!Array.isArray(content)) continue
+    // Images you attached ride in the same message as the text, but ahead of it
+    // (see buildContent in agent.ts). Held back and appended after the blocks so
+    // a reopened chat shows what the live stream showed: your line, then the
+    // thumbnails under it — instead of the picture floating above the sentence.
+    const attached: TranscriptItem[] = []
     for (const block of content as Array<Record<string, unknown>>) {
       if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
         if (role === 'user') items.push(...expandUserText(block.text))
@@ -694,6 +704,13 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         row.running = false
         if (at && row.at && at >= row.at) row.ms = at - row.at
         agentRows.delete(block.tool_use_id)
+      } else if (block.type === 'image' && role === 'user') {
+        // An image you attached, echoed back into the JSONL by the CLI. Without
+        // this it reloads as a bare "[Image #1]" pointing at nothing.
+        const src = block.source as { type?: string; media_type?: string; data?: string } | undefined
+        if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
+          attached.push({ role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })
+        }
       } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
         // Images returned by a tool (e.g. Read of a PNG) — show what Claude saw.
         for (const part of block.content as Array<Record<string, unknown>>) {
@@ -705,6 +722,7 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         }
       }
     }
+    items.push(...attached)
     for (let i = before; i < items.length; i++) {
       // A subagent row carries its own clock and its own fill; the turn's
       // numbers belong to the parent that launched it.

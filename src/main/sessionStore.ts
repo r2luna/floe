@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { dataDir } from './dataDir'
 import type { Effort, PermissionMode, ProjectUiState, ThreadComment, WorktreeUiState } from '../shared/types'
@@ -25,6 +25,13 @@ export interface CreatedSession {
   title: string
   createdAt: number
   claudeId?: string // Claude's session id, once the first prompt links it
+  /**
+   * Claude ids this session used to have. `claude --resume` forks into a fresh
+   * id on every respawn, but an open panel keeps the key it was opened with —
+   * so without this trail a lookup by that key stops matching the moment the
+   * first fork happens, and the next respawn silently starts a blank session.
+   */
+  pastClaudeIds?: string[]
   /**
    * When a turn last ran here, for sessions that leave no transcript on disk.
    * Claude's own recency comes from its `.jsonl` mtime; a session answered by
@@ -109,17 +116,42 @@ const emptyStore = (): Store => ({
 
 const storeFile = (): string => join(dataDir(), 'sessions.json')
 
+// The parsed store, so the ~25 accessors below don't re-read and re-parse the
+// whole file per call (getVibrancy alone runs on every window focus). Validated
+// by mtime+size rather than trusted blindly: the tests — and a second Floe
+// process — write sessions.json behind our back, and a stat is still ~free next
+// to a full parse. Keyed by path because tests repoint dataDir mid-process.
+let cached: { file: string; mtimeMs: number; size: number; store: Store } | undefined
+
+function cacheStore(file: string, store: Store): Store {
+  try {
+    const stat = statSync(file)
+    cached = { file, mtimeMs: stat.mtimeMs, size: stat.size, store }
+  } catch {
+    cached = undefined
+  }
+  return store
+}
+
 function read(): Store {
   const file = storeFile()
   if (!existsSync(file)) return emptyStore()
+  if (cached && cached.file === file) {
+    try {
+      const stat = statSync(file)
+      if (stat.mtimeMs === cached.mtimeMs && stat.size === cached.size) return cached.store
+    } catch {
+      /* fall through to a fresh parse */
+    }
+  }
   try {
     const data = JSON.parse(readFileSync(file, 'utf8'))
     if (!data || typeof data !== 'object') return emptyStore()
     // Migrate the old flat shape (Record<claudeId, { title }>) to the new store.
     if (!('meta' in data) && !('created' in data))
-      return { ...emptyStore(), meta: data as Record<string, SessionMeta> }
+      return cacheStore(file, { ...emptyStore(), meta: data as Record<string, SessionMeta> })
     const view = (data.view as Partial<ViewState>) ?? {}
-    return {
+    return cacheStore(file, {
       meta: (data.meta as Record<string, SessionMeta>) ?? {},
       created: Array.isArray(data.created) ? (data.created as CreatedSession[]) : [],
       view: {
@@ -132,7 +164,7 @@ function read(): Store {
       prefs: (data.prefs as AppPrefs) ?? {},
       reviewCheckpoints: (data.reviewCheckpoints as Record<string, string>) ?? {},
       threadComments: (data.threadComments as Record<string, ThreadComment[]>) ?? {}
-    }
+    })
   } catch {
     return emptyStore()
   }
@@ -146,6 +178,7 @@ function write(store: Store): void {
   const tmp = `${file}.tmp`
   writeFileSync(tmp, JSON.stringify(store, null, 2))
   renameSync(tmp, file)
+  cacheStore(file, store)
 }
 
 export function getSessionMeta(): Record<string, SessionMeta> {
@@ -174,8 +207,20 @@ export function getAllCreatedSessions(): CreatedSession[] {
   return read().created
 }
 
+// A session key from the renderer is `claudeId ?? id` (see App.tsx), so every
+// per-session lookup has to accept either. Missing this is what made an idle
+// session come back empty: after a restart the key was the claudeId, the by-`id`
+// lookup missed, and the agent respawned with no `--resume`.
+function findByKey(created: CreatedSession[], key: string): CreatedSession | undefined {
+  return (
+    created.find((s) => s.id === key) ??
+    created.find((s) => s.claudeId === key) ??
+    created.find((s) => s.pastClaudeIds?.includes(key))
+  )
+}
+
 export function getCreatedSession(id: string): CreatedSession | undefined {
-  return read().created.find((s) => s.id === id)
+  return findByKey(read().created, id)
 }
 
 // Adopt Claude's auto-generated ai-title as a session's title, and keep following
@@ -202,7 +247,7 @@ export function applyAiTitle(claudeId: string, title: string): boolean {
 // one. Lets the agent --resume the right session after the process is gone (the
 // machine slept, the app restarted) instead of silently starting a fresh one.
 export function getCreatedSessionClaudeId(id: string): string | undefined {
-  return read().created.find((s) => s.id === id)?.claudeId
+  return findByKey(read().created, id)?.claudeId
 }
 
 // The next auto-title for a worktree: one past the highest existing "Session N".
@@ -263,7 +308,7 @@ export function renameCreatedSession(id: string, title: string): void {
   const t = title.trim()
   if (!t) return
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.title = t
   write(store)
@@ -272,7 +317,7 @@ export function renameCreatedSession(id: string, title: string): void {
 /** Stamp a session as used now — see CreatedSession.usedAt. */
 export function touchCreatedSession(id: string): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.usedAt = Date.now()
   write(store)
@@ -282,7 +327,7 @@ export function touchCreatedSession(id: string): void {
 // to it (now or after a restart) restores that mode instead of a global default.
 export function setCreatedSessionMode(id: string, mode: PermissionMode): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.permissionMode = mode
   write(store)
@@ -292,7 +337,7 @@ export function setCreatedSessionMode(id: string, mode: PermissionMode): void {
 // back to it (now or after a restart) restores it instead of a global default.
 export function setCreatedSessionModel(id: string, model: string): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.model = model
   write(store)
@@ -302,7 +347,7 @@ export function setCreatedSessionModel(id: string, model: string): void {
 // switching back to it (now or after a restart) restores it.
 export function setCreatedSessionEffort(id: string, effort: Effort): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.effort = effort
   write(store)
@@ -312,18 +357,28 @@ export function setCreatedSessionEffort(id: string, effort: Effort): void {
 // raises are answered by that agent instead of surfacing to the user.
 export function setCreatedSessionSpawnedBy(id: string, parentSessionId: string): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
   c.spawnedBy = parentSessionId
   write(store)
 }
 
+// How many superseded Claude ids to remember per session (see pastClaudeIds).
+const PAST_IDS_CAP = 20
+
 // Link a Floe session to Claude's real on-disk session once its first prompt
 // has produced one, so on reload the two are recognised as the same session.
+// The id it replaces is kept in `pastClaudeIds`, because a panel opened under
+// that id goes on using it as its key.
 export function linkCreatedSession(id: string, claudeId: string): void {
   const store = read()
-  const c = store.created.find((s) => s.id === id)
+  const c = findByKey(store.created, id)
   if (!c) return
+  if (c.claudeId && c.claudeId !== claudeId) {
+    const past = (c.pastClaudeIds ?? []).filter((x) => x !== c.claudeId)
+    past.push(c.claudeId)
+    c.pastClaudeIds = past.slice(-PAST_IDS_CAP)
+  }
   c.claudeId = claudeId
   write(store)
 }
@@ -497,7 +552,7 @@ export function markThreadCommentsSent(sessionKey: string, ids: string[], at = D
 // simply no longer shows in Floe, and stays gone across reloads.
 export function closeSession(opts: { id: string; worktreePath: string; claudeId?: string }): void {
   const store = read()
-  store.created = store.created.filter((s) => s.id !== opts.id)
+  store.created = store.created.filter((s) => s.id !== opts.id && s.claudeId !== opts.id)
   if (opts.claudeId) delete store.meta[opts.claudeId]
   // Notes are keyed by the session id, and sent ones are deliberately never
   // drained — so without this the file only grows: every closed session leaves

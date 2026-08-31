@@ -58,8 +58,13 @@ export async function applyConfig(): Promise<void> {
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
     // Resolved in main — config first, then git/system — so the chat's nick and
-    // the launcher's greeting can never disagree about who you are.
-    setUserNick(await window.floe.userName())
+    // the launcher's greeting can never disagree about who you are. NOT awaited:
+    // on cold start this path runs `git config` and `id -F` in main, and the
+    // nick only labels transcript rows, so it must not hold up the first paint.
+    void window.floe
+      .userName()
+      .then(setUserNick)
+      .catch(() => {})
   } catch {
     // No config is not a reason to show no app: the built-in defaults stand.
   }

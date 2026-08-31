@@ -30,7 +30,8 @@ export async function load(url, context, next) {
 register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.url)
 
 const { setSharedDataDir } = await import('./dataDir.ts')
-const { forgetWorktree, pruneMissingWorktrees } = await import('./sessionStore.ts')
+const { forgetWorktree, pruneMissingWorktrees, getCreatedSessionClaudeId, linkCreatedSession } =
+  await import('./sessionStore.ts')
 
 const dataDir = mkdtempSync(join(tmpdir(), 'floe-store-'))
 setSharedDataDir(dataDir)
@@ -112,6 +113,23 @@ test('pruneMissingWorktrees only prunes when the repo is still on disk', () => {
     seed(gone, join(gone, '.worktrees', 'feat'))
     pruneMissingWorktrees()
     assert.equal(readStore().created.length, 2)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a session key resolves by claude id, including superseded ones', () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  try {
+    const wt = join(root, '.worktrees', 'feat')
+    seed(root, wt)
+    // The renderer keys an open panel by claudeId, not by the store id.
+    assert.equal(getCreatedSessionClaudeId('claude-gone'), 'claude-gone')
+    // `--resume` forked into a new id; the panel still sends the old key.
+    linkCreatedSession('claude-gone', 'claude-fork')
+    assert.equal(getCreatedSessionClaudeId('claude-gone'), 'claude-fork')
+    assert.equal(getCreatedSessionClaudeId('claude-fork'), 'claude-fork')
+    assert.equal(getCreatedSessionClaudeId('s1'), 'claude-fork')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

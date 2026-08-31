@@ -115,7 +115,7 @@ import { refreshUsageNow, setUsageProbeCwd } from './usageMonitor'
 import { startMcpAuth, cancelMcpAuth, pasteMcpAuth, killAllMcpAuths } from './mcpAuth'
 import { authStatus, startLogin, pasteCode, cancelLogin, logout } from './claudeAuth'
 import { claudeStats } from './claudeStats'
-import { runRuntime } from './runtimes'
+import { forgetThread, runRuntime } from './runtimes'
 import { localAgents, localStats, localUsage } from './localAgents'
 import { readRuntimeTranscript } from './runtimeLog'
 import { detectDevCommand, startDev, stopDev } from './devServer'
@@ -462,9 +462,14 @@ function registerIpc(): void {
     return title && applyAiTitle(c.claudeId, title) ? title : null
   })
   ipcMain.handle('sessions:link', (_event, id: string, claudeId: string) => linkCreatedSession(id, claudeId))
-  ipcMain.handle('sessions:close', (_event, opts: { id: string; worktreePath: string; claudeId?: string }) =>
+  ipcMain.handle('sessions:close', (_event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
+    // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
+    // history in memory, keyed by the session key the renderer used — either
+    // id. A closed session's history is unreachable, so drop it here.
+    forgetThread(opts.id)
+    if (opts.claudeId) forgetThread(opts.claudeId)
     closeSession(opts)
-  )
+  })
 
   ipcMain.handle('viewState:get', () => getViewState())
   ipcMain.handle('viewState:setProjectWorktree', (_event, projectPath: string, worktreePath: string) =>
@@ -974,6 +979,7 @@ function registerIpc(): void {
 // after load or after switching apps) — the classic "vibrancy stops working"
 // symptom. The dev screenshot isn't worth losing the effect.
 async function captureWindow(win: BrowserWindow): Promise<void> {
+  if (app.isPackaged) return
   if (process.platform === 'darwin' && getVibrancy()) return
   try {
     const image = await win.webContents.capturePage()

@@ -1,5 +1,5 @@
 import { app, type BrowserWindow } from 'electron'
-import { execFile } from 'node:child_process'
+import { snapshotProcesses, type PsRow } from './psSnapshot'
 import { getSessionPids } from './agent'
 import { getTerminalPids } from './terminal'
 import { getCommandPids } from './commandRunner'
@@ -19,28 +19,6 @@ const MEM_INTERVAL = 2000
 
 let memTimer: ReturnType<typeof setInterval> | undefined
 let lastTotal: number | undefined
-
-interface PsRow {
-  pid: number
-  ppid: number
-  rssBytes: number
-}
-
-// One `ps` snapshot of the whole process table. Resolves [] on Windows or error.
-function snapshotProcesses(): Promise<PsRow[]> {
-  return new Promise((resolve) => {
-    if (process.platform === 'win32') return resolve([])
-    execFile('ps', ['-A', '-o', 'pid=,ppid=,rss='], (err, stdout) => {
-      if (err) return resolve([])
-      const rows: PsRow[] = []
-      for (const line of stdout.split('\n')) {
-        const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)$/)
-        if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), rssBytes: Number(m[3]) * 1024 })
-      }
-      resolve(rows)
-    })
-  })
-}
 
 // Sum the RSS of each root PID and all of its descendants, counting every
 // process at most once (a child of two roots, or a root that is itself a
@@ -99,7 +77,14 @@ export function startMemoryStats(win: BrowserWindow): void {
   stopMemoryStats()
   lastTotal = undefined
   send(win) // sample immediately so the widget shows a value right away
-  memTimer = setInterval(() => send(win), MEM_INTERVAL)
+  // No sampling while the window is blurred or hidden — nobody is reading the
+  // widget, and each tick can spawn a full `ps -A`. A focus listener resamples
+  // immediately so the figure is fresh the moment the app comes back.
+  memTimer = setInterval(() => {
+    if (win.isDestroyed() || !win.isFocused() || !win.isVisible()) return
+    send(win)
+  }, MEM_INTERVAL)
+  win.on('focus', () => send(win))
 }
 
 export function stopMemoryStats(): void {

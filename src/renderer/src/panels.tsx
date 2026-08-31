@@ -27,7 +27,9 @@ import {
 } from '@tabler/icons-react'
 import {
   Fragment,
+  lazy,
   memo,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -54,7 +56,6 @@ import { describeRef, expand, splitRefs } from './fileRefs'
 import { renderMarkdown, type MdLine } from './markdown'
 import { highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
-import { TerminalPanel } from './Terminal'
 import { sendToTerminal } from './terminalBus'
 import { useSessionActivity } from './useRunning'
 import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
@@ -79,7 +80,7 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
-import { MessageBody, RunInTerminal } from './MessageBody'
+import { RunInTerminal } from './runInTerminal'
 import { MergePanel } from './MergePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import type { Merge } from './useMerge'
@@ -95,6 +96,13 @@ import {
 import { previewSound } from './sounds'
 import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
 import type { Skill } from '../../main/config/skills'
+
+// Loaded lazily: xterm (+3 addons) and react-markdown (the whole
+// micromark/mdast chain) are the two heaviest dependency trees in the
+// renderer, and neither is needed to paint the app shell. Each mounts inside
+// its own <Suspense>, so the chunk loads on first terminal / first message.
+const TerminalPanel = lazy(async () => ({ default: (await import('./Terminal')).TerminalPanel }))
+const MessageBody = lazy(async () => ({ default: (await import('./MessageBody')).MessageBody }))
 
 /**
  * Every panel kind the lane can hold. The rail on the right is generated from
@@ -461,15 +469,17 @@ export function PanelBody({
     // files land in one session just as a worktree's files do.
     const base = root ?? cwd ?? HOME
     return (
-      <TerminalPanel
-        termId={`edit:${base}`}
-        cwd={base}
-        branch=""
-        mode="editor"
-        file={target.path}
-        line={target.line}
-        onExit={onEditorExit}
-      />
+      <Suspense fallback={null}>
+        <TerminalPanel
+          termId={`edit:${base}`}
+          cwd={base}
+          branch=""
+          mode="editor"
+          file={target.path}
+          line={target.line}
+          onExit={onEditorExit}
+        />
+      </Suspense>
     )
   }
   if (kind === 'diff')
@@ -479,7 +489,11 @@ export function PanelBody({
   // `sub` carries the directory the shell opens in — the worktree you are in,
   // or your home when you are nowhere in particular. See terminalCwd in App.
   if (kind === 'terminal')
-    return <TerminalPanel termId={`term:${sub ?? '~'}`} cwd={sub ?? HOME} branch="" />
+    return (
+      <Suspense fallback={null}>
+        <TerminalPanel termId={`term:${sub ?? '~'}`} cwd={sub ?? HOME} branch="" />
+      </Suspense>
+    )
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />
@@ -1079,11 +1093,11 @@ function ChatPanel({
           </button>
         )}
         <RunInTerminal.Provider value={runInTerminal}>
-          <Log items={shown} cwd={cwd} />
+          <Log items={shown} cwd={cwd} base={hiddenCount} />
           {tail && (
             // The streaming tail lives outside the memoised Log: a delta flush
             // re-renders this one entry, not the whole transcript above it.
-            <Entry item={tail} isNew={lastSpeaker(shown) !== speakerKey(whoOf(tail))} streaming />
+            <TailEntry item={tail} isNew={lastSpeaker(shown) !== speakerKey(whoOf(tail))} />
           )}
         </RunInTerminal.Provider>
         {question && (
@@ -1318,7 +1332,9 @@ function SubagentLine({ item, peak }: { item: TranscriptItem; peak: number }) {
           as the parent's own work, so there is nothing to quote here. */}
       {!running && !!item.text && (
         <div className="ag-reply">
-          <MessageBody text={item.text} />
+          <Suspense fallback={<div className="md md-plain">{item.text}</div>}>
+            <MessageBody text={item.text} />
+          </Suspense>
         </div>
       )}
     </>
@@ -1332,6 +1348,40 @@ function AgentCost({ ms, tokens }: { ms?: number; tokens?: number }) {
   if (tokens) parts.push(`↓ ${(tokens / 1000).toFixed(1)}k tokens`)
   if (!parts.length) return null
   return <span className="irc-dim">({parts.join(' · ')})</span>
+}
+
+/**
+ * Trailing-edge throttle: returns `value`, at most one change per `ms`.
+ * Fires immediately when idle so the first delta is not delayed.
+ */
+function useThrottled<T>(value: T, ms: number): T {
+  const [out, setOut] = useState(value)
+  const lastFire = useRef(0)
+  useEffect(() => {
+    const wait = lastFire.current + ms - Date.now()
+    if (wait <= 0) {
+      lastFire.current = Date.now()
+      setOut(value)
+      return
+    }
+    const t = setTimeout(() => {
+      lastFire.current = Date.now()
+      setOut(value)
+    }, wait)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return out
+}
+
+/**
+ * The streaming tail, with its markdown re-parse throttled. Deltas flush at
+ * ~33ms and react-markdown re-parses the WHOLE growing message each time —
+ * ~600 full parses over a 20 KB answer. MessageBody is memoised on text, so
+ * holding the text to one change per ~150ms cuts that 5× with no visible lag.
+ */
+function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolean }) {
+  const text = useThrottled(item.text ?? '', 150)
+  return <Entry item={text === (item.text ?? '') ? item : { ...item, text }} isNew={isNew} streaming />
 }
 
 function Entry({
@@ -1367,7 +1417,11 @@ function Entry({
         {/* Only the model's side is markdown. Rendering the user's own
             words would reformat what they typed. */}
         {item.role === 'assistant' ? (
-          <MessageBody text={item.text ?? ''} streaming={streaming} />
+          // While the markdown chunk loads, show the raw text — same words,
+          // briefly unformatted — instead of a blank row.
+          <Suspense fallback={<div className="md md-plain">{item.text ?? ''}</div>}>
+            <MessageBody text={item.text ?? ''} streaming={streaming} />
+          </Suspense>
         ) : (
           <RefText text={item.text ?? ''} />
         )}
@@ -1479,7 +1533,19 @@ function QuestionBlock({
 // Memoised on the items array: `useTranscript` gives it one identity per
 // settled entry, so a streaming delta (which only moves the tail) never remaps
 // or re-diffs the transcript above it.
-const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: string }) {
+// `base` is how many earlier items the window hides. Keys are ABSOLUTE
+// transcript indices (base + i), not window indices: with window indices,
+// every appended item slides the 100-item window and hands each key a
+// different item, remounting (and re-parsing) the whole visible log per delta.
+const Log = memo(function Log({
+  items,
+  cwd,
+  base = 0
+}: {
+  items: TranscriptItem[]
+  cwd?: string
+  base?: number
+}) {
   let speaker: string | null = null
 
   // Each run's header carries the cost of its last spoken entry, so the row that
@@ -1527,7 +1593,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
       const at = i
       while (i < items.length && isBash(items[i])) commands.push(items[i++].summary as string)
       i--
-      out.push(<BashBlock commands={commands} key={at} />)
+      out.push(<BashBlock commands={commands} key={base + at} />)
       continue
     }
 
@@ -1540,7 +1606,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
       const at = i
       while (i < items.length && items[i].role === 'subagent') run.push(items[i++])
       i--
-      out.push(<SubagentGroup items={run} key={at} />)
+      out.push(<SubagentGroup items={run} key={base + at} />)
       continue
     }
 
@@ -1549,7 +1615,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
     // look at it.
     if (item.role === 'image' && item.data) {
       out.push(
-        <div className="irc-body irc-act" key={i}>
+        <div className="irc-body irc-act" key={base + i}>
           {/* A button, which is what makes it a cursor row: j/k walks onto the
               image and Enter opens it full size, same as a shell row. */}
           <Zoomable
@@ -1570,7 +1636,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
       const at = i
       while (i < items.length && items[i].role === 'tool' && !isBash(items[i])) run.push(items[i++])
       i--
-      out.push(<ToolRun items={run} cwd={cwd} key={at} />)
+      out.push(<ToolRun items={run} cwd={cwd} key={base + at} />)
       continue
     }
 
@@ -1578,7 +1644,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
     // someone else talking: they never break the run and never take a header.
     if (item.role !== 'user' && item.role !== 'assistant') {
       out.push(
-        <div className="irc-body irc-act" key={i}>
+        <div className="irc-body irc-act" key={base + i}>
           <span className="irc-star">*</span>{' '}
           {item.name && <span className="irc-by">{item.name} </span>}
           {item.summary || item.text || item.role}
@@ -1597,7 +1663,7 @@ const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: s
         item={item}
         isNew={isNew}
         cost={last?.role === 'assistant' ? last : undefined}
-        key={i}
+        key={base + i}
       />
     )
   }

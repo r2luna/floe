@@ -11,6 +11,7 @@ export default defineConfig({
     resolve: {
       alias: { '@': resolve('src/renderer/src') }
     },
+    build: { minify: 'esbuild' },
     plugins: [react()]
   }
 })

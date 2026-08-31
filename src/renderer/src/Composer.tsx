@@ -440,6 +440,11 @@ export function Composer({
     [mentions]
   )
 
+  // Memoised on the draft: the composer re-renders for plenty that is not
+  // typing (a streaming panel above it, menu state), and re-tokenizing the
+  // whole draft each time is pure repeat work.
+  const mirrorTokens = useMemo(() => tokenizeMarkdown(value, isRef), [value, isRef])
+
   const pick = (item: PaletteItem) => {
     const el = input.current
     if (!el || !trigger) return
@@ -729,7 +734,7 @@ export function Composer({
 
       <div className="composer-stack">
         <pre ref={mirror} className="composer-mirror" aria-hidden="true">
-          {tokenizeMarkdown(value, isRef).map((t, i) => (
+          {mirrorTokens.map((t, i) => (
             <span key={i} className={t.cls}>
               {t.text}
             </span>

@@ -145,3 +145,35 @@ test('two parallel Task calls reload as two subagent rows, the finished one clos
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('an attached image reloads under the message it came with', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-img'
+  const dir = seedSession(worktree, 'sess', [
+    {
+      type: 'user',
+      timestamp: '2026-08-31T00:22:00.000Z',
+      message: {
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } },
+          { type: 'text', text: 'olha esse bug [Image #1]' }
+        ]
+      }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.text ?? i.data]),
+      [
+        ['user', 'olha esse bug [Image #1]'],
+        ['image', 'AAAA']
+      ]
+    )
+    assert.equal(items[1].mediaType, 'image/jpeg')
+    assert.equal(items[1].at, Date.parse('2026-08-31T00:22:00.000Z'))
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

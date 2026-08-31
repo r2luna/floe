@@ -1,10 +1,11 @@
 import * as pty from 'node-pty'
-import { execFile, execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, readFileSync, watch as fsWatch, writeFileSync, type FSWatcher } from 'node:fs'
 import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { app, type BrowserWindow } from 'electron'
 import { exitRecord, type ExitInfo } from './commandExit'
+import { snapshotProcesses } from './psSnapshot'
 
 // Runs a registered command as a process (a PTY, so output keeps colors and the
 // panel can replay scrollback). Keyed by `<worktreePath>#<id>`. A command may
@@ -89,33 +90,26 @@ function send(win: BrowserWindow, event: CommandEvent): void {
   if (!win.isDestroyed()) win.webContents.send('command:event', event)
 }
 
-// Sum the resident memory (RSS, bytes) of every process in pgid's group via
-// `ps`. node-pty makes the child a group leader, so a command like `bun run dev`
-// and the vite/esbuild it spawns all share proc.pid as their pgid — this counts
-// the whole tree. Async so it never blocks the main thread; resolves 0 if ps
-// fails or the group is already gone. Windows has no ps, so it reports nothing.
-function sampleGroupRss(pgid: number): Promise<number> {
-  return new Promise((resolve) => {
-    if (process.platform === 'win32') return resolve(0)
-    execFile('ps', ['-A', '-o', 'pgid=,rss='], (err, stdout) => {
-      if (err) return resolve(0)
-      let total = 0
-      for (const line of stdout.split('\n')) {
-        const m = line.trim().match(/^(\d+)\s+(\d+)$/)
-        if (m && Number(m[1]) === pgid) total += Number(m[2]) * 1024 // ps reports RSS in KiB
-      }
-      resolve(total)
-    })
-  })
+// Sum the resident memory (RSS, bytes) of every process in pgid's group, from
+// the shared `ps` snapshot (see psSnapshot.ts). node-pty makes the child a
+// group leader, so a command like `bun run dev` and the vite/esbuild it spawns
+// all share proc.pid as their pgid — this counts the whole tree. Resolves 0 if
+// ps fails or the group is already gone.
+async function sampleGroupRss(pgid: number): Promise<number> {
+  let total = 0
+  for (const row of await snapshotProcesses()) if (row.pgid === pgid) total += row.rssBytes
+  return total
 }
 
 // Poll a running command's memory and push updates to the renderer, skipping
 // re-sends when the figure hasn't moved. Samples once right away so the row
-// shows a value without waiting a full interval.
+// shows a value without waiting a full interval. Ticks are skipped while the
+// window is blurred or hidden — nobody is reading the figure, and sampling
+// spawns `ps`; the next focused tick (≤2s after refocus) catches up.
 function startMemPolling(win: BrowserWindow, key: string, run: Run): void {
   const pgid = run.proc.pid
   const tick = (): void => {
-    if (!run.running) return
+    if (!run.running || win.isDestroyed() || !win.isFocused() || !win.isVisible()) return
     void sampleGroupRss(pgid).then((rss) => {
       if (!run.running || run.superseded || rss === run.lastRss) return
       run.lastRss = rss
