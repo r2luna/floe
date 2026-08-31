@@ -2813,6 +2813,7 @@ function ProjectsList({
 function WorktreesList({
   worktrees,
   onEnter,
+  creating,
   onOpen,
   openSession,
   find
@@ -2820,6 +2821,8 @@ function WorktreesList({
   worktrees: Worktrees
   /** Go to a worktree and to the chat it was left showing — see PanelBody. */
   onEnter?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
+  /** The new-worktree form, open at the top of the list — see PanelBody. */
+  creating?: NewWorktreeProps | null
   onOpen: OpenFn
   /** The session the lane is showing, so the list can say which one that is. */
   openSession?: string | null
@@ -2842,12 +2845,34 @@ function WorktreesList({
       return next
     })
 
-  if (worktrees.loading && !worktrees.rows.length) return <p className="empty">Loading…</p>
-  if (worktrees.error) return <p className="empty error">{worktrees.error}</p>
-  if (!worktrees.rows.length) return <p className="empty">No worktrees.</p>
+  // The form renders above every state, the empty ones included: a project
+  // with no worktrees yet is exactly where ⌘N gets used.
+  const form = creating ? <NewWorktreeForm {...creating} /> : null
+  if (worktrees.loading && !worktrees.rows.length)
+    return (
+      <>
+        {form}
+        <p className="empty">Loading…</p>
+      </>
+    )
+  if (worktrees.error)
+    return (
+      <>
+        {form}
+        <p className="empty error">{worktrees.error}</p>
+      </>
+    )
+  if (!worktrees.rows.length)
+    return (
+      <>
+        {form}
+        <p className="empty">No worktrees.</p>
+      </>
+    )
 
   return (
     <>
+      {form}
       {worktrees.rows.map(({ worktree, sessions }) => (
         <div className="group" key={worktree.path}>
           <button
