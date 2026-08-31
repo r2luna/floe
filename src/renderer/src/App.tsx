@@ -48,6 +48,7 @@ import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
+import { useCommands } from './useCommands'
 import { useMerge } from './useMerge'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
@@ -385,6 +386,15 @@ export default function App() {
   // What that tree has changed, watched so an agent editing behind the UI shows
   // up without a click.
   const changes = useChanges(here)
+  // Tracks `here` like `changes` does, and for the same reason: the commands a
+  // worktree runs belong to the tree the app is in, not to whichever panel was
+  // opened first.
+  const commands = useCommands(projects.current?.path, here, current?.worktree.branch ?? '')
+  // A log panel's `sub` is the runner key; its header wants the command's name.
+  const commandTitle = (key?: string): string | undefined => {
+    const id = key?.slice(key.indexOf('#') + 1)
+    return commands.list.find((c) => c.id === id)?.name ?? id
+  }
   // `here`, not the sidebar's selection: at the launcher nothing is selected
   // yet, and a `#` menu that offered sessions but no files was reading a
   // worktree the app already knew how to name.
@@ -1078,6 +1088,7 @@ export default function App() {
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
+    commands,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
     patchFor: () => lastPatch.current,
@@ -1488,7 +1499,11 @@ export default function App() {
                     ? whereOf(here)
                     : kind === 'edit'
                       ? editTarget(panel.sub).path
-                      : panel.sub
+                      // A cmdlog's sub is the runner key — machine text. The
+                      // header says which command it is, and the command it runs.
+                      : kind === 'cmdlog'
+                        ? commandTitle(panel.sub)
+                        : panel.sub
             return (
               <section
                 key={panel.id}
@@ -1614,6 +1629,7 @@ export default function App() {
                     movingProject={moving}
                     worktrees={worktrees}
                     changes={changes}
+                    commands={commands}
                     merge={merge}
                     // Picking a project or a branch is never just a selection:
                     // it restores everything that place was left showing.

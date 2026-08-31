@@ -12,7 +12,7 @@ import type { ClaudeSessionMeta, ResumableSession, TranscriptItem } from '../mai
 import type { ViewState, WorktreeView, ProjectUiState, WorktreeUiState } from '../main/sessionStore'
 import type { DevCommand, DevEvent } from '../main/devServer'
 import type { ProjectCommand, CommandScope, CommandPatch } from '../main/commands'
-import type { CommandEvent } from '../main/commandRunner'
+import type { CommandEvent, CommandRun } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
 import type { Skill } from '../main/config/skills'
@@ -500,8 +500,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         command: string,
         cols: number,
         rows: number,
-        watch?: string[]
-      ): Promise<void> => ipcRenderer.invoke('command:start', key, cwd, branch, command, cols, rows, watch),
+        watch?: string[],
+        autoRestart?: boolean
+      ): Promise<void> =>
+        ipcRenderer.invoke('command:start', key, cwd, branch, command, cols, rows, watch, autoRestart),
       stop: (key: string): Promise<void> => ipcRenderer.invoke('command:stop', key),
       restart: (
         key: string,
@@ -510,10 +512,15 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         command: string,
         cols: number,
         rows: number,
-        watch?: string[]
-      ): Promise<void> => ipcRenderer.invoke('command:restart', key, cwd, branch, command, cols, rows, watch),
+        watch?: string[],
+        autoRestart?: boolean
+      ): Promise<void> =>
+        ipcRenderer.invoke('command:restart', key, cwd, branch, command, cols, rows, watch, autoRestart),
       attach: (key: string, cols: number, rows: number): Promise<void> =>
         ipcRenderer.invoke('command:attach', key, cols, rows),
+      // What main is tracking right now. A window reload empties the renderer's
+      // own map, and without this every live process renders as stopped.
+      runs: (): Promise<CommandRun[]> => ipcRenderer.invoke('command:runs'),
       resize: (key: string, cols: number, rows: number): Promise<void> =>
         ipcRenderer.invoke('command:resize', key, cols, rows),
       onEvent: (cb: (event: CommandEvent) => void): (() => void) => {

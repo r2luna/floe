@@ -157,6 +157,7 @@ import {
   resizeCommand,
   killAllCommands,
   killCommandsForWorktree,
+  commandRuns,
   reapOrphanCommands,
   runShellCapture
 } from './commandRunner'
@@ -650,19 +651,43 @@ function registerIpc(): void {
 
   ipcMain.handle(
     'command:start',
-    (event, key: string, cwd: string, branch: string, command: string, cols: number, rows: number, watch?: string[]) => {
+    (
+      event,
+      key: string,
+      cwd: string,
+      branch: string,
+      command: string,
+      cols: number,
+      rows: number,
+      watch?: string[],
+      autoRestart?: boolean
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
-      if (win) startCommand(win, key, cwd, branch, command, cols, rows, watch)
+      if (win) startCommand(win, key, cwd, branch, command, cols, rows, watch, autoRestart)
     }
   )
-  ipcMain.handle('command:stop', (_event, key: string) => stopCommand(key))
+  ipcMain.handle('command:stop', (event, key: string) =>
+    stopCommand(BrowserWindow.fromWebContents(event.sender) ?? undefined, key)
+  )
   ipcMain.handle(
     'command:restart',
-    (event, key: string, cwd: string, branch: string, command: string, cols: number, rows: number, watch?: string[]) => {
+    (
+      event,
+      key: string,
+      cwd: string,
+      branch: string,
+      command: string,
+      cols: number,
+      rows: number,
+      watch?: string[],
+      autoRestart?: boolean
+    ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
-      if (win) restartCommand(win, key, cwd, branch, command, cols, rows, watch)
+      if (win) restartCommand(win, key, cwd, branch, command, cols, rows, watch, autoRestart)
     }
   )
+  // What main is tracking, for a renderer that just loaded and knows nothing.
+  ipcMain.handle('command:runs', () => commandRuns())
   ipcMain.handle('command:attach', (event, key: string, cols: number, rows: number) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) attachCommand(win, key, cols, rows)

@@ -5,6 +5,17 @@ import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { app, type BrowserWindow } from 'electron'
 import { exitRecord, type ExitInfo } from './commandExit'
+import {
+  canStart,
+  newLife,
+  onExit as lifeExit,
+  onSpawned,
+  onStart as lifeStart,
+  onStop as lifeStop,
+  shouldWatchFire,
+  type CommandLife,
+  type CommandState
+} from './commandState'
 import { snapshotProcesses } from './psSnapshot'
 
 // Runs a registered command as a process (a PTY, so output keeps colors and the
@@ -16,11 +27,20 @@ export type CommandEvent =
   | { key: string; kind: 'data'; data: string }
   | { key: string; kind: 'exit'; code: number; durationMs: number } // how long the run lasted
   | { key: string; kind: 'mem'; rss: number } // resident memory of the process group, in bytes
+  // Where the command IS. Sent on every transition the other events do not
+  // already imply — a stop that has been asked for, a restart waiting out its
+  // backoff, a breaker that opened — so the row never has to infer it.
+  | { key: string; kind: 'state'; state: CommandState; reason?: string; restartIn?: number }
 
 interface Run {
   proc: pty.IPty
   buffer: string
   running: boolean
+  life: CommandLife
+  /** Everything a respawn needs, so auto-restart and the watch can do it alone. */
+  spec: { cwd: string; branch: string; command: string; autoRestart?: boolean }
+  /** The pending auto-restart, so a stop or a manual start can cancel it. */
+  restartTimer?: ReturnType<typeof setTimeout>
   superseded: boolean // a re-run replaced this proc — swallow its exit
   memTimer?: ReturnType<typeof setInterval>
   lastRss?: number // last sampled RSS, to skip unchanged updates
@@ -160,6 +180,9 @@ interface PersistedRun {
   key: string
   pid: number
   cmd: string
+  /** Where it was launched, and when — so a stale record can be read by a human. */
+  cwd?: string
+  startedAt?: number
 }
 
 function pidFile(): string {
@@ -180,8 +203,8 @@ function writePersisted(list: PersistedRun[]): void {
     /* userData not writable — reaping is best-effort */
   }
 }
-function recordRun(key: string, pid: number, cmd: string): void {
-  writePersisted([...readPersisted().filter((e) => e.key !== key), { key, pid, cmd }])
+function recordRun(key: string, pid: number, cmd: string, cwd: string, startedAt: number): void {
+  writePersisted([...readPersisted().filter((e) => e.key !== key), { key, pid, cmd, cwd, startedAt }])
 }
 function forgetRun(key: string): void {
   writePersisted(readPersisted().filter((e) => e.key !== key))
@@ -232,10 +255,19 @@ export function reapOrphanCommands(): void {
   reapPersisted()
 }
 
+// Tell the renderer where this command is now. Sent alongside `started`/`exit`
+// rather than instead of them: those two carry the terminal's own payloads
+// (scrollback continuity, the exit code), this one carries the state machine.
+function sendState(win: BrowserWindow, key: string, run: Run, restartIn?: number): void {
+  send(win, { key, kind: 'state', state: run.life.state, reason: run.life.reason, restartIn })
+}
+
 // (Re)spawn the process for a key, superseding any previous one. Keeps the
 // scrollback buffer so a re-run reads as a continuation.
-function spawnProc(win: BrowserWindow, key: string, cwd: string, branch: string, command: string): void {
+function spawnProc(win: BrowserWindow, key: string, spec: Run['spec'], life: CommandLife): void {
+  const { cwd, branch, command } = spec
   const prev = runs.get(key)
+  if (prev?.restartTimer) clearTimeout(prev.restartTimer) // a spawn cancels a pending one
   if (prev?.running) {
     prev.superseded = true
     stopMemPolling(prev)
@@ -253,10 +285,19 @@ function spawnProc(win: BrowserWindow, key: string, cwd: string, branch: string,
     cwd,
     env: { ...process.env, FLOE_WORKTREE: branch, TERM: 'xterm-256color' } as Record<string, string>
   })
-  const run: Run = { proc, buffer: prev?.buffer ?? '', running: true, superseded: false, startedAt: Date.now() }
+  const run: Run = {
+    proc,
+    buffer: prev?.buffer ?? '',
+    running: true,
+    superseded: false,
+    startedAt: Date.now(),
+    life: onSpawned(life),
+    spec
+  }
   runs.set(key, run)
-  if (typeof proc.pid === 'number') recordRun(key, proc.pid, command)
+  if (typeof proc.pid === 'number') recordRun(key, proc.pid, command, cwd, run.startedAt)
   send(win, { key, kind: 'started' })
+  sendState(win, key, run)
   startMemPolling(win, key, run)
 
   proc.onData((data) => {
@@ -269,8 +310,37 @@ function spawnProc(win: BrowserWindow, key: string, cwd: string, branch: string,
     forgetRun(key)
     run.running = false
     run.lastExit = exitRecord(run.startedAt, Date.now(), exitCode)
+    const next = lifeExit(run.life, exitCode, Date.now(), !!run.spec.autoRestart)
+    run.life = next.life
     send(win, { key, kind: 'exit', code: exitCode, durationMs: run.lastExit.durationMs })
+    sendState(win, key, run, next.restartIn)
+    // `auto-restart` waits out a backoff rather than respawning on the spot, so
+    // a command that dies instantly cannot spin. The breaker in commandState
+    // decides when there is no `restartIn` left to schedule.
+    if (next.restartIn != null) {
+      run.restartTimer = setTimeout(() => {
+        if (runs.get(key) !== run) return // superseded while we waited
+        spawnProc(win, key, run.spec, run.life)
+      }, next.restartIn)
+    }
   })
+}
+
+// Recursive fs.watch is not universal: Linux only gained it in Node 20, and on
+// an older runtime the call throws ERR_FEATURE_UNAVAILABLE_ON_PLATFORM rather
+// than degrading. Watching the root alone still catches writes directly inside
+// it, which covers the shape these globs actually take (`database/migrations`),
+// so the fallback is a narrower watch rather than no watch at all.
+function watchDir(root: string, onChange: () => void): FSWatcher | undefined {
+  try {
+    return fsWatch(root, { recursive: true }, onChange)
+  } catch {
+    try {
+      return fsWatch(root, onChange)
+    } catch {
+      return undefined // vanished between the existsSync and here
+    }
+  }
 }
 
 // The longest non-glob directory prefix of a watch pattern, resolved to cwd.
@@ -286,21 +356,28 @@ function watchRoot(cwd: string, pattern: string): string {
 function ensureWatch(
   win: BrowserWindow,
   key: string,
-  cwd: string,
-  branch: string,
-  command: string,
+  spec: Run['spec'],
   watch: string[] | undefined
 ): void {
   if (!watch?.length || watchers.has(key)) return
   const closers: Array<() => void> = []
-  const roots = new Set(watch.map((p) => watchRoot(cwd, p)))
+  const roots = new Set(watch.map((p) => watchRoot(spec.cwd, p)))
   for (const root of roots) {
     if (!existsSync(root)) continue
     let timer: ReturnType<typeof setTimeout> | undefined
-    const w: FSWatcher = fsWatch(root, { recursive: true }, () => {
+    const w = watchDir(root, () => {
       if (timer) clearTimeout(timer)
-      timer = setTimeout(() => spawnProc(win, key, cwd, branch, command), 300)
+      timer = setTimeout(() => {
+        // A command that writes into the very directory it watches (a migration
+        // re-runner does) fires this on its own output. Firing mid-spawn stacks
+        // a second process on one that has not finished starting, and the two
+        // race for the same port or the same database.
+        const life = runs.get(key)?.life ?? newLife()
+        if (!shouldWatchFire(life)) return
+        spawnProc(win, key, spec, life)
+      }, 300)
     })
+    if (!w) continue
     closers.push(() => {
       if (timer) clearTimeout(timer)
       w.close()
@@ -317,12 +394,18 @@ export function startCommand(
   command: string,
   cols: number,
   rows: number,
-  watch?: string[]
+  watch?: string[],
+  autoRestart?: boolean
 ): void {
-  if (runs.get(key)?.running) return // already running
+  const run = runs.get(key)
+  // `canStart` refuses a second spawn while one is in flight — which `running`
+  // alone could not see: a command mid-start, or one waiting out an auto-restart
+  // backoff, used to read as stopped and start a rival process.
+  if (run && !canStart(run.life)) return
   if (cols > 0 && rows > 0) sizes.set(key, { cols, rows })
-  spawnProc(win, key, cwd, branch, command)
-  ensureWatch(win, key, cwd, branch, command, watch)
+  const spec = { cwd, branch, command, autoRestart }
+  spawnProc(win, key, spec, lifeStart())
+  ensureWatch(win, key, spec, watch)
 }
 
 export function restartCommand(
@@ -333,11 +416,15 @@ export function restartCommand(
   command: string,
   cols: number,
   rows: number,
-  watch?: string[]
+  watch?: string[],
+  autoRestart?: boolean
 ): void {
   if (cols > 0 && rows > 0) sizes.set(key, { cols, rows })
-  spawnProc(win, key, cwd, branch, command)
-  ensureWatch(win, key, cwd, branch, command, watch)
+  const spec = { cwd, branch, command, autoRestart }
+  // A restart is a manual start, so it re-arms the breaker: you are asking again
+  // with your own hands, after reading why it stopped.
+  spawnProc(win, key, spec, lifeStart())
+  ensureWatch(win, key, spec, watch)
 }
 
 function closeWatch(key: string): void {
@@ -345,10 +432,25 @@ function closeWatch(key: string): void {
   watchers.delete(key)
 }
 
-export function stopCommand(key: string): void {
+export function stopCommand(win: BrowserWindow | undefined, key: string): void {
   closeWatch(key) // stop auto re-runs too
   const run = runs.get(key)
-  if (run?.running) killTree(run.proc)
+  if (!run) return
+  if (run.restartTimer) {
+    // Stopping during a backoff has to cancel the pending respawn, or the
+    // command comes back seconds after you told it not to.
+    clearTimeout(run.restartTimer)
+    run.restartTimer = undefined
+    run.life = { ...run.life, state: 'exited' }
+    if (win) sendState(win, key, run)
+    return
+  }
+  if (!run.running) return
+  // Marked before the signal, so the exit that follows is read as asked-for and
+  // auto-restart leaves it alone.
+  run.life = lifeStop(run.life)
+  if (win) sendState(win, key, run)
+  killTree(run.proc)
 }
 
 export function attachCommand(win: BrowserWindow, key: string, cols: number, rows: number): void {
@@ -356,6 +458,10 @@ export function attachCommand(win: BrowserWindow, key: string, cols: number, row
   const run = runs.get(key)
   if (!run) return
   if (run.buffer) send(win, { key, kind: 'data', data: run.buffer })
+  // The panel may be opening long after the process started — or after a window
+  // reload, when the renderer knows nothing at all. Replaying the scrollback
+  // without the state is what made a live process render as stopped.
+  sendState(win, key, run)
   if (run.running && cols > 0 && rows > 0) run.proc.resize(cols, rows)
 }
 
@@ -363,6 +469,37 @@ export function resizeCommand(key: string, cols: number, rows: number): void {
   if (cols > 0 && rows > 0) sizes.set(key, { cols, rows })
   const run = runs.get(key)
   if (run?.running && cols > 0 && rows > 0) run.proc.resize(cols, rows)
+}
+
+/** One command's state as main knows it — what a reloading renderer asks for. */
+export interface CommandRun {
+  key: string
+  state: CommandState
+  /** Why auto-restart gave up, when it did. */
+  reason?: string
+  rss?: number
+  exitCode?: number
+  endedAt?: number
+  durationMs?: number
+}
+
+/**
+ * Every command main is tracking, for a renderer that just (re)loaded.
+ *
+ * The renderer's own map is in-memory only, so without this a window reload
+ * showed "stopped" for processes main is still running — and then start and stop
+ * did nothing, because the row was offering the wrong button.
+ */
+export function commandRuns(): CommandRun[] {
+  return [...runs.entries()].map(([key, r]) => ({
+    key,
+    state: r.life.state,
+    reason: r.life.reason,
+    rss: r.running ? r.lastRss : undefined,
+    exitCode: r.lastExit?.code,
+    endedAt: r.lastExit?.endedAt,
+    durationMs: r.lastExit?.durationMs
+  }))
 }
 
 export function isCommandRunning(key: string): boolean {
@@ -384,6 +521,7 @@ export function killAllCommands(): void {
   watchers.clear()
   for (const run of runs.values()) {
     stopMemPolling(run)
+    if (run.restartTimer) clearTimeout(run.restartTimer) // nothing to come back to
     killTree(run.proc, 'SIGKILL')
   }
   runs.clear()
@@ -392,5 +530,5 @@ export function killAllCommands(): void {
 // Stop every command belonging to one worktree (keys are `<worktreePath>#<id>`).
 export function killCommandsForWorktree(worktreePath: string): void {
   const prefix = worktreePath + '#'
-  for (const key of [...runs.keys()]) if (key.startsWith(prefix)) stopCommand(key)
+  for (const key of [...runs.keys()]) if (key.startsWith(prefix)) stopCommand(undefined, key)
 }

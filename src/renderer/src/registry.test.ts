@@ -39,6 +39,22 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     cycleSession: () => {},
     askText: () => {},
     say: () => {},
+    commands: {
+      list: [],
+      runs: {},
+      loading: false,
+      keyOf: (id: string) => `#${id}`,
+      runOf: () => undefined,
+      start: () => {},
+      stop: () => {},
+      restart: () => {},
+      startAll: () => {},
+      reload: () => {},
+      add: async () => {},
+      update: async () => {},
+      remove: async () => {},
+      setScope: async () => {}
+    },
     merge: {
       active: false,
       failed: false,

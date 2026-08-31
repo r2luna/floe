@@ -324,7 +324,17 @@ const startStep: StepDef = {
     }
     for (const c of auto) {
       log(`Starting "${c.name}": ${c.command}`)
-      startCommand(ctx.win, `${ctx.worktreePath}#${c.id}`, ctx.worktreePath, ctx.branch, c.command, 80, 24, c.watch)
+      startCommand(
+        ctx.win,
+        `${ctx.worktreePath}#${c.id}`,
+        ctx.worktreePath,
+        ctx.branch,
+        c.command,
+        80,
+        24,
+        c.watch,
+        c.autoRestart
+      )
     }
     return 'done'
   }

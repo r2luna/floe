@@ -65,6 +65,7 @@ export const COMMAND_IDS: string[] = [
   'group.delete',
   'auth.account',
   'settings.open',
+  'commands.open',
   'skills.open',
   'skill.new',
   'skill.rename',
@@ -85,7 +86,19 @@ export const COMMAND_IDS: string[] = [
   'merge.confirm',
   'merge.review',
   'merge.stash',
-  'merge.cancel'
+  'merge.cancel',
+  // Commands (the worktree's registered processes)
+  'command.run',
+  'command.stop',
+  'command.restart',
+  'command.logs',
+  'command.runAll',
+  'command.stopAll',
+  'command.add',
+  'command.edit',
+  'command.rename',
+  'command.scope',
+  'command.delete'
 ]
 
 export const COMMAND_ID_SET = new Set(COMMAND_IDS)
