@@ -763,22 +763,33 @@ export default function App() {
     enterWorktree((row ?? worktrees.rows[0]).worktree.path)
   }, [worktrees.rows, worktrees.repo, worktrees.loading, projects.current?.path])
 
-  // ⌃I / ⌃O walk this branch's sessions. Newest first — the same order the
-  // sidebar lists them in, so "older" and "newer" mean what you can see. It
-  // wraps, because a list you can walk off the end of needs a second key to get
-  // back and this is meant to be held.
+  // ⌃I / ⌃O walk every session in the sidebar, in the order it lists them:
+  // down a branch's chats, then on into the next branch's. The list you see is
+  // the list you walk, so a worktree boundary is not a wall — holding the key
+  // gets you anywhere without going back to the sidebar. It wraps, because a
+  // list you can walk off the end of needs a second key to get back.
   const cycleSession = (delta: number) => {
-    // The branch the OPEN CHAT belongs to, which is not always the one selected
-    // in the sidebar. Cycling has to stay inside the conversation you are in,
-    // or ⌃O walks off into another branch's sessions.
-    const path = lane.panels.find((p) => p.session)?.session?.worktreePath ?? worktrees.currentPath
-    const sessions = worktrees.rows.find((r) => r.worktree.path === path)?.sessions ?? []
-    if (!sessions.length || !path) return
-    const idOf = (s: (typeof sessions)[number]): string => s.claudeId ?? s.id
-    const at = sessions.findIndex((s) => idOf(s) === sessionKey)
+    // The sidebar flattened: same rows, same per-branch order, collapsed or not.
+    // Branches with no sessions simply contribute nothing to walk through.
+    const all = worktrees.rows.flatMap((r) =>
+      r.sessions.map((s) => ({ path: r.worktree.path, id: s.claudeId ?? s.id, title: s.title }))
+    )
+    if (!all.length) return
+    // Where we are is the OPEN CHAT, not the sidebar selection: those differ
+    // once you cycle across a branch, and the chat is what the keys move.
+    const here = lane.panels.find((p) => p.session)?.session
+    const at = all.findIndex(
+      (s) => s.id === sessionKey && (!here?.worktreePath || s.path === here.worktreePath)
+    )
     // Nothing open yet: either key lands on the newest rather than nowhere.
-    const next = sessions[at === -1 ? 0 : (at + delta + sessions.length) % sessions.length]
-    setLane((l) => open(l, mkPanel('chat', next.title, { id: idOf(next), worktreePath: path })))
+    const next = all[at === -1 ? 0 : (at + delta + all.length) % all.length]
+    // Crossing into another branch takes the sidebar with it — an open chat
+    // whose worktree is not the selected one leaves the rest of the app (diffs,
+    // terminal, merge) pointing somewhere the user is no longer looking.
+    if (next.path !== worktrees.currentPath) worktrees.select(next.path)
+    setLane((l) =>
+      open(l, mkPanel('chat', next.title, { id: next.id, worktreePath: next.path }))
+    )
   }
 
   /**
