@@ -524,12 +524,21 @@ function summarizeTool(input: unknown): string | undefined {
   return undefined
 }
 
+// When a background agent finishes, the CLI resumes the turn by injecting a
+// `<task-notification>` — the agent's whole report — as a plain user message.
+// Nobody typed it: reloading it as a user line pastes that report into the chat
+// under your name. The live stream already discards it (see agent.ts).
+function isTaskNotification(text: string): boolean {
+  return !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').trim()
+}
+
 // Prettify Claude Code's local slash-command markers that show up in user
 // messages: drop the internal caveat, render the command as a chip, and the
 // command output as a code block.
 function expandUserText(text: string): TranscriptItem[] {
   const stripped = text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
   if (!stripped) return []
+  if (isTaskNotification(stripped)) return []
 
   const nameMatch = stripped.match(/<command-name>([\s\S]*?)<\/command-name>/)
   if (nameMatch) {
@@ -612,9 +621,12 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
     if (
       role === 'user' &&
       at &&
-      (typeof content === 'string' ||
-        (Array.isArray(content) &&
-          (content as Array<Record<string, unknown>>).some((b) => b.type === 'text')))
+      (typeof content === 'string'
+        ? // …and a resumed turn's notification is not a message you sent, so it
+          // must not restart the clock either.
+          !isTaskNotification(content)
+        : Array.isArray(content) &&
+          (content as Array<Record<string, unknown>>).some((b) => b.type === 'text'))
     ) {
       turnStartedAt = at
     }
