@@ -317,9 +317,38 @@ export function needsProject(kind: string): boolean {
 // Putting them there would offer "open a branch" with no branch chosen.
 const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog']
 
-export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
-  (k) => !CONTEXTUAL.includes(k)
+/**
+ * The rail, grouped. A flat column of twelve icons is twelve things to read;
+ * grouped, you aim at a block first and an icon second. Each group is one
+ * question: where am I, what changed, what is the harness made of, what is
+ * running, who am I. The order inside a group is the order you meet them in.
+ *
+ * Deliberately not `order`: that is where a panel SITS in the lane, and the two
+ * do not agree — the terminal opens at the far right but belongs beside the
+ * commands that spawn processes like it.
+ */
+export const RAIL_GROUPS: PanelKind[][] = [
+  // Where the work lives.
+  ['projects', 'worktrees'],
+  // What the work did to the tree — read it, review it, land it.
+  ['changes', 'merge', 'files', 'plans'],
+  // What the agents are made of: the skills they can run and the servers they
+  // get. Both are global, both are edited the same way, so they sit together.
+  ['skills', 'mcp'],
+  // Things that run: the project's own processes, and a shell for everything
+  // else.
+  ['commands', 'terminal'],
+  // The app itself.
+  ['account', 'settings']
+]
+
+// A new panel joins a group above; until it does it lands in a trailing group of
+// its own rather than dropping off the rail entirely.
+const UNGROUPED: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
+  (k) => !CONTEXTUAL.includes(k) && !RAIL_GROUPS.some((g) => g.includes(k))
 )
+
+export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED] : RAIL_GROUPS
 
 /** Opens `child` to the right of the panel that asked for it. */
 export type OpenFn = (child: {
@@ -3445,7 +3474,10 @@ function WorktreesList({
             >
               {(() => {
                 const id = s.claudeId ?? s.id
-                const working = !!(busy.has(id) || s.running)
+                // Both names: the agent conn is keyed by whichever the session
+                // last spawned under, so its events arrive tagged with one or
+                // the other and a lookup on a single id misses half the turns.
+                const working = !!(busy.has(id) || busy.has(s.id) || s.running)
                 return <SessionMark working={working} seen={!working && unread.has(id)} />
               })()}
               <span className="row-name">{markAll(s.title, find)}</span>

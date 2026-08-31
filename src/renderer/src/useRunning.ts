@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentEventEnvelope, NotifySoundId } from '../../shared/types'
-import { playDoneSound } from './sounds'
+import { playDoneSound } from './sounds.ts'
 
 // Sessions with an answer you have not seen. Kept in the same store as the
 // drafts and the lane — a reply that landed before you quit is still unread
@@ -26,6 +26,36 @@ function writeUnread(keys: Set<string>): void {
   } catch {
     /* quota or private mode — a mark is a convenience, never a requirement */
   }
+}
+
+// How long an event-driven `busy` entry is trusted over the server's answer. A
+// poll in flight when a turn starts would otherwise erase the spinner it raced:
+// the reply was assembled before the turn existed. Anything quieter than this
+// the server knows better than we do.
+const GRACE_MS = 5_000
+
+/**
+ * The `busy` set the next tick should hold: the server's answer, plus the keys
+ * whose last event is too recent for a poll that started earlier to have seen.
+ *
+ * Pure so the race is testable — `busy` used to be event-driven only, and any
+ * `done` that never arrived (a crashed child, a reload mid-turn, a turn that ran
+ * under the session's other key) left a session spinning until the app quit.
+ */
+export function reconcileBusy(
+  prev: Set<string>,
+  serverKeys: string[],
+  lastEventAt: Map<string, number>,
+  now: number
+): Set<string> {
+  const next = new Set(serverKeys)
+  for (const key of prev) {
+    if (next.has(key)) continue
+    if (now - (lastEventAt.get(key) ?? 0) < GRACE_MS) next.add(key)
+  }
+  // Same membership: hand back the old set so the list does not re-render.
+  if (next.size === prev.size && [...next].every((k) => prev.has(k))) return prev
+  return next
 }
 
 export interface SessionActivity {
@@ -68,9 +98,14 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
     return window.floe.config.onChange(load)
   }, [])
 
+  // When each session last said anything, so the reconcile below can tell a
+  // spinner that is merely new from one that is stale.
+  const lastEventAt = useRef(new Map<string, number>())
+
   useEffect(
     () =>
       window.floe.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
+        lastEventAt.current.set(key, Date.now())
         const live = event.kind !== 'done' && event.kind !== 'error'
         // Any turn ending is the news the sound carries — including the session
         // you are watching, since the window may be behind another app.
@@ -103,6 +138,31 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
       return next
     })
   }, [openKey])
+
+  // The correction. `busy` is built from events, and an event that never arrives
+  // cannot be waited for: ask the main process who is actually working, and
+  // believe it. Also re-hydrates after a reload, when the set starts empty but
+  // the turns did not stop.
+  useEffect(() => {
+    let stopped = false
+    const sync = async (): Promise<void> => {
+      const keys = await window.floe.agent.active().catch(() => null)
+      if (stopped || !keys) return
+      setBusy((prev) => reconcileBusy(prev, keys, lastEventAt.current, Date.now()))
+    }
+    void sync()
+    const timer = setInterval(() => void sync(), 4_000)
+    // A window that was hidden may have missed the whole end of a turn.
+    const onVisible = (): void => {
+      if (!document.hidden) void sync()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [])
 
   useEffect(() => writeUnread(unread), [unread])
 
