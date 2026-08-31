@@ -1,5 +1,6 @@
 import type { MergeStep } from '../../shared/types'
 import type { MergeFlow } from './useMerge'
+import { Spinner } from './Spinner'
 
 /**
  * Steps that throw work away. Flagged from the first paint, not at the moment
@@ -105,7 +106,11 @@ function Step({
 
   return (
     <li className={`merge-node${toneOf(step)}`}>
-      <i className="merge-dot" />
+      {/* The step in flight turns, like every in-flight mark in the app; every
+          other status is a still dot, coloured by how it ended. `blocked` is a
+          still one on purpose — it is not working, it is waiting on you, and
+          the whole point of the rail is that those never look alike. */}
+      {step.status === 'running' ? <Spinner className="merge-dot" /> : <i className="merge-dot" />}
       <div className="merge-row">
         <span className="merge-name">{step.title}</span>
         {aside && <span className="merge-aside">{aside}</span>}

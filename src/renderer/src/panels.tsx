@@ -43,6 +43,7 @@ import {
   type ReactNode
 } from 'react'
 import { Composer } from './Composer'
+import { Spinner } from './Spinner'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { hitRanges, splitByHits } from './findHits.ts'
@@ -1041,23 +1042,25 @@ function ChatPanel({
   // Follow the stream, but only while you are already at the bottom. Scrolling
   // up to re-read something and being yanked back down by the next delta is the
   // worst thing a live transcript can do.
-  //
-  // Master's stick-to-bottom, but reading the scroller instead of the `scroll`
-  // event. That event is delivered asynchronously, so during a stream the next
-  // delta lands first and either measures our own auto-scroll as the user
-  // moving away, or re-scrolls before their scroll is ever reported. Comparing
-  // against the offset WE last set has no such ordering: if it moved, someone
-  // else moved it, and they're reading.
   const pinned = useRef(true)
-  const ourTop = useRef(0)
 
-  // Coming back to the end takes the follow back — the only thing the event is
-  // needed for, and one it can't get wrong.
+  // Nail the last line to the bottom edge. Every path below ends here.
+  const stick = () => {
+    const el = chatRef.current
+    if (!el || !pinned.current) return
+    el.scrollTop = el.scrollHeight
+  }
+
+  // Where the follow is won and lost, and the only place it is: how far the
+  // scroller sits from its own end, read live off the DOM. Measuring the
+  // DISTANCE rather than a diff against the offset we last wrote means our own
+  // auto-scroll can never be mistaken for the user moving away, and neither can
+  // Chrome's scroll anchoring, which rewrites scrollTop on its own whenever
+  // content settles above the viewport.
   const syncPinned = () => {
     const el = chatRef.current
-    if (!el || el.scrollHeight - el.scrollTop - el.clientHeight > PIN_SLOP) return
-    pinned.current = true
-    ourTop.current = el.scrollTop
+    if (!el) return
+    pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight <= PIN_SLOP
   }
 
   // Sending is the other way back, and the one that doesn't need an event:
@@ -1065,7 +1068,7 @@ function ChatPanel({
   // to it should be too.
   const repin = () => {
     pinned.current = true
-    ourTop.current = chatRef.current?.scrollTop ?? 0
+    stick()
   }
 
   // Layout, not effect: this runs once the delta is in the DOM but before the
@@ -1074,14 +1077,40 @@ function ChatPanel({
   // the browser stops handing out while the window is in the background — the
   // transcript of a session you left running then stops moving entirely, and is
   // scrolled up when you come back to it.
+  useLayoutEffect(stick, [items, tail, running, question, queued])
+
+  // The height changes no render reports, and that no scroll event follows:
+  // the composer growing under the transcript as you type (`field-sizing:
+  // content` resizes the textarea with no React commit at all), an image or a
+  // code block settling in late, the window resizing. Each one pushes the last
+  // line out of view while we are still pinned, so each one has to re-stick.
+  // The container covers the composer and the window; the children cover
+  // content that grows after it mounted.
   useLayoutEffect(() => {
     const el = chatRef.current
     if (!el) return
-    if (Math.abs(el.scrollTop - ourTop.current) > 1) pinned.current = false
-    if (!pinned.current) return
-    el.scrollTop = el.scrollHeight
-    ourTop.current = el.scrollTop
-  }, [items, tail, running, question])
+    const ro = new ResizeObserver(stick)
+    // Re-observing an element already observed with the same options is a
+    // no-op, so this can just re-walk after every mutation.
+    const watch = () => {
+      ro.observe(el)
+      for (const child of el.children) ro.observe(child)
+    }
+    watch()
+    const mo = new MutationObserver(watch)
+    mo.observe(el, { childList: true })
+    return () => {
+      ro.disconnect()
+      mo.disconnect()
+    }
+  }, [])
+
+  // Another session opens at its end, whatever the one you left was scrolled
+  // to — being dropped into the middle of a transcript you just opened is the
+  // same lost-the-bottom bug, one panel over.
+  useEffect(() => {
+    pinned.current = true
+  }, [session?.id])
 
   // Who the "is typing" line belongs to.
   const typist = tail?.provider ?? choice.provider ?? 'claude'
@@ -1169,11 +1198,7 @@ function ChatPanel({
               {typist}
             </span>{' '}
             is typing
-            <span className="irc-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
+            <Spinner />
             <TypingMeter startedAt={startedAt} tokens={tokens} />
             <button className="irc-stop" onClick={stop} title="Interrupt (⌘.)">
               stop
@@ -1346,9 +1371,7 @@ function SubagentLine({ item, peak }: { item: TranscriptItem; peak: number }) {
     <>
       <div className="irc-body irc-act ag-line">
         <span className="irc-star">*</span>
-        <span className="ag-dot" data-state={running ? undefined : 'done'}>
-          {running ? '◆' : '◇'}
-        </span>
+        {running ? <Spinner /> : <span className="ag-dot">◇</span>}
         <span className="ag-desc">
           <span className="ag-type">{item.agentType || 'agent'}</span> {item.summary}
           {running && item.lastTool && (
@@ -3004,6 +3027,25 @@ function ProjectsList({
 }
 
 /**
+ * The mark on a session row: one glyph, three states, and only one of them
+ * moves.
+ *
+ * Working is the app's spinner rather than a tinted dot because the session
+ * you have OPEN is already marked in green, and a dot has only its colour to
+ * speak with — so a session that was both open and working could say only one
+ * of the two, and it said the wrong one. See Spinner for the split.
+ *
+ * Working outranks unread: a session answering right now is not something you
+ * failed to read, and it becomes unread on its own the moment the turn ends.
+ */
+function SessionMark({ working, seen }: { working: boolean; seen: boolean }) {
+  if (working) return <Spinner />
+  return (
+    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
+  )
+}
+
+/**
  * A project's worktrees, each with its sessions underneath.
  *
  * The branch row is where you pick a worktree; a session row opens that
@@ -3134,19 +3176,10 @@ function WorktreesList({
                 })
               }}
             >
-              {/* One mark, three states. Working outranks unread: a session
-                  answering right now is not something you failed to read, and
-                  it becomes unread on its own the moment the turn ends. */}
               {(() => {
                 const id = s.claudeId ?? s.id
-                const working = busy.has(id) || s.running
-                const seen = !working && unread.has(id)
-                return (
-                  <span
-                    className={`dot${working ? ' dot-working' : seen ? ' dot-unread' : ''}`}
-                    title={working ? 'working' : seen ? 'unread reply' : undefined}
-                  />
-                )
+                const working = !!(busy.has(id) || s.running)
+                return <SessionMark working={working} seen={!working && unread.has(id)} />
               })()}
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>

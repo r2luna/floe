@@ -614,11 +614,6 @@ button {
   border-radius: 50%;
 }
 
-.dot-live {
-  background: var(--live);
-  border-color: var(--live);
-}
-
 /* An answer you have not read: filled, in the accent — the only warm mark in
    the list, so it is found without looking for it. */
 .dot-unread {
@@ -632,43 +627,26 @@ button {
   color: var(--text-strong);
 }
 
-/* A turn in flight: the row's own dot, filled, with a ring breathing out of
-   it. Nothing else in a session row moves, so the pulse is the whole message —
-   and it stays a dot, so the column of them never jitters as one starts. */
-.dot-working {
-  position: relative;
-  background: var(--working);
-  border-color: var(--working);
-}
+/* A turn in flight: a braille spinner where the dot would be, cycled in JS so
+   every row on screen turns in phase (see SessionMark). Colour could not carry
+   this — the open row is already tinted --live and won that fight — so the
+   mark changes SHAPE and moves, which the open row does not.
 
-.dot-working::after {
-  content: '';
-  position: absolute;
-  /* Outside the dot's own box, so the ring does not shrink it. */
-  inset: -3px;
-  border: 1px solid var(--working);
-  border-radius: 50%;
-  animation: halo 1.4s ease-out infinite;
-}
-
-@keyframes halo {
-  from {
-    opacity: 0.6;
-    transform: scale(0.6);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.4);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  /* Still marked, still its own colour — just a steady ring instead of a
-     breathing one. */
-  .dot-working::after {
-    animation: none;
-    opacity: 0.4;
-  }
+   It keeps the dot's 6px box so the column of names never shifts as a session
+   starts; the glyph is drawn larger and simply overhangs that box, centred,
+   into the gap the row already leaves. */
+.spin {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 6px;
+  height: 6px;
+  color: var(--working);
+  /* Larger than the row's own text: a braille cell only inks the middle of its
+     em box, so at the body size it reads lighter than the 6px dot it stands in
+     for. This is the size at which the two marks carry the same weight. */
+  font-size: 15px;
+  line-height: 1;
 }
 
 .badge {
@@ -1515,6 +1493,11 @@ button {
   overflow-y: auto;
   padding: 6px 4px;
   font-variant-ligatures: none;
+  /* Chrome's scroll anchoring rewrites scrollTop when content above the
+     viewport settles. In a streaming transcript that reads as the user
+     scrolling, and the panel stops following the stream. The follow is ours to
+     do — see the pinning in ChatPanel. */
+  overflow-anchor: none;
 }
 
 /* A run of entries from one speaker is separated from the next run, not from
@@ -1754,51 +1737,11 @@ button {
   font-weight: 700;
 }
 
-.irc-dots {
-  display: inline-flex;
-  align-items: flex-end;
-  gap: 3px;
-  /* Sits on the text baseline rather than the line box, so the dots read as
-     part of the sentence instead of a separate widget. */
-  margin-bottom: 2px;
-}
-
-.irc-dots i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.35;
-  animation: irc-dot 1.2s ease-in-out infinite;
-}
-
-.irc-dots i:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.irc-dots i:nth-child(3) {
-  animation-delay: 0.32s;
-}
-
-@keyframes irc-dot {
-  0%,
-  70%,
-  100% {
-    opacity: 0.25;
-    transform: translateY(0);
-  }
-  35% {
-    opacity: 1;
-    transform: translateY(-3px);
-  }
-}
-
-/* The dots are decoration; a steady line says the same thing without motion. */
-@media (prefers-reduced-motion: reduce) {
-  .irc-dots i {
-    animation: none;
-    opacity: 0.55;
-  }
+/* The spinner sits in a sentence here, not in a row's mark column, so it takes
+   the line's own colour instead of the working blue — "claude is typing ⠹" is
+   one phrase, and a coloured last word would break it into two. */
+.irc-typing .spin {
+  color: inherit;
 }
 
 .agent {
@@ -1879,16 +1822,15 @@ button {
   color: var(--text-strong);
 }
 
-/* Working pulses, finished does not — the glyph carries the state, so a line
-   read at a glance never needs its words. */
+/* A finished agent. The running one is the app's spinner instead (see
+   Spinner): motion says "still going", so the mark that is left over only has
+   to say "not any more". */
 .ag-dot {
-  color: var(--live);
-  animation: pulse 1.4s ease-in-out infinite;
-}
-
-.ag-dot[data-state='done'] {
+  display: grid;
+  place-items: center;
+  width: 6px;
+  height: 6px;
   color: var(--faint);
-  animation: none;
 }
 
 /* The tool it is on right now, in the same blue the app already uses for "a
@@ -1949,13 +1891,11 @@ button {
 .ag-meter i {
   display: block;
   height: 100%;
-  background: var(--live);
-  animation: pulse 1.4s ease-in-out infinite;
+  background: var(--working);
 }
 
 .ag-meter[data-state='done'] i {
   background: #4d5f4d;
-  animation: none;
 }
 
 :root[data-theme='light'] .ag-meter[data-state='done'] i {
@@ -2044,8 +1984,12 @@ button {
   cursor: default;
 }
 
+/* Always laid out, only sometimes shown: taking the column away would widen the
+   command, which is what decides whether the actions show at all — the row would
+   fit, show them, stop fitting, hide them, and flicker between the two forever. */
 .bash-acts {
-  display: none;
+  display: flex;
+  visibility: hidden;
   align-items: center;
   gap: 8px;
   margin-left: 12px;
@@ -2053,7 +1997,7 @@ button {
 
 .bash-row[data-fit] .bash-acts,
 .bash-row[data-open] .bash-acts {
-  display: flex;
+  visibility: visible;
 }
 
 /* No border, no label: two icons that stay out of the way until you look for
@@ -2295,7 +2239,7 @@ button {
 }
 
 .cmd-state[data-run] {
-  color: var(--live);
+  color: var(--working);
 }
 
 /* Memory while it runs, how it ended once it has. Pushed right, and dimmer than
@@ -2537,9 +2481,14 @@ button {
 /* Working and "your turn" are the two states you must never confuse, so they
    get different hues: the app's working blue, and the accent for a step that
    has stopped and is waiting on you. */
-.merge-run .merge-dot {
-  border-color: var(--working);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 18%, transparent);
+/* The spinner takes over the dot's box, so it lands on the rail at exactly the
+   point the still dot would have — the line never kinks when a step starts. */
+.merge-dot.spin {
+  width: 9px;
+  height: 9px;
+  border: 0;
+  background: none;
+  color: var(--working);
 }
 
 .merge-wait .merge-dot {
@@ -4955,7 +4904,7 @@ kbd {
 /* The one warm-neutral mark on the row. Green, like the live dot beside it:
    the two say the same thing and must not disagree in colour. */
 .cmd-state[data-run] {
-  color: var(--live);
+  color: var(--working);
 }
 
 .cmd-note {

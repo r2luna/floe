@@ -1,6 +1,7 @@
 import { IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
 import type { OpenFn } from './panels'
 import type { CommandRunState, Commands } from './useCommands'
+import { Spinner } from './Spinner'
 
 function bytes(n: number): string {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`
@@ -114,13 +115,19 @@ export function CommandsPane({
             onClick={() => onOpen({ kind: 'cmdlog', sub: `${worktreePath ?? ''}#${c.id}` })}
           >
             <span className="cmd-l1">
-              <span
-                className={
-                  'dot' +
-                  (live ? ' dot-live' : '') +
-                  (state === 'crash-looping' || (run?.exitCode ?? 0) !== 0 ? ' dot-err' : '')
-                }
-              />
+              {/* Running turns; anything else is a still dot coloured by how it
+                  ended. It used to be green either way, so a command that had
+                  died and one still serving looked the same. */}
+              {live ? (
+                <Spinner />
+              ) : (
+                <span
+                  className={
+                    'dot' +
+                    (state === 'crash-looping' || (run?.exitCode ?? 0) !== 0 ? ' dot-err' : '')
+                  }
+                />
+              )}
               <span className="row-name">{c.name}</span>
               {c.scope === 'project' && <span className="cmd-scope">project</span>}
               <span className="cmd-state" data-run={live ? '' : undefined}>
