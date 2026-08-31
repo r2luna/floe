@@ -165,6 +165,21 @@ enabled = true
 
 
 # ------------------------------------------------------------------------------
+# | Notifications
+# ------------------------------------------------------------------------------
+# |
+# | \`sound\` plays when an agent finishes a turn, in any session. The sounds are
+# | synthesized in the app, not files: \`chime\`, \`ping\`, \`pop\`, \`bell\`,
+# | \`marimba\` or \`tada\` — Settings previews each one as you cycle through them.
+# | \`off\` silences it.
+# |
+# ------------------------------------------------------------------------------
+
+[notifications]
+sound = "chime"
+
+
+# ------------------------------------------------------------------------------
 # | Auto Update
 # ------------------------------------------------------------------------------
 # |

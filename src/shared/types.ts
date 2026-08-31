@@ -63,6 +63,16 @@ export const PENGUIN_COLORS = [
 
 export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
 
+/**
+ * The sounds a finished turn can play, in the order Settings cycles them.
+ * Shared because `[notifications] sound` is validated against this list in main
+ * and synthesized from it in the renderer (`renderer/src/sounds.ts`) — the
+ * sounds are Web Audio recipes, not files, so this list is all there is.
+ */
+export const NOTIFY_SOUNDS = ['off', 'chime', 'ping', 'pop', 'bell', 'marimba', 'tada'] as const
+
+export type NotifySoundId = (typeof NOTIFY_SOUNDS)[number]
+
 export interface Project {
   path: string
   name: string

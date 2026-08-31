@@ -95,6 +95,19 @@ test('penguin-color takes only the named tones', () => {
   assert.equal(unknown.config.appearance.penguinColor, 'accent', 'an unknown tone falls back to the accent')
 })
 
+test('notification sound takes only the known sounds, off included', () => {
+  const picked = parseFloeConfig('[notifications]\nsound = "tada"\n', 'floe.toml')
+  assert.equal(picked.config.notifications.sound, 'tada')
+  assert.equal(picked.errors.length, 0)
+
+  const off = parseFloeConfig('[notifications]\nsound = "off"\n', 'floe.toml')
+  assert.equal(off.config.notifications.sound, 'off')
+
+  const unknown = parseFloeConfig('[notifications]\nsound = "airhorn"\n', 'floe.toml')
+  assert.equal(unknown.config.notifications.sound, 'chime', 'an unknown sound falls back to the default')
+  assert.match(unknown.errors[0].reason, /off, chime, ping/)
+})
+
 test('the greeting name is optional, and blank means "use the machine\'s"', () => {
   assert.equal(parseFloeConfig('', 'floe.toml').config.user.name, undefined)
   assert.equal(parseFloeConfig('[user]\nname = "Ada"\n', 'floe.toml').config.user.name, 'Ada')
