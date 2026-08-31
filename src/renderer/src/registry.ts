@@ -893,11 +893,12 @@ export const REGISTRY: Map<string, Command> = new Map(
           )
       },
       {
-        // Newer and older, in the sidebar's own order. Ctrl, not a bare letter,
-        // for the same reason ⌃H/⌃L are: this has to work mid-sentence in the
-        // composer, which is where you are when you want the other session.
+        // Newer and older, in the sidebar's own order — across every branch in
+        // it, not just the open one. Ctrl, not a bare letter, for the same
+        // reason ⌃H/⌃L are: this has to work mid-sentence in the composer,
+        // which is where you are when you want the other session.
         id: 'session.prev',
-        title: 'Newer session on this branch',
+        title: 'Newer session',
         group: 'Sessions',
         keys: '⌃I',
         enabled: (c) => !!c.worktree,
@@ -915,7 +916,7 @@ export const REGISTRY: Map<string, Command> = new Map(
       },
       {
         id: 'session.next',
-        title: 'Older session on this branch',
+        title: 'Older session',
         group: 'Sessions',
         keys: '⌃O',
         enabled: (c) => !!c.worktree,
