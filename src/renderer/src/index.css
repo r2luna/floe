@@ -466,6 +466,20 @@ button {
   padding: 8px 8px 8px 0;
 }
 
+/* Panels that answer the same question sit in one block, with a hairline
+   between blocks: you aim at the group first and the icon second. */
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-group + .rail-group {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-soft);
+}
+
 .rail-btn {
   position: relative;
   display: grid;
