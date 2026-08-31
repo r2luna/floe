@@ -2073,7 +2073,7 @@ button {
    Four roles, because those are the four things you actually look for in a
    command you are scanning past. */
 .sh-cmd {
-  color: var(--text-strong);
+  color: var(--text);
   font-weight: 700;
 }
 
@@ -2104,6 +2104,56 @@ button {
 
 :root[data-theme='light'] .sh-num {
   color: #3a64a8;
+}
+
+/* --- tool calls ----------------------------------------------------------- */
+
+/* Tool rows are shell rows with a different word in front: same marker column,
+   same grid, so a run of reads and a run of commands read as one thing. */
+.tool-run {
+  margin: 6px 0;
+}
+
+.tool-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 1px 0;
+  color: var(--dim);
+}
+
+.tool-mark {
+  margin-top: 4px;
+  color: #6f7bd0;
+  opacity: 0.6;
+}
+
+:root[data-theme='light'] .tool-mark {
+  color: #5560b4;
+}
+
+/* One line, ellipsis past the edge — same rule as a closed command: a path
+   that wraps buries the sentence after it. */
+.tool-line {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tool-verb {
+  color: var(--text);
+  font-weight: 700;
+}
+
+/* The directory is context, the filename is the answer. */
+.tool-arg {
+  color: var(--faint);
+}
+
+.tool-base {
+  color: var(--text);
 }
 
 /* --- expanded tool calls -------------------------------------------------- */

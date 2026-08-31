@@ -1076,7 +1076,7 @@ function ChatPanel({
           </button>
         )}
         <RunInTerminal.Provider value={runInTerminal}>
-          <Log items={shown} />
+          <Log items={shown} cwd={cwd} />
           {tail && (
             // The streaming tail lives outside the memoised Log: a delta flush
             // re-renders this one entry, not the whole transcript above it.
@@ -1476,7 +1476,7 @@ function QuestionBlock({
 // Memoised on the items array: `useTranscript` gives it one identity per
 // settled entry, so a streaming delta (which only moves the tail) never remaps
 // or re-diffs the transcript above it.
-const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
+const Log = memo(function Log({ items, cwd }: { items: TranscriptItem[]; cwd?: string }) {
   let speaker: string | null = null
 
   // Each run's header carries the cost of its last spoken entry, so the row that
@@ -1560,6 +1560,17 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
       continue
     }
 
+    // Every other tool call is a run of rows shaped like the shell rows above:
+    // a run of them is one act of work, and they are read the same way.
+    if (item.role === 'tool') {
+      const run: TranscriptItem[] = []
+      const at = i
+      while (i < items.length && items[i].role === 'tool' && !isBash(items[i])) run.push(items[i++])
+      i--
+      out.push(<ToolRun items={run} cwd={cwd} key={at} />)
+      continue
+    }
+
     // Other tool output, images and artifacts are the speaker working, not
     // someone else talking: they never break the run and never take a header.
     if (item.role !== 'user' && item.role !== 'assistant') {
@@ -1629,6 +1640,77 @@ function Zoomable({
       )}
     </>
   )
+}
+
+/**
+ * A run of tool calls, drawn as the shell rows are: marker, verb, argument.
+ *
+ * Reading a transcript is reading down the left edge, and a tool call answers
+ * two questions — what did it do, to what. So the verb comes first and in full
+ * strength, the directory fades, and the filename (the part you are actually
+ * looking for) stays legible. Same grid as a command, so a run of reads and a
+ * run of greps sit in one family instead of two.
+ */
+function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): ReactNode {
+  // The same call repeated is one line with a count: five edits to one file is
+  // one fact about that file, not five rows to scroll past.
+  const rows: Array<{ item: TranscriptItem; n: number }> = []
+  for (const item of items) {
+    const last = rows[rows.length - 1]
+    if (last && last.item.name === item.name && last.item.summary === item.summary) {
+      last.n++
+      continue
+    }
+    rows.push({ item, n: 1 })
+  }
+
+  return (
+    <div className="tool-run">
+      {rows.map(({ item, n }, i) => {
+        const arg = toolArg(item.summary, cwd)
+        return (
+          <div className="tool-row" key={i}>
+            <IconCaretRightFilled size={11} className="tool-mark" />
+            <span className="tool-line">
+              <span className="tool-verb">{toolVerb(item.name)}</span>
+              {arg && (
+                <span className="tool-arg">
+                  {' '}
+                  {arg.dir}
+                  <span className="tool-base">{arg.base}</span>
+                </span>
+              )}
+              {n > 1 && <span className="sh-num"> ×{n}</span>}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The tool as a command word: lower case, and MCP tools by their bare name. */
+function toolVerb(name: string | undefined): string {
+  const raw = name ?? 'tool'
+  const mcp = raw.startsWith('mcp__') ? raw.split('__').pop() || raw : raw
+  return mcp.toLowerCase()
+}
+
+/**
+ * The argument split into the part you skim (the directory) and the part you
+ * read (the filename). Paths are shown relative to the worktree: the prefix is
+ * the same on every row, so printing it says nothing and costs the width the
+ * filename needs.
+ */
+function toolArg(
+  summary: string | undefined,
+  cwd?: string
+): { dir: string; base: string } | null {
+  const text = summary?.replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  const rel = cwd && text.startsWith(cwd + '/') ? text.slice(cwd.length + 1) : text
+  const cut = rel.lastIndexOf('/')
+  return cut === -1 ? { dir: '', base: rel } : { dir: rel.slice(0, cut + 1), base: rel.slice(cut + 1) }
 }
 
 /** A shell call, which is the only tool whose argument is worth showing whole. */
