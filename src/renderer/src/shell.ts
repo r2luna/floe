@@ -18,6 +18,37 @@ const TOKEN =
   /("[^"]*"?|'[^']*'?)|(\|\||&&|[|;&])|(\d?>>?[^\s|;&]*|<[^\s|;&]*)|(--?[A-Za-z][\w-]*)|([^\s|;&<>"']+)/g
 
 /**
+ * The command as its closed row shows it: the leading `cd <dir> ;/&&` hops are
+ * dropped and whitespace collapses to single spaces. The cd prefix is the same
+ * on every row of a block and says nothing — it is the worktree the whole
+ * session runs in — so printing it costs the width the actual command needs.
+ * Opening the row still shows the command whole, prefix and all.
+ */
+export function bashGist(command: string): string {
+  let rest = command
+  let m: RegExpMatchArray | null
+  while ((m = rest.match(/^\s*cd\s+[^;&|<>"']+?\s*(?:;|&&)\s*/))) {
+    rest = rest.slice(m[0].length)
+  }
+  const gist = (rest.trim() ? rest : command).replace(/\s+/g, ' ').trim()
+  return gist
+}
+
+/**
+ * The program a command runs, for the block's fold summary — the first word
+ * that highlights as a command and is not a launcher (`sudo x` runs x).
+ */
+export function bashProgram(command: string): string {
+  for (const t of highlightShell(bashGist(command))) {
+    if (t.cls !== 'sh-cmd') continue
+    const word = t.text
+    if (word === 'sudo' || word === 'env' || word === 'time' || /^\w+=/.test(word)) continue
+    return word
+  }
+  return 'sh'
+}
+
+/**
  * Split a command into coloured tokens.
  *
  * The one piece of grammar here: the first word of the line, and the first word

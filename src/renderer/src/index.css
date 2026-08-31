@@ -2050,6 +2050,73 @@ button {
   color: #3a64a8;
 }
 
+/* --- folded runs ---------------------------------------------------------- */
+
+/* A run of three or more commands (or tool calls) closed to one line: the
+   count and the programs. Same grid and marker as the rows it hides, so
+   closed it still reads as "commands ran here". */
+.run-fold {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.run-fold:focus-visible {
+  outline: none;
+}
+
+.run-fold[data-open] .bash-mark {
+  transform: rotate(90deg);
+  opacity: 1;
+}
+
+.run-fold-line {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.run-fold-count {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.run-fold-verbs {
+  color: var(--dim);
+}
+
+/* The revealed rows hang off a rule, like an expanded tool block (.calls):
+   they belong to the fold line above, not to the chat around it. */
+.run-fold-body {
+  margin: 2px 0 4px 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* Like a shell row, the fold carries the cursor as its marker brightening,
+   not as a wash — it sits inside prose, not in a list. */
+.run-fold[data-cursor] {
+  background: none;
+}
+
+.run-fold[data-cursor]::before {
+  display: none;
+}
+
+.panel[data-focused] .run-fold[data-cursor] {
+  background: none;
+}
+
+.run-fold[data-cursor] .bash-mark {
+  opacity: 1;
+}
+
 /* --- tool calls ----------------------------------------------------------- */
 
 /* Tool rows are shell rows with a different word in front: same marker column,

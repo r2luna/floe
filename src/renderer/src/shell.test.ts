@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { highlightShell } from './shell.ts'
+import { bashGist, bashProgram, highlightShell } from './shell.ts'
 
 /** The tokens as `cls:text` pairs, which is what the assertions read on. */
 const tokens = (cmd: string): string[] =>
@@ -63,4 +63,23 @@ test('every character of the command survives — the row shows what ran', () =>
     ''
   ])
     assert.equal(highlightShell(cmd).reduce((s, t) => s + t.text, ''), cmd)
+})
+
+test('the gist drops the cd prefix and collapses whitespace', () => {
+  assert.equal(bashGist('cd /Users/x/proj; grep -n "foo" src/a.ts'), 'grep -n "foo" src/a.ts')
+  assert.equal(bashGist('cd /Users/x/proj && pnpm test'), 'pnpm test')
+  assert.equal(bashGist('cd /a; cd /b && ls'), 'ls')
+  assert.equal(bashGist("python3 - <<'PY'\n  x = 1\nPY"), "python3 - <<'PY' x = 1 PY")
+})
+
+test('a bare cd is a command, not a prefix — the gist keeps it', () => {
+  assert.equal(bashGist('cd /tmp'), 'cd /tmp')
+  assert.equal(bashGist('cd /tmp;'), 'cd /tmp;')
+})
+
+test('the program skips launchers and the cd prefix', () => {
+  assert.equal(bashProgram('cd /x; python3 - <<PY'), 'python3')
+  assert.equal(bashProgram('sudo rm -rf ./dist'), 'rm')
+  assert.equal(bashProgram('FOO=1 node x.js'), 'node')
+  assert.equal(bashProgram('ls'), 'ls')
 })

@@ -58,7 +58,7 @@ import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import { describeRef, expand, splitRefs } from './fileRefs'
 import { renderMarkdown, type MdLine } from './markdown'
-import { highlightShell } from './shell'
+import { bashGist, bashProgram, highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
 import { sendToTerminal } from './terminalBus'
 import { CommandsPane } from './CommandsPane'
@@ -1818,28 +1818,99 @@ function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): Rea
     rows.push({ item, n: 1 })
   }
 
+  const lines = rows.map(({ item, n }, i) => {
+    const arg = toolArg(item.summary, cwd)
+    return (
+      <div className="tool-row" key={i}>
+        <IconCaretRightFilled size={11} className="tool-mark" />
+        <span className="tool-line">
+          <span className="tool-verb">{toolVerb(item.name)}</span>
+          {arg && (
+            <span className="tool-arg">
+              {' '}
+              {arg.dir}
+              <span className="tool-base">{arg.base}</span>
+            </span>
+          )}
+          {n > 1 && <span className="sh-num"> ×{n}</span>}
+        </span>
+      </div>
+    )
+  })
+
+  if (rows.length < FOLD_AT) return <div className="tool-run">{lines}</div>
   return (
     <div className="tool-run">
-      {rows.map(({ item, n }, i) => {
-        const arg = toolArg(item.summary, cwd)
-        return (
-          <div className="tool-row" key={i}>
-            <IconCaretRightFilled size={11} className="tool-mark" />
-            <span className="tool-line">
-              <span className="tool-verb">{toolVerb(item.name)}</span>
-              {arg && (
-                <span className="tool-arg">
-                  {' '}
-                  {arg.dir}
-                  <span className="tool-base">{arg.base}</span>
-                </span>
-              )}
-              {n > 1 && <span className="sh-num"> ×{n}</span>}
-            </span>
-          </div>
-        )
-      })}
+      <RunFold count={items.length} kind="tool calls" verbs={items.map((it) => toolVerb(it.name))}>
+        {lines}
+      </RunFold>
     </div>
+  )
+}
+
+/* --- folded runs ---------------------------------------------------------- */
+
+/**
+ * Below this many rows a fold saves less than it costs: a keypress to reveal
+ * one or two lines that could just be there.
+ */
+const FOLD_AT = 3
+
+/** `python3 ×3, grep ×2` — the run's programs, most frequent first. */
+function verbSummary(verbs: string[]): string {
+  const counts = new Map<string, number>()
+  for (const v of verbs) counts.set(v, (counts.get(v) ?? 0) + 1)
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const parts = top.map(([v, n]) => (n > 1 ? `${v} ×${n}` : v))
+  if (counts.size > 3) parts.push('…')
+  return parts.join(', ')
+}
+
+/**
+ * A run of rows, folded to one line: the count and the programs, opening to the
+ * rows themselves. Closed is the default — the run is the agent working, and
+ * the transcript reads better as what was said than as everything that ran.
+ * Same marker and grid as the rows it hides, so closed it still reads as
+ * "commands ran here", and j/k lands on it like any other row.
+ */
+function RunFold({
+  count,
+  kind,
+  verbs,
+  children
+}: {
+  count: number
+  kind: string
+  verbs: string[]
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <div
+        className="run-fold"
+        data-nav
+        tabIndex={-1}
+        role="button"
+        aria-expanded={open}
+        data-open={open || undefined}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          setOpen((o) => !o)
+        }}
+      >
+        <IconCaretRightFilled size={11} className="bash-mark" />
+        <span className="run-fold-line">
+          <span className="run-fold-count">
+            {count} {kind}
+          </span>
+          <span className="run-fold-verbs"> · {verbSummary(verbs)}</span>
+        </span>
+      </div>
+      {open && <div className="run-fold-body">{children}</div>}
+    </>
   )
 }
 
@@ -1879,11 +1950,13 @@ const isBash = (item: TranscriptItem): boolean =>
  * be a second way of saying it, and a heavier one.
  */
 function BashBlock({ commands }: { commands: string[] }) {
+  const rows = commands.map((command, i) => <BashRow command={command} key={i} />)
+  if (commands.length < FOLD_AT) return <div className="bash-blk">{rows}</div>
   return (
     <div className="bash-blk">
-      {commands.map((command, i) => (
-        <BashRow command={command} key={i} />
-      ))}
+      <RunFold count={commands.length} kind="commands" verbs={commands.map(bashProgram)}>
+        {rows}
+      </RunFold>
     </div>
   )
 }
@@ -1891,10 +1964,12 @@ function BashBlock({ commands }: { commands: string[] }) {
 /**
  * One command.
  *
- * Closed it is a single truncated line; opening it wraps the whole thing. A
- * command that already fits has nothing to open, so it loses its chevron and
- * keeps its actions on show — pressing a key to reveal what is already there
- * would be a step for nothing.
+ * Closed it is a single truncated line of the command's GIST — the leading
+ * `cd` hop dropped, whitespace collapsed (see bashGist). Opening it shows the
+ * command whole, wrapped. A row whose gist already fits and IS the whole
+ * command has nothing to open, so it loses its chevron and keeps its actions
+ * on show — pressing a key to reveal what is already there would be a step
+ * for nothing.
  *
  * Whether it fits is a question of LAYOUT, not of length: the same command fits
  * a wide panel and not a narrow one, so it is measured after paint and again
@@ -1906,6 +1981,10 @@ function BashRow({ command }: { command: string }) {
   const [open, setOpen] = useState(false)
   const [fits, setFits] = useState(false)
   const [copied, setCopied] = useState(false)
+  const gist = bashGist(command)
+  // Fitting is only "nothing to open" when the gist is the whole command —
+  // a stripped cd prefix is still something opening reveals.
+  const inert = fits && gist === command
 
   useLayoutEffect(() => {
     const el = code.current
@@ -1935,15 +2014,15 @@ function BashRow({ command }: { command: string }) {
       data-nav
       tabIndex={-1}
       role="button"
-      aria-expanded={fits ? undefined : open}
+      aria-expanded={inert ? undefined : open}
       data-open={open || undefined}
-      data-fit={fits || undefined}
+      data-fit={inert || undefined}
       // Read by bash.copy and bash.run — the row already knows its command, so
       // nothing has to be lifted into the lane for a key to find it.
       data-cmd={command}
-      onClick={() => !fits && setOpen((o) => !o)}
+      onClick={() => !inert && setOpen((o) => !o)}
       onKeyDown={(e) => {
-        if (fits || (e.key !== 'Enter' && e.key !== ' ')) return
+        if (inert || (e.key !== 'Enter' && e.key !== ' ')) return
         e.preventDefault()
         setOpen((o) => !o)
       }}
@@ -1952,7 +2031,7 @@ function BashRow({ command }: { command: string }) {
           at, and a row that lost its marker would stop reading as a command. */}
       <IconCaretRightFilled size={11} className="bash-mark" />
       <span className="bash-code" ref={code}>
-        {highlightShell(command).map((t, i) =>
+        {highlightShell(open ? command : gist).map((t, i) =>
           t.cls ? (
             <span className={t.cls} key={i}>
               {t.text}
