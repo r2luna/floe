@@ -283,3 +283,13 @@ test('a table becomes cells, and every row of the block shares one layout', () =
   assert.deepEqual(body.aligns, ['left', 'right'])
   assert.equal(body.head, false)
 })
+
+test('an image reference is a chip of its own', () => {
+  const out = tokenizeMarkdown('crop [Image #1] please')
+  assert.deepEqual(
+    out.filter((t) => t.cls === 'md-attach').map((t) => t.text),
+    ['[Image #1]']
+  )
+  // The invariant every tokenizer test here rests on: nothing is lost.
+  assert.equal(out.map((t) => t.text).join(''), 'crop [Image #1] please')
+})

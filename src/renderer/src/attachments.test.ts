@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classify } from './attachments.ts'
+import { classify, insertImageRef, renumberImageRefs } from './attachments.ts'
 
 const f = (name: string, type = '') => ({ name, type })
 
@@ -36,4 +36,31 @@ test('unsupported binaries are rejected rather than mangled', () => {
 test('extension matching ignores case', () => {
   assert.equal(classify(f('README.MD', '')), 'text')
   assert.equal(classify(f('Spec.PDF', '')), 'pdf')
+})
+
+test('the reference lands at the caret, spaced off the words around it', () => {
+  const out = insertImageRef('crop this', 4, 1)
+  assert.equal(out.text, 'crop [Image #1] this')
+  // Caret sits after the token, ready for the rest of the sentence.
+  assert.equal(out.text.slice(0, out.caret), 'crop [Image #1]')
+})
+
+test('a reference at the end of the text needs no trailing space', () => {
+  assert.equal(insertImageRef('crop', 4, 2).text, 'crop [Image #2]')
+})
+
+test('an empty composer takes the reference bare', () => {
+  assert.equal(insertImageRef('', 0, 1).text, '[Image #1]')
+})
+
+test('removing an image drops its reference and renumbers the rest', () => {
+  assert.equal(renumberImageRefs('a [Image #1] b [Image #2] c', 1), 'a b [Image #1] c')
+})
+
+test('removing the last image leaves the ones before it alone', () => {
+  assert.equal(renumberImageRefs('a [Image #1] b [Image #2]', 2), 'a [Image #1] b')
+})
+
+test('text with no reference to the removed image is untouched', () => {
+  assert.equal(renumberImageRefs('nothing here', 1), 'nothing here')
 })

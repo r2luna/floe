@@ -45,11 +45,26 @@ function refs(text: string, out: Token[], isRef: (token: string) => boolean): vo
   if (last < text.length) out.push({ text: text.slice(last), cls: '' })
 }
 
+/** The token an attached image writes into the message — see attachments.ts. */
+const ATTACH = /\[Image #\d+\]/g
+
 function inline(text: string, out: Token[], isRef?: (token: string) => boolean): void {
-  const plain = (slice: string): void => {
+  const rest = (slice: string): void => {
     if (!slice) return
     if (isRef) refs(slice, out, isRef)
     else out.push({ text: slice, cls: '' })
+  }
+  // An image reference is a chip wherever it appears — in the composer while it
+  // is being written, and in the message once it is sent.
+  const plain = (slice: string): void => {
+    if (!slice) return
+    let last = 0
+    for (const m of slice.matchAll(ATTACH)) {
+      rest(slice.slice(last, m.index))
+      out.push({ text: m[0], cls: 'md-attach' })
+      last = m.index + m[0].length
+    }
+    rest(slice.slice(last))
   }
   let last = 0
   INLINE.lastIndex = 0

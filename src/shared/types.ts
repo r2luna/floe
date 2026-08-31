@@ -443,6 +443,12 @@ export interface FileAttachment {
   name: string // file name — shown as a chip and used as the document title
 }
 
+/** What rode along with one message: the chips shown above the composer. */
+export interface Attached {
+  images: ImageAttachment[]
+  files: FileAttachment[]
+}
+
 // A message the user lined up while the agent was busy. Queued messages drain
 // one-per-turn into the same session, and can be edited or removed until sent.
 export interface QueuedMessage {

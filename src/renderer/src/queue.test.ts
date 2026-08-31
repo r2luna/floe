@@ -44,3 +44,18 @@ test('a linked flag on the head is ignored', () => {
   assert.equal(out.text, 'head')
   assert.equal(out.rest.length, 1)
 })
+
+test('attachments ride with the batch that carries their text', () => {
+  const img = (id: string): Queued['images'] => [{ id, mediaType: 'image/png', data: 'x' }]
+  const out = takeBatch([
+    { ...q('a'), images: img('1') },
+    { ...q('b', true), images: img('2') },
+    { ...q('c'), images: img('3') }
+  ])!
+  assert.deepEqual(
+    out.images!.map((i) => i.id),
+    ['1', '2']
+  )
+  // The unlinked message keeps its own image for its own turn.
+  assert.deepEqual(out.rest[0].images?.map((i) => i.id), ['3'])
+})

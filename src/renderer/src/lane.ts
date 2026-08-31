@@ -1,3 +1,4 @@
+import type { Attached } from '../../shared/types'
 import type { ModelChoice } from './models'
 
 // The lane is the whole navigation model: panels side by side, in a fixed
@@ -59,6 +60,8 @@ export type Panel = {
   firstPrompt?: string
   /** The model that opening message was addressed to. */
   firstChoice?: ModelChoice
+  /** What was dropped or pasted into that opening message. */
+  firstAttached?: Attached
   /**
    * Where the cursor sits inside this panel, as an index into its rows.
    *

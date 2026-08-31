@@ -322,6 +322,36 @@ button {
   white-space: nowrap;
 }
 
+/* Changed-file badge in the chat header. Outline chip, neutral border: it
+   reports a fact, it does not ask to be pressed. The +/- keep the changes
+   list's own colours so the same number reads the same in both places. */
+.head-changes {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  background: var(--well);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.head-changes:hover,
+.head-changes:focus-visible {
+  color: var(--text-strong);
+  border-color: var(--edge);
+}
+
+/* The badge already took the free space; a second auto margin would split what
+   is left and open a gap. Same reason as the .ctx-wrap + .panel-act rule. */
+.head-changes + .ctx-wrap,
+.head-changes + .panel-act {
+  margin-left: 0;
+}
+
 /* --- context meter -------------------------------------------------------- */
 
 .ctx-wrap {
@@ -785,6 +815,25 @@ button {
   object-fit: cover;
 }
 
+/* The image's number, matching the [Image #n] token in the text. Bottom-left so
+   it never sits under the remove button in the opposite corner. */
+.chip-num {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  padding: 0 3px;
+  border-top-right-radius: 3px;
+  background: #000000a6;
+  color: #d7dbe3;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+:root[data-theme='light'] .chip-num {
+  background: #00000080;
+  color: #fff;
+}
+
 .chip-image .chip-x {
   position: absolute;
   top: 2px;
@@ -916,6 +965,22 @@ button {
 :root[data-theme='light'] .md-ref {
   background: #0000000d;
   box-shadow: 0 0 0 3px #0000000d;
+}
+
+/* An image reference. Tinted rather than grey so it reads as a thing that came
+   with the message, not as a path someone typed. Same box-shadow-as-padding
+   trick as .md-ref — the mirror must not change the text's metrics. */
+.md-attach {
+  border-radius: 3px;
+  background: #7ec69926;
+  box-shadow: 0 0 0 3px #7ec69926;
+  color: #a8dcbc;
+}
+
+:root[data-theme='light'] .md-attach {
+  background: #3f9c6b1f;
+  box-shadow: 0 0 0 3px #3f9c6b1f;
+  color: #2f7350;
 }
 
 .tool {
@@ -1907,23 +1972,20 @@ button {
 
 /* --- shell calls ----------------------------------------------------------- */
 
-/* A run of shell commands: one frame, one row per command. The frame is what
-   says these belong to the same piece of work — without it five commands read
-   as five separate things happening in the conversation. */
+/* A run of shell commands. No frame around it: the marker at the head of each
+   row already says "this is a command", and a box would say it a second time,
+   louder. The run reads as one thing because the rows are adjacent. */
 .bash-blk {
   margin: 6px 0;
-  padding: 4px 10px 5px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
 }
 
-/* chevron · command · actions. The chevron keeps its column even where it is
-   hidden, so every command in the block starts in the same place. */
+/* marker · command · actions. The marker keeps its column on every row, so the
+   commands of a run all start in the same place. */
 .bash-row {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: start;
-  gap: 6px;
+  gap: 8px;
   padding: 2px 0;
   color: var(--dim);
   cursor: pointer;
@@ -1933,21 +1995,30 @@ button {
   outline: none;
 }
 
-.bash-chev {
-  margin-top: 3px;
-  color: var(--faint);
-  opacity: 0.5;
+/* The prompt: a solid arrow, the shape a shell prompt uses, drawn on every
+   command whether or not it has anything to expand. Where it does, it turns. */
+.bash-mark {
+  margin-top: 4px;
+  color: #6f7bd0;
+  opacity: 0.75;
   transition: transform 0.12s ease;
 }
 
-.bash-row:hover .bash-chev,
-.bash-row[data-cursor] .bash-chev {
+/* No hover state on the row at all: a command is something you read past, and
+   a slab of background following the pointer down a transcript is noise. The
+   cursor is shown by the marker alone — see below, where the row opts out of
+   the lane's cursor wash. */
+.bash-row[data-cursor] .bash-mark {
   opacity: 1;
 }
 
-.bash-row[data-open] .bash-chev {
+.bash-row[data-open] .bash-mark {
   transform: rotate(90deg);
   opacity: 1;
+}
+
+:root[data-theme='light'] .bash-mark {
+  color: #5560b4;
 }
 
 /* Closed, the command is one line and the rest is an ellipsis: a transcript is
@@ -1966,14 +2037,11 @@ button {
   overflow-wrap: anywhere;
 }
 
-/* A command that already fits has nothing to open. The chevron goes (its column
-   stays), and the actions stop hiding — there is no state to reveal them. */
+/* A command that already fits has nothing to open — it keeps its prompt marker,
+   which is not an affordance but a label, and its actions stop hiding, since
+   there is no state left to reveal them. */
 .bash-row[data-fit] {
   cursor: default;
-}
-
-.bash-row[data-fit] .bash-chev {
-  visibility: hidden;
 }
 
 .bash-acts {
@@ -2158,6 +2226,253 @@ button {
   font-size: 11px;
 }
 
+/* --- guided merge --------------------------------------------------------- */
+
+/* A timeline: a rail down the left with one dot per step, filled behind you and
+   hollow ahead. The shape IS the progress, so there is no bar repeating it. The
+   step in flight grows in place instead of becoming a card — the merge is one
+   sequence, and lifting the active step out of it would break the only line the
+   eye has to follow. Chips follow docs/ui-conventions.md. */
+
+.merge-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 4px 10px;
+  font-size: 11px;
+}
+
+.merge-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.merge-base {
+  flex: none;
+  color: var(--dim);
+}
+
+.merge-count {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.merge-track {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* One step. The rail is the node's own ::before, running from under its dot to
+   the bottom of the row, so a step that grows carries its own segment with it
+   and the line never breaks. */
+.merge-node {
+  position: relative;
+  padding: 0 4px 10px 22px;
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.merge-node::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 12px;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+/* The last dot has nothing below it to connect to. */
+.merge-node:last-child::before {
+  display: none;
+}
+
+/* Behind you the rail is walked; a skipped step is still walked, just not run. */
+.merge-node.merge-ok::before,
+.merge-node.merge-skip::before {
+  background: var(--live);
+  opacity: 0.4;
+}
+
+.merge-dot {
+  position: absolute;
+  left: 1px;
+  top: 4px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.merge-ok .merge-dot {
+  background: var(--live);
+  border-color: var(--live);
+}
+
+/* Skipped: on the walked part of the rail, but hollow — it did not run. */
+.merge-skip .merge-dot {
+  border-color: var(--live);
+  opacity: 0.55;
+}
+
+/* Working and "your turn" are the two states you must never confuse, so they
+   get different hues: the app's working blue, and the accent for a step that
+   has stopped and is waiting on you. */
+.merge-run .merge-dot {
+  border-color: var(--working);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 18%, transparent);
+}
+
+.merge-wait .merge-dot {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.merge-bad .merge-dot {
+  border-color: #c07a72;
+  background: #c07a72;
+}
+
+.merge-node.merge-ok,
+.merge-node.merge-skip {
+  color: var(--dim);
+}
+
+/* The step in flight: bigger and brighter, in place. */
+.merge-node.merge-run,
+.merge-node.merge-wait,
+.merge-node.merge-bad {
+  padding-bottom: 12px;
+  color: var(--text-strong);
+}
+
+.merge-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.merge-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merge-run .merge-name,
+.merge-wait .merge-name,
+.merge-bad .merge-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.merge-bad .merge-name {
+  color: #c49495;
+}
+
+:root[data-theme='light'] .merge-bad .merge-name {
+  color: #b1454a;
+}
+
+/* What a settled step ended up doing — a commit hash, a conflict count. */
+.merge-aside {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+/* Steps that throw work away, flagged from the first paint — while there is
+   still time to cancel. */
+.merge-destructive {
+  flex: none;
+  margin-left: auto;
+  color: #c07a72;
+  opacity: 0.75;
+  font-size: 10px;
+}
+
+/* A live step's detail is a sentence about what is happening, so it sits under
+   the name rather than beside it. */
+.merge-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--faint);
+  white-space: pre-wrap;
+}
+
+.merge-bad .merge-sub {
+  color: #c49495;
+}
+
+:root[data-theme='light'] .merge-bad .merge-sub {
+  color: #b1454a;
+}
+
+.merge-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.merge-chip {
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  background: var(--panel);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.merge-chip:hover {
+  color: var(--text);
+  border-color: var(--edge);
+}
+
+.merge-chip-danger {
+  color: #c49495;
+  border-color: #352829;
+  background: #221b1c;
+}
+
+.merge-chip-danger:hover {
+  color: #c49495;
+  border-color: #c49495;
+}
+
+:root[data-theme='light'] .merge-chip-danger {
+  color: #b1454a;
+  border-color: #e3bdbf;
+  background: #f9eef0;
+}
+
+:root[data-theme='light'] .merge-chip-danger:hover {
+  color: #b1454a;
+  border-color: #b1454a;
+}
+
+/* The keys that are live right now. A hint, not a control — the chips on the
+   active step are what you click, this is what you press. */
+.merge-foot {
+  margin-top: 6px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 10px;
+}
+
 /* --- diff ----------------------------------------------------------------- */
 
 .diff {
@@ -2198,6 +2513,15 @@ button {
 
 .file-image {
   max-width: 100%;
+}
+
+/* An attached or read image, inline in the transcript. Capped so a screenshot
+   does not take the whole scrollback. */
+.irc-image {
+  max-width: min(420px, 100%);
+  max-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
 }
 
 .diff-no {
@@ -2649,6 +2973,21 @@ button {
   width: 100%;
   border-top: 1px solid var(--line-soft);
   vertical-align: middle;
+}
+
+/* A shell row carries the cursor without the wash and the bar: it sits inside
+   prose rather than in a list, and a highlighted band there reads as a
+   selection you did not make. Its marker brightens instead. */
+.bash-row[data-cursor] {
+  background: none;
+}
+
+.bash-row[data-cursor]::before {
+  display: none;
+}
+
+.panel[data-focused] .bash-row[data-cursor] {
+  background: none;
 }
 
 /* The cursor: where this panel will act, visible whether or not the panel holds

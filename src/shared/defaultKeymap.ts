@@ -182,6 +182,30 @@ adds a project rather than repeating a search — \`/\` still searches it, and
     ]
   },
   {
+    title: 'Guided merge',
+    doc: `\`⌘K M\` merges the worktree you are in into its base, as a checklist you
+can watch: it brings base in, hands any conflicts to an agent in a session of
+its own, and stops for you to read the result.
+
+The other four are the checklist's own keys, and they only mean anything while
+it is focused. \`⏎\` answers whatever it is waiting for — approve at the review
+checkpoint, retry on a step that failed, since it never stops at both. \`r\` puts
+the diff on screen without approving, \`s\` stashes a tree too dirty to merge and
+runs the checks again, and Escape drops the checklist and its panel with it.
+Escape does not undo the merge: what git has already done stays done.
+
+\`⌘K M\` while one is already running brings its panel back rather than starting
+a second — which is how you get from the diff you opened with \`r\` to the
+approval waiting for you.`,
+    binds: [
+      { key: 'super+k m', command: 'worktree.merge' },
+      { key: 'enter', command: 'merge.confirm', when: 'panel == "merge"' },
+      { key: 'r', command: 'merge.review', when: 'panel == "merge"' },
+      { key: 's', command: 'merge.stash', when: 'panel == "merge"' },
+      { key: 'escape', command: 'merge.cancel', when: 'panel == "merge"' }
+    ]
+  },
+  {
     title: 'Cursor & Scrolling',
     doc: `The vim set, and it means the same thing in a file, a diff and a list,
 because all of these move the CURSOR. \`⌃D\` and \`⌃U\` take half a screen and

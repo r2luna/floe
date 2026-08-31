@@ -15,8 +15,8 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import type { FileAttachment, ImageAttachment } from '../../shared/types'
-import { previewUrl, readAttachment } from './attachments'
+import type { Attached, FileAttachment, ImageAttachment } from '../../shared/types'
+import { insertImageRef, previewUrl, readAttachment, renumberImageRefs } from './attachments'
 import { isFileRef } from './fileRefs'
 import { continueList, tokenizeMarkdown } from './markdown'
 import { applyTrigger, refBefore, triggerAt, type Trigger } from './trigger'
@@ -90,8 +90,9 @@ export function Composer({
 }: {
   value: string
   onChange: (next: string) => void
-  /** Send, with the model and effort picked in this composer. */
-  onSend: (choice: ModelChoice) => void
+  /** Send, with the model and effort picked in this composer, plus whatever was
+      dropped or pasted into it. The chips live here, so they leave from here. */
+  onSend: (choice: ModelChoice, attached?: Attached) => void
   /** Fires when the model or effort changes, and once with what was restored. */
   onChoice?: (choice: ModelChoice) => void
   /**
@@ -579,7 +580,15 @@ export function Composer({
       if (value.trim() === '' && onEmptyEnter?.()) return
       pushHistory(value)
       at.current = -1
-      onSend(choice)
+      // The chips go with the message, and only then stop being pending. An
+      // empty send is a no-op downstream, so the attachments stay put rather
+      // than being thrown away on a stray ⏎.
+      onSend(choice, images.length || files.length ? { images, files } : undefined)
+      if (value.trim() !== '') {
+        setImages([])
+        setFiles([])
+        setRejected([])
+      }
       return
     }
 
@@ -596,14 +605,45 @@ export function Composer({
 
   const absorb = async (list: FileList) => {
     setRejected([])
+    // The text is rewritten once at the end: `value` is a prop, so an onChange
+    // per file inside the loop would each build on the same stale string and
+    // only the last one would survive.
+    let text = value
+    let caretAt = input.current?.selectionStart ?? value.length
+    let n = images.length
+    let wrote = false
+
     for (const file of Array.from(list)) {
       const read = await readAttachment(file)
-      if (read.kind === 'image') setImages((prev) => [...prev, read.image])
-      else if (read.kind === 'doc') setFiles((prev) => [...prev, read.file])
+      if (read.kind === 'image') {
+        setImages((prev) => [...prev, read.image])
+        // Every image gets its token in the message, so it can be pointed at
+        // while you type — "crop [Image #1]" — instead of being an unnamed
+        // thing hanging above the input.
+        const put = insertImageRef(text, caretAt, ++n)
+        text = put.text
+        caretAt = put.caret
+        wrote = true
+      } else if (read.kind === 'doc') setFiles((prev) => [...prev, read.file])
       // A file we can't carry is named rather than swallowed — dropping
       // something and getting no reaction at all is the worst outcome.
       else setRejected((prev) => [...prev, read.name])
     }
+
+    if (wrote) {
+      onChange(text)
+      setCaret(caretAt)
+      input.current?.focus()
+    }
+  }
+
+  /** Take an image back out: the chip AND the token that named it, with what
+      follows renumbered so the text still matches what gets sent. */
+  const dropImage = (id: string) => {
+    const at = images.findIndex((x) => x.id === id)
+    if (at === -1) return
+    setImages((prev) => prev.filter((x) => x.id !== id))
+    onChange(renumberImageRefs(value, at + 1))
   }
 
   // Paste is the same gesture by another name: a screenshot on the clipboard
@@ -653,14 +693,17 @@ export function Composer({
     >
       {chips && (
         <div className="attachments">
-          {images.map((a) => (
+          {images.map((a, i) => (
             <button
               key={a.id}
               className="chip chip-image"
-              title={`Remove ${a.name ?? 'image'}`}
-              onClick={() => setImages((p) => p.filter((x) => x.id !== a.id))}
+              title={`Remove Image #${i + 1}`}
+              onClick={() => dropImage(a.id)}
             >
               <img src={previewUrl(a)} alt="" />
+              {/* The same number the token in the text carries — the chip and
+                  the words have to agree on which image is which. */}
+              <span className="chip-num">#{i + 1}</span>
               <IconX size={11} stroke={2} className="chip-x" />
             </button>
           ))}

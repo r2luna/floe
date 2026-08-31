@@ -38,7 +38,18 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     deleteSession: () => {},
     cycleSession: () => {},
     askText: () => {},
-    say: () => {}
+    say: () => {},
+    merge: {
+      active: false,
+      failed: false,
+      awaitingReview: false,
+      canStash: false,
+      start: () => {},
+      approve: () => {},
+      retry: () => {},
+      stashRetry: () => {},
+      cancel: () => {}
+    }
   }
   return ctx
 }

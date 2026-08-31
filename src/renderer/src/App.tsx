@@ -1,10 +1,11 @@
 import {
+  IconGitCompare,
   IconLayoutColumns,
   IconLayoutRows,
   IconX
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ModelChoice } from './models'
+import { loadChoice, type ModelChoice } from './models'
 import type { Lane, Panel } from './lane'
 import {
   clearSize,
@@ -47,6 +48,7 @@ import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
+import { useMerge } from './useMerge'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
@@ -779,6 +781,48 @@ export default function App() {
     setLane((l) => open(l, mkPanel('chat', next.title, { id: idOf(next), worktreePath: path })))
   }
 
+  /**
+   * The guided merge, one flow per project.
+   *
+   * Everything the chain needs from the app is passed in rather than reached
+   * for: it opens a chat for the conflict-resolution turn, stops the turns
+   * running in a worktree it is about to tear down, and clears what that
+   * worktree had on screen once it is gone. The hook owns the git steps and
+   * nothing else.
+   */
+  const merge = useMerge({
+    root: projects.current?.path,
+    // A merge session is an ordinary chat — same panel, same transcript — that
+    // is handed its opening message and pinned to `full`: it has to edit files
+    // and `git add` without a prompt per tool, whatever the composer was set to.
+    openResolve: (session, prompt) =>
+      setLane((l) =>
+        open(l, mkPanel('chat', 'resolve conflicts', session, prompt, { ...loadChoice(), mode: 'skip' }))
+      ),
+    stopAgents: (worktreePath) => {
+      const row = worktrees.rows.find((r) => r.worktree.path === worktreePath)
+      for (const s of row?.sessions ?? []) void window.floe.agent.stop(s.claudeId ?? s.id)
+    },
+    onWorktreeGone: (worktreePath) => {
+      // Close every panel that was showing it — a chat in a worktree that no
+      // longer exists is a dead transcript over a missing tree.
+      setLane((l) => {
+        let next = l
+        for (;;) {
+          const i = next.panels.findIndex(
+            (p) =>
+              p.session?.worktreePath === worktreePath ||
+              (p.kind === 'terminal' && p.sub === worktreePath)
+          )
+          if (i === -1) return next
+          next = closePanel(next, i, () => panelOf('branch'))
+        }
+      })
+      worktrees.reload()
+    },
+    show: () => setLane((l) => open(l, panelOf('merge')))
+  })
+
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
     const p = alternate.current
@@ -1112,6 +1156,28 @@ export default function App() {
           branch: worktrees.rows.find((r) => r.worktree.path === here)?.worktree.branch ?? ''
         }
       : undefined,
+    // The checklist's state, flattened for the registry: the commands ask what
+    // the merge is waiting for, never what step it is on.
+    merge: {
+      active: !!merge.flow,
+      failed: !!merge.flow?.steps.some((s) => s.status === 'error'),
+      awaitingReview: merge.flow?.awaiting === 'review',
+      canStash: /uncommitted changes/i.test(
+        merge.flow?.steps.find((s) => s.status === 'error')?.detail ?? ''
+      ),
+      // `here`, like every other worktree command: the branch you are in is the
+      // one ⌘K M means, whether you got there from the sidebar or from a chat.
+      start: () => {
+        const wt = worktrees.rows.find((r) => r.worktree.path === here)?.worktree
+        if (!wt) return say('no worktree to merge')
+        const why = merge.start(wt)
+        if (why) say(why)
+      },
+      approve: merge.approve,
+      retry: merge.retry,
+      stashRetry: merge.stashRetry,
+      cancel: merge.cancel
+    },
     deleteSession,
     cycleSession,
     // Undefined until there IS one, which is also how the command knows to dim
@@ -1278,6 +1344,12 @@ export default function App() {
     if (!railKeys.has(b.arg)) railKeys.set(b.arg, formatChord(b.key))
   }
 
+  // Summed once per render for the chat header's badge, not per panel.
+  const changeStat = changes.files.reduce(
+    (acc, f) => ({ add: acc.add + f.additions, del: acc.del + f.deletions }),
+    { add: 0, del: 0 }
+  )
+
   const openFromRail = (kind: PanelKind) => {
     if (!canOpen(kind)) return
     setLane((l) => open(l, mkPanel(kind)))
@@ -1422,6 +1494,31 @@ export default function App() {
                         {panel.kind === 'terminal' ? sub.split('/').pop() : sub}
                       </span>
                     )}
+                    {/* The chat is where you watch an agent work, so it is
+                        where "the tree moved" has to show up — otherwise you
+                        only learn there are edits by opening the changes panel
+                        to look. Only on the chat: `changes` tracks `here`,
+                        which the open session defines, so hanging the count on
+                        any other panel would be reporting a different tree's
+                        edits under this one's title. Clicking opens the list;
+                        the same panel has its own key (see the rail), so this
+                        adds no mouse-only path. */}
+                    {kind === 'chat' && changes.files.length > 0 && (
+                      <button
+                        className="head-changes"
+                        title={`${changes.files.length} changed ${
+                          changes.files.length === 1 ? 'file' : 'files'
+                        } — open changes${
+                          railKeys.has('changes') ? ` (${railKeys.get('changes')})` : ''
+                        }`}
+                        onClick={() => openFromRail('changes')}
+                      >
+                        <IconGitCompare size={12} stroke={1.8} />
+                        {changes.files.length}
+                        {changeStat.add > 0 && <span className="stat-add">+{changeStat.add}</span>}
+                        {changeStat.del > 0 && <span className="stat-del">−{changeStat.del}</span>}
+                      </button>
+                    )}
                     {usage[panel.id]?.used > 0 && <ContextMeter usage={usage[panel.id]} />}
                     {'action' in spec && spec.action && (
                       <button
@@ -1469,6 +1566,7 @@ export default function App() {
                     movingProject={moving}
                     worktrees={worktrees}
                     changes={changes}
+                    merge={merge}
                     // Picking a project or a branch is never just a selection:
                     // it restores everything that place was left showing.
                     onEnterProject={enterProject}
@@ -1510,22 +1608,27 @@ export default function App() {
                     find={i === lane.focus && finding !== null ? finding : undefined}
                     firstPrompt={panel.firstPrompt}
                     firstChoice={panel.firstChoice}
+                    firstAttached={panel.firstAttached}
                     // Where it lands is the lane's business, not the opener's:
                     // every panel has an order, so nothing needs to say "after
                     // me".
                     onOpen={(child) =>
                       setLane((l) =>
-                        open(
-                          l,
-                          mkPanel(
+                        open(l, {
+                          ...mkPanel(
                             child.kind,
                             child.sub,
                             child.session,
                             child.firstPrompt,
                             child.firstChoice,
                             child.root
-                          )
-                        )
+                          ),
+                          // Set beside mkPanel rather than through it: only a
+                          // chat started from the launcher has attachments, and
+                          // every other caller would have to pass undefined
+                          // past five arguments to skip it.
+                          firstAttached: child.firstAttached
+                        })
                       )
                     }
                   />

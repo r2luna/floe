@@ -80,7 +80,12 @@ export const COMMAND_IDS: string[] = [
   'session.delete',
   'session.deleteOthers',
   'session.deleteAll',
-  'worktree.new'
+  'worktree.new',
+  'worktree.merge',
+  'merge.confirm',
+  'merge.review',
+  'merge.stash',
+  'merge.cancel'
 ]
 
 export const COMMAND_ID_SET = new Set(COMMAND_IDS)

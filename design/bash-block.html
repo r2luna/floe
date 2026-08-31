@@ -81,9 +81,6 @@
   /* --- o bloco ------------------------------------------------------------- */
   .blk {
     margin: 8px 0;
-    border: 1px solid var(--line-soft);
-    border-radius: var(--radius);
-    overflow: hidden;
   }
   .blk-bar {
     display: flex;
@@ -103,7 +100,7 @@
     color: var(--faint);
   }
   .blk-body {
-    padding: 5px 10px 6px;
+    padding: 0;
   }
 
   /* Uma linha de comando: chevron, comando, e — aberta — as ações. */
@@ -134,11 +131,11 @@
     text-underline-offset: 3px;
   }
   .chev {
-    width: 14px;
-    height: 14px;
-    margin-top: 3px;
-    color: var(--faint);
-    opacity: 0.5;
+    width: 12px;
+    height: 12px;
+    margin-top: 4px;
+    color: #6f7bd0;
+    opacity: 0.75;
     transition: transform 0.12s ease;
   }
   .cmd[data-open] .chev {
@@ -164,9 +161,7 @@
   .cmd[data-fit] {
     cursor: default;
   }
-  .cmd[data-fit] .chev {
-    visibility: hidden;
-  }
+
 
   /* As ações: sem caixa, sem rótulo por padrão. Três estilos para comparar —
      o switch na barra do topo troca entre eles. */
@@ -304,7 +299,7 @@
     ]
 
     const ICON = {
-      chevron: `<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
+      chevron: `<svg class="chev" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M9 6l6 6-6 6z"/></svg>`,
       copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>`,
       play: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16l13-8z"/></svg>`
     }

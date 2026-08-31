@@ -1,4 +1,5 @@
 import {
+  IconCaretRightFilled,
   IconCheck,
   IconChevronDown,
   IconChevronRight,
@@ -11,6 +12,7 @@ import {
   IconFileText,
   IconGitBranch,
   IconGitCompare,
+  IconGitMerge,
   IconMessage,
   IconNotes,
   IconPencil,
@@ -77,6 +79,9 @@ import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { MessageBody, RunInTerminal } from './MessageBody'
+import { MergePanel } from './MergePanel'
+import { Lightbox } from './Lightbox'
+import type { Merge } from './useMerge'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
   PENGUIN_COLORS,
@@ -84,7 +89,7 @@ import {
   type PenguinColorId,
   type PenguinHeadId
 } from '../../shared/types'
-import type { ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
+import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
 import type { Skill } from '../../main/config/skills'
 
 /**
@@ -146,6 +151,10 @@ export const KINDS = {
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
   changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
+  // The guided merge's checklist. Beside `changes`, and deliberately narrow for
+  // the same reason: the review checkpoint sends you to the diff, and both have
+  // to be readable at once.
+  merge: { icon: IconGitMerge, title: 'merge', width: 340, min: 260, order: 41, needsProject: true },
   // The worktree's tree. Same shape as `changes`: a narrow list whose rows open
   // something wider beside it, so it spends as little width as it can.
   files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsProject: true },
@@ -265,6 +274,8 @@ export type OpenFn = (child: {
   firstPrompt?: string
   /** The model that first message was addressed to. */
   firstChoice?: ModelChoice
+  /** What was dropped or pasted into that first message. */
+  firstAttached?: Attached
 }) => void
 
 const HOME = '~'
@@ -278,6 +289,7 @@ export function PanelBody({
   movingProject,
   worktrees,
   changes,
+  merge,
   onEnterProject,
   onEnterWorktree,
   cwd,
@@ -287,6 +299,7 @@ export function PanelBody({
   find,
   firstPrompt,
   firstChoice,
+  firstAttached,
   onPatch,
   onUsage,
   menuItems,
@@ -303,6 +316,8 @@ export function PanelBody({
   movingProject?: { path: string; group: string } | null
   worktrees: Worktrees
   changes: Changes
+  /** The guided merge in flight, for the merge panel. See useMerge. */
+  merge: Merge
   /**
    * Go to a project, or to a worktree, restoring what it was left showing —
    * App.enterProject / App.enterWorktree. A plain `select` would move the
@@ -355,6 +370,8 @@ export function PanelBody({
   firstPrompt?: string
   /** The model that opening message was addressed to. */
   firstChoice?: ModelChoice
+  /** What was attached to that opening message. */
+  firstAttached?: Attached
   onOpen: OpenFn
 }): ReactNode {
   // Every panel with rows gets the query: the find bar is one feature, so it
@@ -398,11 +415,15 @@ export function PanelBody({
         menuItems={menuItems}
         firstPrompt={firstPrompt}
         firstChoice={firstChoice}
+        firstAttached={firstAttached}
         onUsage={onUsage}
         onOpen={onOpen}
       />
     )
   if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
+  // The checklist draws itself from the flow and dispatches command ids for
+  // everything it offers — the chips and the keys are the same commands.
+  if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} find={find} />
   if (kind === 'plans')
     return (
@@ -575,7 +596,7 @@ function Launcher({
   // second kind of conversation — and the record is created HERE, on send,
   // rather than when the launcher opened, so an abandoned launcher leaves
   // nothing behind.
-  const start = (choice: ModelChoice) => {
+  const start = (choice: ModelChoice, attached?: Attached) => {
     // Two forms of the same message: what was typed names files the short way,
     // what is sent names them the way the agent can open. The title stays the
     // typed one — a session called `/Users/…/skills/example.md:7-23` reads as
@@ -596,7 +617,8 @@ function Launcher({
           sub: typed.slice(0, 40),
           session: { id, worktreePath: cwd },
           firstPrompt: prompt,
-          firstChoice: choice
+          firstChoice: choice,
+          firstAttached: attached
         })
       })
       .catch(() => {
@@ -841,6 +863,7 @@ function ChatPanel({
   menuItems,
   firstPrompt,
   firstChoice,
+  firstAttached,
   onUsage,
   onOpen
 }: {
@@ -848,6 +871,7 @@ function ChatPanel({
   menuItems?: (trigger: Trigger) => PaletteItem[]
   firstPrompt?: string
   firstChoice?: ModelChoice
+  firstAttached?: Attached
   /**
    * How full this chat's context is. Reported upward because the gauge lives in
    * the panel header, which the lane draws — the chat is the only one that
@@ -939,8 +963,8 @@ function ChatPanel({
     if (!firstPrompt || sentFirst.current || !session) return
     sentFirst.current = true
     repin()
-    send(firstPrompt, firstChoice)
-  }, [firstPrompt, firstChoice, session, send])
+    send(firstPrompt, firstChoice, firstAttached?.images, firstAttached?.files)
+  }, [firstPrompt, firstChoice, firstAttached, session, send])
 
   // Follow the stream, but only while you are already at the bottom. Scrolling
   // up to re-read something and being yanked back down by the next delta is the
@@ -1107,11 +1131,11 @@ function ChatPanel({
       <Composer
         value={text}
         onChange={setText}
-        onSend={(choice) => {
+        onSend={(choice, attached) => {
           repin()
           // Busy or idle, ⏎ means "this is what I want to say". The hook decides
           // whether that starts a turn now or waits for the current one to end.
-          send(expand(text), choice, undefined, undefined, linking)
+          send(expand(text), choice, attached?.images, attached?.files, linking)
           setText('')
           setLinking(false)
         }}
@@ -1493,6 +1517,20 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
       continue
     }
 
+    // An image in the transcript is shown, not named: it is either what was
+    // attached to a message or what a tool read, and the point of both is to
+    // look at it.
+    if (item.role === 'image' && item.data) {
+      out.push(
+        <div className="irc-body irc-act" key={i}>
+          {/* A button, which is what makes it a cursor row: j/k walks onto the
+              image and Enter opens it full size, same as a shell row. */}
+          <Zoomable src={`data:${item.mediaType ?? 'image/png'};base64,${item.data}`} />
+        </div>
+      )
+      continue
+    }
+
     // Other tool output, images and artifacts are the speaker working, not
     // someone else talking: they never break the run and never take a header.
     if (item.role !== 'user' && item.role !== 'assistant') {
@@ -1516,6 +1554,27 @@ const Log = memo(function Log({ items }: { items: TranscriptItem[] }) {
   return <>{out}</>
 })
 
+/**
+ * An image you can open. Small in the flow of the conversation, full size when
+ * you ask — a screenshot at 260px is there to tell you a screenshot happened,
+ * not to be read.
+ */
+function Zoomable({ src, alt, className }: { src: string; alt?: string; className?: string }): ReactNode {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button
+        className={className ?? 'irc-image'}
+        title="Open full size"
+        onClick={() => setOpen(true)}
+      >
+        <img src={src} alt={alt ?? ''} />
+      </button>
+      {open && <Lightbox src={src} alt={alt} onClose={() => setOpen(false)} />}
+    </>
+  )
+}
+
 /** A shell call, which is the only tool whose argument is worth showing whole. */
 const isBash = (item: TranscriptItem): boolean =>
   item.role === 'tool' && item.name?.toLowerCase() === 'bash' && !!item.summary
@@ -1523,9 +1582,9 @@ const isBash = (item: TranscriptItem): boolean =>
 /**
  * A run of shell commands, as rows.
  *
- * One frame around the whole run, and inside it one row per command — the row
- * is the unit you act on (open it, copy it, run it), and the frame is what says
- * these belong to the same piece of work.
+ * No frame: the rows sit in the transcript like everything else, and the prompt
+ * marker at the head of each one is what says "this is a command" — a box would
+ * be a second way of saying it, and a heavier one.
  */
 function BashBlock({ commands }: { commands: string[] }) {
   return (
@@ -1597,7 +1656,9 @@ function BashRow({ command }: { command: string }) {
         setOpen((o) => !o)
       }}
     >
-      <IconChevronRight size={14} stroke={1.8} className="bash-chev" />
+      {/* Always drawn, expandable or not: it is the prompt this command ran
+          at, and a row that lost its marker would stop reading as a command. */}
+      <IconCaretRightFilled size={11} className="bash-mark" />
       <span className="bash-code" ref={code}>
         {highlightShell(command).map((t, i) =>
           t.cls ? (

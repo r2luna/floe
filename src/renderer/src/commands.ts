@@ -91,6 +91,29 @@ export interface CommandContext {
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
+  /**
+   * The guided merge, as the registry sees it.
+   *
+   * State plus the four answers the checklist offers, so the chips in the panel
+   * and the keys over it run the same commands — which is the only reason the
+   * panel can say "⏎ approve" and be telling the truth.
+   */
+  merge: {
+    /** A flow exists for the open project. */
+    active: boolean
+    /** It stopped on a failed step, so ⏎ means retry. */
+    failed: boolean
+    /** It is at the review checkpoint, so ⏎ means approve and commit. */
+    awaitingReview: boolean
+    /** The failure is a dirty tree, which stashing answers. */
+    canStash: boolean
+    /** Merge the worktree the app is in, or show the flow already running. */
+    start: () => void
+    approve: () => void
+    retry: () => void
+    stashRetry: () => void
+    cancel: () => void
+  }
   /** Show the new-worktree flow. */
   newWorktree: () => void
   /** Forget sessions, after asking: the open one, the rest of the worktree's, or all of them. */

@@ -1,3 +1,5 @@
+import type { FileAttachment, ImageAttachment } from '../../shared/types'
+
 // The type-while-busy queue.
 //
 // The model is never asked to pull from a queue: this is a client-side buffer
@@ -9,6 +11,9 @@
 export interface Queued {
   id: string
   text: string
+  /** What was dropped or pasted with it — it waits in the queue too. */
+  images?: ImageAttachment[]
+  files?: FileAttachment[]
   /**
    * Merge with the item above instead of taking its own turn. A run of linked
    * items becomes one user message — for when three lines are really one
@@ -25,15 +30,17 @@ export interface Queued {
  * on the FIRST item is ignored — there is nothing above it in this batch to
  * link to.
  */
-export function takeBatch(queued: Queued[]): { text: string; rest: Queued[] } | null {
+export function takeBatch(
+  queued: Queued[]
+): { text: string; images: ImageAttachment[]; files: FileAttachment[]; rest: Queued[] } | null {
   if (!queued.length) return null
   let take = 1
   while (take < queued.length && queued[take].linked) take++
+  const batch = queued.slice(0, take)
   return {
-    text: queued
-      .slice(0, take)
-      .map((q) => q.text)
-      .join('\n\n'),
+    text: batch.map((q) => q.text).join('\n\n'),
+    images: batch.flatMap((q) => q.images ?? []),
+    files: batch.flatMap((q) => q.files ?? []),
     rest: queued.slice(take)
   }
 }

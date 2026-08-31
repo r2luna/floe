@@ -74,8 +74,17 @@ test('focus falls back to the session when the focused panel is gone', () => {
 // The opening message of a brand-new chat: replayed on restore it would send
 // the message again, every launch.
 test('the first prompt is never written down', () => {
-  const saved = persistable([panel('chat', 30, { firstPrompt: 'hello', sub: 'x' })])
+  const saved = persistable([
+    panel('chat', 30, {
+      firstPrompt: 'hello',
+      firstAttached: { images: [{ id: 'a1', mediaType: 'image/png', data: 'x' }], files: [] },
+      sub: 'x'
+    })
+  ])
   assert.equal('firstPrompt' in saved[0], false)
+  // Its attachments go with it — resent on every launch, and base64 in
+  // localStorage besides.
+  assert.equal('firstAttached' in saved[0], false)
   assert.equal(saved[0].sub, 'x')
 })
 

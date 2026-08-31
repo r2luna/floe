@@ -334,6 +334,18 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // for that would leave your own message missing for as long as the model
       // takes to answer.
       dispatch({ type: 'push', item: { role: 'user', text: prompt, at: Date.now() } })
+      // Show what rode along too — an image you attached is part of what you
+      // said, and the JSONL echo of it only lands when the turn is over.
+      for (const img of images ?? [])
+        dispatch({
+          type: 'push',
+          item: { role: 'image', mediaType: img.mediaType, data: img.data, at: Date.now() }
+        })
+      for (const f of files ?? [])
+        dispatch({
+          type: 'push',
+          item: { role: 'tool', name: 'attached', summary: f.name, at: Date.now() }
+        })
       setRunning(true)
       // A steer (send while running) joins the turn in flight, so the clock
       // keeps counting from when that turn began.
@@ -461,7 +473,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       if (running && provider !== 'claude') {
         setQueued((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), text: prompt, linked: !!linked }
+          { id: crypto.randomUUID(), text: prompt, images, files, linked: !!linked }
         ])
         return
       }
@@ -496,7 +508,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     if (!batch) return
     setQueued(batch.rest)
     draining.current = true
-    deliver(batch.text, choiceRef.current)
+    deliver(batch.text, choiceRef.current, batch.images, batch.files)
   }, [running, queued, deliver])
 
   const stop = useCallback(() => {

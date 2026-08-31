@@ -97,10 +97,11 @@ export function withScoped(lane: Lane, scoped: Panel[]): Lane {
  *
  * `firstPrompt` is the one field that must never survive a reload: it is the
  * opening message a brand-new chat sends when it mounts, so persisting it would
- * re-send that message every time the app started.
+ * re-send that message every time the app started. Its attachments go with it —
+ * and base64 images have no business in localStorage anyway.
  */
 export function persistable(panels: Panel[]): Panel[] {
-  return panels.map(({ firstPrompt: _p, firstChoice: _c, ...rest }) => rest)
+  return panels.map(({ firstPrompt: _p, firstChoice: _c, firstAttached: _a, ...rest }) => rest)
 }
 
 /**

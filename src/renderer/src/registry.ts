@@ -954,6 +954,71 @@ export const REGISTRY: Map<string, Command> = new Map(
         keys: '⌘N',
         run: (c) => c.newWorktree()
       },
+      // --- guided merge ---------------------------------------------------
+      // Everything the checklist offers is a command: its chips dispatch these
+      // ids, and so do ⏎ / r / s / esc over the panel.
+      {
+        id: 'worktree.merge',
+        title: 'Merge worktree into its base',
+        group: 'Worktrees',
+        keys: '⌘K M',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to merge — open one first',
+        run: (c) => c.merge.start()
+      },
+      {
+        id: 'merge.confirm',
+        // One key for the one thing the checklist is waiting for: it stops
+        // either at the review checkpoint or on a failed step, never both.
+        title: 'Merge: approve, or retry the failed step',
+        group: 'Worktrees',
+        keys: '⏎',
+        enabled: (c) => c.merge.awaitingReview || c.merge.failed,
+        unavailable: () => 'the merge is not waiting on you',
+        run: (c) => (c.merge.failed ? c.merge.retry() : c.merge.approve())
+      },
+      {
+        id: 'merge.review',
+        title: 'Merge: review the changes',
+        group: 'Worktrees',
+        keys: 'r',
+        // The flow stays paused at the checkpoint — this only puts the diff on
+        // screen, so approving is still a deliberate second key.
+        enabled: (c) => c.merge.awaitingReview && c.canOpen('changes'),
+        unavailable: (c) =>
+          c.merge.awaitingReview ? c.whyCannotOpen('changes') : 'the merge is not waiting on a review',
+        run: (c) => c.setLane((l) => toggleKind(l, 'changes', () => c.makePanel('changes')))
+      },
+      {
+        id: 'merge.stash',
+        title: 'Merge: stash the uncommitted changes and retry',
+        group: 'Worktrees',
+        keys: 's',
+        enabled: (c) => c.merge.canStash,
+        unavailable: () => 'nothing to stash — the merge is not blocked on a dirty tree',
+        run: (c) => c.merge.stashRetry()
+      },
+      {
+        id: 'merge.cancel',
+        title: 'Merge: cancel',
+        group: 'Worktrees',
+        keys: 'esc',
+        enabled: (c) => c.merge.active,
+        unavailable: () => 'no merge running',
+        // What git has already done stays done — this drops the checklist, it
+        // does not roll the merge back.
+        //
+        // The panel goes with it: a dismissed merge leaves an empty checklist
+        // holding the focus, which is exactly the stranded focus the
+        // keyboard-first rule is about.
+        run: (c) => {
+          c.merge.cancel()
+          c.setLane((l) => {
+            const at = l.panels.findIndex((p) => p.kind === 'merge')
+            return at === -1 ? l : close(l, at)
+          })
+        }
+      },
       {
         id: 'palette.chord',
         title: 'Command palette',
