@@ -128,6 +128,26 @@ function skillRow(c: CommandContext): HTMLElement | null {
   return row?.dataset.skill ? row : null
 }
 
+/**
+ * The command row the cursor is on, as its id.
+ *
+ * Read off the row's own `data-command` rather than by counting rows, for the
+ * same reason `fileTarget` does: the row already knows which command it is, and
+ * an index into a list that grows a header the day someone adds one is exactly
+ * the arithmetic that starts the wrong process.
+ */
+function commandTarget(c: CommandContext): string | undefined {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'commands') return undefined
+  return fileRow(c)?.dataset.command
+}
+
+/** Whether the command under the cursor has a live process. */
+function commandLive(c: CommandContext): boolean {
+  const id = commandTarget(c)
+  const state = id ? c.commands.runOf(id)?.state : undefined
+  return state === 'running' || state === 'starting'
+}
+
 /** Join a directory and a name, where the directory may be the root (''). */
 function join(dir: string, name: string): string {
   const clean = name.replace(/^\/+|\/+$/g, '')
@@ -731,6 +751,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'commands.open',
+        title: 'Commands…',
+        group: 'App',
+        keys: '⌘K C',
+        enabled: (c) => c.canOpen('commands'),
+        unavailable: (c) => c.whyCannotOpen('commands'),
+        run: (c) => c.setLane((l) => toggleKind(l, 'commands', () => c.makePanel('commands')))
+      },
+      {
         // The panel, not a palette: skills are things you keep, so the list has
         // to be somewhere you can act on it, not somewhere that closes the
         // moment you pick a row.
@@ -1017,6 +1046,189 @@ export const REGISTRY: Map<string, Command> = new Map(
           c.setLane((l) => {
             const at = l.panels.findIndex((p) => p.kind === 'merge')
             return at === -1 ? l : close(l, at)
+          })
+        }
+      },
+      {
+        id: 'command.run',
+        title: 'Run command',
+        group: 'Commands',
+        keys: 'r',
+        enabled: (c) => !!commandTarget(c),
+        unavailable: () => 'no command under the cursor',
+        // One key for both, because the question you are answering is "run
+        // this" either way — a running command restarts, a stopped one starts.
+        run: (c) => {
+          const id = commandTarget(c)
+          if (!id) return
+          if (commandLive(c)) c.commands.restart(id)
+          else c.commands.start(id)
+        }
+      },
+      {
+        id: 'command.stop',
+        title: 'Stop command',
+        group: 'Commands',
+        keys: 's',
+        enabled: (c) => commandLive(c),
+        unavailable: (c) => (commandTarget(c) ? 'that command is not running' : 'no command under the cursor'),
+        run: (c) => {
+          const id = commandTarget(c)
+          if (id) c.commands.stop(id)
+        }
+      },
+      {
+        id: 'command.restart',
+        title: 'Restart command',
+        group: 'Commands',
+        keys: '⇧R',
+        enabled: (c) => !!commandTarget(c),
+        unavailable: () => 'no command under the cursor',
+        run: (c) => {
+          const id = commandTarget(c)
+          if (id) c.commands.restart(id)
+        }
+      },
+      {
+        id: 'command.logs',
+        title: 'Show command output',
+        group: 'Commands',
+        keys: '⏎',
+        enabled: (c) => !!commandTarget(c) && !!c.worktree,
+        unavailable: () => 'no command under the cursor',
+        run: (c) => {
+          const id = commandTarget(c)
+          if (!id || !c.worktree) return
+          c.setLane((l) => open(l, c.makePanel('cmdlog', `${c.worktree?.path}#${id}`)))
+        }
+      },
+      {
+        id: 'command.runAll',
+        title: 'Run every stopped command',
+        group: 'Commands',
+        enabled: (c) => c.commands.list.length > 0,
+        unavailable: () => 'this worktree has no commands',
+        run: (c) => c.commands.startAll()
+      },
+      {
+        id: 'command.stopAll',
+        title: 'Stop every running command',
+        group: 'Commands',
+        enabled: (c) => c.commands.list.some((x) => c.commands.runOf(x.id)?.state === 'running'),
+        unavailable: () => 'nothing running in this worktree',
+        run: (c) => {
+          for (const x of c.commands.list) c.commands.stop(x.id)
+        }
+      },
+      {
+        id: 'command.add',
+        title: 'Add command…',
+        group: 'Commands',
+        keys: 'a',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree open',
+        // Two prompts rather than a form: the palette is what the app already
+        // uses to ask for one line, and a name and a command line are two.
+        run: (c) => {
+          c.askText({
+            placeholder: 'Name…',
+            verb: 'Call it',
+            onDone: (name) => {
+              if (!name.trim()) return
+              c.askText({
+                placeholder: 'Command to run…',
+                verb: 'Run',
+                onDone: (command) => {
+                  if (!command.trim()) return
+                  void c.commands.add(name, command)
+                }
+              })
+            }
+          })
+        }
+      },
+      {
+        id: 'command.edit',
+        title: 'Edit command…',
+        group: 'Commands',
+        keys: 'e',
+        enabled: (c) => !!commandTarget(c),
+        unavailable: () => 'no command under the cursor',
+        run: (c) => {
+          const id = commandTarget(c)
+          const cmd = c.commands.list.find((x) => x.id === id)
+          if (!id || !cmd) return
+          c.askText({
+            placeholder: 'Command to run…',
+            value: cmd.command,
+            verb: 'Run',
+            onDone: (command) => {
+              if (command.trim()) void c.commands.update(id, { command })
+            }
+          })
+        }
+      },
+      {
+        id: 'command.rename',
+        title: 'Rename command…',
+        group: 'Commands',
+        // Deliberately refused while it runs: the id is the slug of the name
+        // (see commandStore), so renaming re-keys the command and the output
+        // panel loses the process it was showing — which keeps running, and
+        // which you can then no longer stop by name.
+        enabled: (c) => !!commandTarget(c) && !commandLive(c),
+        unavailable: (c) =>
+          commandLive(c) ? 'stop it first — renaming a running command orphans its output' : 'no command under the cursor',
+        run: (c) => {
+          const id = commandTarget(c)
+          const cmd = c.commands.list.find((x) => x.id === id)
+          if (!id || !cmd) return
+          c.askText({
+            placeholder: 'Name…',
+            value: cmd.name,
+            verb: 'Call it',
+            onDone: (name) => {
+              if (name.trim()) void c.commands.update(id, { name })
+            }
+          })
+        }
+      },
+      {
+        id: 'command.scope',
+        title: 'Move command between project and this worktree',
+        group: 'Commands',
+        enabled: (c) => !!commandTarget(c),
+        unavailable: () => 'no command under the cursor',
+        // A toggle, not two commands: "shared by the project" and "only here"
+        // are the two halves of one question.
+        run: (c) => {
+          const id = commandTarget(c)
+          const cmd = c.commands.list.find((x) => x.id === id)
+          if (!id || !cmd) return
+          void c.commands.setScope(id, cmd.scope === 'project' ? 'local' : 'project')
+        }
+      },
+      {
+        id: 'command.delete',
+        title: 'Delete command…',
+        group: 'Commands',
+        keys: 'd',
+        enabled: (c) => !!commandTarget(c),
+        unavailable: () => 'no command under the cursor',
+        // Stopped first: deleting the row while the process runs would leave it
+        // running with nothing left in the UI that can name it.
+        run: (c) => {
+          const id = commandTarget(c)
+          const cmd = c.commands.list.find((x) => x.id === id)
+          if (!id || !cmd) return
+          c.askText({
+            placeholder: `Delete "${cmd.name}"? Type y to confirm`,
+            verb: 'Delete',
+            onDone: (answer) => {
+              if (answer.trim().toLowerCase() !== 'y') return
+              c.commands.stop(id)
+              void c.commands.remove(id)
+            }
           })
         }
       },

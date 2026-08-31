@@ -10,6 +10,7 @@
 // stays a plain data structure: listable, searchable, and callable from outside.
 
 import type { Lane, Panel } from './lane.ts'
+import type { Commands } from './useCommands.ts'
 
 export interface CommandContext {
   lane: Lane
@@ -91,6 +92,14 @@ export interface CommandContext {
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
+  /**
+   * The worktree's registered processes.
+   *
+   * Passed whole rather than as eight callbacks: start, stop and restart are
+   * one object's methods, and the row the cursor sits on is read from the DOM
+   * (see commandTarget) exactly the way the file commands read theirs.
+   */
+  commands: Commands
   /**
    * The guided merge, as the registry sees it.
    *

@@ -57,6 +57,8 @@ import { renderMarkdown, type MdLine } from './markdown'
 import { highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
 import { sendToTerminal } from './terminalBus'
+import { CommandsPane } from './CommandsPane'
+import type { Commands } from './useCommands'
 import { useSessionActivity } from './useRunning'
 import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
 import type { Projects } from './useProjects'
@@ -103,6 +105,9 @@ import type { Skill } from '../../main/config/skills'
 // its own <Suspense>, so the chunk loads on first terminal / first message.
 const TerminalPanel = lazy(async () => ({ default: (await import('./Terminal')).TerminalPanel }))
 const MessageBody = lazy(async () => ({ default: (await import('./MessageBody')).MessageBody }))
+// Lazy for the same reason the terminal is: xterm is a large chunk, and it
+// should not load for a session that never opens a command's output.
+const CommandLog = lazy(async () => ({ default: (await import('./CommandLog')).CommandLog }))
 
 /**
  * Every panel kind the lane can hold. The rail on the right is generated from
@@ -191,7 +196,34 @@ export const KINDS = {
     // third way in, not a third create flow.
     action: { icon: IconPlus, title: 'New skill…', command: 'skill.new' }
   },
+  // The worktree's processes. A narrow list whose rows open something wide, so
+  // it sits with `files` and `plans` and for the same reason: left of the thing
+  // it opens, or the log lands behind the list.
+  commands: {
+    icon: IconPlayerPlay,
+    title: 'commands',
+    width: 300,
+    min: 240,
+    order: 43,
+    needsProject: true,
+    // The same command `a` runs — the header button is a second way in, not a
+    // second add flow.
+    action: { icon: IconPlus, title: 'Add command…', command: 'command.add' }
+  },
   diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsProject: true },
+  // A command's output. Shares the diff's slot: both are "the thing the list to
+  // the left just opened", and two of them side by side would be two logs from
+  // one list. `sub` is the runner key, `<worktreePath>#<id>`.
+  cmdlog: {
+    icon: IconPlayerPlay,
+    title: 'output',
+    width: 560,
+    grow: true,
+    min: 360,
+    order: 50,
+    slot: 'diff',
+    needsProject: true
+  },
   // What a file row opens: the file as it is on disk, not as a patch. Shares
   // the diff's slot — both are "the file you just picked", and two of them side
   // by side would be the same file twice.
@@ -268,7 +300,7 @@ export function needsProject(kind: string): boolean {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog']
 
 export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
   (k) => !CONTEXTUAL.includes(k)
@@ -320,6 +352,7 @@ export function PanelBody({
   onEditorExit,
   onCommand,
   onEditSkill,
+  commands,
   onOpen
 }: {
   kind: PanelKind
@@ -384,6 +417,8 @@ export function PanelBody({
   onCommand?: (id: string) => void
   /** Open a skill's file in your editor — see editSkill in App. */
   onEditSkill?: (dir: string, rel: string) => void
+  /** The worktree's registered processes and their state. See useCommands. */
+  commands?: Commands
   /** A brand-new chat's opening message. */
   firstPrompt?: string
   /** The model that opening message was addressed to. */
@@ -484,6 +519,18 @@ export function PanelBody({
   }
   if (kind === 'diff')
     return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} find={find} />
+  if (kind === 'commands')
+    return commands ? (
+      <CommandsPane commands={commands} worktreePath={cwd} onOpen={onOpen} onCommand={onCommand} />
+    ) : null
+  // Keyed on the runner key so picking another row builds a fresh terminal
+  // instead of writing a second command's output into the first one's buffer.
+  if (kind === 'cmdlog')
+    return (
+      <Suspense fallback={null}>
+        <CommandLog key={sub ?? ''} cmdKey={sub ?? ''} />
+      </Suspense>
+    )
   // A real shell, not a mock: the PTY machinery in src/main survived the
   // rewrite untouched, so this panel is wired for real while the rest is demo.
   // `sub` carries the directory the shell opens in — the worktree you are in,
@@ -2577,6 +2624,8 @@ function SkillsList({
   onCommand?: (id: string) => void
   /** Open a skill's file in your editor — see editSkill in App. */
   onEditSkill?: (dir: string, rel: string) => void
+  /** The worktree's registered processes and their state. See useCommands. */
+  commands?: Commands
   find?: string
 }) {
   const skills = useSkills(cwd)

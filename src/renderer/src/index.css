@@ -2239,6 +2239,167 @@ button {
   gap: 9px;
 }
 
+/* --- commands ------------------------------------------------------------ */
+
+/* A command row is two lines, not one: the name and its state read at a glance,
+   the command line underneath is what you check when the state surprises you.
+   Everything else in the app's lists is one line, so this is the exception the
+   content earns — a process has a state AND an identity, and collapsing them
+   into one row meant truncating whichever mattered. */
+.cmd-row {
+  display: block;
+  padding: 5px 8px;
+}
+
+.cmd-l1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Indented past the dot above it, so the command hangs under the name rather
+   than under the status light. */
+.cmd-l2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 13px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cmd-cmd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Which scope the command came from. An outline chip, lowercase, in the faint
+   tone: it labels the row, it does not compete with the name. Local commands
+   carry no badge — "only here" is the exception worth reading, and marking both
+   would put a chip on every row and none of them would register. */
+.cmd-scope {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.cmd-state {
+  margin-left: auto;
+  flex: none;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cmd-state[data-run] {
+  color: var(--live);
+}
+
+/* Memory while it runs, how it ended once it has. Pushed right, and dimmer than
+   the command beside it: it is the number you glance at, not the one you read. */
+.cmd-note {
+  margin-left: auto;
+  flex: none;
+  color: var(--time-dim);
+}
+
+/* A non-zero exit, and the crash-loop notice. The muted danger tone from the
+   mode chips — coloured text, no fill, so a failed row does not become a red
+   block in a list of grey ones. */
+.cmd-note[data-err="true"] {
+  color: #c49495;
+}
+
+:root[data-theme="light"] .cmd-note[data-err="true"] {
+  color: #b1454a;
+}
+
+.dot-err {
+  background: #c49495;
+  border-color: #c49495;
+}
+
+:root[data-theme="light"] .dot-err {
+  background: #b1454a;
+  border-color: #b1454a;
+}
+
+/* The per-row ▶/■/↻. Spans with a button role, never buttons: a real button
+   would join the cursor's row list (see rowsOf in App) and the cursor would
+   stop three times per command. They stay out of the flow until the pointer is
+   over the row — the keyboard has its own keys for all three, so these are the
+   mouse's copy of an existing path, not a second one. */
+.cmd-acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: 6px;
+  opacity: 0;
+}
+
+.cmd-row:hover .cmd-acts,
+.cmd-row:focus .cmd-acts,
+.cmd-row:focus-visible .cmd-acts {
+  opacity: 1;
+}
+
+.cmd-act {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  padding: 1px 3px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.cmd-act:hover {
+  color: var(--text-strong);
+  border-color: var(--dimmer);
+}
+
+/* "Run all" in the count header. Same outline chip as everything else that can
+   be pressed, and it disappears once nothing is left to start. */
+.cmd-runall {
+  margin-left: auto;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.cmd-runall:hover {
+  color: var(--text-strong);
+  border-color: var(--dimmer);
+}
+
+/* The output panel's xterm host. Same negative margin as the terminal panel: it
+   cancels the panel body's padding so the log fills the panel, and the fill
+   follows focus like every other body does. */
+.cmdlog {
+  height: 100%;
+  padding: 4px 2px 4px 8px;
+  margin: -8px;
+  background: var(--panel);
+}
+
+.panel[data-focused] .cmdlog {
+  background: var(--panel-focused);
+}
+
+.cmdlog-host {
+  height: 100%;
+}
+
+.cmdlog .xterm-viewport {
+  background: transparent !important;
+}
+
 .change-status {
   flex: none;
   width: 11px;
@@ -4737,4 +4898,161 @@ kbd {
 :root[data-theme='light'] .file-ref {
   border-color: var(--edge);
   background: var(--well);
+}
+
+/* --- commands ------------------------------------------------------------ */
+
+/* A command row is two lines, not one: the name and its state read as a unit,
+   and the command line under them is what you scan when two rows share a name.
+   Otherwise it is an ordinary `.row` — the lane's cursor walks it, and the same
+   focus ring lands on it. */
+.cmd-row {
+  display: block;
+  padding-block: 5px;
+}
+
+.cmd-l1 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.cmd-l2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* Indented to clear the dot, so the command line starts under the name
+     rather than under the status mark. */
+  padding-left: 13px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.cmd-cmd {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Outline chip, neutral border: scope reports a fact, it is not a button. */
+.cmd-scope {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.cmd-state {
+  margin-left: auto;
+  flex: none;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* The one warm-neutral mark on the row. Green, like the live dot beside it:
+   the two say the same thing and must not disagree in colour. */
+.cmd-state[data-run] {
+  color: var(--live);
+}
+
+.cmd-note {
+  margin-left: auto;
+  flex: none;
+  color: var(--time-dim);
+}
+
+/* A non-zero exit and an open breaker are the two things worth finding without
+   looking — the same red the deletions stat uses, so the app has one "this went
+   wrong" colour rather than two. */
+.cmd-note[data-err='true'] {
+  color: #c07a72;
+}
+
+/* A stopped command's dot: hollow like any idle row, but ringed in the error
+   colour when the last run failed. */
+.dot-err {
+  border-color: #c07a72;
+}
+
+/* Spans with a button role, not buttons: a real button would join the cursor's
+   row list and every command would cost three extra stops to walk past. Shown
+   on hover and whenever the row has the cursor, so the keyboard route never
+   depends on the pointer being somewhere. */
+.cmd-acts {
+  display: flex;
+  gap: 2px;
+  flex: none;
+  opacity: 0;
+}
+
+.cmd-row:hover .cmd-acts,
+.cmd-row[data-cursor] .cmd-acts,
+.cmd-row:focus .cmd-acts,
+.cmd-row:focus-visible .cmd-acts {
+  opacity: 1;
+}
+
+.cmd-act {
+  display: flex;
+  align-items: center;
+  padding: 1px 4px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.cmd-act:hover {
+  border-color: var(--dimmer);
+  color: var(--text-strong);
+}
+
+/* "Run all" in the count line. Same outline chip as the row actions — it is
+   the same kind of thing, one step up. */
+.cmd-runall {
+  margin-left: auto;
+  padding: 0 6px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.cmd-runall:hover {
+  border-color: var(--dimmer);
+  color: var(--text-strong);
+}
+
+/* The output panel. The wrapper takes the panel body's box; the host inside is
+   what xterm measures, so a fit() never races the panel's own padding. The
+   terminal's background is transparent, so the panel fill shows through. */
+.cmdlog {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.cmdlog-host {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Light theme: the error red and the chip edges both need lifting — the dark
+   values sit too pale on a light fill to read as a warning or as an edge. */
+:root[data-theme='light'] .cmd-note[data-err='true'] {
+  color: #a3453c;
+}
+
+:root[data-theme='light'] .dot-err {
+  border-color: #a3453c;
+}
+
+:root[data-theme='light'] .cmd-act,
+:root[data-theme='light'] .cmd-runall {
+  border-color: var(--edge);
 }
