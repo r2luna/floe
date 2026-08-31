@@ -21,7 +21,7 @@ const PROBE_TIMEOUT_MS = 20_000
 const projectsDir = (): string => join(homedir(), '.claude', 'projects')
 const encode = (p: string): string => p.replace(/[/.]/g, '-')
 
-export function getClaudeInfo(worktreePath: string): Promise<ClaudeInfo> {
+export function getClaudeInfo(worktreePath: string, mcpConfig?: string): Promise<ClaudeInfo> {
   return new Promise((resolve) => {
     const info: ClaudeInfo = { mcpServers: [], skills: [], plugins: [] }
     let sessionId: string | undefined
@@ -38,6 +38,12 @@ export function getClaudeInfo(worktreePath: string): Promise<ClaudeInfo> {
       '--permission-mode',
       'default'
     ]
+    // The same merged config a real session gets (Floe's server + the registry,
+    // mcpServer.ts mcpConfigFor) — passed in by the caller so this module stays
+    // free of the mcpServer graph. Without it /mcp only reports the servers in
+    // Claude's own config, and the MCP panel could not show the connection
+    // state of anything registered in Floe.
+    if (mcpConfig) args.push('--mcp-config', mcpConfig)
 
     let child: ReturnType<typeof spawn>
     try {

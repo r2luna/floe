@@ -1,8 +1,9 @@
 # Floe
 
 An Electron app for managing git worktrees and Claude Code sessions across projects.
-Desktop only — the v1 headless server and in-app MCP control server were removed; both get
-rebuilt from scratch for v2.
+Desktop only — the v1 headless server was removed and gets rebuilt from scratch for v2.
+The in-app MCP control server is back (`src/main/mcpServer.ts`): agents drive Floe over
+`/mcp/<token>` — see [docs/mcp.md](docs/mcp.md).
 
 ## Core principle — keyboard first
 
@@ -17,6 +18,16 @@ Apply this to every feature and change:
 - Prefer flows that don't require pointer precision (no hover-only affordances, no drag-only interactions without a keyboard equivalent).
 
 When in doubt, ask: "could the user do this with the mouse unplugged?" If not, it's not finished.
+
+## Second principle — agent first
+
+Everything the user can do, an agent must be able to do over the MCP server. When you add a
+user-facing command or action, ship its MCP tooling in the same change:
+
+- A renderer/palette command: register it in `renderer/src/commands.ts`'s registry + `src/shared/commandIds.ts` (lockstep enforced by `registry.test.ts`) — `run_command`/`list_commands` then expose it automatically.
+- A main-process action (new IPC handler / service function): add a dedicated tool in `src/main/mcpServer.ts` `registerTools()` and list it in `mcpServer.test.ts`.
+
+Ask: "could an agent do this without the UI?" If not, it's not finished. Details and the tool-writing pattern: [docs/mcp.md](docs/mcp.md).
 
 ## Layout & commands
 

@@ -25,6 +25,7 @@ import type { Command, CommandContext } from './commands.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
 import { startSkillDraft } from './skillDraft.ts'
+import { startMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import type { FileOp } from '../../shared/types.ts'
 
@@ -126,6 +127,13 @@ function skillRow(c: CommandContext): HTMLElement | null {
   if (c.lane.panels[c.lane.focus]?.kind !== 'skills') return null
   const row = fileRow(c)
   return row?.dataset.skill ? row : null
+}
+
+/** The MCP server row under the cursor — same contract as skillRow. */
+function mcpRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'mcp') return null
+  const row = fileRow(c)
+  return row?.dataset.mcp ? row : null
 }
 
 /**
@@ -597,6 +605,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // Manual fallback for the boot-time auto-registration (mcpServer.ts):
+        // needed when Floe came up on a fallback port, or the `claude` CLI
+        // appeared on PATH after launch.
+        id: 'mcp.install',
+        title: 'Install Floe MCP globally',
+        group: 'App',
+        run: (c) => {
+          void window.floe.mcp.installGlobal().then((r) => c.say(r.message))
+        }
+      },
+      {
         id: 'keybindings.reset',
         title: 'Reset keybindings to defaults…',
         group: 'App',
@@ -823,6 +842,89 @@ export const REGISTRY: Map<string, Command> = new Map(
           const root = row?.dataset.skillRoot
           const file = row?.dataset.skillFile
           if (root && file) c.editSkill(root, file)
+        }
+      },
+      {
+        // The panel, not a palette, for the reason skills got one: servers are
+        // things you keep, and the list is where their state (connected /
+        // needs-auth / off) is worth watching.
+        id: 'mcp.open',
+        title: 'MCP servers…',
+        group: 'App',
+        run: (c) => c.setLane((l) => toggleKind(l, 'mcp', () => c.makePanel('mcp')))
+      },
+      {
+        // Opens the panel if it is not up, then asks it for a draft row — the
+        // scope and the name happen in the list, see mcpDraft.ts.
+        id: 'mcp.new',
+        title: 'Add MCP server…',
+        group: 'MCP',
+        keys: 'n',
+        run: (c) => {
+          if (!c.lane.panels.some((p) => p.kind === 'mcp')) {
+            c.setLane((l) => open(l, c.makePanel('mcp')))
+          }
+          startMcpDraft({ kind: 'new' })
+        }
+      },
+      {
+        // The row IS the file entry: editing a server is editing its mcp.toml,
+        // opened in your editor rooted at the config directory it lives in.
+        id: 'mcp.edit',
+        title: 'Edit MCP server in your editor',
+        group: 'MCP',
+        keys: 'e',
+        enabled: (c) => !!mcpRow(c),
+        run: (c) => {
+          const file = mcpRow(c)?.dataset.mcpFile
+          if (!file) return
+          const slash = file.lastIndexOf('/')
+          c.editSkill(file.slice(0, slash), file.slice(slash + 1))
+        }
+      },
+      {
+        id: 'mcp.toggle',
+        title: 'Enable/disable MCP server',
+        group: 'MCP',
+        keys: 't',
+        enabled: (c) => !!mcpRow(c),
+        run: (c) => {
+          const row = mcpRow(c)
+          const name = row?.dataset.mcp
+          if (!name) return
+          const enabled = row?.dataset.mcpEnabled === '1'
+          void window.floe.mcp.servers
+            .update(name, { enabled: !enabled }, c.worktree?.path)
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // `claude mcp login <name>` in a PTY (main/mcpAuth.ts): the consent URL
+        // comes back over mcp:auth:event and the panel opens it in the browser.
+        id: 'mcp.auth',
+        title: 'Authenticate MCP server…',
+        group: 'MCP',
+        keys: 'a',
+        enabled: (c) => !!mcpRow(c),
+        run: (c) => {
+          const name = mcpRow(c)?.dataset.mcp
+          if (!name) return
+          void window.floe.claude.authMcp(c.worktree?.path ?? window.floe.homeDir, name)
+        }
+      },
+      {
+        id: 'mcp.delete',
+        title: 'Delete MCP server…',
+        group: 'MCP',
+        keys: 'd',
+        enabled: (c) => !!mcpRow(c),
+        run: (c) => {
+          const name = mcpRow(c)?.dataset.mcp
+          if (!name) return
+          // Removes the entry from mcp.toml — the server itself is untouched,
+          // but every future session loses it, so it still asks.
+          if (!window.confirm(`Remove "${name}" from Floe's MCP registry?`)) return
+          void window.floe.mcp.servers.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

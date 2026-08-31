@@ -181,6 +181,20 @@ the menu focuses the row it was opened on and dispatches an id.`,
     ]
   },
   {
+    title: 'MCP servers',
+    doc: `The MCP panel's own letters, mirroring the skills panel: \`n\` adds a
+server (scope under the +, name on the row), \`e\` opens its mcp.toml in your
+editor, \`t\` enables/disables it, \`a\` runs the OAuth flow for a server whose
+status chip says needs-auth, \`d\` removes the entry.`,
+    binds: [
+      { key: 'n', command: 'mcp.new', when: 'panel == "mcp"' },
+      { key: 'e', command: 'mcp.edit', when: 'panel == "mcp"' },
+      { key: 't', command: 'mcp.toggle', when: 'panel == "mcp"' },
+      { key: 'a', command: 'mcp.auth', when: 'panel == "mcp"' },
+      { key: 'd', command: 'mcp.delete', when: 'panel == "mcp"' }
+    ]
+  },
+  {
     title: 'Projects',
     doc: `The list's own letters. \`n\` adds a project, \`d\` removes the one under the
 cursor — Floe forgets it, the folder on disk is untouched — and \`m\` picks it

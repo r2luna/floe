@@ -208,6 +208,83 @@ export interface WorktreesUpdatedEvent {
   worktrees: Worktree[]
 }
 
+// --- MCP control server (an agent drives Floe from inside a session) --------
+// An MCP server runs in the main process (see main/mcpServer.ts). Each spawned
+// `claude` session gets a per-session `--mcp-config` whose HTTP url carries the
+// session's own key as a token (/mcp/<key>), so a tool call knows which session
+// made it (the "caller"). Tools that mutate state or read data run in main;
+// tools that drive the UI are forwarded to the renderer as an `mcp:command`.
+
+// A command the main process asks the renderer to perform on the caller's
+// behalf (over the `mcp:command` channel). Commands carrying a `requestId`
+// expect an answer back over `mcp:command-result`; the rest are fire-and-forget.
+export type McpCommand =
+  // Bring a session on screen: select its project/worktree and open its chat
+  // panel. `sessionId` is the renderer's session key (`claudeId ?? id`).
+  | {
+      kind: 'select_session'
+      callerKey: string
+      sessionId: string
+      title: string
+      worktreePath: string
+      projectPath?: string
+    }
+  // Open a plan file in the reader panel, rooted at its worktree.
+  | { kind: 'open_plan'; callerKey: string; worktreePath: string; relPath: string }
+  // Start the guided merge for a worktree: navigate to its project if needed,
+  // then bring the checklist panel up (useMerge.start). Answered once the flow
+  // starts — or with the refusal reason (main worktree, blocked, no project).
+  | {
+      kind: 'start_merge'
+      callerKey: string
+      requestId: string
+      worktreePath: string
+      projectPath: string
+    }
+  // Run a registry command (the same ids the palette and the keymap dispatch).
+  | { kind: 'run_command'; callerKey: string; requestId: string; commandId: string; arg?: string }
+  // List the registry's commands with their palette metadata and availability.
+  | { kind: 'list_commands'; callerKey: string; requestId: string }
+
+// One third-party MCP server in Floe's own registry (config/mcpServers.ts) —
+// `~/.config/floe/mcp.toml` (global) or `projects/<dir>/mcp.toml` (project).
+// Floe owns the list and projects it into each spawned harness's config
+// (mcpConfigFor), the same way skills are owned once and expanded per turn.
+export interface McpServerEntry {
+  name: string
+  scope: 'global' | 'project'
+  transport: 'http' | 'stdio'
+  /** http: the server url. */
+  url?: string
+  /** stdio: the command to run, with its args. */
+  command?: string
+  args?: string[]
+  enabled: boolean
+  /** Absolute path of the mcp.toml the entry lives in, for opening it to edit. */
+  file: string
+  /** Position in that file's `[[server]]` run — what writes address. */
+  index: number
+}
+
+// One registry command as `list_commands` reports it — the palette row's data.
+export interface McpUiCommand {
+  id: string
+  title: string
+  group: string
+  keys?: string
+  enabled: boolean
+}
+
+// The renderer's reply to a requestId-carrying `mcp:command`, sent back over
+// `mcp:command-result` so the waiting tool can return a real answer.
+export interface McpCommandResult {
+  requestId: string
+  ok: boolean
+  error?: string
+  /** `list_commands` answers with its `McpUiCommand[]` here. */
+  commands?: McpUiCommand[]
+}
+
 // A remote branch not yet checked out locally, offered in the new-worktree
 // picker. Picking one creates a local branch tracking `ref`.
 export interface RemoteBranch {

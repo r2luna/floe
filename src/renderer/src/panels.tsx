@@ -16,6 +16,7 @@ import {
   IconMessage,
   IconNotes,
   IconPencil,
+  IconPlug,
   IconPlus,
   IconTrash,
   IconSettings,
@@ -49,8 +50,10 @@ import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { hitRanges, splitByHits } from './findHits.ts'
 import { usePlans } from './usePlans'
 import { useSkills } from './useSkills'
+import { useMcpServers } from './useMcpServers'
 import { RowMenu, type MenuAction } from './RowMenu'
 import { onSkillDraft } from './skillDraft.ts'
+import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import { describeRef, expand, splitRefs } from './fileRefs'
@@ -97,7 +100,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, WorktreeStatus } from '../../shared/types'
+import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import type { Skill } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -210,6 +213,17 @@ export const KINDS = {
     // The same command `a` runs — the header button is a second way in, not a
     // second add flow.
     action: { icon: IconPlus, title: 'Add command…', command: 'command.add' }
+  },
+  // Floe's MCP registry: the third-party servers every spawned harness gets.
+  // A narrow list like skills, and NOT `needsProject` for the same reason —
+  // global servers exist with no project open, and that is where you add one.
+  mcp: {
+    icon: IconPlug,
+    title: 'mcp',
+    width: 300,
+    min: 220,
+    order: 47,
+    action: { icon: IconPlus, title: 'Add MCP server…', command: 'mcp.new' }
   },
   diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsProject: true },
   // A command's output. Shares the diff's slot: both are "the thing the list to
@@ -558,6 +572,7 @@ export function PanelBody({
         find={find}
       />
     )
+  if (kind === 'mcp') return <McpList cwd={cwd} onCommand={onCommand} onEdit={onEditSkill} find={find} />
   return null
 }
 
@@ -2931,6 +2946,258 @@ function DraftRow({
       {draft.error && <p className="skill-error">{draft.error}</p>}
     </>
   )
+}
+
+/**
+ * The MCP panel: Floe's own registry of third-party MCP servers, and the four
+ * things you do to one — edit (`e`, the row opens mcp.toml in your editor),
+ * toggle (`t`), authenticate (`a`, for a server whose probe says needs-auth)
+ * and delete (`d`). Adding mirrors the skills panel: `n` picks the scope under
+ * the header's `+`, the name is typed on the row where the entry will live,
+ * and the file opens to fill in the url/command.
+ *
+ * The status chip beside a row is the CONNECTION state, probed from a `claude`
+ * spawn that gets the same merged --mcp-config a real session does — so what
+ * the chip says is what a session actually sees.
+ */
+function McpList({
+  cwd,
+  onCommand,
+  onEdit,
+  find
+}: {
+  cwd?: string
+  onCommand?: (id: string) => void
+  /** Open a file in the editor rooted at a directory — see editSkill in App. */
+  onEdit?: (dir: string, rel: string) => void
+  find?: string
+}) {
+  const servers = useMcpServers(cwd)
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+  const [scoping, setScoping] = useState<{ x: number; y: number } | null>(null)
+  const [draft, setDraft] = useState<McpDraftRow | null>(null)
+  // The OAuth flow of the row being authenticated, and how it went. One at a
+  // time — `claude mcp login` holds a PTY, and two flows would fight over it.
+  const [auth, setAuth] = useState<{ name: string; note: string } | null>(null)
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  // Same deferred landing as the skills panel: the row you just named is a
+  // write, a watcher tick and a refetch away from existing.
+  const focusRow = useCallback((name?: string, tries = 12) => {
+    requestAnimationFrame(() => {
+      const panel = document.querySelector('.panel[data-kind="mcp"]')
+      if (panel?.querySelector('.skill-input')) return
+      const want = name ? panel?.querySelector<HTMLElement>(`[data-mcp="${CSS.escape(name)}"]`) : null
+      if (!want && name && tries > 0) return focusRow(name, tries - 1)
+      ;(want ?? panel?.querySelector<HTMLElement>('[data-mcp]'))?.focus()
+    })
+  }, [])
+
+  const askScope = useCallback(() => {
+    const plus = document.querySelector('.panel[data-kind="mcp"] .panel-act')
+    const box = plus?.getBoundingClientRect()
+    setScoping({ x: box ? box.left : 12, y: box ? box.bottom + 4 : 40 })
+  }, [])
+
+  useEffect(
+    () =>
+      onMcpDraft(() => {
+        setMenu(null)
+        if (!cwd) return setDraft({ scope: 'global', text: '' })
+        askScope()
+      }),
+    [askScope, cwd]
+  )
+
+  // The auth events of the `claude mcp login` PTY (main/mcpAuth.ts). The
+  // consent URL opens in the system browser; the CLI's loopback callback
+  // finishes the flow locally, so `connected` usually needs no paste at all.
+  useEffect(
+    () =>
+      window.floe.claude.onMcpAuthEvent(({ serverName, event }) => {
+        if (event.kind === 'url') {
+          void window.floe.openExternal(event.url)
+          setAuth({ name: serverName, note: 'waiting for consent in the browser…' })
+        } else if (event.kind === 'connected') {
+          setAuth(null)
+          servers.probe()
+        } else if (event.kind === 'timeout') {
+          setAuth({ name: serverName, note: 'timed out waiting for consent — `a` to retry' })
+        } else if (event.kind === 'error') {
+          setAuth({ name: serverName, note: event.message })
+        }
+      }),
+    [servers]
+  )
+
+  const items: MenuAction[] = [
+    { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('mcp.edit') },
+    { label: 'Enable/disable', keys: 't', run: () => onCommand?.('mcp.toggle') },
+    { label: 'Authenticate…', keys: 'a', run: () => onCommand?.('mcp.auth') },
+    { label: 'Delete…', keys: 'd', run: () => onCommand?.('mcp.delete') },
+    { label: 'Add server…', keys: 'n', run: () => onCommand?.('mcp.new') }
+  ]
+
+  const scopes: MenuAction[] = [
+    { label: 'Global', keys: 'every project', run: () => setDraft({ scope: 'global', text: '' }) },
+    {
+      label: 'This project',
+      keys: 'here only',
+      disabled: !cwd,
+      run: () => setDraft({ scope: 'project', text: '' })
+    }
+  ]
+
+  const writing = useRef(false)
+
+  /** Create the entry disabled, then open the file — the url/command is typed
+   * there, next to the template's worked example, and `t` turns it on when it
+   * is real. A half-filled server that is already live would fail every spawn. */
+  const commit = (): void => {
+    if (!draft || writing.current) return
+    const name = draft.text.trim()
+    if (!name) return cancel()
+    writing.current = true
+    void window.floe.mcp.servers
+      .add(draft.scope, { name, transport: 'http', url: 'https://', enabled: false }, cwd)
+      .then((made) => {
+        writing.current = false
+        setDraft(null)
+        servers.reload()
+        focusRow(made.name)
+        const slash = made.file.lastIndexOf('/')
+        onEdit?.(made.file.slice(0, slash), made.file.slice(slash + 1))
+      })
+      .catch((err: unknown) => {
+        writing.current = false
+        setDraft((d) => (d ? { ...d, error: reason(err) } : d))
+      })
+  }
+
+  const cancel = (): void => {
+    if (writing.current) return
+    setDraft(null)
+    focusRow()
+  }
+
+  if (servers.error) return <p className="empty error">{servers.error}</p>
+  if (servers.loading && !servers.all.length && !draft) return <p className="empty">Loading…</p>
+
+  const groups: Array<{ scope: McpServerEntry['scope']; rows: McpServerEntry[] }> = (
+    ['global', 'project'] as const
+  ).map((scope) => ({ scope, rows: servers.all.filter((s) => s.scope === scope) }))
+
+  const empty = !servers.all.length && !draft
+
+  return (
+    <>
+      {empty && (
+        <p className="empty">
+          No MCP servers yet — <kbd>n</kbd> to add one.
+        </p>
+      )}
+      {groups.map(({ scope, rows }) => {
+        const drafting = draft && draft.scope === scope
+        if (!rows.length && !drafting) return null
+        return (
+          <Fragment key={scope}>
+            <div className="group-label">{scope.toUpperCase()}</div>
+            {rows.map((s) => {
+              const target = s.transport === 'http' ? s.url : [s.command, ...(s.args ?? [])].join(' ')
+              const status = servers.status[s.name]
+              return (
+                <button
+                  key={s.name}
+                  className={s.enabled ? 'row' : 'row row-off'}
+                  title={s.file}
+                  data-mcp={s.name}
+                  data-mcp-file={s.file}
+                  data-mcp-enabled={s.enabled ? '1' : '0'}
+                  onClick={() => onCommand?.('mcp.edit')}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    const row = e.currentTarget as HTMLElement
+                    row.focus()
+                    setMenu({ x: e.clientX, y: e.clientY, row })
+                  }}
+                >
+                  <span className="row-name">{markAll(s.name, find)}</span>
+                  {!s.enabled && <span className="mcp-status">off</span>}
+                  {s.enabled && status && (
+                    <span className={`mcp-status mcp-${statusTone(status)}`}>{status}</span>
+                  )}
+                  {s.enabled && !status && servers.probing && <span className="mcp-status">probing…</span>}
+                  {auth?.name === s.name ? (
+                    <span className="skill-note">{auth.note}</span>
+                  ) : (
+                    target && <span className="skill-note">{target}</span>
+                  )}
+                </button>
+              )
+            })}
+            {drafting && draft && (
+              <>
+                <div className="row row-draft">
+                  <input
+                    className="skill-input"
+                    autoFocus
+                    size={Math.max(draft.text.length, 4)}
+                    value={draft.text}
+                    placeholder="name"
+                    spellCheck={false}
+                    onChange={(e) => setDraft((d) => (d ? { ...d, text: e.target.value, error: undefined } : d))}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commit()
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault()
+                        cancel()
+                      }
+                    }}
+                    onBlur={() => (draft.text.trim() ? commit() : cancel())}
+                  />
+                </div>
+                {draft.error && <p className="skill-error">{draft.error}</p>}
+              </>
+            )}
+          </Fragment>
+        )
+      })}
+      {scoping && (
+        <RowMenu
+          at={scoping}
+          items={scopes}
+          onClose={() => {
+            setScoping(null)
+            focusRow()
+          }}
+        />
+      )}
+      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
+    </>
+  )
+}
+
+interface McpDraftRow {
+  scope: McpServerEntry['scope']
+  text: string
+  error?: string
+}
+
+/** Which chip tone a probe status gets: the canonical mode-chip tones only. */
+function statusTone(status: string): string {
+  if (status === 'connected') return 'ok'
+  if (status === 'needs-auth' || status === 'needs_auth') return 'auth'
+  if (status === 'failed') return 'bad'
+  return 'dim'
 }
 
 /**

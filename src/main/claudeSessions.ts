@@ -662,7 +662,9 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         // A present_decision call rebuilds as the inline artifact panel (not a
         // tool row), mirroring the live stream — so reload round-trips it.
         if (block.name === 'mcp__floe__present_decision') {
-          const spec = parseArtifactSpec(block.input)
+          // Same injection as the live stream (agent.ts): the tool input has no
+          // `type` field — the tool name is the discriminant.
+          const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
           if (spec) {
             items.push({ role: 'artifact', spec })
             continue
