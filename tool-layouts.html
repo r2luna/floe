@@ -1,0 +1,230 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Tool call layouts</title>
+<style>
+@font-face { font-family:"CommitMonoPinguim"; font-weight:400; src:url("./src/renderer/src/assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2"); }
+@font-face { font-family:"CommitMonoPinguim"; font-weight:700; src:url("./src/renderer/src/assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2"); }
+
+:root{
+  --mono:"CommitMonoPinguim",ui-monospace,Menlo,monospace;
+  --bg:#0d0e11; --panel:#141519; --line:#23252b; --line-soft:#1c1e23;
+  --text:#c9ccd2; --text-strong:#e8eaee; --dim:#6d7280; --faint:#575d6a; --dimmer:#7f8797;
+  --edge:#343a45; --well:#1b1d23; --accent:#d3956d; --working:#6d93c9; --live:#6ea86e;
+  --time-dim:#4e5460; --radius:5px;
+  --wash-1:#ffffff08; --wash-3:#ffffff0d;
+  --sh-cmd:#e8eaee; --sh-flag:#a795d8; --sh-str:#d0a06a; --sh-num:#7fa3d8;
+  --mark:#6f7bd0;
+}
+:root[data-theme='light']{
+  --bg:#eceef2; --panel:#f8f9fb; --line:#d7dae1; --line-soft:#e4e7ec;
+  --text:#3d434e; --text-strong:#1b1e25; --dim:#767c88; --faint:#939aa6; --dimmer:#868d99;
+  --edge:#c3c8d1; --well:#eef0f4; --accent:#a9631f; --working:#3a64a8; --live:#2f7d52;
+  --time-dim:#9aa1ad;
+  --wash-1:#00000008; --wash-3:#0000000d;
+  --sh-cmd:#1b1e25; --sh-flag:#6f4fa8; --sh-str:#a9631f; --sh-num:#3a64a8;
+  --mark:#5560b4;
+}
+
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:28px 32px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 2px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 18px; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 10px; }
+.opt{ margin:0 0 26px; }
+.panel{ background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px 16px; max-width:900px; }
+.msg{ color:var(--text); margin:0 0 8px; }
+.msg + .msg{ margin-top:10px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* --- today (reference) --- */
+.irc-act{ color:var(--dim); }
+.irc-star{ color:var(--time-dim); }
+.irc-by{ font-weight:700; }
+
+/* --- shell reference --- */
+.bash-row{ display:grid; grid-template-columns:12px minmax(0,1fr); gap:8px; padding:2px 0; color:var(--dim); }
+.bash-mark{ color:var(--mark); opacity:.75; }
+.sh-cmd{ color:var(--sh-cmd); font-weight:700; }
+.sh-flag{ color:var(--sh-flag); }
+.sh-str{ color:var(--sh-str); }
+.sh-num{ color:var(--sh-num); }
+.sh-op{ color:var(--faint); }
+
+/* path parts, shared */
+.dir{ color:var(--faint); }
+.base{ color:var(--text); }
+
+/* ============ O1 — prompt rows (bash twin) ============ */
+.o1{ margin:6px 0; }
+.o1 .row{ display:grid; grid-template-columns:12px minmax(0,1fr); gap:8px; padding:1px 0;
+  color:var(--dim); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.o1 .mark{ color:var(--mark); opacity:.6; }
+.o1 .verb{ color:var(--sh-cmd); font-weight:700; }
+.o1 .arg{ color:var(--faint); }
+.o1 .arg .base{ color:var(--text); }
+.o1 .n{ color:var(--sh-num); }
+
+/* ============ O2 — verb column ============ */
+.o2{ margin:6px 0; }
+.o2 .row{ display:grid; grid-template-columns:12px 52px minmax(0,1fr); gap:8px; padding:1px 0;
+  color:var(--dim); white-space:nowrap; overflow:hidden; }
+.o2 .mark{ color:var(--mark); opacity:.55; }
+.o2 .verb{ color:var(--sh-flag); font-weight:700; }
+.o2 .arg{ color:var(--faint); overflow:hidden; text-overflow:ellipsis; }
+.o2 .arg .base{ color:var(--text); }
+
+/* ============ O3 — merged runs ============ */
+.o3{ margin:6px 0; }
+.o3 .row{ display:grid; grid-template-columns:12px minmax(0,1fr); gap:8px; padding:1px 0; color:var(--dim); }
+.o3 .mark{ color:var(--mark); opacity:.6; }
+.o3 .verb{ color:var(--sh-cmd); font-weight:700; }
+.o3 .cnt{ color:var(--sh-num); }
+.o3 .list{ color:var(--text); }
+.o3 .sep{ color:var(--faint); }
+
+/* ============ O4 — outline chip verb ============ */
+.o4{ margin:6px 0; }
+.o4 .row{ display:flex; align-items:center; gap:8px; padding:2px 0; color:var(--dim);
+  min-width:0; }
+.o4 .chip{ flex:none; font-size:11px; line-height:1; padding:3px 6px; border-radius:var(--radius);
+  border:1px solid color-mix(in srgb, var(--mark) 45%, transparent);
+  color:var(--mark); background:color-mix(in srgb, var(--mark) 10%, transparent); }
+.o4 .chip[data-k='write']{ border-color:color-mix(in srgb, var(--live) 45%, transparent);
+  color:var(--live); background:color-mix(in srgb, var(--live) 10%, transparent); }
+.o4 .chip[data-k='search']{ border-color:color-mix(in srgb, var(--accent) 45%, transparent);
+  color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+.o4 .arg{ color:var(--faint); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.o4 .arg .base{ color:var(--text); }
+
+/* ============ O5 — ledger ============ */
+.o5{ margin:6px 0; border-left:1px solid var(--line); padding-left:10px; }
+.o5 .row{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; padding:1px 0;
+  color:var(--dim); align-items:baseline; }
+.o5 .lhs{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.o5 .verb{ color:var(--dimmer); }
+.o5 .base{ color:var(--text-strong); font-weight:700; }
+.o5 .dir{ color:var(--faint); }
+.o5 .tail{ color:var(--time-dim); font-size:12px; }
+.o5 .add{ color:var(--live); }
+.o5 .del{ color:#c9736b; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Tool call layouts</h1>
+<p class="sub">Same transcript rendered five ways. Bash rows are shown unchanged in each, so you can judge how the tool rows sit next to them.</p>
+
+<!-- ============ TODAY ============ -->
+<div class="opt">
+  <h2>Today</h2>
+  <p class="note">Flat `* Read /abs/path` — long, low contrast, no shape to scan.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o <b>read.ts</b>, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="irc-act"><span class="irc-star">*</span> <span class="irc-by">Read </span>/Users/r2luna/code/01.r2luna/01.projects/floe/.worktrees/notification/src/main/config/read.ts</div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">grep</span> <span class="sh-flag">-n</span> <span class="sh-str">"PENGUIN_HEADS"</span> src/shared/types.ts</span></div>
+    <div class="irc-act"><span class="irc-star">*</span> <span class="irc-by">Edit </span>/Users/r2luna/code/01.r2luna/01.projects/floe/.worktrees/notification/src/main/config/floe.ts</div>
+  </div>
+</div>
+
+<!-- ============ O1 ============ -->
+<div class="opt">
+  <h2>O1 — prompt rows (bash twin)</h2>
+  <p class="note">Same grid as a shell row: marker · bold verb · argument. Directory dimmed, filename readable. Tool rows and shell rows become one visual family.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o read.ts, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="o1">
+      <div class="row"><span class="mark">▸</span><span><span class="verb">read</span> <span class="arg">src/main/config/<span class="base">read.ts</span></span></span></div>
+      <div class="row"><span class="mark">▸</span><span><span class="verb">read</span> <span class="arg">src/main/config/<span class="base">floe.test.ts</span></span></span></div>
+      <div class="row"><span class="mark">▸</span><span><span class="verb">read</span> <span class="arg">src/shared/<span class="base">types.ts</span></span></span></div>
+    </div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">grep</span> <span class="sh-flag">-n</span> <span class="sh-str">"PENGUIN_HEADS"</span> src/shared/types.ts <span class="sh-op">|</span> <span class="sh-cmd">head</span></span></div>
+    <p class="msg">Agora implemento.</p>
+    <div class="o1">
+      <div class="row"><span class="mark">▸</span><span><span class="verb">edit</span> <span class="arg">src/shared/<span class="base">types.ts</span></span></span></div>
+      <div class="row"><span class="mark">▸</span><span><span class="verb">edit</span> <span class="arg">src/main/config/<span class="base">floe.ts</span></span> <span class="n">×5</span></span></div>
+      <div class="row"><span class="mark">▸</span><span><span class="verb">write</span> <span class="arg">src/renderer/src/<span class="base">sounds.ts</span></span></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ O2 ============ -->
+<div class="opt">
+  <h2>O2 — verb column</h2>
+  <p class="note">Verb gets a fixed column, so every path starts on the same x. Reads as a table; the eye drops straight down the filenames.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o read.ts, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="o2">
+      <div class="row"><span class="mark">▸</span><span class="verb">read</span><span class="arg">src/main/config/<span class="base">read.ts</span></span></div>
+      <div class="row"><span class="mark">▸</span><span class="verb">read</span><span class="arg">src/main/config/<span class="base">floe.test.ts</span></span></div>
+      <div class="row"><span class="mark">▸</span><span class="verb">grep</span><span class="arg"><span class="base">PENGUIN_HEADS</span> in src/shared/types.ts</span></div>
+      <div class="row"><span class="mark">▸</span><span class="verb">edit</span><span class="arg">src/main/config/<span class="base">floe.ts</span></span></div>
+      <div class="row"><span class="mark">▸</span><span class="verb">write</span><span class="arg">src/renderer/src/<span class="base">sounds.ts</span></span></div>
+    </div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">pnpm</span> typecheck</span></div>
+  </div>
+</div>
+
+<!-- ============ O3 ============ -->
+<div class="opt">
+  <h2>O3 — merged runs</h2>
+  <p class="note">Consecutive calls of the same tool collapse into one line, exactly like a run of shell commands is one block. Fewest lines by far; you lose per-call ordering.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o read.ts, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="o3">
+      <div class="row"><span class="mark">▸</span><span><span class="verb">read</span> <span class="cnt">×3</span> <span class="list">read.ts</span> <span class="sep">·</span> <span class="list">floe.test.ts</span> <span class="sep">·</span> <span class="list">types.ts</span></span></div>
+    </div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">grep</span> <span class="sh-flag">-n</span> <span class="sh-str">"PENGUIN_HEADS"</span> src/shared/types.ts</span></div>
+    <p class="msg">Agora implemento.</p>
+    <div class="o3">
+      <div class="row"><span class="mark">▸</span><span><span class="verb">edit</span> <span class="cnt">×6</span> <span class="list">types.ts</span> <span class="sep">·</span> <span class="list">floe.ts</span> <span class="cnt">×5</span></span></div>
+      <div class="row"><span class="mark">▸</span><span><span class="verb">write</span> <span class="list">sounds.ts</span> <span class="sep">·</span> <span class="dir">src/renderer/src</span></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ O4 ============ -->
+<div class="opt">
+  <h2>O4 — outline chip verb</h2>
+  <p class="note">Verb becomes an outline chip, tinted by kind (read/blue, write/green, search/amber). Loudest of the five and taller per row; it does sort tools by kind at a glance.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o read.ts, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="o4">
+      <div class="row"><span class="chip">read</span><span class="arg">src/main/config/<span class="base">read.ts</span></span></div>
+      <div class="row"><span class="chip" data-k="search">grep</span><span class="arg"><span class="base">PENGUIN_HEADS</span> · src/shared/types.ts</span></div>
+      <div class="row"><span class="chip" data-k="write">edit</span><span class="arg">src/main/config/<span class="base">floe.ts</span></span></div>
+      <div class="row"><span class="chip" data-k="write">write</span><span class="arg">src/renderer/src/<span class="base">sounds.ts</span></span></div>
+    </div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">pnpm</span> test</span></div>
+  </div>
+</div>
+
+<!-- ============ O5 ============ -->
+<div class="opt">
+  <h2>O5 — ledger</h2>
+  <p class="note">Filename bold and first, directory trailing and dim, right column for the result (edit counts, matches, lines). Densest; the run is bracketed by one hairline instead of markers.</p>
+  <div class="panel">
+    <p class="msg">Agora vou ver o read.ts, os testes de config, e onde PENGUIN_HEADS vive.</p>
+    <div class="o5">
+      <div class="row"><span class="lhs"><span class="verb">read </span><span class="base">read.ts</span> <span class="dir">src/main/config</span></span><span class="tail">180 lines</span></div>
+      <div class="row"><span class="lhs"><span class="verb">read </span><span class="base">floe.test.ts</span> <span class="dir">src/main/config</span></span><span class="tail">92 lines</span></div>
+      <div class="row"><span class="lhs"><span class="verb">grep </span><span class="base">PENGUIN_HEADS</span> <span class="dir">src/shared/types.ts</span></span><span class="tail">3 hits</span></div>
+    </div>
+    <div class="bash-row"><span class="bash-mark">▸</span><span><span class="sh-cmd">grep</span> <span class="sh-flag">-rn</span> <span class="sh-str">"notify"</span> src/main/config/</span></div>
+    <p class="msg">Agora implemento.</p>
+    <div class="o5">
+      <div class="row"><span class="lhs"><span class="verb">edit </span><span class="base">floe.ts</span> <span class="dir">src/main/config</span></span><span class="tail"><span class="add">+38</span> <span class="del">−4</span></span></div>
+      <div class="row"><span class="lhs"><span class="verb">write </span><span class="base">sounds.ts</span> <span class="dir">src/renderer/src</span></span><span class="tail"><span class="add">+96</span></span></div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

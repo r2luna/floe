@@ -43,7 +43,7 @@ import { useAppearance } from './appearance'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
-import { NewWorktree } from './NewWorktree'
+import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees } from './useWorktrees'
@@ -1196,6 +1196,10 @@ export default function App() {
         })
         .catch(() => setBranches([]))
       setNewWt(true)
+      // The form lives at the top of the worktrees panel, so the panel has to
+      // be up — and focused, so the input's own focus lands inside the panel
+      // the lane already calls current.
+      setLane((l) => open(l, panelOf('worktrees')))
     }
   }
 
@@ -1288,6 +1292,39 @@ export default function App() {
     const at = lane.panels[lane.focus]?.cursor
     ;(rows[Math.min(at ?? 0, rows.length - 1)] ?? el).focus({ preventScroll: true })
   }
+
+  // The inline new-worktree form's wiring, handed to the worktrees panel while
+  // ⌘N has one open — the flow that used to be a modal.
+  const newWorktreeProps: NewWorktreeProps | undefined =
+    newWt && projects.current
+      ? {
+          branches,
+          mainBase: worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch,
+          defaultBase: current?.worktree.branch,
+          onCancel: () => {
+            setNewWt(false)
+            // After the re-render that removes the form — reading the rows now
+            // would hand focus to a button about to disappear.
+            requestAnimationFrame(backToLane)
+          },
+          onCreate: ({ branch, base, resetBranch }) => {
+            setNewWt(false)
+            void window.floe.worktrees
+              .create(projects.current!.path, branch, { base, resetBranch })
+              .then((list) => {
+                worktrees.reload()
+                // Land in what you just made — creating a worktree and then
+                // having to go find it is a step the app can take for you. The
+                // path comes from what create returned, not from guessing where
+                // git put it.
+                const made = list.find((wt) => wt.branch === branch)
+                if (made) worktrees.select(made.path)
+                setLane((l) => open(l, panelOf('branch', branch)))
+              })
+              .catch((e: Error) => console.warn('[worktree.new]', e.message))
+          }
+        }
+      : undefined
 
   /**
    * Ask for a line of text — a new name, a destination directory.
@@ -1571,6 +1608,7 @@ export default function App() {
                     // it restores everything that place was left showing.
                     onEnterProject={enterProject}
                     onEnterWorktree={enterWorktree}
+                    newWorktree={newWorktreeProps}
                     cwd={cwd}
                     root={panel.root}
                     onPatch={(patch) => (lastPatch.current = patch)}
@@ -1739,31 +1777,6 @@ export default function App() {
           })}
         </nav>
       </div>
-
-      {newWt && projects.current && (
-        <NewWorktree
-          branches={branches}
-          mainBase={worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch}
-          defaultBase={current?.worktree.branch}
-          onClose={() => setNewWt(false)}
-          onCreate={({ branch, base, resetBranch }) => {
-            setNewWt(false)
-            void window.floe.worktrees
-              .create(projects.current!.path, branch, { base, resetBranch })
-              .then((list) => {
-                worktrees.reload()
-                // Land in what you just made — creating a worktree and then
-                // having to go find it is a step the app can take for you. The
-                // path comes from what create returned, not from guessing where
-                // git put it.
-                const made = list.find((wt) => wt.branch === branch)
-                if (made) worktrees.select(made.path)
-                setLane((l) => open(l, panelOf('branch', branch)))
-              })
-              .catch((e: Error) => console.warn('[worktree.new]', e.message))
-          }}
-        />
-      )}
 
       {adding && (
         <AddProject

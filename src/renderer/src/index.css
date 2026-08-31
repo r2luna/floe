@@ -3534,6 +3534,31 @@ kbd {
   border-color: #4a5a7a;
 }
 
+/* --- new-worktree form (inline in the worktrees panel) -------------------- */
+
+/* Reuses the dialog's field styles, sized down for a 330px column. A rule
+   under the form, not a box around it: it is part of the panel, not a modal
+   that happens to be docked. */
+.wt-new {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 2px 2px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.wt-new .dialog-input,
+.wt-new .dialog-select {
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.wt-new .dialog-actions {
+  margin-top: 2px;
+}
+
 /* --- composer menus (/ and @) --------------------------------------------- */
 
 /* Above the composer, not below: the composer sits at the bottom of its panel,
