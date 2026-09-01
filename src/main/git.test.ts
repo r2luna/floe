@@ -38,14 +38,8 @@ void pathToFileURL
 
 const { createWorktree, mergeFastForward } = await import('./git.ts')
 
-// `-C` loses to GIT_DIR/GIT_INDEX_FILE, which git exports to its own hooks and
-// every child inherits. Without this scrub, running the suite from a pre-commit
-// hook points these fixture commands at the real repository.
-const cleanEnv = (): NodeJS.ProcessEnv =>
-  Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')))
-
 const g = (cwd: string, ...args: string[]): string =>
-  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: cleanEnv() }).trim()
+  execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
 
 // base ('main') is checked out in a LINKED worktree, not root. mergeFastForward
 // must FF it via `merge --ff-only` inside that worktree, not `branch -f` (which

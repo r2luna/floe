@@ -85,7 +85,6 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'rename_skill',
       'delete_skill',
       'list_mcp_servers',
-      'search_mcp_servers',
       'add_mcp_server',
       'update_mcp_server',
       'remove_mcp_server',
@@ -140,7 +139,7 @@ test('rejects browser-shaped requests (Origin header) with 403', async () => {
 test('mcpConfigFor writes a config file pointing at the token url', () => {
   const path = mcpConfigFor('abc-123')
   assert.ok(existsSync(path), 'config file should be written')
-  assert.ok(path.endsWith('floe-mcp-abc-123.json'), 'file name is what hooks.ts DETECT_FLOE greps for')
+  assert.ok(/floe-mcp-abc-123\.json$/.test(path), 'file name is what hooks.ts DETECT_FLOE greps for')
   const cfg = JSON.parse(readFileSync(path, 'utf8'))
   assert.equal(cfg.mcpServers.floe.type, 'http')
   assert.match(cfg.mcpServers.floe.url, /\/mcp\/abc-123$/)

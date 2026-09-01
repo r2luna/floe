@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { liveReducer, type LiveState } from './transcriptState.ts'
 import type { TranscriptItem } from '../../main/claudeSessions.ts'
 
-const empty: LiveState = { live: [], tail: null }
+const empty: LiveState = { base: [], live: [], tail: null }
 
 const start = (id: string, type: string, harness = 'claude'): TranscriptItem => ({
   role: 'subagent',
@@ -19,7 +19,11 @@ const start = (id: string, type: string, harness = 'claude'): TranscriptItem => 
 const run = (...actions: Parameters<typeof liveReducer>[1][]): LiveState =>
   actions.reduce(liveReducer, empty)
 
-const rows = (s: LiveState): TranscriptItem[] => s.live.filter((i) => i.role === 'subagent')
+const rows = (s: LiveState): TranscriptItem[] =>
+  [...s.base, ...s.live].filter((i) => i.role === 'subagent')
+
+/** The transcript as the panel shows it: what was on disk, then what streamed. */
+const shown = (s: LiveState): TranscriptItem[] => [...s.base, ...s.live]
 
 test('three agents launched in one turn are three rows, in launch order', () => {
   const s = run(
@@ -170,3 +174,48 @@ test('a subagent row settles the streaming tail, so it lands where it was launch
   assert.deepEqual(s.live.map((i) => i.role), ['assistant', 'subagent'])
   assert.equal(s.tail, null)
 })
+
+// --- a panel that opens in the middle of a turn -----------------------------
+// The CLI writes each assistant message to the JSONL as it closes, so a Task
+// launched early in a turn is ALREADY on disk when the panel opens. Everything
+// that closes it — and the report it comes back with — arrives afterwards, as
+// live events naming it by tool_use id.
+
+test('a row read off disk is not opened a second time by the replayed launch', () => {
+  const s = run(
+    { type: 'load', items: [{ role: 'user', text: 'mapeia' }, start('t1', 'Explore')] },
+    { type: 'push', item: start('t1', 'Explore') }
+  )
+  assert.equal(rows(s).length, 1, 'one agent, one row')
+})
+
+test('the report closes the row that came off disk, and speaks for it', () => {
+  const s = run(
+    { type: 'load', items: [start('t1', 'Explore')] },
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'agent', toolUseId: 't1', patch: { running: false, lastTool: '' } },
+    { type: 'agent-reply', toolUseId: 't1', text: 'achei' }
+  )
+  assert.equal(rows(s).length, 1)
+  assert.equal(rows(s)[0].running, false, 'the disk row closes — nothing else ever would')
+  const said = shown(s)[shown(s).length - 1]
+  assert.deepEqual([said.from, said.text], ['explore-t1', 'achei'], 'named after the row on disk')
+})
+
+test('a turn ending stops a row left running on disk', () => {
+  const s = run(
+    { type: 'load', items: [start('t1', 'Explore')] },
+    { type: 'finish', ms: 1000, tokens: 100 }
+  )
+  assert.equal(rows(s)[0].running, false)
+})
+
+test('a launch that streamed before the disk read lands is not loaded twice', () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'load', items: [{ role: 'user', text: 'mapeia' }, start('t1', 'Explore')] }
+  )
+  assert.equal(rows(s).length, 1)
+  assert.deepEqual(shown(s).map((i) => i.role), ['user', 'subagent'])
+})
+

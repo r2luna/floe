@@ -88,8 +88,14 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
       // A subagent row this panel already has (read off disk on open) must not
       // be opened again by the replay of the turn it is part of — two rows for
       // one agent, and only one of them ever closes.
-      if (action.item.role === 'subagent' && action.item.toolUseId && rowAt(state, action.item.toolUseId)) {
-        return state
+      //
+      // Only against a row still RUNNING: a closed row with the same id is a
+      // finished agent, and a launch arriving after it is a second run that
+      // deserves its own line.
+      if (action.item.role === 'subagent' && action.item.toolUseId) {
+        const open = rowAt(state, action.item.toolUseId)
+        const row = open ? (open.where === 'live' ? state.live : state.base)[open.at] : undefined
+        if (row?.running) return state
       }
       const live = state.tail ? [...state.live, state.tail] : state.live
       return { ...state, live: [...live, action.item], tail: null }

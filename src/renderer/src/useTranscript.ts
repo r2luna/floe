@@ -117,7 +117,7 @@ export interface Transcript {
  * already folded in (by seq). Only then does the stream go straight through.
  */
 export function useTranscript(worktreePath?: string, sessionId?: string): Transcript {
-  const [{ live, tail }, dispatch] = useReducer(liveReducer, { live: [], tail: null })
+  const [{ base, live, tail }, dispatch] = useReducer(liveReducer, { base: [], live: [], tail: null })
   const [running, setRunning] = useState(false)
   const [tokens, setTokens] = useState(0)
   const [startedAt, setStartedAt] = useState<number | undefined>(undefined)
@@ -125,7 +125,6 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // numbers the turn footer needs are mirrored here for it to read on `done`.
   const startedRef = useRef<number | undefined>(undefined)
   const tokensRef = useRef(0)
-  const [items, setItems] = useState<TranscriptItem[]>([])
   // Starts true when there is something to read: on a fresh mount the effect
   // that fetches has not run yet, and a `false` here says "nothing is coming"
   // to everything downstream.
@@ -175,7 +174,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
 
   useEffect(() => {
     if (!worktreePath || !sessionId) {
-      setItems([])
+      dispatch({ type: 'load', items: [] })
       return
     }
     let alive = true
@@ -185,7 +184,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       .transcript(worktreePath, sessionId)
       .then((list) => {
         if (!alive) return
-        setItems(list)
+        dispatch({ type: 'load', items: list })
         // Seed the gauge from the last message that recorded a fill. Without
         // this, opening a chat you did not just run shows no context at all —
         // the number only existed as a live event, so it died with the turn.
@@ -646,7 +645,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // One identity per settle, not per render: the Log memoises on this array,
   // and rebuilding it every delta would put the whole transcript back on the
   // render path the tail split just took it off.
-  const merged = useMemo(() => [...items, ...live], [items, live])
+  const merged = useMemo(() => [...base, ...live], [base, live])
 
   return {
     items: merged,

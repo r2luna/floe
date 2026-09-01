@@ -85,6 +85,7 @@ import {
   pruneMissingWorktrees,
   renameCreatedSession,
   linkCreatedSession,
+  getCreatedSessionClaudeId,
   resumeSession,
   closeSession,
   getViewState,
@@ -140,7 +141,6 @@ import {
   type McpServerPatch,
   type NewMcpServer
 } from './config/mcpServers'
-import { searchMcpServers } from './config/mcpDiscovery'
 import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
@@ -174,7 +174,7 @@ import {
 import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { watchChanges } from './reviewWatch'
-import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp } from './provision'
+import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
 import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
@@ -461,10 +461,6 @@ function registerIpc(): void {
   handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
     removeMcpServer(name, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
-  // What a server named on the draft row actually is, from the public registry
-  // (config/mcpDiscovery.ts) — so the entry is written with its real url or
-  // command instead of an empty shell to go and look up.
-  handle('mcp:servers:search', (_event, query: string) => searchMcpServers(query))
 
   handle('claude:sessions', (_event, worktreePath: string) =>
     // Both names: the conn is filed under whichever the session last spawned

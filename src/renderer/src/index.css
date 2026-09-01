@@ -5287,10 +5287,6 @@ kbd {
   position: fixed;
   z-index: 60;
   min-width: 200px;
-  /* Bounded, because one caller's labels are registry ids and a menu as wide as
-     its longest id would rewrap the moment it is clamped back inside the
-     window — and then sit 8px wider than the place it measured for. */
-  max-width: 380px;
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -5322,10 +5318,6 @@ kbd {
 
 .row-menu-label {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
 }
 
 /* The key that does the same thing, in the column every list of bindings in the

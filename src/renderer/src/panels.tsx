@@ -107,7 +107,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpCandidate, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -800,6 +800,86 @@ function Launcher({
       )}
 
     </div>
+  )
+}
+
+/* --- pipeline + subagents ------------------------------------------------ */
+
+/** Step states, in the vocabulary the runner already speaks. */
+type StepState = 'done' | 'running' | 'pending' | 'skipped' | 'failed'
+
+type Step = { id: string; state: StepState }
+
+// The real step ids from src/renderer/src/workflow/Pipeline.ts on master.
+const IMPLEMENT: Step[] = [
+  { id: 'specify', state: 'done' },
+  { id: 'clarify', state: 'skipped' },
+  { id: 'plan', state: 'done' },
+  { id: 'review', state: 'done' },
+  { id: 'tasks', state: 'done' },
+  { id: 'commit', state: 'done' },
+  { id: 'implement', state: 'running' },
+  { id: 'refactor', state: 'pending' }
+]
+
+const BUGFIX: Step[] = [
+  { id: 'bugfix', state: 'done' },
+  { id: 'clarify', state: 'running' },
+  { id: 'fix', state: 'pending' },
+  { id: 'commit', state: 'pending' },
+  { id: 'refactor', state: 'pending' }
+]
+
+/**
+ * One segment per step, so a glance answers "how far in, and is it moving?"
+ * without reading a single word. The running step is the only one labelled —
+ * naming all eight in a 285px panel would just wrap.
+ */
+function PipelineStrip({ label, steps }: { label: string; steps: Step[] }) {
+  const running = steps.find((s) => s.state === 'running')
+  const done = steps.filter((s) => s.state === 'done' || s.state === 'skipped').length
+
+  return (
+    <div className="pipe">
+      <div className="pipe-bar">
+        {steps.map((s) => (
+          <span key={s.id} className="pipe-seg" data-state={s.state} title={s.id} />
+        ))}
+      </div>
+      <div className="pipe-line">
+        <span className="pipe-label">{label}</span>
+        <span className="pipe-step">{running ? running.id : 'idle'}</span>
+        <span className="pipe-count">
+          {done}/{steps.length}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+type Sub = { name: string; state: 'running' | 'done'; note: string; depth: number }
+
+/**
+ * Subagents are real sessions, so they nest: an agent that spawned another is
+ * that one's parent. Depth is drawn with indent alone — a connector glyph per
+ * level costs a column the names need more.
+ */
+function Subagents({ subs }: { subs: Sub[] }) {
+  return (
+    <>
+      {subs.map((s) => (
+        <div
+          className="sub"
+          key={s.name}
+          style={{ paddingLeft: `${28 + s.depth * 14}px` }}
+          data-state={s.state}
+        >
+          <IconSparkles size={11} stroke={1.6} className="sub-icon" />
+          <span className="row-name">{s.name}</span>
+          <span className="sub-note">{s.note}</span>
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -3054,13 +3134,8 @@ function DraftRow({
  * things you do to one — edit (`e`, the row opens mcp.toml in your editor),
  * toggle (`t`), authenticate (`a`, for a server whose probe says needs-auth)
  * and delete (`d`). Adding mirrors the skills panel: `n` picks the scope under
- * the header's `+`, and the name is typed on the row where the entry will live.
- *
- * That name is then a SEARCH. Floe looks it up in the public MCP registry
- * (main/config/mcpDiscovery.ts) and writes the entry with the published config
- * already in it — one match is applied, several open a picker, none falls back
- * to the blank entry you fill in yourself. A server that needs a key of yours
- * is written disabled with REPLACE_ME where the key goes, and its file opens.
+ * the header's `+`, the name is typed on the row where the entry will live,
+ * and the file opens to fill in the url/command.
  *
  * The status chip beside a row is the CONNECTION state, probed from a `claude`
  * spawn that gets the same merged --mcp-config a real session does — so what
@@ -3082,9 +3157,6 @@ function McpList({
   const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
   const [scoping, setScoping] = useState<{ x: number; y: number } | null>(null)
   const [draft, setDraft] = useState<McpDraftRow | null>(null)
-  // The registry's answers when the typed name matched more than one server —
-  // which one it is, is the user's call, not a coin flip between vendors.
-  const [picking, setPicking] = useState<McpPicker | null>(null)
   // The OAuth flow of the row being authenticated, and how it went. One at a
   // time — `claude mcp login` holds a PTY, and two flows would fight over it.
   const [auth, setAuth] = useState<{ name: string; note: string } | null>(null)
@@ -3153,26 +3225,6 @@ function McpList({
     { label: 'Add server…', keys: 'n', run: () => onCommand?.('mcp.new') }
   ]
 
-  // What the registry came back with. The id is the answer to the only question
-  // a list of near-identical servers raises — whose is it — so it is the label,
-  // and the note beside it says what taking this one will cost you.
-  const picks: MenuAction[] = picking
-    ? [
-        ...picking.found.map((c) => ({
-          // `io.github.` is on most of the list and tells nobody anything — the
-          // account under it is the part that says whose server this is.
-          label: c.id.replace(/^io\.github\./, ''),
-          keys: pickNote(c),
-          run: () => apply(picking.scope, picking.name, c)
-        })),
-        {
-          label: 'None of these — blank entry',
-          keys: 'fill it in yourself',
-          run: () => write(picking.scope, { name: picking.name, transport: 'http', url: 'https://', enabled: false }, true)
-        }
-      ]
-    : []
-
   const scopes: MenuAction[] = [
     { label: 'Global', keys: 'every project', run: () => setDraft({ scope: 'global', text: '' }) },
     {
@@ -3183,89 +3235,29 @@ function McpList({
     }
   ]
 
-  // True from the moment the name is submitted until the entry exists (or the
-  // flow gives up): the search, the picker and the write are one act, and the
-  // input's own blur must not start a second one on the way through.
   const writing = useRef(false)
 
-  /**
-   * Write the entry and land on it.
-   *
-   * `open` means the file is still missing something only the user has — a key,
-   * a url — so the editor opens on it and the entry stays off until `t`. A
-   * half-filled server that was already live would fail every spawn.
-   */
-  const write = (scope: McpServerEntry['scope'], server: NewMcpServer, open: boolean): void => {
+  /** Create the entry disabled, then open the file — the url/command is typed
+   * there, next to the template's worked example, and `t` turns it on when it
+   * is real. A half-filled server that is already live would fail every spawn. */
+  const commit = (): void => {
+    if (!draft || writing.current) return
+    const name = draft.text.trim()
+    if (!name) return cancel()
+    writing.current = true
     void window.floe.mcp.servers
-      .add(scope, server, cwd)
+      .add(draft.scope, { name, transport: 'http', url: 'https://', enabled: false }, cwd)
       .then((made) => {
         writing.current = false
         setDraft(null)
         servers.reload()
         focusRow(made.name)
-        if (!open) return servers.probe()
         const slash = made.file.lastIndexOf('/')
         onEdit?.(made.file.slice(0, slash), made.file.slice(slash + 1))
       })
       .catch((err: unknown) => {
         writing.current = false
-        setDraft((d) => (d ? { ...d, searching: false, error: reason(err) } : d))
-      })
-  }
-
-  /**
-   * One registry answer, written under the name that was typed — the entry is
-   * yours to call what you like; only its config comes from the registry.
-   *
-   * What it still needs decides where it lands. A stdio server missing a key of
-   * yours has a REPLACE_ME in its command, so it goes in off and its file opens
-   * on the line to fix. A remote missing an auth header has nothing to type —
-   * mcp.toml holds no headers — so it goes in live and the probe says
-   * needs-auth, which is what `a` is for.
-   */
-  const apply = (scope: McpServerEntry['scope'], name: string, found: McpCandidate): void => {
-    const fillIn = found.transport === 'stdio' && found.needs.length > 0
-    write(
-      scope,
-      {
-        name,
-        transport: found.transport,
-        url: found.url,
-        command: found.command,
-        args: found.args,
-        enabled: !fillIn
-      },
-      fillIn
-    )
-  }
-
-  /** The typed name, looked up: apply one match, offer several, fall back to none. */
-  const commit = (): void => {
-    if (!draft || writing.current) return
-    const name = draft.text.trim()
-    if (!name) return cancel()
-    const scope = draft.scope
-    writing.current = true
-    setDraft((d) => (d ? { ...d, searching: true, error: undefined } : d))
-    void window.floe.mcp.servers
-      .search(name)
-      // Offline, or nothing published under that name: the blank entry is the
-      // behaviour this flow always had, so a registry that cannot answer costs
-      // the user a lookup, not the server they were adding.
-      .catch(() => [] as McpCandidate[])
-      .then((found) => {
-        if (found.length === 1) return apply(scope, name, found[0])
-        if (!found.length) return write(scope, { name, transport: 'http', url: 'https://', enabled: false }, true)
-        const box = document
-          .querySelector('.panel[data-kind="mcp"] .skill-input')
-          ?.getBoundingClientRect()
-        setDraft((d) => (d ? { ...d, searching: false } : d))
-        setPicking({
-          at: { x: box ? box.left : 12, y: box ? box.bottom + 4 : 40 },
-          scope,
-          name,
-          found
-        })
+        setDraft((d) => (d ? { ...d, error: reason(err) } : d))
       })
   }
 
@@ -3340,9 +3332,6 @@ function McpList({
                     value={draft.text}
                     placeholder="name"
                     spellCheck={false}
-                    // The lookup owns the name it was given: retyping under a
-                    // search in flight would leave the two disagreeing.
-                    readOnly={draft.searching}
                     onChange={(e) => setDraft((d) => (d ? { ...d, text: e.target.value, error: undefined } : d))}
                     onKeyDown={(e) => {
                       e.stopPropagation()
@@ -3356,7 +3345,6 @@ function McpList({
                     }}
                     onBlur={() => (draft.text.trim() ? commit() : cancel())}
                   />
-                  {draft.searching && <span className="skill-note">searching the registry…</span>}
                 </div>
                 {draft.error && <p className="skill-error">{draft.error}</p>}
               </>
@@ -3364,22 +3352,6 @@ function McpList({
           </Fragment>
         )
       })}
-      {picking && (
-        <RowMenu
-          at={picking.at}
-          items={picks}
-          onClose={() => {
-            setPicking(null)
-            // Closed without picking: nothing was written, so the draft row goes
-            // with it and the list is exactly as it was before `n`.
-            if (writing.current) {
-              writing.current = false
-              setDraft(null)
-              focusRow()
-            }
-          }}
-        />
-      )}
       {scoping && (
         <RowMenu
           at={scoping}
@@ -3399,29 +3371,6 @@ interface McpDraftRow {
   scope: McpServerEntry['scope']
   text: string
   error?: string
-  /** The registry lookup for the typed name is in flight. */
-  searching?: boolean
-}
-
-/** The registry's answers, waiting on the one the user meant. */
-interface McpPicker {
-  at: { x: number; y: number }
-  scope: McpServerEntry['scope']
-  /** The name typed on the row — what the entry gets called, whichever is picked. */
-  name: string
-  found: McpCandidate[]
-}
-
-/** What `mcp.servers.add` takes, without reaching into the main process for it. */
-type NewMcpServer = Parameters<typeof window.floe.mcp.servers.add>[1]
-
-/**
- * What taking this candidate will cost you, in the menu's key column: a remote
- * you sign into, a command that needs a key of yours, or nothing at all.
- */
-function pickNote(c: McpCandidate): string {
-  if (c.transport === 'http') return c.needs.length ? 'remote · sign in after' : 'remote url'
-  return c.needs.length ? `needs ${c.needs.join(', ')}` : `${c.command} …`
 }
 
 /** Which chip tone a probe status gets: the canonical mode-chip tones only. */
