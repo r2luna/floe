@@ -191,6 +191,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       ipcRenderer.on('update:downloaded', listener)
       return () => ipcRenderer.removeListener('update:downloaded', listener)
     },
+    // Poll the release feed now rather than waiting out the hours-long interval.
+    // Resolves to the line to show the user — up to date, downloading, or why it
+    // failed — so the caller never has to interpret an updater result itself.
+    checkForUpdate: (): Promise<string> => ipcRenderer.invoke('update:check'),
     // Relaunch into the downloaded update right now (quitAndInstall).
     installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
     // OS light/dark appearance. `isDark` is the snapshot for the initial render;
@@ -377,6 +381,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       stop: (key: string): Promise<void> => ipcRenderer.invoke('agent:stop', key),
       // The turn in flight, for a panel that mounts mid-turn (see AgentReplay).
       replay: (key: string): Promise<AgentReplay> => ipcRenderer.invoke('agent:replay', key),
+      // Every session working right now, for useSessionActivity to reconcile
+      // its event-driven set against.
+      active: (): Promise<string[]> => ipcRenderer.invoke('agent:active'),
       onEvent: (cb: (payload: AgentEventEnvelope) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, payload: AgentEventEnvelope): void => cb(payload)
         ipcRenderer.on('agent:event', listener)

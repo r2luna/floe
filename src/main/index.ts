@@ -64,7 +64,7 @@ import {
   worktreeDiffStat,
   type CreateWorktreeOptions
 } from './git'
-import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, hasActiveTurn, startAgentWatchdog, replaySnapshot } from './agent'
+import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion } from './codexServer'
 import { isCodexModel } from '../shared/types'
@@ -349,7 +349,11 @@ function registerIpc(): void {
             sessionId: s.id,
             title: s.title,
             lastActivityAt: s.mtime,
-            running: !!s.claudeId && isClaudeIdConnected(s.claudeId)
+            // A turn in flight — NOT "the child is alive", which a session that
+            // answered an hour ago still is: the CLI child is kept for the next
+            // --resume, so that read left every session it had ever run marked
+            // as working until the process was reaped.
+            running: anyActiveTurn([s.id, s.claudeId])
           })
         }
       }
@@ -420,6 +424,11 @@ function registerIpc(): void {
   )
   // What a panel opening mid-turn missed: the streamed events since turn start.
   handle('agent:replay', (_event, key: string) => replaySnapshot(key))
+  // The authoritative "who is working right now", for the renderer to reconcile
+  // its live event set against. The set is built from `done` arriving; a `done`
+  // that never lands (a crashed child, a window reloaded mid-turn) would leave a
+  // session spinning forever with nothing to correct it.
+  handle('agent:active', () => activeTurnKeys())
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
@@ -449,7 +458,9 @@ function registerIpc(): void {
   )
 
   handle('claude:sessions', (_event, worktreePath: string) =>
-    listClaudeSessions(worktreePath).map((m) => ({ ...m, running: hasActiveTurn(m.id) }))
+    // Both names: the conn is filed under whichever the session last spawned
+    // with, and `m.id` alone missed the turns that ran under the claudeId.
+    listClaudeSessions(worktreePath).map((m) => ({ ...m, running: anyActiveTurn([m.id, m.claudeId]) }))
   )
   handle('claude:resumable', (_event, worktreePath: string) => listResumableSessions(worktreePath))
   handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>

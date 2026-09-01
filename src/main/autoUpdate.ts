@@ -12,7 +12,28 @@ import { handle } from './plugins/handleMap'
 // which is fine for a knob measured in hours.
 const checkIntervalMs = (): number => floeConfig().update.checkIntervalHours * 60 * 60 * 1000
 
+// The version already downloaded and waiting for a restart, so a repeat check
+// says "restart to apply" instead of claiming it's downloading all over again.
+let downloadedVersion: string | null = null
+
 export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void {
+  // ⌘K "Check for updates now" — the only way to pull a release in before the
+  // next scheduled poll, which is hours away. Registered above the isPackaged
+  // bail-out so the command answers in dev instead of rejecting the invoke with
+  // "no handler registered".
+  handle('update:check', async (): Promise<string> => {
+    if (!app.isPackaged) return 'Updates only apply to a packaged build.'
+    if (downloadedVersion)
+      return `Floe ${downloadedVersion} is downloaded — run "Restart to update" to apply it.`
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      if (!result?.isUpdateAvailable) return `Floe ${app.getVersion()} is up to date.`
+      return `Floe ${result.updateInfo.version} found — downloading; you'll get a restart prompt when it's ready.`
+    } catch (err) {
+      return `Update check failed: ${err instanceof Error ? err.message : String(err)}`
+    }
+  })
+
   // Squirrel can only swap a real, signed, packaged bundle — there's nothing to
   // update in `electron-vite dev`, and checking would just error.
   if (!app.isPackaged) return
@@ -41,6 +62,7 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
     console.log(`[auto-update] downloading ${info.version}…`)
   })
   autoUpdater.on('update-downloaded', (info) => {
+    downloadedVersion = info.version
     console.log(`[auto-update] ${info.version} ready — installs on next restart.`)
     const window = getWindow()
     window?.webContents.send('update:downloaded', { version: info.version })

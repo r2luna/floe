@@ -68,6 +68,7 @@ export const PINNED_CHANNELS = new Set([
   'notify:show',
   'theme:get',
   'update:install',
+  'update:check',
   'user:name',
   'keybindings:load',
   'keybindings:reveal',

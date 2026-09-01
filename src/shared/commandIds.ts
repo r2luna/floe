@@ -79,6 +79,7 @@ export const COMMAND_IDS: string[] = [
   'mcp.auth',
   'mcp.delete',
   'keybindings.reset',
+  'update.check',
   'update.install',
   // Sessions & worktrees
   'session.prev',

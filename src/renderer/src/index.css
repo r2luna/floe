@@ -466,6 +466,20 @@ button {
   padding: 8px 8px 8px 0;
 }
 
+/* Panels that answer the same question sit in one block, with a hairline
+   between blocks: you aim at the group first and the icon second. */
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail-group + .rail-group {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-soft);
+}
+
 .rail-btn {
   position: relative;
   display: grid;
@@ -642,10 +656,29 @@ button {
   width: 6px;
   height: 6px;
   color: var(--working);
-  /* Larger than the row's own text: a braille cell only inks the middle of its
-     em box, so at the body size it reads lighter than the 6px dot it stands in
-     for. This is the size at which the two marks carry the same weight. */
-  font-size: 15px;
+  /* At the body size: the glyph should read as part of the line it sits on,
+     not outweigh it. The half-pixel lift centres the inked dots on the text's
+     x-height — the braille cell inks below its em centre. */
+  font-size: 12px;
+  line-height: 1;
+  transform: translateY(-0.5px);
+}
+
+/* A session blocked on the user — an unanswered question or permission prompt.
+   The spinner would keep turning here (the turn IS in flight), but that says
+   "wait for it" when the truth is "it is waiting for YOU", so the mark stops
+   moving and takes the accent: warm means "needs you", same as unread. Keeps
+   the dot's 6px box so the column never shifts. `--accent` flips with the
+   theme, so no light override is needed. */
+.mark-ask {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 6px;
+  height: 6px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
 }
 
@@ -1915,10 +1948,6 @@ button {
 /* A run of shell commands. No frame around it: the marker at the head of each
    row already says "this is a command", and a box would say it a second time,
    louder. The run reads as one thing because the rows are adjacent. */
-.bash-blk {
-  margin: 6px 0;
-}
-
 /* marker · command · actions. The marker keeps its column on every row, so the
    commands of a run all start in the same place. */
 .bash-row {
@@ -2015,9 +2044,12 @@ button {
 
 /* Shell highlighting: the program, its flags, quoted strings and the plumbing.
    Four roles, because those are the four things you actually look for in a
-   command you are scanning past. */
+   command you are scanning past.
+
+   Everything here stays at or below the row's dim — machinery is scanned past,
+   prose is read, and nothing that ran may outshine what was said. The program
+   keeps only its weight as the row's anchor. */
 .sh-cmd {
-  color: var(--text);
   font-weight: 700;
 }
 
@@ -2050,12 +2082,81 @@ button {
   color: #3a64a8;
 }
 
+/* --- folded runs ---------------------------------------------------------- */
+
+/* A run of three or more commands (or tool calls) closed to one line: the
+   count and the programs. Same grid and marker as the rows it hides, so
+   closed it still reads as "commands ran here". */
+.run-fold {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.run-fold:focus-visible {
+  outline: none;
+}
+
+.run-fold[data-open] .bash-mark {
+  transform: rotate(90deg);
+  opacity: 1;
+}
+
+.run-fold-line {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Same rule as .sh-cmd: weight for the anchor, never the prose's colour. */
+.run-fold-count {
+  font-weight: 700;
+}
+
+.run-fold-verbs {
+  color: var(--dim);
+}
+
+/* The revealed rows hang off a rule, like an expanded tool block (.calls):
+   they belong to the fold line above, not to the chat around it. */
+.run-fold-body {
+  margin: 2px 0 4px 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* Like a shell row, the fold carries the cursor as its marker brightening,
+   not as a wash — it sits inside prose, not in a list. */
+.run-fold[data-cursor] {
+  background: none;
+}
+
+.run-fold[data-cursor]::before {
+  display: none;
+}
+
+.panel[data-focused] .run-fold[data-cursor] {
+  background: none;
+}
+
+.run-fold[data-cursor] .bash-mark {
+  opacity: 1;
+}
+
 /* --- tool calls ----------------------------------------------------------- */
 
 /* Tool rows are shell rows with a different word in front: same marker column,
    same grid, so a run of reads and a run of commands read as one thing. */
+/* Closed to one line and kept tight: the fold is a footnote between two
+   paragraphs of prose, not a paragraph of its own. */
 .tool-run {
-  margin: 6px 0;
+  margin: 2px 0;
 }
 
 .tool-row {
@@ -2087,7 +2188,6 @@ button {
 }
 
 .tool-verb {
-  color: var(--text);
   font-weight: 700;
 }
 
@@ -2097,7 +2197,7 @@ button {
 }
 
 .tool-base {
-  color: var(--text);
+  color: var(--dim);
 }
 
 /* --- expanded tool calls -------------------------------------------------- */
@@ -2130,7 +2230,7 @@ button {
 .call-arg {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--text);
+  color: var(--dim);
 }
 
 .call-result {
@@ -2489,6 +2589,8 @@ button {
   border: 0;
   background: none;
   color: var(--working);
+  /* No x-height to centre on out here on the rail — stay put. */
+  transform: none;
 }
 
 .merge-wait .merge-dot {

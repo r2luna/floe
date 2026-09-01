@@ -592,6 +592,18 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.setLane((l) => toggleKind(l, 'account', () => c.makePanel('account')))
       },
       {
+        // The scheduled poll is hours apart, so right after a release the machine
+        // that published it would otherwise sit on the old version — or get the
+        // new one hand-copied over a running bundle, which corrupts the asar
+        // reads. This is the way to pull a release in on demand.
+        id: 'update.check',
+        title: 'Check for updates now',
+        group: 'App',
+        run: (c) => {
+          void window.floe.checkForUpdate().then((message) => c.say(message))
+        }
+      },
+      {
         // The only way a downloaded update ever gets applied: the main process
         // refuses to swap the bundle on quit, so quitting and reopening keeps
         // you on the old version. The banner's button dispatches this id.

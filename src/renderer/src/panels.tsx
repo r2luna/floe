@@ -60,7 +60,7 @@ import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, expand, splitRefs } from './fileRefs'
 import { renderMarkdown, type MdLine } from './markdown'
-import { highlightShell } from './shell'
+import { bashGist, bashProgram, highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
 import { sendToTerminal } from './terminalBus'
 import { CommandsPane } from './CommandsPane'
@@ -323,9 +323,38 @@ export function needsProject(kind: string): boolean {
 // Putting them there would offer "open a branch" with no branch chosen.
 const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin']
 
-export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
-  (k) => !CONTEXTUAL.includes(k)
+/**
+ * The rail, grouped. A flat column of twelve icons is twelve things to read;
+ * grouped, you aim at a block first and an icon second. Each group is one
+ * question: where am I, what changed, what is the harness made of, what is
+ * running, who am I. The order inside a group is the order you meet them in.
+ *
+ * Deliberately not `order`: that is where a panel SITS in the lane, and the two
+ * do not agree — the terminal opens at the far right but belongs beside the
+ * commands that spawn processes like it.
+ */
+export const RAIL_GROUPS: PanelKind[][] = [
+  // Where the work lives.
+  ['projects', 'worktrees'],
+  // What the work did to the tree — read it, review it, land it.
+  ['changes', 'merge', 'files', 'plans'],
+  // What the agents are made of: the skills they can run and the servers they
+  // get. Both are global, both are edited the same way, so they sit together.
+  ['skills', 'mcp'],
+  // Things that run: the project's own processes, and a shell for everything
+  // else.
+  ['commands', 'terminal'],
+  // The app itself.
+  ['account', 'settings']
+]
+
+// A new panel joins a group above; until it does it lands in a trailing group of
+// its own rather than dropping off the rail entirely.
+const UNGROUPED: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
+  (k) => !CONTEXTUAL.includes(k) && !RAIL_GROUPS.some((g) => g.includes(k))
 )
+
+export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED] : RAIL_GROUPS
 
 /** Opens `child` to the right of the panel that asked for it. */
 export type OpenFn = (child: {
@@ -1677,15 +1706,15 @@ const Log = memo(function Log({
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
 
-    // A run of shell calls is one block, not one line each: the agent exploring
-    // is a single act of work, and five bordered rows in a row would read as
-    // five separate things happening.
-    if (isBash(item)) {
-      const commands: string[] = []
+    // A run of calls — commands and tool calls alike — is one act of work, so
+    // it is one block: the agent exploring reads as one thing happening, not as
+    // a stack of separate events between two paragraphs.
+    if (item.role === 'tool') {
+      const run: TranscriptItem[] = []
       const at = i
-      while (i < items.length && isBash(items[i])) commands.push(items[i++].summary as string)
+      while (i < items.length && items[i].role === 'tool') run.push(items[i++])
       i--
-      out.push(<BashBlock commands={commands} key={base + at} />)
+      out.push(<CallsFold items={run} cwd={cwd} key={base + at} />)
       continue
     }
 
@@ -1718,17 +1747,6 @@ const Log = memo(function Log({
           />
         </div>
       )
-      continue
-    }
-
-    // Every other tool call is a run of rows shaped like the shell rows above:
-    // a run of them is one act of work, and they are read the same way.
-    if (item.role === 'tool') {
-      const run: TranscriptItem[] = []
-      const at = i
-      while (i < items.length && items[i].role === 'tool' && !isBash(items[i])) run.push(items[i++])
-      i--
-      out.push(<ToolRun items={run} cwd={cwd} key={base + at} />)
       continue
     }
 
@@ -1804,49 +1822,129 @@ function Zoomable({
 }
 
 /**
- * A run of tool calls, drawn as the shell rows are: marker, verb, argument.
+ * A run of calls — commands and tool calls alike — closed behind one line.
  *
- * Reading a transcript is reading down the left edge, and a tool call answers
- * two questions — what did it do, to what. So the verb comes first and in full
- * strength, the directory fades, and the filename (the part you are actually
- * looking for) stays legible. Same grid as a command, so a run of reads and a
- * run of greps sit in one family instead of two.
+ * ALWAYS folded, whatever the count: the transcript is what was said, and the
+ * machinery is only ever context for it. Reading is hunting for the model's
+ * words, so a call may never sit in the way — one dim line says work happened,
+ * and the rows cost no screen until they are asked for.
+ *
+ * Opened, a tool call answers two questions — what did it do, to what — so the
+ * verb leads, the directory fades, and the filename stays legible. Commands
+ * keep their own rows (gist, expand, copy/run). Same grid for both, so a run
+ * of reads and a run of greps sit in one family instead of two.
  */
-function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): ReactNode {
+function CallsFold({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): ReactNode {
   // The same call repeated is one line with a count: five edits to one file is
-  // one fact about that file, not five rows to scroll past.
+  // one fact about that file, not five rows to scroll past. Commands stay
+  // whole — a BashRow carries its own expand/copy/run and no count slot.
   const rows: Array<{ item: TranscriptItem; n: number }> = []
   for (const item of items) {
     const last = rows[rows.length - 1]
-    if (last && last.item.name === item.name && last.item.summary === item.summary) {
+    if (
+      last &&
+      !isBash(item) &&
+      last.item.name === item.name &&
+      last.item.summary === item.summary
+    ) {
       last.n++
       continue
     }
     rows.push({ item, n: 1 })
   }
 
+  const lines = rows.map(({ item, n }, i) => {
+    if (isBash(item)) return <BashRow command={item.summary as string} key={i} />
+    const arg = toolArg(item.summary, cwd)
+    return (
+      <div className="tool-row" key={i}>
+        <IconCaretRightFilled size={11} className="tool-mark" />
+        <span className="tool-line">
+          <span className="tool-verb">{toolVerb(item.name)}</span>
+          {arg && (
+            <span className="tool-arg">
+              {' '}
+              {arg.dir}
+              <span className="tool-base">{arg.base}</span>
+            </span>
+          )}
+          {n > 1 && <span className="sh-num"> ×{n}</span>}
+        </span>
+      </div>
+    )
+  })
+
+  const bashN = items.filter(isBash).length
+  const one = items.length === 1
+  const kind =
+    bashN === items.length ? (one ? 'command' : 'commands') : bashN ? 'calls' : one ? 'tool call' : 'tool calls'
+  const verbs = items.map((it) => (isBash(it) ? bashProgram(it.summary as string) : toolVerb(it.name)))
   return (
     <div className="tool-run">
-      {rows.map(({ item, n }, i) => {
-        const arg = toolArg(item.summary, cwd)
-        return (
-          <div className="tool-row" key={i}>
-            <IconCaretRightFilled size={11} className="tool-mark" />
-            <span className="tool-line">
-              <span className="tool-verb">{toolVerb(item.name)}</span>
-              {arg && (
-                <span className="tool-arg">
-                  {' '}
-                  {arg.dir}
-                  <span className="tool-base">{arg.base}</span>
-                </span>
-              )}
-              {n > 1 && <span className="sh-num"> ×{n}</span>}
-            </span>
-          </div>
-        )
-      })}
+      <RunFold count={items.length} kind={kind} verbs={verbs}>
+        {lines}
+      </RunFold>
     </div>
+  )
+}
+
+/* --- folded runs ---------------------------------------------------------- */
+
+/** `python3 ×3, grep ×2` — the run's programs, most frequent first. */
+function verbSummary(verbs: string[]): string {
+  const counts = new Map<string, number>()
+  for (const v of verbs) counts.set(v, (counts.get(v) ?? 0) + 1)
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const parts = top.map(([v, n]) => (n > 1 ? `${v} ×${n}` : v))
+  if (counts.size > 3) parts.push('…')
+  return parts.join(', ')
+}
+
+/**
+ * A run of rows, folded to one line: the count and the programs, opening to the
+ * rows themselves. Closed is the default — the run is the agent working, and
+ * the transcript reads better as what was said than as everything that ran.
+ * Same marker and grid as the rows it hides, so closed it still reads as
+ * "commands ran here", and j/k lands on it like any other row.
+ */
+function RunFold({
+  count,
+  kind,
+  verbs,
+  children
+}: {
+  count: number
+  kind: string
+  verbs: string[]
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <div
+        className="run-fold"
+        data-nav
+        tabIndex={-1}
+        role="button"
+        aria-expanded={open}
+        data-open={open || undefined}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          setOpen((o) => !o)
+        }}
+      >
+        <IconCaretRightFilled size={11} className="bash-mark" />
+        <span className="run-fold-line">
+          <span className="run-fold-count">
+            {count} {kind}
+          </span>
+          <span className="run-fold-verbs"> · {verbSummary(verbs)}</span>
+        </span>
+      </div>
+      {open && <div className="run-fold-body">{children}</div>}
+    </>
   )
 }
 
@@ -1879,29 +1977,14 @@ const isBash = (item: TranscriptItem): boolean =>
   item.role === 'tool' && item.name?.toLowerCase() === 'bash' && !!item.summary
 
 /**
- * A run of shell commands, as rows.
- *
- * No frame: the rows sit in the transcript like everything else, and the prompt
- * marker at the head of each one is what says "this is a command" — a box would
- * be a second way of saying it, and a heavier one.
- */
-function BashBlock({ commands }: { commands: string[] }) {
-  return (
-    <div className="bash-blk">
-      {commands.map((command, i) => (
-        <BashRow command={command} key={i} />
-      ))}
-    </div>
-  )
-}
-
-/**
  * One command.
  *
- * Closed it is a single truncated line; opening it wraps the whole thing. A
- * command that already fits has nothing to open, so it loses its chevron and
- * keeps its actions on show — pressing a key to reveal what is already there
- * would be a step for nothing.
+ * Closed it is a single truncated line of the command's GIST — the leading
+ * `cd` hop dropped, whitespace collapsed (see bashGist). Opening it shows the
+ * command whole, wrapped. A row whose gist already fits and IS the whole
+ * command has nothing to open, so it loses its chevron and keeps its actions
+ * on show — pressing a key to reveal what is already there would be a step
+ * for nothing.
  *
  * Whether it fits is a question of LAYOUT, not of length: the same command fits
  * a wide panel and not a narrow one, so it is measured after paint and again
@@ -1913,6 +1996,10 @@ function BashRow({ command }: { command: string }) {
   const [open, setOpen] = useState(false)
   const [fits, setFits] = useState(false)
   const [copied, setCopied] = useState(false)
+  const gist = bashGist(command)
+  // Fitting is only "nothing to open" when the gist is the whole command —
+  // a stripped cd prefix is still something opening reveals.
+  const inert = fits && gist === command
 
   useLayoutEffect(() => {
     const el = code.current
@@ -1942,15 +2029,15 @@ function BashRow({ command }: { command: string }) {
       data-nav
       tabIndex={-1}
       role="button"
-      aria-expanded={fits ? undefined : open}
+      aria-expanded={inert ? undefined : open}
       data-open={open || undefined}
-      data-fit={fits || undefined}
+      data-fit={inert || undefined}
       // Read by bash.copy and bash.run — the row already knows its command, so
       // nothing has to be lifted into the lane for a key to find it.
       data-cmd={command}
-      onClick={() => !fits && setOpen((o) => !o)}
+      onClick={() => !inert && setOpen((o) => !o)}
       onKeyDown={(e) => {
-        if (fits || (e.key !== 'Enter' && e.key !== ' ')) return
+        if (inert || (e.key !== 'Enter' && e.key !== ' ')) return
         e.preventDefault()
         setOpen((o) => !o)
       }}
@@ -1959,7 +2046,7 @@ function BashRow({ command }: { command: string }) {
           at, and a row that lost its marker would stop reading as a command. */}
       <IconCaretRightFilled size={11} className="bash-mark" />
       <span className="bash-code" ref={code}>
-        {highlightShell(command).map((t, i) =>
+        {highlightShell(open ? command : gist).map((t, i) =>
           t.cls ? (
             <span className={t.cls} key={i}>
               {t.text}
@@ -3311,8 +3398,27 @@ function ProjectsList({
  *
  * Working outranks unread: a session answering right now is not something you
  * failed to read, and it becomes unread on its own the moment the turn ends.
+ *
+ * Waiting outranks working: the turn is technically still in flight while a
+ * question or permission prompt sits unanswered, but a spinner there promises
+ * progress that will never come — the session is blocked on YOU, and the mark
+ * has to say so.
  */
-function SessionMark({ working, seen }: { working: boolean; seen: boolean }) {
+function SessionMark({
+  working,
+  waiting,
+  seen
+}: {
+  working: boolean
+  waiting: boolean
+  seen: boolean
+}) {
+  if (waiting)
+    return (
+      <span className="mark-ask" title="waiting for your answer">
+        ?
+      </span>
+    )
   if (working) return <Spinner />
   return (
     <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
@@ -3348,7 +3454,7 @@ function WorktreesList({
   // Work happening in sessions this list is only showing, not hosting: the
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
-  const { busy, unread } = useSessionActivity(openSession)
+  const { busy, waiting, unread } = useSessionActivity(openSession)
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -3452,8 +3558,17 @@ function WorktreesList({
             >
               {(() => {
                 const id = s.claudeId ?? s.id
-                const working = !!(busy.has(id) || s.running)
-                return <SessionMark working={working} seen={!working && unread.has(id)} />
+                // Both names: the agent conn is keyed by whichever the session
+                // last spawned under, so its events arrive tagged with one or
+                // the other and a lookup on a single id misses half the turns.
+                const working = !!(busy.has(id) || busy.has(s.id) || s.running)
+                return (
+                  <SessionMark
+                    working={working}
+                    waiting={waiting.has(id) || waiting.has(s.id)}
+                    seen={!working && unread.has(id)}
+                  />
+                )
               })()}
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>
