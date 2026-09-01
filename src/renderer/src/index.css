@@ -1096,6 +1096,58 @@ button {
   color: #b1454a;
 }
 
+/* Which vim mode the box is in. Sits beside the model button because it is the
+   same kind of fact: what the next keystroke will do. */
+.vim-mode {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vim-mode[data-mode='normal'] {
+  border-color: #282f3a;
+  color: #95a6c0;
+}
+
+.vim-mode[data-mode='visual'] {
+  border-color: #283129;
+  color: #93b8a1;
+}
+
+/* The half-typed command — `2d`, `f`, `ci` — so a count or a pending operator
+   is never a silent state you have to remember you are in. */
+.vim-pending {
+  color: var(--text-strong);
+  text-transform: none;
+}
+
+:root[data-theme='light'] .vim-mode[data-mode='normal'] {
+  border-color: #c2d4ef;
+  color: #3a64a8;
+}
+
+:root[data-theme='light'] .vim-mode[data-mode='visual'] {
+  border-color: #b6d9c3;
+  color: #2f7d52;
+}
+
+/* Normal mode's cursor IS a one-character selection, so it must not look like
+   dragged text: brighter, and with the caret behind it hidden. */
+.composer-input[data-vim='normal'] {
+  caret-color: transparent;
+}
+
+.composer-input[data-vim='normal']::selection {
+  background: #6f7bd0aa;
+}
+
 /* The model picker. Anchored to the composer's bottom-right, above the tools
    row, because that is where the button that opens it sits. */
 .model-scrim {

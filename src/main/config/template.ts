@@ -123,6 +123,24 @@ system-prompt = "system-prompt.md"
 
 
 # ------------------------------------------------------------------------------
+# | Composer
+# ------------------------------------------------------------------------------
+# |
+# | \`vim\` turns the message box into a modal editor: Escape leaves insert mode,
+# | and normal mode has the motions, operators and text objects you already know
+# | — \`ciw\`, \`di"\`, \`dd\`, \`yyp\`, \`v\` and \`V\`, counts, \`u\` and \`⌃r\`.
+# |
+# | Enter still sends the message from either mode, and sending puts you back in
+# | insert — so a draft always starts typing. Escape in normal mode with nothing
+# | half-typed goes back to closing the panel, as it does everywhere else.
+# |
+# ------------------------------------------------------------------------------
+
+[composer]
+vim = false
+
+
+# ------------------------------------------------------------------------------
 # | Editor
 # ------------------------------------------------------------------------------
 # |

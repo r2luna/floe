@@ -47,6 +47,8 @@ export interface FloeConfig {
   /** Who the launcher greets. Empty means "whoever this machine says I am". */
   user: { name?: string }
   terminal: { shell?: string }
+  /** The message box: vim motions on or off. */
+  composer: { vim: boolean }
   editor: { command: string }
   sandbox: { enabled: boolean }
   notifications: { sound: (typeof NOTIFY_SOUNDS)[number] }
@@ -69,6 +71,7 @@ export const DEFAULTS: FloeConfig = {
   },
   user: { name: undefined },
   terminal: { shell: undefined },
+  composer: { vim: false },
   editor: { command: 'nvim' },
   sandbox: { enabled: true },
   notifications: { sound: 'chime' },
@@ -128,6 +131,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const agent = subTable(sink, raw, root, 'agent')
   const user = subTable(sink, raw, root, 'user')
   const terminal = subTable(sink, raw, root, 'terminal')
+  const composer = subTable(sink, raw, root, 'composer')
   const editor = subTable(sink, raw, root, 'editor')
   const sandbox = subTable(sink, raw, root, 'sandbox')
   const notifications = subTable(sink, raw, root, 'notifications')
@@ -159,6 +163,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
       // which is the same state as never having set one.
       user: { name: user?.optStr('name')?.trim() || undefined },
       terminal: { shell: terminal?.optStr('shell') },
+      composer: { vim: composer?.bool('vim', d.composer.vim) ?? d.composer.vim },
       // Not `oneOf`: the known ids are what Settings offers, not the whole set —
       // any editor binary on the machine is a valid answer here.
       editor: { command: editor?.str('command', d.editor.command) ?? d.editor.command },

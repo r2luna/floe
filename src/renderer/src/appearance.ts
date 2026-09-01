@@ -8,7 +8,7 @@
 // way a terminal's font size does: text, padding and rules together. See
 // `applyZoom` in main/index.ts.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { setDefaultChoice, setUserNick } from './models'
 
 type Theme = 'system' | 'dark' | 'light'
@@ -57,6 +57,7 @@ export async function applyConfig(): Promise<void> {
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
+    setVim(config.composer.vim)
     // Resolved in main — config first, then git/system — so the chat's nick and
     // the launcher's greeting can never disagree about who you are. NOT awaited:
     // on cold start this path runs `git config` and `id -F` in main, and the
@@ -68,6 +69,29 @@ export async function applyConfig(): Promise<void> {
   } catch {
     // No config is not a reason to show no app: the built-in defaults stand.
   }
+}
+
+// Whether the composer is modal. Module state for the same reason the font is:
+// the Composer mounts and unmounts constantly (every panel switch), and a flag
+// re-fetched per mount would flicker the mode indicator on every one of them.
+let vim = false
+const vimWatchers = new Set<(on: boolean) => void>()
+
+function setVim(on: boolean): void {
+  if (on === vim) return
+  vim = on
+  for (const w of vimWatchers) w(on)
+}
+
+/** Vim motions in the message box — `[composer] vim` in floe.toml. */
+export function useVimEnabled(): boolean {
+  const [on, setOn] = useState(vim)
+  useEffect(() => {
+    setOn(vim)
+    vimWatchers.add(setOn)
+    return () => void vimWatchers.delete(setOn)
+  }, [])
+  return on
 }
 
 /** Re-read it whenever the file changes, so an edit lands without a restart. */

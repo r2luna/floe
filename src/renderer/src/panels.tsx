@@ -4154,6 +4154,19 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
       ]
     },
     {
+      title: 'Composer',
+      rows: [
+        {
+          kind: 'bool',
+          table: 'composer',
+          key: 'vim',
+          label: 'Vim motions',
+          value: config.composer.vim,
+          hint: 'Escape for normal mode — motions, operators and text objects in the message box'
+        }
+      ]
+    },
+    {
       title: 'Terminal',
       rows: [
         {
