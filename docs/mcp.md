@@ -44,7 +44,11 @@ command.
    skills admin set `list_skills` / `read_skill` / `create_skill` /
    `update_skill` / `rename_skill` / `delete_skill` (Floe-owned skills,
    `config/skills.ts` — to *use* one, put `/name` in a prompt; expansion
-   happens on send). `start_merge` opens the **guided** merge checklist for a
+   happens on send). `list_project_commands` / `add_project_command` write a
+   project's own processes — the dev server, queue worker or watcher Floe runs
+   in a worktree's command pane (`commands.toml`, `main/commands.ts`); the
+   built-in `/setup-commands` skill is what fills them in from the repo.
+   `start_merge` opens the **guided** merge checklist for a
    worktree (navigating the UI to its project if needed) and pauses at the
    review checkpoint for the user — `merge_worktree` stays the headless
    one-shot with no review stop.

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './hook.test-helper.ts'
@@ -229,4 +229,71 @@ test('acting on a skill that is not there says so', () => {
   reset()
   assert.throws(() => skills.deleteSkill('ghost'), /no skill called/)
   assert.throws(() => skills.renameSkill('ghost', 'other'), /no skill called/)
+})
+
+/* --- built-ins ------------------------------------------------------------ */
+
+test("Floe's own skills are written on boot and read back as builtin", () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  const list = skills.listSkills()
+  assert.ok(list.length > 0, 'BUILTIN_SKILLS is not empty')
+  assert.ok(list.every((s) => s.scope === 'builtin'))
+  const setup = list.find((s) => s.name === 'setup-commands')
+  assert.ok(setup, 'the commands skill ships')
+  assert.ok(skills.readSkill('setup-commands')?.includes('add_project_command'))
+})
+
+test('rewriting on the next boot is a no-op when nothing changed', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  const file = join(skills.builtinSkillsDir(), 'setup-commands.md')
+  const before = statSync(file).mtimeMs
+  skills.ensureBuiltinSkills()
+  assert.equal(statSync(file).mtimeMs, before, 'an identical file is left alone — the watcher would repaint')
+})
+
+test('a hand-edited built-in is put back, because the directory is Floe\'s', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  const file = join(skills.builtinSkillsDir(), 'setup-commands.md')
+  writeFileSync(file, 'mine now')
+  skills.ensureBuiltinSkills()
+  assert.notEqual(readFileSync(file, 'utf8'), 'mine now')
+})
+
+test('a built-in Floe no longer ships is removed rather than left behind', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  const stale = join(skills.builtinSkillsDir(), 'retired.md')
+  writeFileSync(stale, 'from an older version')
+  skills.ensureBuiltinSkills()
+  assert.ok(!existsSync(stale))
+})
+
+test('a global skill of the same name shadows a built-in', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  skill(skills.globalSkillsDir(), 'setup-commands', 'my own version')
+  const found = skills.listSkills().find((s) => s.name === 'setup-commands')
+  assert.equal(found?.scope, 'global')
+  assert.equal(skills.readSkill('setup-commands'), 'my own version')
+})
+
+test('a built-in cannot be written to — the next boot would undo it', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  assert.throws(() => skills.updateSkill('setup-commands', 'x'), /built-in/)
+  assert.throws(() => skills.renameSkill('setup-commands', 'other'), /built-in/)
+  assert.throws(() => skills.deleteSkill('setup-commands'), /built-in/)
+  assert.ok(existsSync(join(skills.builtinSkillsDir(), 'setup-commands.md')))
+})
+
+test('shadowing a built-in is what writing to it means', () => {
+  reset()
+  skills.ensureBuiltinSkills()
+  const made = skills.createSkill('setup-commands', 'global')
+  assert.equal(made.file, join(skills.globalSkillsDir(), 'setup-commands.md'))
+  skills.updateSkill('setup-commands', 'mine')
+  assert.equal(skills.readSkill('setup-commands'), 'mine', 'the copy is what the write lands on')
 })

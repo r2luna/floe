@@ -103,7 +103,7 @@ import {
 } from '../../shared/types'
 import { previewSound } from './sounds'
 import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpServerEntry, WorktreeStatus } from '../../shared/types'
-import type { Skill } from '../../main/config/skills'
+import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
 // micromark/mdast chain) are the two heaviest dependency trees in the
@@ -2797,7 +2797,11 @@ function SkillsList({
           return askScope()
         }
         const found = skills.all.find((s) => s.name === req.name)
-        if (found) setDraft({ scope: found.scope, renaming: found.name, text: found.name })
+        // A built-in has no name of its own to change: the file comes back on
+        // the next launch. Shadowing it is `n` + the same name, not a rename.
+        if (found && found.scope !== 'builtin') {
+          setDraft({ scope: found.scope, renaming: found.name, text: found.name })
+        }
       }),
     [askScope, cwd, skills.all]
   )
@@ -2868,9 +2872,9 @@ function SkillsList({
   // Grouped by scope, then by name inside it. The list from the main process is
   // sorted by name alone — right for the composer's `/` menu, wrong here, where
   // interleaved scopes would print a GLOBAL/PROJECT heading over every row.
-  const groups: Array<{ scope: Skill['scope']; rows: Skill[] }> = (['global', 'project'] as const).map(
-    (scope) => ({ scope, rows: skills.all.filter((s) => s.scope === scope) })
-  )
+  const groups: Array<{ scope: Skill['scope']; rows: Skill[] }> = (
+    ['builtin', 'global', 'project'] as const
+  ).map((scope) => ({ scope, rows: skills.all.filter((s) => s.scope === scope) }))
 
   const empty = !skills.all.length && !draft
 
@@ -2886,7 +2890,7 @@ function SkillsList({
         if (!rows.length && !drafting) return null
         return (
           <Fragment key={scope}>
-            <div className="group-label">{scope.toUpperCase()}</div>
+            <div className="group-label">{scope === 'builtin' ? 'BUILT-IN' : scope.toUpperCase()}</div>
             {rows.map((skill) => {
               // The reader takes a path relative to a root, which for a skill is
               // its own directory — see the `root` override in PanelBody.
@@ -2947,7 +2951,9 @@ function SkillsList({
  * named after it.
  */
 interface SkillDraftRow {
-  scope: Skill['scope']
+  // Not `Skill['scope']`: a built-in is Floe's own copy, rewritten on the next
+  // boot, so it is never what a draft writes to — see config/skills.ts.
+  scope: WritableScope
   /** The skill being renamed — absent when the row is a skill that is new. */
   renaming?: string
   text: string
