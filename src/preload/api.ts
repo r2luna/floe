@@ -86,6 +86,17 @@ export interface FloeHost {
   appVersion: string
   homeDir: string
   worktreeTag: string | null
+  /** The preload's multi-backend router controls; absent means local-only. */
+  backendsCtl?: BackendsCtl
+}
+
+/** How the api layer steers the preload's backend router (see preload/index.ts). */
+export interface BackendsCtl {
+  list: () => BackendInfo[]
+  current: () => string
+  /** Point workspace calls at this backend. False when the id names none. */
+  use: (id: string) => boolean
+  state: (id: string) => 'connecting' | 'open' | 'closed'
 }
 
 // A machine this window can run work on. Single-entry today (this one) — the
@@ -121,11 +132,17 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       get: (): Promise<boolean> => ipcRenderer.invoke('window:getVibrancy'),
       set: (on: boolean): Promise<void> => ipcRenderer.invoke('window:setVibrancy', on)
     },
-    // The machines this window can run on.
+    // The machines this window can run on. Workspace calls follow `use`'s
+    // pointer; PINNED channels always stay on this machine (remoteProtocol.ts).
     backends: {
-      list: (): BackendInfo[] => [
-        { id: 'local', label: host.homeDir.split('/').pop() || 'local', homeDir: host.homeDir, remote: false }
-      ]
+      list: (): BackendInfo[] =>
+        host.backendsCtl?.list() ?? [
+          { id: 'local', label: host.homeDir.split('/').pop() || 'local', homeDir: host.homeDir, remote: false }
+        ],
+      current: (): string => host.backendsCtl?.current() ?? 'local',
+      use: (id: string): boolean => host.backendsCtl?.use(id) ?? id === 'local',
+      state: (id: string): 'connecting' | 'open' | 'closed' =>
+        host.backendsCtl?.state(id) ?? (id === 'local' ? 'open' : 'closed')
     },
     // Runtime plugins (main/plugins/host.ts): the palette merges `commands`
     // into the registry as `plugin:<name>:<id>` rows whose run dispatches back

@@ -16,7 +16,7 @@
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux",
     "release": "electron-vite build && electron-builder --mac --publish always",
-    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications \u2014 abra com duplo-clique.'",
+    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications — abra com duplo-clique.'",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
@@ -41,6 +41,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-builder": "^26.15.2",
@@ -49,6 +50,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "ws": "^8.21.3"
   }
 }

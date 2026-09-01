@@ -1249,11 +1249,12 @@ void app.whenReady().then(async () => {
   buildAppMenu(openNewInstance)
   registerIpc()
   ensureAgentHookInstalled()
-  createWindow()
-  // Runtime plugins from ~/.config/floe/plugins — loaded before the MCP server
-  // starts only for tidiness (tools are read per-connection either way). A
-  // broken plugin logs and is skipped; boot never dies for one.
+  // Runtime plugins from ~/.config/floe/plugins — loaded BEFORE the window so
+  // the backends a plugin registers are already there when the preload asks
+  // (backends:get runs at window load). A broken plugin logs and is skipped;
+  // boot never dies for one.
   await loadPlugins(app.getVersion(), () => localWindow ?? BrowserWindow.getAllWindows()[0])
+  createWindow()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
   // window getter so ordering vs. createWindow doesn't matter.
   startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])
