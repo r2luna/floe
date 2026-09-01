@@ -384,6 +384,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // Every session working right now, for useSessionActivity to reconcile
       // its event-driven set against.
       active: (): Promise<string[]> => ipcRenderer.invoke('agent:active'),
+      // Every session blocked on an unanswered question or permission prompt,
+      // for the same reconcile — see agent:waiting.
+      waiting: (): Promise<string[]> => ipcRenderer.invoke('agent:waiting'),
       onEvent: (cb: (payload: AgentEventEnvelope) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, payload: AgentEventEnvelope): void => cb(payload)
         ipcRenderer.on('agent:event', listener)

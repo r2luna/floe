@@ -32,6 +32,8 @@ import {
 import { DEFAULT_MODE, MODES, modesFor, nearestMode } from '../../shared/modes.ts'
 import { useLocalAgents } from './useLocalAgents'
 import { pushHistory, readHistory } from './history'
+import { useVimEnabled } from './appearance'
+import { blockAt, vimKey, vimStart, type VimState } from './vim'
 
 /**
  * The model menu's two columns.
@@ -139,6 +141,12 @@ export function Composer({
   // Set after a list continuation so the caret can be restored once React has
   // committed the new value — assigning it before that would be overwritten.
   const [caret, setCaret] = useState<number | null>(null)
+  // Vim's mode and its half-typed command, and the selection a command asked
+  // for. Selection rather than caret: normal mode shows its cursor as the one
+  // character it is sitting on, which a textarea can only draw as a selection.
+  const vimOn = useVimEnabled()
+  const [vim, setVim] = useState<VimState>(() => vimStart('insert'))
+  const [sel, setSel] = useState<{ start: number; end: number } | null>(null)
   // The `/` or `@` being typed right now, and where the menu cursor sits.
   const [trigger, setTrigger] = useState<Trigger | null>(null)
   const [menuAt, setMenuAt] = useState(0)
@@ -479,6 +487,57 @@ export function Composer({
     setCaret(null)
   }, [caret])
 
+  useEffect(() => {
+    if (!sel) return
+    input.current?.setSelectionRange(sel.start, sel.end)
+    setSel(null)
+  }, [sel])
+
+  // Leaving vim mode — or the box, or a send — always lands in insert, so the
+  // next thing typed is text. A composer you have to press `i` to use is a
+  // composer that has stopped being a message box.
+  useEffect(() => {
+    if (!vimOn) setVim(vimStart('insert'))
+  }, [vimOn])
+
+  /**
+   * Hand the key to vim, and put back whatever it makes of it.
+   *
+   * Returns false when vim does not claim the key, which is every key in insert
+   * mode but Escape — so with the mode off, or while typing, the composer's own
+   * bindings below are untouched.
+   */
+  const runVim = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!vimOn) return false
+    // An empty composer has nothing to edit, and a bare digit in one is an
+    // answer to the question above it — not the start of a count.
+    if (value === '' && onDigit && /^[1-9]$/.test(e.key)) return false
+    const el = e.currentTarget
+    const out = vimKey(e, { text: value, start: el.selectionStart, end: el.selectionEnd }, vim)
+    if (!out) return false
+    e.preventDefault()
+    // Escape into normal mode must not also close the panel behind us.
+    e.stopPropagation()
+    setVim(out.state)
+    if (out.text !== value) onChange(out.text)
+    setSel({ start: out.start, end: out.end })
+    return true
+  }
+
+  /**
+   * Keep normal mode sitting ON a character after a click or a native move.
+   *
+   * Only when the selection is collapsed and only when the block is not already
+   * where it belongs — re-selecting what is already selected would re-enter this
+   * handler forever.
+   */
+  const blockCursor = (el: HTMLTextAreaElement): void => {
+    if (!vimOn || vim.mode !== 'normal' || el.selectionStart !== el.selectionEnd) return
+    const block = blockAt(value, el.selectionStart)
+    if (block.start === el.selectionStart && block.end === el.selectionEnd) return
+    setSel(block)
+  }
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // While the menu is up it owns the keys it needs — otherwise Enter would
     // send the message instead of picking, and the arrows would move the caret
@@ -498,6 +557,11 @@ export function Composer({
         return pick(matches[menuAt].item)
       }
     }
+
+    // Vim owns the keys next, but only ever the ones it answers for: in insert
+    // mode that is Escape alone, and in normal mode never a chord — so ⌘L, ⌃⇧M
+    // and ⏎ below keep working from either mode.
+    if (runVim(e)) return
 
     // ⌃⇧M cycles the mode in place — it is the one part of the choice you
     // change mid-chat (plan, then auto once the plan is agreed), and stopping
@@ -593,6 +657,8 @@ export function Composer({
       // empty send is a no-op downstream, so the attachments stay put rather
       // than being thrown away on a stray ⏎.
       onSend(choice, images.length || files.length ? { images, files } : undefined)
+      // A sent message ends the edit: the next draft starts typing.
+      if (vimOn) setVim(vimStart('insert'))
       if (value.trim() !== '') {
         setImages([])
         setFiles([])
@@ -765,7 +831,11 @@ export function Composer({
           // The caret can also move without typing — clicking, arrows, undo —
           // and the menu has to follow it or it would keep filtering on a token
           // the caret already left.
-          onSelect={(e) => syncTrigger(e.currentTarget)}
+          data-vim={vimOn ? vim.mode : undefined}
+          onSelect={(e) => {
+            syncTrigger(e.currentTarget)
+            blockCursor(e.currentTarget)
+          }}
           onBlur={() => setTrigger(null)}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -822,6 +892,16 @@ export function Composer({
           >
             <IconArrowBackUp size={15} stroke={1.8} />
           </button>
+        )}
+        {vimOn && (
+          <span
+            className="vim-mode"
+            data-mode={vim.mode}
+            title="Vim motions — Escape for normal mode, i to type again"
+          >
+            {vim.mode === 'insert' ? 'ins' : vim.mode === 'visual' ? 'vis' : 'nor'}
+            {vim.pending && <span className="vim-pending">{vim.pending}</span>}
+          </span>
         )}
         <button
           className="model"

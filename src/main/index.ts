@@ -64,9 +64,9 @@ import {
   worktreeDiffStat,
   type CreateWorktreeOptions
 } from './git'
-import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
-import { answerCodexQuestion } from './codexServer'
+import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { isCodexModel } from '../shared/types'
 import { ensureAgentHookInstalled } from './hooks'
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
@@ -429,6 +429,11 @@ function registerIpc(): void {
   // that never lands (a crashed child, a window reloaded mid-turn) would leave a
   // session spinning forever with nothing to correct it.
   handle('agent:active', () => activeTurnKeys())
+  // The same correction for "who is blocked on YOU": the `?` is set by a
+  // `question`/`permission` event and cleared by the next event on that key, so
+  // an event that lands under the session's other name — or a window that
+  // reloaded while a card was up — left the mark on with nothing to turn it off.
+  handle('agent:waiting', () => [...new Set([...waitingKeys(), ...codexWaitingKeys()])])
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)

@@ -58,10 +58,17 @@ const {
   flushDeltas,
   watchdogAction,
   runWatchdogTick,
-  isChildDead
+  isChildDead,
+  pruneSettled,
+  markTurnStart,
+  sendAgentEvent,
+  replaySnapshot,
+  dropSettled
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
-const { addCreatedSession, setCreatedSessionSpawnedBy } = await import('./sessionStore.ts')
+const { addCreatedSession, setCreatedSessionSpawnedBy, linkCreatedSession } = await import(
+  './sessionStore.ts'
+)
 
 // Point the persistent stores at a throwaway dir — the spawned-session test seeds
 // a real sessions.json and must not touch the machine's store.
@@ -528,4 +535,55 @@ test('handleLine: turnHadMeaningfulOutput flips true only on non-system lines an
   // invariant that stops the watchdog killing a turn that already did real work.
   run({ type: 'system', subtype: 'status' }, conn)
   assert.equal(conn.turnHadMeaningfulOutput, true)
+})
+
+test('pruneSettled: an answered question leaves the replay, the rest of the turn stays', () => {
+  // The stale-card bug: the replay only ever grew, so reopening a panel after
+  // answering replayed the question as if it were still open.
+  const events: AgentEvent[] = [
+    { kind: 'text', text: 'thinking' },
+    { kind: 'question', toolUseId: 'req-1', questions: [{ question: 'Q?', options: [{ label: 'A' }] }] },
+    { kind: 'permission', permission: { requestId: 'req-2', toolName: 'Bash' } }
+  ]
+  assert.deepEqual(kinds(pruneSettled(events, 'req-1')), ['text', 'permission'])
+  assert.deepEqual(kinds(pruneSettled(events, 'req-2')), ['text', 'question'])
+  // An id that settled on another session must not eat this one's card.
+  assert.deepEqual(kinds(pruneSettled(events, 'req-9')), ['text', 'question', 'permission'])
+})
+
+test('dropSettled: the answered question leaves the live replay snapshot', () => {
+  // The codex path answers over JSON-RPC, not the control channel, so this is
+  // the only thing that clears its card: without it, leaving the chat and
+  // coming back mid-turn replayed the question the model was already answering.
+  const { win } = fakeWin()
+  markTurnStart('sess-1')
+  sendAgentEvent(win, 'sess-1', { kind: 'text', text: 'working' })
+  sendAgentEvent(win, 'sess-1', {
+    kind: 'question',
+    toolUseId: '7',
+    questions: [{ question: 'Q?', options: [{ label: 'A' }] }]
+  })
+  assert.deepEqual(kinds(replaySnapshot('sess-1').events), ['text', 'question'])
+  dropSettled('sess-1', '7')
+  assert.deepEqual(kinds(replaySnapshot('sess-1').events), ['text'])
+})
+
+test('dropSettled: the card is pruned under every name the session answers to', () => {
+  // The panel keys itself by `claudeId ?? id` while the conn stays filed under
+  // whatever spawned it, so the answer can arrive under a different name than
+  // the one the question was recorded under. Pruning one of them left the other
+  // replay holding an open card for a question already answered.
+  const { win } = fakeWin()
+  addCreatedSession({ id: 'floe-id', worktreePath: '/tmp/wt' })
+  linkCreatedSession('floe-id', 'claude-id')
+  markTurnStart('floe-id')
+  sendAgentEvent(win, 'floe-id', {
+    kind: 'question',
+    toolUseId: 'rq-1',
+    questions: [{ question: 'Q?', options: [{ label: 'A' }] }]
+  })
+  assert.deepEqual(kinds(replaySnapshot('floe-id').events), ['question'])
+  // Answered under the panel's name, not the one the replay is filed under.
+  dropSettled('claude-id', 'rq-1')
+  assert.deepEqual(kinds(replaySnapshot('floe-id').events), [])
 })

@@ -628,6 +628,21 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The file is the setting's home; this is the way to flip it without
+        // leaving the keyboard — and the way an agent flips it too, since every
+        // registry command is an MCP `run_command`.
+        id: 'composer.vim',
+        title: 'Toggle vim motions in the composer',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then((config) => window.floe.config.set('composer', 'vim', !config.composer.vim))
+            .then((config) => c.say(config.composer.vim ? 'Vim motions on' : 'Vim motions off'))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'keybindings.reset',
         title: 'Reset keybindings to defaults…',
         group: 'App',

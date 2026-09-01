@@ -92,7 +92,7 @@ import { RunInTerminal } from './runInTerminal'
 import { MergePanel } from './MergePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import type { Merge } from './useMerge'
-import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
+import type { TranscriptItem } from '../../main/claudeSessions'
 import {
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
@@ -506,7 +506,6 @@ export function PanelBody({
         onOpen={onOpen}
         menuItems={menuItems}
         worktreePath={worktrees.currentPath}
-        recent={worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.sessions}
         onCreated={worktrees.reload}
         noProjects={!projects.loading && projects.all.length === 0}
         onAddProject={onAddProject}
@@ -689,7 +688,6 @@ function Launcher({
   onOpen,
   menuItems,
   worktreePath,
-  recent,
   onCreated,
   noProjects,
   onAddProject
@@ -697,8 +695,6 @@ function Launcher({
   onOpen: OpenFn
   menuItems?: (trigger: Trigger) => PaletteItem[]
   worktreePath?: string
-  /** This branch's sessions, newest first — already loaded by the sidebar. */
-  recent?: ClaudeSessionMeta[]
   /** Re-read the worktree list, so the new session shows up under its branch. */
   onCreated?: () => void
   /** Nothing has ever been added — not merely "none selected right now". */
@@ -782,35 +778,6 @@ function Launcher({
         </div>
       )}
 
-      {/* Only shown when there is something to show: an empty "Recent" header
-          over nothing is a worse first run than no header at all. */}
-      {!!recent?.length && (
-        <div className="recent">
-          <div className="recent-head">
-            <span>Recent on this branch</span>
-          </div>
-          {recent.slice(0, 5).map((s) => (
-            <button
-              className="recent-row"
-              key={s.id}
-              onClick={() =>
-                onOpen({
-                  kind: 'chat',
-                  sub: s.title,
-                  // `claudeId` names the transcript on disk — see WorktreesList.
-                  session: { id: s.claudeId ?? s.id, worktreePath: cwd }
-                })
-              }
-            >
-              <IconMessage size={15} stroke={1.5} />
-              <span className="row-name">
-                {s.title}
-                <span className="when">{ago(s.mtime)}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   )
 }
@@ -4158,6 +4125,19 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           label: 'Provider',
           value: config.agent.provider,
           options: ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama']
+        }
+      ]
+    },
+    {
+      title: 'Composer',
+      rows: [
+        {
+          kind: 'bool',
+          table: 'composer',
+          key: 'vim',
+          label: 'Vim motions',
+          value: config.composer.vim,
+          hint: 'Escape for normal mode — motions, operators and text objects in the message box'
         }
       ]
     },
