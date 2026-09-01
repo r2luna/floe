@@ -428,7 +428,9 @@ export function Composer({
   /**
    * Is this token a reference the input should draw as a chip?
    *
-   * Two sources, because there are two kinds. A file is one the path map knows
+   * Three sources. A handle is one the `@` menu is offering — the channel's
+   * own roster, so `@codex` chips and `@whoever` does not. A file is one the
+   * path map knows
    * — inserting from `#` puts the file NAME in the box and remembers the path
    * behind it, so only that map can tell `Composer.tsx` from a word. A session
    * is one the `#` menu is currently offering, since a session mention is just
@@ -439,7 +441,8 @@ export function Composer({
    */
   const mentions = useMemo(() => {
     const ids = new Set<string>()
-    for (const item of menuItems?.({ char: '#', query: '', start: 0 }) ?? []) ids.add(item.id)
+    for (const char of ['#', '@'] as const)
+      for (const item of menuItems?.({ char, query: '', start: 0 }) ?? []) ids.add(item.id)
     return ids
   }, [menuItems])
 

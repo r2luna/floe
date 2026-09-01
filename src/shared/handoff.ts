@@ -75,6 +75,9 @@ function shortModel(model?: string): string | undefined {
 
 /** Who is speaking, as the incoming harness should read it. */
 function speaker(item: TranscriptItem): string {
+  // A peer session's line went out under 'user' before: the next harness read
+  // another agent's words as its user's instructions.
+  if (item.from) return `peer/${item.from}`
   if (item.role === 'user') return 'user'
   const harness = item.provider && item.provider !== 'claude' ? item.provider : 'claude'
   const model = shortModel(item.model)

@@ -66,6 +66,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'list_sessions',
       'create_session',
       'send_message',
+      'ask_codex',
       'read_session_output',
       'stop_session',
       'select_session',
@@ -88,6 +89,8 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'add_mcp_server',
       'update_mcp_server',
       'remove_mcp_server',
+      'list_project_commands',
+      'add_project_command',
       'list_commands',
       'run_command'
     ]) {

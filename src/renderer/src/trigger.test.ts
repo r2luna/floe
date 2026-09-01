@@ -6,6 +6,7 @@ test('a trigger at the very start counts', () => {
   assert.deepEqual(triggerAt('/', 1), { char: '/', query: '', start: 0 })
   assert.deepEqual(triggerAt('/dep', 4), { char: '/', query: 'dep', start: 0 })
   assert.deepEqual(triggerAt('#raf', 4), { char: '#', query: 'raf', start: 0 })
+  assert.deepEqual(triggerAt('@cod', 4), { char: '@', query: 'cod', start: 0 })
 })
 
 test('a trigger after a space counts', () => {
@@ -17,6 +18,8 @@ test('a trigger mid-word does not', () => {
   // This is the whole point: a path and an issue ref must not open a menu.
   assert.equal(triggerAt('src/main', 8), null)
   assert.equal(triggerAt('user#host', 9), null)
+  // The one that matters most for '@': an address is not a handle.
+  assert.equal(triggerAt('rafael@lunardelli.me', 20), null)
   assert.equal(triggerAt('a/b/c', 5), null)
 })
 

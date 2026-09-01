@@ -16,12 +16,12 @@ import { invalidateProjects, projectScan } from './projectStore'
 import { invalidateEditorCache } from '../editors'
 import { readCommands } from './commandStore'
 import { ensureKeybindings } from '../keybindings'
-import { ensureSkills } from './skills'
+import { ensureBuiltinSkills, ensureSkills } from './skills'
 import { ensureSystemPrompt, systemPromptPath } from '../appSettings'
 
 /** Create anything missing. Never throws: a read-only home is not a crash. */
 export function initConfig(): void {
-  for (const step of [ensureFloeConfig, ensureKeybindings, ensureSkills, ensureSystemPrompt]) {
+  for (const step of [ensureFloeConfig, ensureKeybindings, ensureSkills, ensureBuiltinSkills, ensureSystemPrompt]) {
     try {
       step()
     } catch (err) {

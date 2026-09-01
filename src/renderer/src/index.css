@@ -730,12 +730,14 @@ button {
 .launcher {
   display: flex;
   flex-direction: column;
-  /* Dead centre: with nothing below the composer there is nothing to drift. */
+  /* Centred in the column, but the column is short of the panel by the padding
+     below — dead centre sits too low to read as the start of anything. */
   justify-content: center;
   gap: 26px;
   /* min-height, not height: once the input has grown the column must be able to
      get taller than the panel and let the panel body scroll it. */
   min-height: 100%;
+  padding-bottom: 18vh;
   max-width: 720px;
   margin-inline: auto;
 }
@@ -749,6 +751,18 @@ button {
   font-size: 21px;
   font-weight: 400;
   color: var(--text-strong);
+}
+
+/* Sits with the greeting, not between it and the composer, so the column still
+   reads as two blocks — hence the negative margin against the 26px gap. */
+.greet-branch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: -18px;
+  color: var(--dim);
+  font-size: 12px;
 }
 
 /* Painted by its `penguin-tone-*` class — see `[appearance] penguin-color`.
@@ -901,6 +915,12 @@ button {
 
 .composer-stack {
   display: grid;
+  /* One track, sized by the box and never by the text. The input sizes itself
+     to its content (`field-sizing`), and a `#session` mention is a single word
+     as long as the session's title — an `auto` track takes that word's width,
+     and the line then runs out past the composer instead of wrapping inside
+     it. */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 /* The mirror and the input share one grid cell and overlap exactly. Every
@@ -909,6 +929,10 @@ button {
 .composer-mirror,
 .composer-input {
   grid-area: 1 / 1;
+  /* The track's width, not the content's: `field-sizing: content` sizes the
+     input in BOTH axes, and only an explicit width keeps it from growing
+     sideways with a long unbroken token. */
+  width: 100%;
   margin: 0;
   padding: 14px 14px 4px;
   border: none;
@@ -1642,6 +1666,17 @@ button {
   gap: 8px;
 }
 
+/* A run that OPENS with work is headed on its own, outside any entry (see the
+   Log), so it has to take the run spacing the entries get from the rule above —
+   or the agent's header would sit tight against the message it is answering. */
+.chat > .irc-head {
+  margin-top: 12px;
+}
+
+.chat > .irc-head:first-child {
+  margin-top: 0;
+}
+
 .irc-nick {
   font-weight: 700;
 }
@@ -2073,14 +2108,6 @@ button {
 
 :root[data-theme='light'] .ag-meter[data-state='done'] i {
   background: #9dbaa6;
-}
-
-/* The Codex bridge's answer, quoted under the line that ran it. */
-.ag-reply {
-  margin: 2px 0 4px 22px;
-  padding-left: 10px;
-  border-left: 1px solid var(--line);
-  color: var(--dim);
 }
 
 /* --- shell calls ----------------------------------------------------------- */
@@ -4590,6 +4617,32 @@ kbd {
 .irc-host {
   color: var(--faint);
   font-weight: 400;
+}
+
+/* A handle inside a sentence: `@codex`. Coloured like its nick and nothing
+   else — a box around every mention would make it louder than the line it is
+   part of. */
+.irc-mention {
+  font-weight: 600;
+}
+
+/* Who else is in the channel: another Claude session, badged so its nick does
+   not read as a second person typing. Plan/blue tone, same chip as the
+   subagent harness badge. */
+.irc-peer {
+  padding: 0 5px;
+  border: 1px solid #282f3a;
+  border-radius: var(--radius);
+  background: #1b1e25;
+  color: #95a6c0;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+:root[data-theme='light'] .irc-peer {
+  border-color: #c2d4ef;
+  background: #eef2f9;
+  color: #3a64a8;
 }
 
 /* --- harness accounts ------------------------------------------------------ */

@@ -15,6 +15,7 @@ import {
   removeCommand as storeRemove,
   setCommandWorktree,
   updateCommand as storeUpdate,
+  type NewCommand,
   type NotifyLevel,
   type StoredCommand
 } from './config/commandStore'
@@ -183,4 +184,38 @@ export function setCommandScope(
 ): ProjectCommand[] {
   setCommandWorktree(projectPath, id, scope === 'local' ? worktreePath : null)
   return listCommands(projectPath, worktreePath)
+}
+
+/* --- the agent's view ----------------------------------------------------- */
+//
+// The panel always asks about ONE worktree, because that is the pane it draws.
+// An agent registering a project's commands has no worktree in mind yet, so
+// these two work on the project as a whole: every entry in commands.toml, and a
+// write that carries the full [[command]] shape rather than the name/command
+// pair the panel's inline row can type.
+
+export type CommandDefinition = NewCommand
+/** A stored command as an agent sees it — no file index, `worktree` kept. */
+export type DefinedCommand = Omit<StoredCommand, 'index'>
+
+export function projectCommands(projectPath: string): DefinedCommand[] {
+  seedDefaults(projectPath)
+  return readCommands(projectPath).commands.map(({ index: _index, ...c }) => c)
+}
+
+/**
+ * Add a command to the project's commands.toml.
+ *
+ * Refuses a name that is already there. Ids are slugified from the name, so a
+ * second "Dev" would land as `dev-2` — two rows saying the same word, which is
+ * never what a re-run of the analysis meant.
+ */
+export function defineCommand(projectPath: string, spec: CommandDefinition): DefinedCommand[] {
+  const name = spec.name.trim()
+  const command = spec.command.trim()
+  if (!name || !command) throw new Error('a command needs both a name and a command to run')
+  const taken = projectCommands(projectPath).some((c) => c.name.toLowerCase() === name.toLowerCase())
+  if (taken) throw new Error(`"${name}" is already a command in this project`)
+  storeAdd(projectPath, { ...spec, name, command })
+  return projectCommands(projectPath)
 }

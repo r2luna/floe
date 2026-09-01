@@ -84,20 +84,27 @@ export function isWaitingEvent(kind: AgentEvent['kind']): boolean {
  * that is not the end of a turn means the session is working; `done` and
  * `error` end it, and end it *unread* unless you had that session open.
  *
- * `busy` is only the live edge: a session already mid-turn when the app started
- * is not in it until its next event, which is what `ClaudeSessionMeta.running`
- * (read from disk with the list) is for.
+ * `busy` starts as the live edge, and the sync below is what makes it the whole
+ * truth: a session already mid-turn when the app started joins it on the first
+ * poll. It is deliberately the ONLY source the rows read — `ClaudeSessionMeta
+ * .running` is a snapshot of whenever the list was last read, so a row that
+ * ORs it in keeps a spinner on a turn that ended long ago.
  */
-export function useSessionActivity(openKey?: string | null): SessionActivity {
+export function useSessionActivity(openKeys: readonly string[] = []): SessionActivity {
   const [busy, setBusy] = useState<Set<string>>(() => new Set())
   const [waiting, setWaiting] = useState<Set<string>>(() => new Set())
   const [unread, setUnread] = useState<Set<string>>(() => new Set(readUnread()))
 
+  // EVERY name the open session answers to, not just the one the panel was
+  // opened with: a session has two (Floe's id and the claudeId), the conn is
+  // filed under whichever it last spawned with, and a turn that ended under the
+  // other name would have marked the chat you are looking at as unread.
+  //
   // Read inside the listener rather than resubscribed on every change: which
   // session is open changes as you click around, and tearing the subscription
   // down mid-turn would lose the events that arrive while it is replaced.
-  const open = useRef(openKey)
-  open.current = openKey
+  const open = useRef(openKeys)
+  open.current = openKeys
 
   // Which sound a finished turn plays, from `[notifications]` in floe.toml. A
   // ref for the same reason `open` is one: the subscription below must not be
@@ -145,7 +152,7 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
           return next
         })
         // A turn ended somewhere you were not looking.
-        if (live || key === open.current) return
+        if (live || open.current.includes(key)) return
         setUnread((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
       }),
     []
@@ -153,12 +160,16 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
 
   // Opening a session IS reading it — including one that goes on answering
   // while you watch, since the mark is only ever set for another session.
+  // Under both names: a mark left under the id the panel is NOT keyed by would
+  // otherwise sit on the row of the chat that is open in front of you.
+  const openKey = openKeys.join(' ')
   useEffect(() => {
-    if (!openKey) return
+    const keys = openKey.split(' ').filter(Boolean)
+    if (!keys.length) return
     setUnread((prev) => {
-      if (!prev.has(openKey)) return prev
+      if (!keys.some((k) => prev.has(k))) return prev
       const next = new Set(prev)
-      next.delete(openKey)
+      for (const k of keys) next.delete(k)
       return next
     })
   }, [openKey])

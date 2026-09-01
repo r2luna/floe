@@ -63,6 +63,7 @@ const {
   markTurnStart,
   sendAgentEvent,
   replaySnapshot,
+  activeTurnKeys,
   dropSettled
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
@@ -292,6 +293,74 @@ test('handleLine: <task-notification> completion closes the async subagent row',
   )
   assert.deepEqual(only(events, 'subagent-done'), [{ kind: 'subagent-done', toolUseId: 't1' }])
   assert.ok(!conn.subagents.has('t1'))
+})
+
+test('handleLine: another session\'s message joins the channel under its nick', () => {
+  const conn = fakeConn({})
+  const { events } = run(
+    {
+      type: 'user',
+      message: {
+        content:
+          'Another Claude session sent a message:\n' +
+          '<cross-session-message from="uds:/tmp/cc-socks/24482.sock" from-name="floe-8f" from-mode="bypass">\n' +
+          'Vou mexer em skills.ts, não toca nele.\n' +
+          '</cross-session-message>\n\n' +
+          'This came from another Claude session — not typed by your user.'
+      }
+    },
+    conn
+  )
+  assert.deepEqual(only(events, 'peer'), [
+    { kind: 'peer', from: 'floe-8f', text: 'Vou mexer em skills.ts, não toca nele.' }
+  ])
+})
+
+test('handleLine: a string-form async launch ack keeps the row open and says nothing', () => {
+  const conn = fakeConn({ subagents: new Set(['t1']) })
+  const { events } = run(
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Async agent launched (task id ad8330)' }] }
+    },
+    conn
+  )
+  assert.deepEqual(only(events, 'subagent-done'), [], 'the ack is not the agent reporting back')
+  assert.ok(conn.subagents.has('t1'), 'its <task-notification> still has a row to close')
+})
+
+test('handleLine: a failed tool_result closes the row without speaking for the agent', () => {
+  const conn = fakeConn({ subagents: new Set(['t1']) })
+  const { events } = run(
+    {
+      type: 'user',
+      message: { content: [{ type: 'tool_result', tool_use_id: 't1', is_error: true, content: 'Error: permission denied' }] }
+    },
+    conn
+  )
+  assert.deepEqual(only(events, 'subagent-done'), [{ kind: 'subagent-done', toolUseId: 't1' }])
+  assert.ok(!conn.subagents.has('t1'))
+})
+
+test('handleLine: a peer message that merely mentions a task-notification is still the peer talking', () => {
+  const conn = fakeConn({ subagents: new Set(['t1']) })
+  const { events } = run(
+    {
+      type: 'user',
+      message: {
+        content:
+          'Another Claude session sent a message:\n' +
+          '<cross-session-message from="uds:/tmp/cc-socks/1.sock" from-name="floe-3b" from-mode="bypass">\n' +
+          'o <task-notification> do agente assíncrono nunca chega no stdout\n' +
+          '</cross-session-message>'
+      }
+    },
+    conn
+  )
+  assert.deepEqual(only(events, 'peer'), [
+    { kind: 'peer', from: 'floe-3b', text: 'o <task-notification> do agente assíncrono nunca chega no stdout' }
+  ])
+  assert.ok(conn.subagents.has('t1'), 'and it closed nobody\'s row')
 })
 
 test('handleLine: result does NOT fire done while an async agent is pending', () => {
@@ -586,4 +655,50 @@ test('dropSettled: the card is pruned under every name the session answers to', 
   // Answered under the panel's name, not the one the replay is filed under.
   dropSettled('claude-id', 'rq-1')
   assert.deepEqual(kinds(replaySnapshot('floe-id').events), [])
+})
+
+test('replaySnapshot: the turn is found under every name the session answers to', () => {
+  // The chat opened from the launcher is keyed by Floe's id, so its first turn
+  // is marked under that — while a chat reopened from the sidebar is keyed by
+  // the claudeId. Asking under the name the panel happens to hold used to
+  // answer "nothing running", which is how a session went silent mid-turn.
+  const { win } = fakeWin()
+  addCreatedSession({ id: 'floe-replay', worktreePath: '/tmp/wt' })
+  linkCreatedSession('floe-replay', 'claude-replay')
+  markTurnStart('floe-replay')
+  sendAgentEvent(win, 'floe-replay', { kind: 'text', text: 'working' })
+
+  const snapshot = replaySnapshot('claude-replay')
+  assert.equal(snapshot.running, true)
+  assert.deepEqual(kinds(snapshot.events), ['text'])
+  // Both names travel with it: the panel listens for events under either, or
+  // the rest of the turn arrives tagged with a key it filters out.
+  assert.deepEqual(snapshot.names?.sort(), ['claude-replay', 'floe-replay'])
+})
+
+test('replaySnapshot: a finished turn does not come back as running', () => {
+  // The other half of the same lookup: `done` ends the turn under the name it
+  // ran under, and an alias must not resurrect it — a chat that re-opened to a
+  // typing line for an answer already printed is exactly the reported bug.
+  const { win } = fakeWin()
+  addCreatedSession({ id: 'floe-ended', worktreePath: '/tmp/wt' })
+  linkCreatedSession('floe-ended', 'claude-ended')
+  markTurnStart('floe-ended')
+  sendAgentEvent(win, 'floe-ended', { kind: 'text', text: 'answered' })
+  sendAgentEvent(win, 'floe-ended', { kind: 'done', ok: true })
+
+  assert.equal(replaySnapshot('claude-ended').running, false)
+  assert.equal(replaySnapshot('floe-ended').running, false)
+})
+
+test('activeTurnKeys: a runtime with no conn still reports its turn', () => {
+  // codex and the local agents keep no conn — `markTurnStart` is the only mark
+  // they leave. Built from `conns` alone this list called their turns idle, and
+  // both reconcilers (the session list's spinner, the chat's typing line) take
+  // it as the authority: they would have closed a turn still running.
+  const { win } = fakeWin()
+  markTurnStart('codex-sess')
+  assert.ok(activeTurnKeys().includes('codex-sess'))
+  sendAgentEvent(win, 'codex-sess', { kind: 'done', ok: true })
+  assert.ok(!activeTurnKeys().includes('codex-sess'))
 })

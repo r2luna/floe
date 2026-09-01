@@ -8,12 +8,15 @@
 //
 // Two scopes, the same shape:
 //
+//   ~/.config/floe/builtin-skills/<name>.md      built-in — shipped with Floe
 //   ~/.config/floe/skills/<name>.md              global — every project
 //   ~/.config/floe/projects/<dir>/skills/<name>.md   this project only
 //
 // A skill may also be a DIRECTORY holding `SKILL.md`, which is how you ship one
-// with reference files beside it. A project skill wins over a global one of the
-// same name: the narrower answer is the one you meant.
+// with reference files beside it. The narrower scope wins a name clash: a
+// project skill beats a global one, and either beats a built-in — which is how
+// you customize a built-in, since its own file is rewritten on every launch
+// (builtinSkills.ts).
 
 import {
   existsSync,
@@ -27,13 +30,20 @@ import {
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { configDir } from '../dataDir'
+import { BUILTIN_SKILLS } from './builtinSkills'
 import { projectScan } from './projectStore'
+
+/** Where a skill came from, narrowest last — the order they override in. */
+export type SkillScope = 'builtin' | 'global' | 'project'
+
+/** The scopes a user can write to. Built-ins are Floe's, and are read-only. */
+export type WritableScope = Exclude<SkillScope, 'builtin'>
 
 export interface Skill {
   /** The token you type after `/`. */
   name: string
   description?: string
-  scope: 'global' | 'project'
+  scope: SkillScope
   /** Absolute path of the markdown file, for opening it in the reader. */
   file: string
   /** The directory the file sits in — a bundled skill's reference files live here. */
@@ -41,6 +51,9 @@ export interface Skill {
 }
 
 export const globalSkillsDir = (): string => join(configDir(), 'skills')
+
+/** Floe's own skills, rewritten from BUILTIN_SKILLS on every boot. */
+export const builtinSkillsDir = (): string => join(configDir(), 'builtin-skills')
 
 export function projectSkillsDir(projectPath: string): string | null {
   const dir = projectScan().byPath.get(projectPath)
@@ -115,13 +128,15 @@ function safeIsDir(path: string): boolean {
 }
 
 /**
- * Every skill available to a project: the global ones, then its own.
+ * Every skill available to a project: Floe's own, then the global ones, then
+ * the project's.
  *
- * Project skills are collected second so they overwrite a global of the same
- * name — the narrower one is the one you meant.
+ * Collected widest first so each scope overwrites the one before it — the
+ * narrower one is the one you meant.
  */
 export function listSkills(projectPath?: string): Skill[] {
   const found = new Map<string, Skill>()
+  collect(builtinSkillsDir(), 'builtin', found)
   collect(globalSkillsDir(), 'global', found)
   const own = projectPath ? projectSkillsDir(projectPath) : null
   if (own) collect(own, 'project', found)
@@ -152,6 +167,37 @@ export function ensureSkills(): void {
   mkdirSync(dir, { recursive: true })
   const example = join(dir, 'example.md')
   if (!existsSync(example)) writeFileSync(example, EXAMPLE)
+}
+
+/**
+ * Write Floe's own skills, every boot.
+ *
+ * Managed the way the hook scripts are: this directory belongs to Floe, and an
+ * edit made here is gone on the next launch. Customizing a built-in means
+ * writing a global or project skill of the SAME NAME — which wins the lookup
+ * anyway, and survives every update.
+ */
+export function ensureBuiltinSkills(): void {
+  const dir = builtinSkillsDir()
+  mkdirSync(dir, { recursive: true })
+  for (const skill of BUILTIN_SKILLS) {
+    const file = join(dir, `${skill.name}.md`)
+    let current = ''
+    try {
+      current = readFileSync(file, 'utf8')
+    } catch {
+      // Not there yet — the write below is the whole point.
+    }
+    // Only when it differs: the config watcher repaints the app on every write
+    // under this directory, and boot is not a reason to repaint.
+    if (current !== skill.text) writeFileSync(file, skill.text)
+  }
+  // A skill Floe stopped shipping, or renamed, would otherwise stay forever —
+  // nobody deletes a file they did not know they had.
+  const ours = new Set(BUILTIN_SKILLS.map((skill) => `${skill.name}.md`))
+  for (const entry of readdirSync(dir)) {
+    if (entry.endsWith('.md') && !ours.has(entry)) rmSync(join(dir, entry), { force: true })
+  }
 }
 
 const EXAMPLE = `---
@@ -207,11 +253,19 @@ function checkName(name: string): string {
 }
 
 /** Where a new skill of this scope goes, created if it isn't there yet. */
-function dirFor(scope: Skill['scope'], projectPath?: string): string {
+function dirFor(scope: WritableScope, projectPath?: string): string {
   if (scope === 'global') return globalSkillsDir()
   const dir = projectPath ? projectSkillsDir(projectPath) : null
   if (!dir) throw new Error('no project here to keep a project skill in')
   return dir
+}
+
+/** Refuse a write to Floe's own copy — the next boot would undo it anyway. */
+function writable(skill: Skill): Skill {
+  if (skill.scope !== 'builtin') return skill
+  throw new Error(
+    `"${skill.name}" is a built-in skill — create a global skill with the same name to change it`
+  )
 }
 
 function find(name: string, projectPath?: string): Skill {
@@ -225,7 +279,7 @@ function find(name: string, projectPath?: string): Skill {
 // `dir` is the skills root it sits in, which must never be touched.
 const isBundle = (skill: Skill): boolean => basename(skill.file) === 'SKILL.md'
 
-export function createSkill(name: string, scope: Skill['scope'], projectPath?: string): Skill {
+export function createSkill(name: string, scope: WritableScope, projectPath?: string): Skill {
   const clean = checkName(name)
   if (listSkills(projectPath).some((s) => s.name === clean && s.scope === scope)) {
     throw new Error(`"${clean}" already exists`)
@@ -247,7 +301,7 @@ export function createSkill(name: string, scope: Skill['scope'], projectPath?: s
  */
 export function renameSkill(name: string, to: string, projectPath?: string): Skill {
   const clean = checkName(to)
-  const skill = find(name, projectPath)
+  const skill = writable(find(name, projectPath))
   if (clean === skill.name) return skill
   if (listSkills(projectPath).some((s) => s.name === clean)) throw new Error(`"${clean}" already exists`)
 
@@ -271,7 +325,7 @@ export function renameSkill(name: string, to: string, projectPath?: string): Ski
 
 /** Delete a skill: the file, or the whole directory a bundled one owns. */
 export function deleteSkill(name: string, projectPath?: string): void {
-  const skill = find(name, projectPath)
+  const skill = writable(find(name, projectPath))
   rmSync(isBundle(skill) ? skill.dir : skill.file, { recursive: true, force: true })
 }
 
@@ -293,7 +347,7 @@ export function readSkillFile(name: string, projectPath?: string): { skill: Skil
  * hand-editing the file.
  */
 export function updateSkill(name: string, content: string, projectPath?: string): Skill {
-  const skill = find(name, projectPath)
+  const skill = writable(find(name, projectPath))
   writeFileSync(skill.file, content)
   return skill
 }

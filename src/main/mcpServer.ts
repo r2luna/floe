@@ -32,6 +32,9 @@ import { worktreeStatus } from './gitStatus'
 import { provisionWorktree } from './provision'
 import { listPlans, readPlan } from './plans'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion } from './claudeSessions'
+// Circular with codex (it emits through agent, which imports this file) — safe:
+// every side only calls the others' functions at runtime, never at module top.
+import { askCodex, MAX_EXCHANGES } from './codex'
 import {
   addCreatedSession,
   getAllCreatedSessions,
@@ -50,6 +53,8 @@ import {
   updateSkill
 } from './config/skills'
 import { projectFor } from './config/projectStore'
+import { defineCommand, projectCommands } from './commands'
+import { NOTIFY_LEVELS } from './config/commandStore'
 import { pluginTools } from './plugins/host'
 import {
   addMcpServer,
@@ -535,6 +540,35 @@ function registerTools(server: McpServer, token: string): void {
   )
 
   server.tool(
+    'ask_codex',
+    'Ask the local Codex CLI, as a second pair of eyes on the code. Codex runs read-only in this session\'s worktree, joins the chat as @codex (a subagent row plus its answer in the channel), and keeps one thread across calls — call it again to continue the same conversation.',
+    {
+      prompt: z.string().describe('What to ask Codex. It is another model, not a human: lead with the delta, use file:line, skip the pleasantries.'),
+      new_topic: z.boolean().optional().describe('Start a fresh Codex thread instead of continuing the current one.')
+    },
+    async ({ prompt, new_topic }) => {
+      try {
+        // The caller's own session: Codex answers into THIS chat (that is what
+        // makes it a participant), and runs in the worktree being talked about.
+        const caller = findSessionAny(token)
+        if (!caller) return textResult({ error: 'ask_codex must be called from a Floe session.' })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available to run Codex.' })
+        const result = await askCodex(win, connKeyFor(caller), caller.worktreePath, prompt, new_topic === true)
+        if (result.capped)
+          return textResult({
+            capped: true,
+            note: `${MAX_EXCHANGES} exchanges used — check in with your user before continuing this thread.`
+          })
+        if (result.error) return textResult({ error: result.error })
+        return textResult({ reply: result.reply, exchange: result.exchange })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
     'read_session_output',
     'Read recent output from a session: the live in-memory buffer plus, if linked, the tail of its on-disk transcript.',
     {
@@ -553,7 +587,11 @@ function registerTools(server: McpServer, token: string): void {
             .map((it) => {
               if (it.role === 'image') return '[image]'
               if (it.role === 'tool') return `[tool ${it.name ?? ''}] ${it.summary ?? ''}`.trim()
-              return `${it.role}: ${it.text ?? ''}`
+              // A line another session or a subagent said is labelled with who
+              // said it. Reading it back as `user:`/`assistant:` is how an agent
+              // watching this session ends up quoting a peer's words as its
+              // user's instructions.
+              return `${it.from ?? it.role}: ${it.text ?? ''}`
             })
             .filter(Boolean)
           disk = lines.slice(-cap).join('\n')
@@ -969,6 +1007,60 @@ function registerTools(server: McpServer, token: string): void {
   )
 
   // --- UI commands (the renderer's registry) --------------------------------
+
+  // --- Project commands (a project's named processes — commands.ts) ---------
+  // Not to be confused with list_commands/run_command below, which are the UI's
+  // palette commands. These write the project's own commands.toml: the dev
+  // server, queue worker or watcher Floe runs in a worktree's command pane.
+
+  server.tool(
+    'list_project_commands',
+    "The named processes Floe runs for a project (its commands.toml): dev server, queue worker, watcher. Not the UI's palette commands — those are list_commands.",
+    {
+      project: z.string().describe('The repo root path (a worktree path works too).')
+    },
+    async ({ project }) => {
+      try {
+        return textResult(projectCommands(projectFor(project) ?? project))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'add_project_command',
+    'Register a process Floe can run for this project — it shows up in every worktree\'s command pane. For long-running things (servers, workers, watchers), not one-shot tasks like tests. Refuses a name already in use.',
+    {
+      project: z.string().describe('The repo root path (a worktree path works too).'),
+      name: z.string().describe('What the row is called, e.g. "Dev" or "Queue".'),
+      command: z.string().describe('The shell command, run in the worktree root.'),
+      cwd: z.string().optional().describe('Working directory override — relative to the worktree.'),
+      auto_start: z.boolean().optional().describe('Start it when a worktree is provisioned. Only for processes that are safe to run unattended.'),
+      auto_restart: z.boolean().optional().describe('Bring it back when it exits.'),
+      watch: z.array(z.string()).optional().describe('Globs that restart the command when they change.'),
+      notify: z.enum(NOTIFY_LEVELS).optional().describe('How loudly its output notifies: all, important or none.'),
+      worktree: z.string().optional().describe('Scope it to this one worktree path. Omit for every worktree of the project.')
+    },
+    async ({ project, name, command, cwd, auto_start, auto_restart, watch, notify, worktree }) => {
+      try {
+        const root = projectFor(project) ?? project
+        const commands = defineCommand(root, {
+          name,
+          command,
+          cwd,
+          autoStart: auto_start,
+          autoRestart: auto_restart,
+          watch,
+          notify,
+          worktree
+        })
+        return textResult({ ok: true, commands })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
 
   server.tool(
     'list_commands',

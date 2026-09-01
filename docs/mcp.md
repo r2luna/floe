@@ -35,7 +35,11 @@ command.
    `worktree_status`, `list_branches`, `changed_files`, `file_diff`,
    `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with
-   `wait=true` for synchronous session-to-session calls), `read_session_output`,
+   `wait=true` for synchronous session-to-session calls), `ask_codex` (the local
+   Codex CLI as a second pair of eyes — read-only in the caller's worktree, one
+   resumable thread per session, capped at five exchanges before the agent has
+   to check in; it joins the chat as `@codex`, see `main/codex.ts`),
+   `read_session_output`,
    `stop_session`, `select_session`, `create_followup` / `list_followups` /
    `cancel_followup`, `list_plans`, `read_plan`, `open_plan`,
    `present_decision` (renders the inline decision panel — `agent.ts` and
@@ -44,7 +48,11 @@ command.
    skills admin set `list_skills` / `read_skill` / `create_skill` /
    `update_skill` / `rename_skill` / `delete_skill` (Floe-owned skills,
    `config/skills.ts` — to *use* one, put `/name` in a prompt; expansion
-   happens on send). `start_merge` opens the **guided** merge checklist for a
+   happens on send). `list_project_commands` / `add_project_command` write a
+   project's own processes — the dev server, queue worker or watcher Floe runs
+   in a worktree's command pane (`commands.toml`, `main/commands.ts`); the
+   built-in `/setup-commands` skill is what fills them in from the repo.
+   `start_merge` opens the **guided** merge checklist for a
    worktree (navigating the UI to its project if needed) and pauses at the
    review checkpoint for the user — `merge_worktree` stays the headless
    one-shot with no review stop.

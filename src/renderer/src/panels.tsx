@@ -73,15 +73,20 @@ import type { Worktrees } from './useWorktrees'
 import type { Changes } from './useChanges'
 import type { PaletteItem } from './fuzzy'
 import type { Trigger } from './trigger'
+import { lastChoice, loadChoice, speakerKey, userNick, windowOf, type ModelChoice } from './models'
+// Who is in the channel and how you name them in a sentence — see mentions.ts.
+import { rosterOf, splitMentions } from './mentions'
+// Whose header a line prints under. The rules live next to their test, not in
+// the panel that draws them — see speakers.ts.
 import {
-  addressOf,
-  lastChoice,
-  loadChoice,
-  speakerKey,
-  userNick,
-  windowOf,
-  type ModelChoice
-} from './models'
+  actOwner,
+  answeringWho,
+  isAct,
+  lastSpeaker,
+  nextAssistant,
+  whoOf,
+  type Who
+} from './speakers'
 import { useDraft } from './drafts'
 import { useAuth } from './useAuth'
 import { useLocalAgents } from './useLocalAgents'
@@ -92,7 +97,7 @@ import { RunInTerminal } from './runInTerminal'
 import { MergePanel } from './MergePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import type { Merge } from './useMerge'
-import type { TranscriptItem } from '../../main/claudeSessions'
+import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
@@ -103,7 +108,7 @@ import {
 } from '../../shared/types'
 import { previewSound } from './sounds'
 import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpCandidate, McpServerEntry, WorktreeStatus } from '../../shared/types'
-import type { Skill } from '../../main/config/skills'
+import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
 // micromark/mdast chain) are the two heaviest dependency trees in the
@@ -506,6 +511,9 @@ export function PanelBody({
         onOpen={onOpen}
         menuItems={menuItems}
         worktreePath={worktrees.currentPath}
+        branch={
+          worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.worktree.branch
+        }
         onCreated={worktrees.reload}
         noProjects={!projects.loading && projects.all.length === 0}
         onAddProject={onAddProject}
@@ -688,6 +696,7 @@ function Launcher({
   onOpen,
   menuItems,
   worktreePath,
+  branch,
   onCreated,
   noProjects,
   onAddProject
@@ -695,6 +704,8 @@ function Launcher({
   onOpen: OpenFn
   menuItems?: (trigger: Trigger) => PaletteItem[]
   worktreePath?: string
+  /** The branch the session will be started on — absent when none is selected. */
+  branch?: string
   /** Re-read the worktree list, so the new session shows up under its branch. */
   onCreated?: () => void
   /** Nothing has ever been added — not merely "none selected right now". */
@@ -756,6 +767,16 @@ function Launcher({
         />
         {greeting}
       </h1>
+
+      {/* Which branch the message lands on. Only when one is selected — with no
+          branch the session runs in the home folder, and naming a branch there
+          would be a lie. */}
+      {branch && (
+        <div className="greet-branch">
+          <IconGitBranch size={13} stroke={1.6} />
+          {branch}
+        </div>
+      )}
 
       <Composer
         value={text}
@@ -919,6 +940,27 @@ function ChatPanel({
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
+  // Everyone this message could name: the voices already in the channel, plus
+  // the runtimes installed on this machine that you can still call into it.
+  // Answered here rather than in useMenuItems because it is the only menu that
+  // depends on THIS conversation.
+  const roster = useMemo(
+    () =>
+      rosterOf(tail ? [...items, tail] : items, {
+        you: userNick(),
+        model: choice.provider ?? 'claude',
+        runtimes: agents.map((a) => a.id)
+      }),
+    [items, tail, choice.provider, agents]
+  )
+  const composerMenu = useCallback(
+    (t: Trigger): PaletteItem[] =>
+      t.char === '@'
+        ? roster.map((h) => ({ id: `@${h.nick}`, title: h.nick, detail: h.detail, group: h.kind }))
+        : (menuItems?.(t) ?? []),
+    [roster, menuItems]
+  )
+
   // Whoever answered last in THIS session is who the composer should be set to.
   // Pinned once, when the transcript lands: after that the picker is yours, and
   // a reply arriving must not undo a model you just switched to for the next
@@ -1052,6 +1094,14 @@ function ChatPanel({
 
   // Who the "is typing" line belongs to.
   const typist = tail?.provider ?? choice.provider ?? 'claude'
+  // Who a run that OPENS with work is headed by: the model has started on your
+  // message but not said anything yet, so there is no entry to read it off.
+  // Memoised on what it is made of, so a delta does not hand the memoised Log a
+  // fresh object and re-render the whole transcript.
+  const pending = useMemo(
+    () => answeringWho(shown, tail, choice),
+    [shown, tail?.provider, tail?.model, tail?.effort, choice]
+  )
 
   // A question is answered IN the composer (digits, free text), so it must
   // hold focus the moment one arrives — with focus elsewhere (the panel, a
@@ -1107,11 +1157,11 @@ function ChatPanel({
           </button>
         )}
         <RunInTerminal.Provider value={runInTerminal}>
-          <Log items={shown} cwd={cwd} base={hiddenCount} />
+          <Log items={shown} cwd={cwd} base={hiddenCount} pending={pending} />
           {tail && (
             // The streaming tail lives outside the memoised Log: a delta flush
             // re-renders this one entry, not the whole transcript above it.
-            <TailEntry item={tail} isNew={lastSpeaker(shown) !== speakerKey(whoOf(tail))} />
+            <TailEntry item={tail} isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))} />
           )}
         </RunInTerminal.Provider>
         {question && (
@@ -1182,7 +1232,7 @@ function ChatPanel({
         onToggleLink={() => setLinking((v) => !v)}
         onStop={running ? stop : undefined}
         placeholder={question ? questionHint(question) : running ? 'Type while it works — ⏎ queues…' : 'Reply…'}
-        menuItems={menuItems}
+        menuItems={composerMenu}
         onDigit={
           question
             ? (n) => {
@@ -1219,29 +1269,6 @@ function ChatPanel({
 // How many transcript entries mount at once; "earlier" pages back by the same.
 const LOG_PAGE = 100
 
-// `nick!ident@host`, the way IRC writes a speaker: who answered, how hard it
-// was told to think, and which model it ran on. Changing either mid-conversation
-// breaks the run and prints a fresh header, because it IS a different speaker:
-// same name, different machine. The nick is who answered: the runtime, not
-// always Claude.
-function whoOf(item: TranscriptItem): ReturnType<typeof addressOf> {
-  return addressOf(
-    item.role === 'user' ? userNick() : (item.provider ?? 'claude'),
-    item.model,
-    item.effort
-  )
-}
-
-/** Who spoke last — lets the streaming tail decide if it continues the run. */
-function lastSpeaker(items: TranscriptItem[]): string | null {
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i]
-    // Tool rows don't break a speaker run in the Log, so they don't here either.
-    if (item.role === 'user' || item.role === 'assistant') return speakerKey(whoOf(item))
-  }
-  return null
-}
-
 /** One spoken entry, shared by the settled Log and the streaming tail. */
 /**
  * Your own words, with file references drawn as chips.
@@ -1259,9 +1286,33 @@ function RefText({ text }: { text: string }) {
     <>
       {splitRefs(text).map((part, i) =>
         part.ref === undefined ? (
-          <Fragment key={i}>{part.text}</Fragment>
+          <MentionText text={part.text} key={i} />
         ) : (
           <FileChip ref_={part.ref} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * `@codex` drawn as the handle it is.
+ *
+ * Same reasoning as the file chip above: the name of who you are talking about
+ * is the one word in the sentence you scan for, so it is the one word that
+ * should not read like the rest of the line. Nothing is rewritten — the model
+ * still receives the sentence exactly as it was typed.
+ */
+function MentionText({ text }: { text: string }) {
+  return (
+    <>
+      {splitMentions(text).map((part, i) =>
+        part.nick === undefined ? (
+          <Fragment key={i}>{part.text}</Fragment>
+        ) : (
+          <span className="irc-mention" style={{ color: nickColor(part.nick) }} key={i}>
+            {part.text}
+          </span>
         )
       )}
     </>
@@ -1337,15 +1388,10 @@ function SubagentLine({ item, peak }: { item: TranscriptItem; peak: number }) {
           {tokens > 0 && <i style={{ width: `${Math.max(6, (tokens / peak) * 100)}%` }} />}
         </span>
       </div>
-      {/* Only the Codex bridge answers in words; a Task subagent's output lands
-          as the parent's own work, so there is nothing to quote here. */}
-      {!running && !!item.text && (
-        <div className="ag-reply">
-          <Suspense fallback={<div className="md md-plain">{item.text}</div>}>
-            <MessageBody text={item.text} />
-          </Suspense>
-        </div>
-      )}
+      {/* What it answered is NOT quoted under its launch line: the agent says it
+          in the channel, under its own nick (see the 'agent-reply' action). A
+          report tucked inside the row that launched it reads as a footnote to
+          the parent's work, and it is not one — it is someone reporting back. */}
     </>
   )
 }
@@ -1393,6 +1439,49 @@ function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolean }) {
   return <Entry item={text === (item.text ?? '') ? item : { ...item, text }} isNew={isNew} streaming />
 }
 
+/**
+ * The line that opens a run: who is speaking, when, and what the run cost.
+ *
+ * Its own component because a run does not always open with words. Work — tool
+ * calls, subagents — can come first, and it is headed by whoever ran it (see
+ * actOwner) rather than inheriting the header above, which is the user's.
+ */
+function Head({
+  who,
+  at,
+  peer,
+  cost
+}: {
+  who: Who
+  at?: number
+  /**
+   * A voice that is neither you nor the model answering you — see whoOf.
+   * 'session' is another Claude session, 'agent' a subagent reporting back.
+   */
+  peer?: 'session' | 'agent'
+  /** What the whole run cost, printed on the header that opens it. */
+  cost?: TranscriptItem
+}) {
+  return (
+    <div className="irc-head">
+      {/* One span, not two: the header is a flex row with a gap, so
+          a sibling would put air between the name and its host and
+          stop `claude@opus-5` reading as a single address. */}
+      <span className="irc-nick" style={{ color: nickColor(who.nick) }}>
+        {who.nick}
+        {who.ident && <span className="irc-host">!{who.ident}</span>}
+        {who.host && <span className="irc-host">@{who.host}</span>}
+      </span>
+      {/* The nick alone says a different speaker, not what kind. Both of these
+          are agents, and neither is the model you are talking to: one is
+          another session, the other one it sent out itself. */}
+      {peer && <span className="irc-peer">{peer}</span>}
+      <span className="irc-time">{clock(at)}</span>
+      {cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />}
+    </div>
+  )
+}
+
 function Entry({
   item,
   isNew,
@@ -1405,22 +1494,15 @@ function Entry({
   cost?: TranscriptItem
   streaming?: boolean
 }) {
-  const who = whoOf(item)
   return (
     <div className="irc-entry" data-cont={!isNew || undefined}>
       {isNew && (
-        <div className="irc-head">
-          {/* One span, not two: the header is a flex row with a gap, so
-              a sibling would put air between the name and its host and
-              stop `claude@opus-5` reading as a single address. */}
-          <span className="irc-nick" style={{ color: nickColor(who.nick) }}>
-            {who.nick}
-            {who.ident && <span className="irc-host">!{who.ident}</span>}
-            {who.host && <span className="irc-host">@{who.host}</span>}
-          </span>
-          <span className="irc-time">{clock(item.at)}</span>
-          {cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />}
-        </div>
+        <Head
+          who={whoOf(item)}
+          at={item.at}
+          peer={item.from ? (item.role === 'user' ? 'session' : 'agent') : undefined}
+          cost={cost}
+        />
       )}
       <div className="irc-body">
         {/* Only the model's side is markdown. Rendering the user's own
@@ -1549,11 +1631,14 @@ function QuestionBlock({
 const Log = memo(function Log({
   items,
   cwd,
-  base = 0
+  base = 0,
+  pending
 }: {
   items: TranscriptItem[]
   cwd?: string
   base?: number
+  /** Who is answering now, for work that started before a word was said. */
+  pending?: Who
 }) {
   let speaker: string | null = null
 
@@ -1594,13 +1679,41 @@ const Log = memo(function Log({
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
 
+    // Work is whoever ran it speaking, so it opens their run rather than
+    // continuing the one above it. Without this a message of yours followed by
+    // tool calls printed those calls under YOUR header — the log said you ran
+    // them, when it was the model going to work on what you had just said.
+    if (isAct(item)) {
+      const owner = actOwner(items, i, pending)
+      const key = owner ? speakerKey(owner) : null
+      if (owner && key !== speaker) {
+        speaker = key
+        // The run this work opens ends at the last thing its speaker says, and
+        // that is where the cost of the turn is known — so the header carries
+        // it here, exactly as it does when a run opens with words.
+        const opens = nextAssistant(items, i)
+        const last = opens === -1 ? undefined : items[runEnd.get(opens) ?? opens]
+        out.push(
+          <Head
+            who={owner}
+            at={item.at ?? (opens === -1 ? undefined : items[opens].at)}
+            cost={last?.role === 'assistant' ? last : undefined}
+            key={`head-${base + i}`}
+          />
+        )
+      }
+    }
+
     // A run of calls — commands and tool calls alike — is one act of work, so
     // it is one block: the agent exploring reads as one thing happening, not as
     // a stack of separate events between two paragraphs.
     if (item.role === 'tool') {
       const run: TranscriptItem[] = []
       const at = i
-      while (i < items.length && items[i].role === 'tool') run.push(items[i++])
+      // A command YOU typed is not part of the model's run of calls (see `by`),
+      // so it folds on its own and keeps the header it belongs under.
+      while (i < items.length && items[i].role === 'tool' && items[i].by === item.by)
+        run.push(items[i++])
       i--
       out.push(<CallsFold items={run} cwd={cwd} key={base + at} />)
       continue
@@ -1608,7 +1721,7 @@ const Log = memo(function Log({
 
     // Agents launched together are one act of work, so they are gathered into
     // one group — like the run of shell calls above, and for the same reason.
-    // They do NOT break the speaker run: these are lines about what the speaker
+    // They take no header of their own: these are lines about what the speaker
     // set in motion, not another voice taking over the conversation.
     if (item.role === 'subagent') {
       const run: TranscriptItem[] = []
@@ -2717,7 +2830,11 @@ function SkillsList({
           return askScope()
         }
         const found = skills.all.find((s) => s.name === req.name)
-        if (found) setDraft({ scope: found.scope, renaming: found.name, text: found.name })
+        // A built-in has no name of its own to change: the file comes back on
+        // the next launch. Shadowing it is `n` + the same name, not a rename.
+        if (found && found.scope !== 'builtin') {
+          setDraft({ scope: found.scope, renaming: found.name, text: found.name })
+        }
       }),
     [askScope, cwd, skills.all]
   )
@@ -2788,9 +2905,9 @@ function SkillsList({
   // Grouped by scope, then by name inside it. The list from the main process is
   // sorted by name alone — right for the composer's `/` menu, wrong here, where
   // interleaved scopes would print a GLOBAL/PROJECT heading over every row.
-  const groups: Array<{ scope: Skill['scope']; rows: Skill[] }> = (['global', 'project'] as const).map(
-    (scope) => ({ scope, rows: skills.all.filter((s) => s.scope === scope) })
-  )
+  const groups: Array<{ scope: Skill['scope']; rows: Skill[] }> = (
+    ['builtin', 'global', 'project'] as const
+  ).map((scope) => ({ scope, rows: skills.all.filter((s) => s.scope === scope) }))
 
   const empty = !skills.all.length && !draft
 
@@ -2806,7 +2923,7 @@ function SkillsList({
         if (!rows.length && !drafting) return null
         return (
           <Fragment key={scope}>
-            <div className="group-label">{scope.toUpperCase()}</div>
+            <div className="group-label">{scope === 'builtin' ? 'BUILT-IN' : scope.toUpperCase()}</div>
             {rows.map((skill) => {
               // The reader takes a path relative to a root, which for a skill is
               // its own directory — see the `root` override in PanelBody.
@@ -2867,7 +2984,9 @@ function SkillsList({
  * named after it.
  */
 interface SkillDraftRow {
-  scope: Skill['scope']
+  // Not `Skill['scope']`: a built-in is Floe's own copy, rewritten on the next
+  // boot, so it is never what a draft writes to — see config/skills.ts.
+  scope: WritableScope
   /** The skill being renamed — absent when the row is a skill that is new. */
   renaming?: string
   text: string
@@ -3445,6 +3564,18 @@ function SessionMark({
 }
 
 /**
+ * Every id one session answers to: Floe's own, and the claudeId the CLI gave it.
+ *
+ * A session has two names for its whole life. The panel is keyed by one of
+ * them, the live agent conn by whichever it last spawned with, and the marks
+ * (busy, waiting, unread) by whatever the events were tagged with — so a row
+ * that asks about a single id is right about half the time.
+ */
+function namesOf(s: ClaudeSessionMeta): string[] {
+  return s.claudeId && s.claudeId !== s.id ? [s.id, s.claudeId] : [s.id]
+}
+
+/**
  * A project's worktrees, each with its sessions underneath.
  *
  * The branch row is where you pick a worktree; a session row opens that
@@ -3470,10 +3601,22 @@ function WorktreesList({
   /** The find bar's query — the run of text it matched is tinted in the row. */
   find?: string
 }) {
+  // Every name the open session answers to. The lane knows the one the panel
+  // was opened with; the other is what a turn started from the launcher runs
+  // under, and the marks are keyed by whichever the conn spawned with.
+  const openKeys = useMemo(() => {
+    if (!openSession) return []
+    for (const { sessions } of worktrees.rows) {
+      const s = sessions.find((s) => s.id === openSession || s.claudeId === openSession)
+      if (s) return namesOf(s)
+    }
+    return [openSession]
+  }, [openSession, worktrees.rows])
+
   // Work happening in sessions this list is only showing, not hosting: the
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
-  const { busy, waiting, unread } = useSessionActivity(openSession)
+  const { busy, waiting, unread } = useSessionActivity(openKeys)
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -3552,18 +3695,33 @@ function WorktreesList({
             <GitDirt status={worktrees.status[worktree.path]} />
           </button>
 
-          {(collapsed.has(worktree.path) ? [] : sessions).map((s) => (
+          {(collapsed.has(worktree.path) ? [] : sessions).map((s) => {
+            // Both names, everywhere: the agent conn is filed under whichever
+            // the session last spawned with, so its events arrive tagged with
+            // one or the other and a lookup on a single id misses half of them.
+            // A session started from the launcher runs under Floe's id while
+            // the list already knows it by its claudeId — checking only the
+            // claudeId is why its reply never lit the row as unread.
+            const names = namesOf(s)
+            const marked = (set: ReadonlySet<string>): boolean => names.some((n) => set.has(n))
+            // Live only. `s.running` is a snapshot from whenever the list was
+            // last read, so a turn that has since ended keeps a spinner on the
+            // row forever — and, because a working row cannot show unread, hides
+            // the mark that says the answer is waiting. `busy` is corrected
+            // against the main process every few seconds (see reconcileLive).
+            const working = marked(busy)
+            return (
             <button
               className="row row-session"
               key={s.id}
               title={s.title}
               // An answer arrived while you were elsewhere. Cleared by opening
               // it, which is the only way to read it.
-              data-unread={unread.has(s.claudeId ?? s.id) || undefined}
+              data-unread={marked(unread) || undefined}
               // The open one, marked the same way the current project is. The
               // cursor shows where you last MOVED; this shows what you are
               // actually looking at, and they are different questions.
-              data-active={(openSession && (s.claudeId ?? s.id) === openSession) || undefined}
+              data-active={(!!openSession && names.includes(openSession)) || undefined}
               onClick={() => {
                 worktrees.select(worktree.path)
                 // `claudeId` names the transcript file on disk; Floe's own id
@@ -3575,24 +3733,16 @@ function WorktreesList({
                 })
               }}
             >
-              {(() => {
-                const id = s.claudeId ?? s.id
-                // Both names: the agent conn is keyed by whichever the session
-                // last spawned under, so its events arrive tagged with one or
-                // the other and a lookup on a single id misses half the turns.
-                const working = !!(busy.has(id) || busy.has(s.id) || s.running)
-                return (
-                  <SessionMark
-                    working={working}
-                    waiting={waiting.has(id) || waiting.has(s.id)}
-                    seen={!working && unread.has(id)}
-                  />
-                )
-              })()}
+              <SessionMark
+                working={working}
+                waiting={marked(waiting)}
+                seen={!working && marked(unread)}
+              />
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>
             </button>
-          ))}
+            )
+          })}
         </div>
       ))}
     </>

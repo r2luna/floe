@@ -128,3 +128,51 @@ test('survives a project with no package.json', () => {
   writeFileSync(join(d, '.floe', 'vite.config.mjs'), '')
   assert.equal(containerizeViteCommand('bun run dev', d, d), 'bun run dev')
 })
+
+/* --- the agent's view (projectCommands / defineCommand) ------------------- */
+//
+// These write commands.toml, so they need a config directory of their own —
+// `configDir()` reads XDG_CONFIG_HOME on every call, which is what makes a
+// per-test temp home possible after the import above.
+
+const { defineCommand, projectCommands } = await import('./commands.ts')
+const { invalidateProjects } = await import('./config/projectStore.ts')
+
+/** A fresh project, tracked in a config directory nothing else has written to. */
+function project(): string {
+  process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'floe-cfg-'))
+  invalidateProjects()
+  const dir = mkdtempSync(join(tmpdir(), 'floe-proj-'))
+  return dir
+}
+
+test('a defined command lands in the project, flags and all', () => {
+  const dir = project()
+  defineCommand(dir, { name: 'Dev', command: 'pnpm dev', autoStart: true, watch: ['src/**'] })
+  const [cmd] = projectCommands(dir)
+  assert.equal(cmd.name, 'Dev')
+  assert.equal(cmd.command, 'pnpm dev')
+  assert.equal(cmd.autoStart, true)
+  assert.deepEqual(cmd.watch, ['src/**'])
+  assert.equal(cmd.id, 'dev', 'the id is the slugified name — what the runtime keys on')
+})
+
+test('the same name twice is refused rather than numbered', () => {
+  const dir = project()
+  defineCommand(dir, { name: 'Queue', command: 'php artisan queue:work' })
+  assert.throws(() => defineCommand(dir, { name: 'queue', command: 'other' }), /already a command/)
+  assert.equal(projectCommands(dir).length, 1)
+})
+
+test('a command needs both halves', () => {
+  const dir = project()
+  assert.throws(() => defineCommand(dir, { name: '  ', command: 'pnpm dev' }), /needs both/)
+  assert.throws(() => defineCommand(dir, { name: 'Dev', command: '  ' }), /needs both/)
+  assert.deepEqual(projectCommands(dir), [])
+})
+
+test('a worktree-scoped command keeps the worktree it names', () => {
+  const dir = project()
+  defineCommand(dir, { name: 'Tunnel', command: 'ngrok http 8000', worktree: '/code/app-feat' })
+  assert.equal(projectCommands(dir)[0].worktree, '/code/app-feat')
+})
