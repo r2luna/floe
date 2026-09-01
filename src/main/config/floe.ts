@@ -27,7 +27,8 @@ export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', '
 // The written names for how much the agent may do. `MODES` in shared/modes.ts
 // carries the same four under the ids the CLIs use; these are the words a
 // person types in a config file.
-export const MODES = ['plan', 'ask', 'auto', 'full'] as const
+// `full` is the pre-rename word for `bypass`; old configs still have to read.
+export const MODES = ['plan', 'ask', 'auto', 'bypass', 'full'] as const
 
 export interface FloeConfig {
   appearance: {

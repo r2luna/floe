@@ -1030,6 +1030,18 @@ button {
   transition: opacity 0.12s ease;
 }
 
+/* In a chat the chip sits with the tool buttons on the left, under the start
+   of what you type; its menu then hangs off the button's left edge so it stays
+   inside the window. */
+.composer[data-model-left] .model {
+  margin-left: 0;
+}
+
+.composer[data-model-left] .model-menu {
+  right: auto;
+  left: anchor(left);
+}
+
 /* Until the chat's own model is read, the chip still holds the last chat's —
    fade it out rather than let a wrong (and wider) label flash and snap. */
 .model[data-pending] {
