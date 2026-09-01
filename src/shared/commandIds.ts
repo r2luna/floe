@@ -105,7 +105,9 @@ export const COMMAND_IDS: string[] = [
   'command.edit',
   'command.rename',
   'command.scope',
-  'command.delete'
+  'command.delete',
+  // Backends (multi-machine attach — see shared/remoteProtocol.ts)
+  'backend.use'
 ]
 
 export const COMMAND_ID_SET = new Set(COMMAND_IDS)

@@ -125,6 +125,12 @@ export interface CommandContext {
   }
   /** Show the new-worktree flow. */
   newWorktree: () => void
+  /**
+   * Point the window at a backend (machine). With an id, switch directly —
+   * the MCP path; without, offer the picker. Lives in App because switching
+   * remounts the tree, and the registry must not learn how.
+   */
+  useBackend: (id?: string) => void
   /** Forget sessions, after asking: the open one, the rest of the worktree's, or all of them. */
   deleteSession: (scope?: 'one' | 'others' | 'all') => void
   /**

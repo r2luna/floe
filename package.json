@@ -8,14 +8,15 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:server": "node scripts/build-server.mjs",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "test": "node --test --test-reporter spec 'src/**/*.test.ts'",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
-    "release": "electron-vite build && electron-builder --mac --publish always",
+    "build:mac": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac",
+    "build:linux": "electron-vite build && node scripts/build-server.mjs && electron-builder --linux",
+    "release": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac --publish always",
     "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications — abra com duplo-clique.'",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
