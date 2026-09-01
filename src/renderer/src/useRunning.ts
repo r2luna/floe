@@ -35,14 +35,16 @@ function writeUnread(keys: Set<string>): void {
 const GRACE_MS = 5_000
 
 /**
- * The `busy` set the next tick should hold: the server's answer, plus the keys
- * whose last event is too recent for a poll that started earlier to have seen.
+ * The set the next tick should hold: the server's answer, plus the keys whose
+ * last event is too recent for a poll that started earlier to have seen.
  *
- * Pure so the race is testable — `busy` used to be event-driven only, and any
- * `done` that never arrived (a crashed child, a reload mid-turn, a turn that ran
- * under the session's other key) left a session spinning until the app quit.
+ * Pure so the race is testable, and used for BOTH live sets. Each was
+ * event-driven only, and each had the same hole: an edge that never arrived
+ * (a crashed child, a reload mid-turn, an event tagged with the session's other
+ * key) left the mark on with nothing to turn it off — a session spinning until
+ * the app quit, or a `?` on a question that was answered ten minutes ago.
  */
-export function reconcileBusy(
+export function reconcileLive(
   prev: Set<string>,
   serverKeys: string[],
   lastEventAt: Map<string, number>,
@@ -161,16 +163,22 @@ export function useSessionActivity(openKey?: string | null): SessionActivity {
     })
   }, [openKey])
 
-  // The correction. `busy` is built from events, and an event that never arrives
-  // cannot be waited for: ask the main process who is actually working, and
-  // believe it. Also re-hydrates after a reload, when the set starts empty but
-  // the turns did not stop.
+  // The correction. Both sets are built from events, and an event that never
+  // arrives cannot be waited for: ask the main process who is actually working
+  // and who is actually blocked on the user, and believe it. Also re-hydrates
+  // after a reload, when the sets start empty but the turns did not stop and the
+  // open question did not answer itself.
   useEffect(() => {
     let stopped = false
     const sync = async (): Promise<void> => {
-      const keys = await window.floe.agent.active().catch(() => null)
-      if (stopped || !keys) return
-      setBusy((prev) => reconcileBusy(prev, keys, lastEventAt.current, Date.now()))
+      const [keys, asking] = await Promise.all([
+        window.floe.agent.active().catch(() => null),
+        window.floe.agent.waiting().catch(() => null)
+      ])
+      if (stopped) return
+      const now = Date.now()
+      if (keys) setBusy((prev) => reconcileLive(prev, keys, lastEventAt.current, now))
+      if (asking) setWaiting((prev) => reconcileLive(prev, asking, lastEventAt.current, now))
     }
     void sync()
     const timer = setInterval(() => void sync(), 4_000)

@@ -183,8 +183,11 @@ function recordForReplay(key: string, event: AgentEvent, seq: number): void {
     case 'tool':
     case 'error':
     // A question is part of the turn: a panel mounting mid-question must get
-    // it back or the session looks idle with the CLI still blocked on it.
+    // it back or the session looks idle with the CLI still blocked on it. Same
+    // for a permission prompt — both are answered from the same card, and both
+    // are dropped again the moment they settle (dropSettled).
     case 'question':
+    case 'permission':
       r.events.push(event)
       break
     case 'done':
@@ -514,14 +517,72 @@ export function sendToAgent(
   write(conn, { type: 'user', message: { role: 'user', content: buildContent(prompt, images, files) } })
 }
 
+/**
+ * The live conn behind ANY of a session's names.
+ *
+ * A conn stays filed under whatever key spawned it, while the renderer keys a
+ * panel by `claudeId ?? id` — so the key an answer arrives with is not always
+ * the key the question went out under. `conns.get(key)` alone then missed, and
+ * the miss was silent: the card vanished from the panel while the CLI stayed
+ * blocked on a control_request nobody would ever resolve, pinning the row's `?`
+ * for the rest of the session.
+ */
+function resolveConn(key: string): [string, Conn] | undefined {
+  const direct = conns.get(key)
+  if (direct) return [key, direct]
+  const stored = getCreatedSession(key)
+  for (const k of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) {
+    const conn = k ? conns.get(k) : undefined
+    if (k && conn) return [k, conn]
+  }
+  // Last resort: the CLI's own id for a conn the store has not linked yet.
+  for (const [k, c] of conns) if (c.sessionId === key) return [k, c]
+  return undefined
+}
+
+/**
+ * A settled prompt leaves the replay too.
+ *
+ * The snapshot is what a panel opening mid-turn is shown, and it only ever
+ * grows — so a question already answered came back as an open card on the next
+ * open, asking again for something the model has long since read.
+ */
+export function pruneSettled(events: AgentEvent[], requestId: string): AgentEvent[] {
+  return events.filter(
+    (e) =>
+      !(
+        (e.kind === 'question' && e.toolUseId === requestId) ||
+        (e.kind === 'permission' && e.permission.requestId === requestId)
+      )
+  )
+}
+
+export function dropSettled(key: string, requestId: string): void {
+  const replay = replays.get(key)
+  if (replay) replay.events = pruneSettled(replay.events, requestId)
+}
+
+/**
+ * Every key blocked on the user right now — an unanswered question or tool
+ * permission. `pendingPerms` is the one authority: it is written when the CLI
+ * raises the control_request and cleared when we resolve it, so a renderer that
+ * missed either edge (a mis-keyed event, a reload, a panel that was never open)
+ * can correct itself against this instead of holding a `?` forever.
+ */
+export function waitingKeys(): string[] {
+  return [...conns].filter(([, c]) => c.pendingPerms.size > 0).map(([k]) => k)
+}
+
 // Answer a tool-permission prompt over the control channel. `allow` runs the
 // tool (with its original input); otherwise it's refused with a short reason.
 export function respondPermission(key: string, requestId: string, allow: boolean): void {
-  const conn = conns.get(key)
-  if (!conn) return
+  const found = resolveConn(key)
+  if (!found) return log('permission-no-conn', { key, requestId })
+  const [connKey, conn] = found
   // Echo back the original tool input the CLI handed us when it asked.
   const toolInput = conn.pendingPerms.get(requestId) ?? {}
   conn.pendingPerms.delete(requestId)
+  dropSettled(connKey, requestId)
   const response = allow
     ? { behavior: 'allow', updatedInput: toolInput }
     : { behavior: 'deny', message: 'The user declined this action.' }
@@ -543,9 +604,11 @@ const CHILD_ANSWERS_ITSELF =
 // selections as the message. The CLI feeds that back as the tool result and the
 // model reads it as the answer, continuing the same turn (no auto-dismiss).
 export function answerQuestion(key: string, requestId: string, answer: string): void {
-  const conn = conns.get(key)
-  if (!conn) return
+  const found = resolveConn(key)
+  if (!found) return log('answer-no-conn', { key, requestId })
+  const [connKey, conn] = found
   conn.pendingPerms.delete(requestId)
+  dropSettled(connKey, requestId)
   write(conn, {
     type: 'control_response',
     response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: answer } }

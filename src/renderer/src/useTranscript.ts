@@ -3,6 +3,7 @@ import type { TranscriptItem } from '../../main/claudeSessions'
 import type {
   AgentEvent,
   AgentEventEnvelope,
+  AgentPermission,
   AgentQuestion,
   FileAttachment,
   ImageAttachment
@@ -21,6 +22,13 @@ export type { Queued }
  */
 export interface PendingQuestion {
   requestId: string
+  /**
+   * Which channel the answer goes back on. A tool-permission prompt blocks the
+   * turn exactly like a question does, so it is shown as one — two options, the
+   * same digits, the same ⏎ — and only the reply differs: allow/deny on
+   * `agent.permission` instead of the question's control_response.
+   */
+  kind: 'question' | 'permission'
   questions: AgentQuestion[]
   /** Which question is active now. */
   index: number
@@ -28,6 +36,21 @@ export interface PendingQuestion {
   picks: string[]
   /** One entry per settled question: the labels (or free text) it got. */
   answered: string[][]
+}
+
+/** The one label that means yes. Compared against, so it lives in one place. */
+const ALLOW = 'Allow'
+
+/** A permission prompt, worded as the two-option question the card renders. */
+function permissionQuestion(p: AgentPermission): AgentQuestion {
+  return {
+    header: `Run ${p.toolName}?`,
+    question: p.summary ?? `The agent wants to use ${p.toolName}.`,
+    options: [
+      { label: ALLOW, description: 'Run it with the input it asked for.' },
+      { label: 'Deny', description: 'Refuse this one call. The turn continues.' }
+    ]
+  }
 }
 
 export interface Transcript {
@@ -237,7 +260,23 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       dispatch({ type: 'settle' })
       setQuestion({
         requestId: event.toolUseId,
+        kind: 'question',
         questions: event.questions,
+        index: 0,
+        picks: [],
+        answered: []
+      })
+      setRunning(false)
+    } else if (event.kind === 'permission') {
+      // Same pause, same card. Before this the event was emitted and nothing
+      // rendered it: in "ask" mode the turn sat blocked on a prompt that had
+      // nowhere to appear, and the row's `?` could never be cleared because
+      // there was no way to answer it.
+      dispatch({ type: 'settle' })
+      setQuestion({
+        requestId: event.permission.requestId,
+        kind: 'permission',
+        questions: [permissionQuestion(event.permission)],
         index: 0,
         picks: [],
         answered: []
@@ -430,6 +469,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       setQuestion(null)
       setRunning(true)
       wasRunning.current = true
+      // A permission answers allow/deny on its own channel. Only the explicit
+      // "allow" runs the tool: free text typed at the prompt is not consent, so
+      // anything else refuses — the safe reading of an ambiguous answer.
+      if (question.kind === 'permission') {
+        void window.floe.agent.permission(key, question.requestId, labels[0] === ALLOW)
+        return
+      }
       // Both shapes travel: Claude's control channel takes the joined message,
       // codex answers per question id — main picks whichever fits the runtime.
       void window.floe.agent.answer(key, question.requestId, message, answered)

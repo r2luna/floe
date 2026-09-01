@@ -427,7 +427,7 @@ function registerTools(server: McpServer, token: string): void {
 
   server.tool(
     'list_sessions',
-    'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given — it reads each transcript) means the session is blocked on an unanswered question.',
+    'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given) means the session is blocked on you — an unanswered question or a tool-permission prompt.',
     { worktree: z.string().optional().describe('Limit to sessions in this worktree path.') },
     async ({ worktree }) => {
       try {
@@ -437,7 +437,14 @@ function registerTools(server: McpServer, token: string): void {
           return textResult(
             getCreatedSessions(worktree).map((s) => ({
               ...sessionSummary(s),
-              needsYou: s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false
+              // Two authorities, because neither sees the whole thing: the
+              // live conn knows about a prompt the CLI has not written to the
+              // JSONL yet (and about permission prompts, which never land
+              // there), the transcript knows about one raised before this app
+              // run.
+              needsYou:
+                sessionRuntime(connKeyFor(s)).waiting ||
+                (s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false)
             }))
           )
         }
