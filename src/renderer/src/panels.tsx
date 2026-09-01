@@ -1290,6 +1290,7 @@ function ChatPanel({
         onChoice={setChoice}
         pinned={sessionChoice}
         pinPending={!sessionChoice && loading}
+        modelLeft
         linking={linking}
         onToggleLink={() => setLinking((v) => !v)}
         onStop={running ? stop : undefined}

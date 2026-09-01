@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { modeLabel, modesFor, nearestMode, supportsMode } from './modes.ts'
+import { modeFromLabel, modeLabel, modesFor, nearestMode, supportsMode } from './modes.ts'
 
 test('every runtime offers only what it can do', () => {
   assert.deepEqual(modesFor('claude'), ['plan', 'default', 'acceptEdits', 'skip'])
@@ -29,6 +29,11 @@ test('nearestMode never widens the blast radius on a tie', () => {
 
 test('labels replace Claude jargon', () => {
   assert.equal(modeLabel('acceptEdits'), 'auto')
-  assert.equal(modeLabel('skip'), 'full')
+  assert.equal(modeLabel('skip'), 'bypass')
   assert.equal(modeLabel('plan'), 'plan')
+})
+
+test('the old "full" label still reads as skip', () => {
+  assert.equal(modeFromLabel('full'), 'skip')
+  assert.equal(modeFromLabel('bypass'), 'skip')
 })
