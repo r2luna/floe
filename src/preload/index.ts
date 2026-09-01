@@ -49,22 +49,43 @@ const router: IpcLike = {
   }
 }
 
-void ipcRenderer
-  .invoke('backends:get')
-  .then((list: Array<{ id: string; label: string; url: string; token: string }>) => {
-    for (const b of list) {
-      if (remotes.has(b.id)) continue
-      const ipc = createSocketIpc(b.url, b.token, pkg.version as string)
-      for (const s of subscriptions) ipc.on(s.channel, s.listener)
-      remotes.set(b.id, {
-        info: { id: b.id, label: b.label, homeDir: '', remote: true },
-        ipc
-      })
-    }
-  })
-  .catch(() => {
-    // No backends handler (host not loaded) just means local-only.
-  })
+// Fetched at load and re-synced whenever main pushes backends:changed (a
+// machine paired/removed in a plugin panel) — sockets are added and closed
+// live, so no window reload. Every existing subscription replays onto a socket
+// created late, which is what makes the hot add safe.
+const urls = new Map<string, string>()
+const syncBackends = (): void => {
+  void ipcRenderer
+    .invoke('backends:get')
+    .then((list: Array<{ id: string; label: string; url: string; token: string }>) => {
+      const wanted = new Set(list.map((b) => b.id))
+      for (const [id, r] of remotes) {
+        if (wanted.has(id)) continue
+        r.ipc.close()
+        remotes.delete(id)
+        urls.delete(id)
+        if (current === id) current = 'local'
+      }
+      for (const b of list) {
+        const key = `${b.url}#${b.token}`
+        if (remotes.has(b.id)) {
+          if (urls.get(b.id) === key) continue
+          // Same id, new address/token — replace the socket.
+          remotes.get(b.id)!.ipc.close()
+          remotes.delete(b.id)
+        }
+        const ipc = createSocketIpc(b.url, b.token, pkg.version as string)
+        for (const s of subscriptions) ipc.on(s.channel, s.listener)
+        remotes.set(b.id, { info: { id: b.id, label: b.label, homeDir: '', remote: true }, ipc })
+        urls.set(b.id, key)
+      }
+    })
+    .catch(() => {
+      // No backends handler (host not loaded) just means local-only.
+    })
+}
+syncBackends()
+ipcRenderer.on('backends:changed', syncBackends)
 
 const host: FloeHost = {
   platform: process.platform,

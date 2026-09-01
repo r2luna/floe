@@ -2,6 +2,7 @@
 // CJS bundle in the main process and hand it a FloePluginContext. A broken
 // plugin logs and is skipped — boot never dies for one. See docs/plugins.md.
 
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -138,9 +139,24 @@ function buildContext(manifest: PluginManifest, dir: string, floeVersion: string
       const win = getWindow()
       if (win && !win.isDestroyed()) win.webContents.send('plugins:panel-changed', `${manifest.name}:${id}`)
     },
+    runUiCommand: (id, arg) => {
+      const win = getWindow()
+      if (win && !win.isDestroyed())
+        win.webContents.send('mcp:command', {
+          kind: 'run_command',
+          callerKey: `plugin:${manifest.name}`,
+          requestId: randomUUID(),
+          commandId: id,
+          arg
+        })
+    },
     backends: {
       set: (list) => {
         backends = list
+        // Hot sync: the preload rebuilds its socket set on this push, so a
+        // machine paired in the panel is attachable without a window reload.
+        const win = getWindow()
+        if (win && !win.isDestroyed()) win.webContents.send('backends:changed')
       },
       get: () => backends
     }

@@ -122,7 +122,17 @@ export interface FloePluginContext {
   registerPanel: (panel: PluginPanelSpec) => void
   /** Tell an open panel its data changed, so the renderer refetches the body. */
   refreshPanel: (id: string) => void
-  /** The remote backends the multi-backend seam offers the preload at window load. */
+  /**
+   * Run a renderer/palette command by id (the same dispatch ⌘K and MCP
+   * run_command use) — for actions that must happen in the renderer, like
+   * `backend.use`. Fire-and-forget.
+   */
+  runUiCommand: (id: string, arg?: string) => void
+  /**
+   * The remote backends the multi-backend seam offers the preload. Read at
+   * window load and hot-synced on every set (the preload adds/removes sockets
+   * live).
+   */
   backends: { set: (list: BackendEntry[]) => void; get: () => BackendEntry[] }
 }
 
