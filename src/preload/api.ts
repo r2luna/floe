@@ -37,6 +37,7 @@ import type {
   ImplementPhase,
   JumpSession,
   McpAuthEnvelope,
+  McpCandidate,
   McpCommand,
   McpCommandResult,
   McpServerEntry,
@@ -499,7 +500,11 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
           worktreePath?: string
         ): Promise<McpServerEntry> => ipcRenderer.invoke('mcp:servers:update', name, patch, worktreePath),
         remove: (name: string, worktreePath?: string): Promise<void> =>
-          ipcRenderer.invoke('mcp:servers:remove', name, worktreePath)
+          ipcRenderer.invoke('mcp:servers:remove', name, worktreePath),
+        // What that name is out in the world: the public registry's own config
+        // for it, best match first (main/config/mcpDiscovery.ts).
+        search: (query: string): Promise<McpCandidate[]> =>
+          ipcRenderer.invoke('mcp:servers:search', query)
       }
     },
     // Floe's own skills — Markdown in ~/.config/floe, global or per project.

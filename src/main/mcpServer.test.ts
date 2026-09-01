@@ -84,6 +84,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'rename_skill',
       'delete_skill',
       'list_mcp_servers',
+      'search_mcp_servers',
       'add_mcp_server',
       'update_mcp_server',
       'remove_mcp_server',

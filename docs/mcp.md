@@ -64,9 +64,17 @@ registered once reaches each spawned session; changes apply to sessions spawned
 after the edit.
 
 - **The MCP panel** (⌘K → "MCP servers…", command `mcp.open`) is the admin UI,
-  mirroring the skills panel: `n` add (scope under the `+`, name on the row —
-  the entry is created disabled and its mcp.toml opens to fill in url/command),
+  mirroring the skills panel: `n` add (scope under the `+`, name on the row),
   `e` edit, `t` enable/disable, `a` authenticate, `d` delete.
+- **Discovery**: the name typed on the draft row is looked up in the public MCP
+  registry (`registry.modelcontextprotocol.io`, see `config/mcpDiscovery.ts`)
+  and the entry is written with the published transport, url or command/args
+  already in it. One match is applied, several open a picker (whose id says who
+  published which — a vendor's own server against a re-host of it), none falls
+  back to the blank entry whose mcp.toml opens to fill in by hand. A stdio
+  server that needs a key of yours lands disabled with `REPLACE_ME` where the
+  key goes and its file opens; a remote that needs an auth header lands live,
+  since `a` is what signs into one.
 - **Connection state**: the panel's status chips come from the `claude:info`
   probe, which gets the same merged `--mcp-config` a real session does — so
   `connected` / `needs-auth` / `failed` is what a session actually sees.
@@ -75,7 +83,9 @@ after the edit.
   the token. Tokens are per-harness — Floe distributes the server definition,
   each harness holds its own credentials.
 - **Tools**: `list_mcp_servers` / `add_mcp_server` / `update_mcp_server` /
-  `remove_mcp_server` — the same CRUD, for agents.
+  `remove_mcp_server` — the same CRUD, for agents — and `search_mcp_servers`,
+  the same registry lookup, so an agent adds a server from its published config
+  instead of guessing an install line.
 
 UI-driving tools (`select_session`, `open_plan`, and the round-trip pair) need a
 window; everything else works headless and answers `{ error: … }` instead of

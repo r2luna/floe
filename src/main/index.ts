@@ -141,6 +141,7 @@ import {
   type McpServerPatch,
   type NewMcpServer
 } from './config/mcpServers'
+import { searchMcpServers } from './config/mcpDiscovery'
 import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
@@ -461,6 +462,10 @@ function registerIpc(): void {
   handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
     removeMcpServer(name, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
+  // What a server named on the draft row actually is, from the public registry
+  // (config/mcpDiscovery.ts) — so the entry is written with its real url or
+  // command instead of an empty shell to go and look up.
+  handle('mcp:servers:search', (_event, query: string) => searchMcpServers(query))
 
   handle('claude:sessions', (_event, worktreePath: string) =>
     // Both names: the conn is filed under whichever the session last spawned

@@ -58,6 +58,7 @@ import {
   updateMcpServer,
   type NewMcpServer
 } from './config/mcpServers'
+import { searchMcpServers } from './config/mcpDiscovery'
 
 // The MCP control server runs inside the Electron main process so its tools have
 // direct access to git / sessionStore / the agent conns AND to win.webContents
@@ -881,6 +882,21 @@ function registerTools(server: McpServer, token: string): void {
       try {
         const root = project ? (projectFor(project) ?? project) : undefined
         return textResult(listMcpServers(root))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'search_mcp_servers',
+    "Look a third-party MCP server up in the public registry (registry.modelcontextprotocol.io) and get its published config — transport, url or command/args, and any secrets it still needs. Feed the chosen one straight to add_mcp_server instead of guessing an install line.",
+    {
+      query: z.string().describe('What to look for — a server name like "context7" or "playwright".')
+    },
+    async ({ query }) => {
+      try {
+        return textResult(await searchMcpServers(query))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

@@ -266,6 +266,34 @@ export interface McpServerEntry {
   index: number
 }
 
+/**
+ * A config for a new MCP server, as the public registry publishes it.
+ *
+ * What the MCP panel offers when a name is typed on the draft row, and what
+ * `search_mcp_servers` returns — the fields are already mcp.toml's fields, so
+ * picking one is a write, not a translation. See main/config/mcpDiscovery.ts.
+ */
+export interface McpCandidate {
+  /** The registry id — `io.github.upstash/context7`. */
+  id: string
+  /** Its published title, or the name after the slash. */
+  title: string
+  description: string
+  version?: string
+  /** The source repo, for telling a vendor's own server from a re-host. */
+  repository?: string
+  transport: 'http' | 'stdio'
+  url?: string
+  command?: string
+  args?: string[]
+  /**
+   * Secrets it still needs — env vars for a stdio command, auth headers for a
+   * remote. A stdio one lands disabled with REPLACE_ME to fill in; a remote one
+   * lands live and is signed into from the panel.
+   */
+  needs: string[]
+}
+
 // One registry command as `list_commands` reports it — the palette row's data.
 export interface McpUiCommand {
   id: string
