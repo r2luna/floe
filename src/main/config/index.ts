@@ -71,6 +71,10 @@ export function watchConfig(onChange: (file: string) => void): () => void {
       // Our own atomic writes land as `<file>.tmp` first; reacting to those would
       // reload a file that is about to be replaced anyway.
       if (name.endsWith('.tmp') || name.endsWith('.migrated')) return
+      // Plugins live under the config dir but are code + private state, not
+      // config: a plugin writing its own files must not repaint the app, and a
+      // changed bundle only takes effect on relaunch anyway.
+      if (filename.toString().split('/')[0] === 'plugins') return
       pending = filename.toString()
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => {

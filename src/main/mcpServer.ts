@@ -50,6 +50,7 @@ import {
   updateSkill
 } from './config/skills'
 import { projectFor } from './config/projectStore'
+import { pluginTools } from './plugins/host'
 import {
   addMcpServer,
   listMcpServers,
@@ -979,6 +980,30 @@ function registerTools(server: McpServer, token: string): void {
       return textResult({ ok: true })
     }
   )
+
+  // --- Plugin tools (plugins/host.ts) ---------------------------------------
+  // Registered after the built-ins so a plugin can never shadow one: a name
+  // collision throws inside server.tool and costs only that plugin's tool.
+  for (const t of pluginTools()) {
+    const shape: Record<string, z.ZodTypeAny> = {}
+    for (const [key, p] of Object.entries(t.params ?? {})) {
+      let s: z.ZodTypeAny = p.type === 'number' ? z.number() : p.type === 'boolean' ? z.boolean() : z.string()
+      if (p.description) s = s.describe(p.description)
+      if (p.optional) s = s.optional()
+      shape[key] = s
+    }
+    try {
+      server.tool(t.name, t.description, shape, async (args: Record<string, unknown>) => {
+        try {
+          return textResult(await t.run(args))
+        } catch (e) {
+          return textResult({ error: (e as Error).message })
+        }
+      })
+    } catch {
+      // duplicate tool name — the built-in (or an earlier plugin) wins
+    }
+  }
 }
 
 // Parse the caller token out of a /mcp/<token> path. Returns '' if it doesn't match.

@@ -18,6 +18,7 @@ import {
   IconPencil,
   IconPlug,
   IconPlus,
+  IconPuzzle,
   IconTrash,
   IconSettings,
   IconSparkles,
@@ -56,6 +57,7 @@ import { onSkillDraft } from './skillDraft.ts'
 import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
+import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, expand, splitRefs } from './fileRefs'
 import { renderMarkdown, type MdLine } from './markdown'
 import { highlightShell } from './shell'
@@ -272,7 +274,11 @@ export const KINDS = {
   account: { icon: IconUserCircle, title: 'account', width: 380, order: 130 },
   // Settings: a view of ~/.config/floe/floe.toml. Narrow like the account panel —
   // it is a column of single values, not a list that grows.
-  settings: { icon: IconSettings, title: 'settings', width: 420, order: 140 }
+  settings: { icon: IconSettings, title: 'settings', width: 420, order: 140 },
+  // A runtime plugin's declarative panel — `sub` names which one
+  // (`<plugin>:<panel>`). Contextual: reached through the plugin's own palette
+  // command, never from the rail, which can't know what plugins exist.
+  plugin: { icon: IconPuzzle, title: 'plugin', width: 420, min: 300, order: 145 }
 } satisfies Record<
   string,
   {
@@ -315,7 +321,7 @@ export function needsProject(kind: string): boolean {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin']
 
 export const PANEL_KIND_LIST: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
   (k) => !CONTEXTUAL.includes(k)
@@ -562,6 +568,7 @@ export function PanelBody({
   // Owns its own state for the same reason the account panel does: the config is
   // global, so nothing above it needs to know when a setting changes.
   if (kind === 'settings') return <SettingsPanel onOpen={onOpen} />
+  if (kind === 'plugin') return <PluginPanel sub={sub ?? ''} />
   if (kind === 'skills')
     return (
       <SkillsList
@@ -4446,6 +4453,142 @@ function SwatchPicker<T extends string>({
             {render(id)}
           </button>
         ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A runtime plugin's declarative panel (docs/plugins.md). The plugin describes
+ * sections in main; this renders them with the same rows Settings uses, so the
+ * cursor, Enter and the theme all behave like everywhere else. Every activation
+ * dispatches one of the plugin's own commands over plugins:run and refetches —
+ * the panel is a view of main-process state, never a store of its own.
+ */
+function PluginPanel({ sub }: { sub: string }) {
+  type Body = { title: string; sections: PluginPanelSection[] } | null
+  const [spec, setSpec] = useState<Body | undefined>(undefined)
+  // The action row currently asking for its one line of input, by command id.
+  const [asking, setAsking] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const box = useRef<HTMLInputElement>(null)
+  const rowBack = useRef<HTMLButtonElement>(null)
+
+  const refetch = useCallback(() => {
+    void window.floe.plugins.panel(sub).then(setSpec)
+  }, [sub])
+  useEffect(() => refetch(), [refetch])
+  useEffect(() => window.floe.plugins.onPanelChanged((s) => (s === sub ? refetch() : undefined)), [sub, refetch])
+  useEffect(() => {
+    if (asking) box.current?.focus()
+  }, [asking])
+
+  const dispatch = (id: string, arg?: string): void => {
+    void window.floe.plugins.run(id, arg).then(refetch)
+  }
+
+  if (spec === undefined) return <p className="empty">Loading…</p>
+  if (spec === null) return <p className="empty">This panel’s plugin is not loaded.</p>
+
+  return (
+    <div className="settings">
+      <div className="group">
+        <div className="group-label">{spec.title.toUpperCase()}</div>
+        {spec.sections.map((s, i) => {
+          if (s.kind === 'text') return <p className="empty" key={i}>{s.text}</p>
+          if (s.kind === 'toggle')
+            return (
+              <button className="row settings-row" key={s.id} title={s.detail} onClick={() => dispatch(s.id)}>
+                <span className="row-name">{s.label}</span>
+                <span className={`settings-value${s.value ? '' : ' settings-off'}`}>{s.value ? 'on' : 'off'}</span>
+              </button>
+            )
+          if (s.kind === 'action') {
+            if (asking === s.id)
+              return (
+                <div className="row settings-row settings-editing" key={s.id}>
+                  <span className="row-name">{s.input?.verb ?? s.label}</span>
+                  <input
+                    ref={box}
+                    className="dialog-input settings-input"
+                    value={draft}
+                    placeholder={s.input?.placeholder}
+                    spellCheck={false}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter' && draft.trim()) {
+                        dispatch(s.id, draft.trim())
+                        setAsking(null)
+                        setDraft('')
+                        rowBack.current?.focus()
+                      }
+                      if (e.key === 'Escape') {
+                        setAsking(null)
+                        setDraft('')
+                        // Focus never strands on the dismissed input — back to
+                        // a row, so the next keystroke still moves the cursor.
+                        rowBack.current?.focus()
+                      }
+                    }}
+                  />
+                </div>
+              )
+            return (
+              <button
+                ref={rowBack}
+                className="row settings-row"
+                key={s.id}
+                title={s.detail}
+                onClick={() => (s.input ? setAsking(s.id) : dispatch(s.id))}
+              >
+                <span className="row-name">{s.label}</span>
+                {s.detail && <span className="badge">{s.detail}</span>}
+              </button>
+            )
+          }
+          // list — each row's Enter runs the first rowAction with the row id as
+          // the arg; the rest are mouse chips (their commands stay one ⌘K away).
+          return (
+            <Fragment key={i}>
+              {s.title && <div className="group-label">{s.title.toUpperCase()}</div>}
+              {s.rows.length === 0 && s.empty && <p className="empty">{s.empty}</p>}
+              {s.rows.map((row) => {
+                const primary = s.rowActions?.[0]
+                return (
+                  <div
+                    className="row settings-row"
+                    key={row.id}
+                    data-nav
+                    tabIndex={-1}
+                    role="button"
+                    title={row.detail}
+                    onClick={() => primary && dispatch(primary.id, row.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && primary) dispatch(primary.id, row.id)
+                    }}
+                  >
+                    <span className="row-name">{row.title}</span>
+                    {row.state && <span className="badge">{row.state}</span>}
+                    {s.rowActions?.slice(1).map((a) => (
+                      <span
+                        key={a.id}
+                        className="settings-value"
+                        role="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          dispatch(a.id, row.id)
+                        }}
+                      >
+                        {a.label}
+                      </span>
+                    ))}
+                  </div>
+                )
+              })}
+            </Fragment>
+          )
+        })}
       </div>
     </div>
   )

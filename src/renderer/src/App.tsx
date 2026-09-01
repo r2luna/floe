@@ -25,7 +25,7 @@ import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
 import { KINDS, PANEL_KIND_LIST, PanelBody, needsProject, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
-import { runCommand, type CommandContext } from './commands'
+import { installPluginCommands, runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
 import { Palette } from './Palette'
 import {
@@ -1224,6 +1224,21 @@ export default function App() {
       setLane((l) => open(l, panelOf('worktrees')))
     }
   }
+
+  // --- Plugin commands ---------------------------------------------------------
+  // Overlay the runtime plugins' commands onto the registry at mount, so the
+  // palette, the keymap and MCP run_command all reach them through the same
+  // dispatch as any built-in. The run goes back to main, where the plugin lives.
+  useEffect(() => {
+    let cancelled = false
+    void window.floe.plugins.commands().then((cmds) => {
+      if (cancelled || !cmds.length) return
+      installPluginCommands(REGISTRY, cmds, (id, arg) => void window.floe.plugins.run(id, arg))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // --- MCP control server -----------------------------------------------------
   // Commands an agent's tool pushed from main over mcp:command. run_command and

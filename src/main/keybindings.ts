@@ -247,7 +247,9 @@ export function parseKeybindings(text: string): { binds: Keybind[]; errors: Keyb
       errors.push({ ...at(command), reason: `binding for "${command}" has no key` })
       continue
     }
-    if (!COMMAND_ID_SET.has(command)) {
+    // `plugin:` ids come from runtime plugins, outside the static id set — the
+    // renderer overlays them onto the registry, so a binding can reach them.
+    if (!COMMAND_ID_SET.has(command) && !command.startsWith('plugin:')) {
       errors.push({ ...at(key), reason: `unknown command "${command}"` })
       continue
     }

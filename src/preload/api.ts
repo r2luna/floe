@@ -17,6 +17,8 @@ import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
 import type { Skill } from '../main/config/skills'
 import type { FloeConfig } from '../main/config/floe'
+import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
+import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
 import type { TomlValue } from '../main/config/toml'
 import type {
@@ -124,6 +126,24 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       list: (): BackendInfo[] => [
         { id: 'local', label: host.homeDir.split('/').pop() || 'local', homeDir: host.homeDir, remote: false }
       ]
+    },
+    // Runtime plugins (main/plugins/host.ts): the palette merges `commands`
+    // into the registry as `plugin:<name>:<id>` rows whose run dispatches back
+    // through `run`; `list` is the load report (name, version, error).
+    plugins: {
+      commands: (): Promise<PluginCommandMeta[]> => ipcRenderer.invoke('plugins:commands'),
+      run: (id: string, arg?: string): Promise<{ ok: true } | { ok: false; error: string }> =>
+        ipcRenderer.invoke('plugins:run', id, arg),
+      list: (): Promise<PluginInfo[]> => ipcRenderer.invoke('plugins:list'),
+      // A declarative plugin panel's current body (null when the sub names no
+      // panel — e.g. the plugin was removed since the lane was saved).
+      panel: (sub: string): Promise<{ title: string; sections: PluginPanelSection[] } | null> =>
+        ipcRenderer.invoke('plugins:panel', sub),
+      onPanelChanged: (cb: (sub: string) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, sub: string): void => cb(sub)
+        ipcRenderer.on('plugins:panel-changed', listener)
+        return () => ipcRenderer.removeListener('plugins:panel-changed', listener)
+      }
     },
     // Open Floe at login — OS login-item list (Settings → General).
     loginItem: {

@@ -50,5 +50,6 @@ Buttons use the **outline-chip pattern** (never solid fills) and every tinted el
 
 ## More docs — read when the task touches them
 
+- [docs/plugins.md](docs/plugins.md) — runtime plugins (`~/.config/floe/plugins`); new core `ipcMain.handle` calls must go through `plugins/handleMap.ts`'s `handle()`.
 - [docs/message-queue.md](docs/message-queue.md) — type-while-busy queue semantics.
 - [docs/http-client.md](docs/http-client.md) — embedded `.http` client.

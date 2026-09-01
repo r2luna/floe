@@ -26,7 +26,7 @@ export async function load(url, context, next) {
     return {
       format: 'module',
       shortCircuit: true,
-      source: "export const app = { getPath: () => process.env.FLOE_TEST_USERDATA || '/tmp' }; export const dialog = {}; export const shell = {}; export const safeStorage = { isEncryptionAvailable: () => false }; export default {};"
+      source: "export const app = { getPath: () => process.env.FLOE_TEST_USERDATA || '/tmp' }; export const dialog = {}; export const shell = {}; export const safeStorage = { isEncryptionAvailable: () => false }; export const ipcMain = { handle: () => {}, removeHandler: () => {} }; export default {};"
     }
   }
   return next(url, context)
