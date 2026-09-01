@@ -32,6 +32,9 @@ import { worktreeStatus } from './gitStatus'
 import { provisionWorktree } from './provision'
 import { listPlans, readPlan } from './plans'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion } from './claudeSessions'
+// Circular with codex (it emits through agent, which imports this file) — safe:
+// every side only calls the others' functions at runtime, never at module top.
+import { askCodex, MAX_EXCHANGES } from './codex'
 import {
   addCreatedSession,
   getAllCreatedSessions,
@@ -536,6 +539,35 @@ function registerTools(server: McpServer, token: string): void {
   )
 
   server.tool(
+    'ask_codex',
+    'Ask the local Codex CLI, as a second pair of eyes on the code. Codex runs read-only in this session\'s worktree, joins the chat as @codex (a subagent row plus its answer in the channel), and keeps one thread across calls — call it again to continue the same conversation.',
+    {
+      prompt: z.string().describe('What to ask Codex. It is another model, not a human: lead with the delta, use file:line, skip the pleasantries.'),
+      new_topic: z.boolean().optional().describe('Start a fresh Codex thread instead of continuing the current one.')
+    },
+    async ({ prompt, new_topic }) => {
+      try {
+        // The caller's own session: Codex answers into THIS chat (that is what
+        // makes it a participant), and runs in the worktree being talked about.
+        const caller = findSessionAny(token)
+        if (!caller) return textResult({ error: 'ask_codex must be called from a Floe session.' })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available to run Codex.' })
+        const result = await askCodex(win, connKeyFor(caller), caller.worktreePath, prompt, new_topic === true)
+        if (result.capped)
+          return textResult({
+            capped: true,
+            note: `${MAX_EXCHANGES} exchanges used — check in with your user before continuing this thread.`
+          })
+        if (result.error) return textResult({ error: result.error })
+        return textResult({ reply: result.reply, exchange: result.exchange })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
     'read_session_output',
     'Read recent output from a session: the live in-memory buffer plus, if linked, the tail of its on-disk transcript.',
     {
@@ -554,7 +586,11 @@ function registerTools(server: McpServer, token: string): void {
             .map((it) => {
               if (it.role === 'image') return '[image]'
               if (it.role === 'tool') return `[tool ${it.name ?? ''}] ${it.summary ?? ''}`.trim()
-              return `${it.role}: ${it.text ?? ''}`
+              // A line another session or a subagent said is labelled with who
+              // said it. Reading it back as `user:`/`assistant:` is how an agent
+              // watching this session ends up quoting a peer's words as its
+              // user's instructions.
+              return `${it.from ?? it.role}: ${it.text ?? ''}`
             })
             .filter(Boolean)
           disk = lines.slice(-cap).join('\n')

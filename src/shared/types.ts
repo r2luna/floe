@@ -682,6 +682,10 @@ export type AgentEvent =
   | { kind: 'question'; toolUseId: string; questions: AgentQuestion[] }
   | { kind: 'artifact'; spec: ArtifactSpec } // an inline decision panel (see shared/artifact.ts)
   | { kind: 'permission'; permission: AgentPermission }
+  // Another Claude session spoke into this one (the CLI injects it as a user
+  // turn). `from` is its nick — the transcript heads the line with it rather
+  // than with the user's, because the user did not say this.
+  | { kind: 'peer'; from: string; text: string }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
@@ -697,10 +701,11 @@ export type AgentEvent =
       harness?: string
     }
   | { kind: 'subagent-progress'; toolUseId: string; tokens: number; tool?: string }
-  // `reply`/`ms` are carried only by the Codex bridge: unlike a Task subagent
-  // (whose work lands in the transcript as the parent's own tool calls), a Codex
-  // exchange has no other trace, so the answer has to ride the done event or it
-  // is lost when the turn ends.
+  // `reply` is what the agent came back to say — the Task's tool_result, an
+  // async agent's <task-notification> result, or the Codex bridge's answer. It
+  // rides the done event because that is the only moment it exists in the
+  // stream; the panel prints it as the agent's own line in the channel. `ms` is
+  // the Codex bridge's alone: a Task row times itself from when it opened.
   | { kind: 'subagent-done'; toolUseId: string; reply?: string; ms?: number }
   | { kind: 'done'; ok: boolean }
   | { kind: 'error'; message: string }
@@ -723,6 +728,13 @@ export interface AgentReplay {
   startedAt?: number // epoch ms the turn began — a panel opening mid-turn times from here
   model?: string // concrete model id the CLI resolved for this turn
   events: AgentEvent[]
+  /**
+   * Every id this session answers to — Floe's own and the claudeId the CLI gave
+   * it. A panel is keyed by ONE of them while the live conn is filed under
+   * whichever it last spawned with, so a panel that only listens for its own
+   * key goes deaf mid-turn: no text, and no `done` to take "is typing" back off.
+   */
+  names?: string[]
 }
 
 // --- Provisioning (setup checklist for a freshly created worktree) ---------

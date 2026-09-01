@@ -206,14 +206,196 @@ test('a task-notification does not reload as a user message', () => {
   ])
   try {
     const items = loadClaudeTranscript(worktree, 'sess')
+    // The notification itself is plumbing and never reloads as a user line; what
+    // survives of it is the agent's report, spoken under the agent's own nick.
     assert.deepEqual(
-      items.map((i) => i.role),
-      ['user', 'subagent', 'assistant']
+      items.map((i) => [i.role, i.from ?? null]),
+      [
+        ['user', null],
+        ['subagent', null],
+        ['assistant', 'explore-t1'],
+        ['assistant', null]
+      ]
     )
     assert.ok(!items.some((i) => (i.text ?? '').includes('task-notification')))
+    assert.equal(items[2].text, 'Here is the complete picture…')
     // The notification did not restart the turn clock: the answer is still
     // timed from the message that was actually sent.
-    assert.equal(items[2].ms, 130_000)
+    assert.equal(items[3].ms, 130_000)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// --- another session speaking ----------------------------------------------
+
+test("a peer session's message reloads under its own nick, body only", () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-peer'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-01T11:00:00.000Z', message: { content: 'toca o barco' } },
+    {
+      type: 'user',
+      timestamp: '2026-09-01T11:08:00.000Z',
+      message: {
+        content:
+          'Another Claude session sent a message:\n' +
+          '<cross-session-message from="uds:/tmp/cc-socks/24482.sock" from-name="floe-8f" from-mode="bypass">\n' +
+          'Vou mexer em skills.ts, não toca nele.\n' +
+          '</cross-session-message>\n\n' +
+          'This came from another Claude session — not typed by your user, but very likely working on their behalf.'
+      }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.from]),
+      [
+        ['user', undefined],
+        ['user', 'floe-8f']
+      ]
+    )
+    // Only what the peer actually said: the preamble and the trailer are the
+    // harness talking to the model, not a message anyone can read as one.
+    assert.equal(items[1].text, 'Vou mexer em skills.ts, não toca nele.')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test("a Task's result comes back as the agent's own line, under its nick", () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-reply'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-01T09:00:00.000Z', message: { content: 'mapeia o pipeline' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-01T09:00:05.000Z',
+      message: {
+        model: 'claude-opus-5',
+        content: [{ type: 'tool_use', id: 'toolu_a3f', name: 'Task', input: { subagent_type: 'Explore', description: 'mapear' } }]
+      }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-01T09:01:00.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_a3f', content: [{ type: 'text', text: 'o pipeline passa por agent.ts' }] }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.from ?? null]),
+      [
+        ['user', null],
+        ['subagent', null],
+        ['assistant', 'explore-ua3f']
+      ]
+    )
+    assert.equal(items[2].text, 'o pipeline passa por agent.ts')
+    // The row it was launched from still closes, and still times itself.
+    assert.equal(items[1].running, false)
+    assert.equal(items[1].ms, 55_000)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an async agent keeps its row open on the launch ack and speaks in its notification', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-async'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-01T09:00:00.000Z', message: { content: 'auditar o bundle' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-01T09:00:05.000Z',
+      message: {
+        model: 'claude-opus-5',
+        content: [{ type: 'tool_use', id: 'toolu_b7c', name: 'Agent', input: { subagent_type: 'general-purpose', description: 'auditar' } }]
+      }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-01T09:00:06.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_b7c', content: [{ type: 'text', text: 'Async agent launched (task id ad8330)' }] }] }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-01T09:04:05.000Z',
+      message: {
+        content:
+          '<task-notification>\n<task-id>ad8330</task-id>\n<tool-use-id>toolu_b7c</tool-use-id>\n<status>completed</status>\n<result>O bundle do renderer não é minificado.</result>\n</task-notification>'
+      }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.from ?? null]),
+      [
+        ['user', null],
+        ['subagent', null],
+        ['assistant', 'general-purpose-ub7c']
+      ],
+      'the launch ack says nothing — only the notification carries what it found'
+    )
+    assert.equal(items[2].text, 'O bundle do renderer não é minificado.')
+    assert.equal(items[1].running, false)
+    // Timed from the launch to the notification, not to the ack it answered with.
+    assert.equal(items[1].ms, 240_000)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an envelope quoted inside a message of your own stays your message', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-quoted'
+  const dir = seedSession(worktree, 'sess', [
+    {
+      type: 'user',
+      timestamp: '2026-09-01T11:20:00.000Z',
+      message: {
+        content:
+          'olha o formato que chega: <cross-session-message from-name="floe-8f" from-mode="bypass">\nnão sou eu falando\n</cross-session-message> — dá pra parsear isso?'
+      }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(items.map((i) => [i.role, i.from ?? null]), [['user', null]])
+    assert.match(items[0].text ?? '', /dá pra parsear isso\?$/)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a failed Task closes its row without putting the error in the agent\'s mouth', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-failed'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-01T09:00:00.000Z', message: { content: 'roda o explore' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-01T09:00:05.000Z',
+      message: { content: [{ type: 'tool_use', id: 'toolu_c9d', name: 'Task', input: { subagent_type: 'Explore', description: 'mapear' } }] }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-01T09:00:09.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_c9d', is_error: true, content: 'Error: permission denied' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(items.map((i) => i.role), ['user', 'subagent'])
+    assert.equal(items[1].running, false, 'the row still closes — it really did end')
   } finally {
     process.env.HOME = home
     rmSync(dir, { recursive: true, force: true })

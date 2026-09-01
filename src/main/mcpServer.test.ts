@@ -66,6 +66,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'list_sessions',
       'create_session',
       'send_message',
+      'ask_codex',
       'read_session_output',
       'stop_session',
       'select_session',

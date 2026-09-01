@@ -1,4 +1,4 @@
-// Finding the `/` or `#` you are typing right now.
+// Finding the `/`, `#` or `@` you are typing right now.
 //
 // Both menus hang on the same question: is the caret inside a token that starts
 // with a trigger character? Getting it wrong in either direction is bad — a menu
@@ -6,8 +6,8 @@
 // just typed is a feature you cannot reach.
 
 export interface Trigger {
-  /** Which menu: '/' for skills, '#' for sessions and files. */
-  char: '/' | '#'
+  /** Which menu: '/' skills, '#' sessions and files, '@' who is in the channel. */
+  char: '/' | '#' | '@'
   /** What you have typed after it, for filtering. */
   query: string
   /** Where the trigger character sits, so a pick can replace from there. */
@@ -19,8 +19,8 @@ export interface Trigger {
  *
  * A trigger only counts at the start of a word — after a space, a newline, or
  * at the very beginning. That is what keeps `src/main` and `user@host` from
- * opening a menu: their `/` and `#` follow a letter, so they are part of a word
- * you are writing rather than the start of a command.
+ * opening a menu: their `/`, `#` and `@` follow a letter, so they are part of a
+ * word you are writing rather than the start of a command.
  */
 export function triggerAt(text: string, caret: number): Trigger | null {
   // Walk back from the caret to the start of the current word.
@@ -28,7 +28,7 @@ export function triggerAt(text: string, caret: number): Trigger | null {
   while (i > 0 && !/\s/.test(text[i - 1])) i--
 
   const char = text[i]
-  if (char !== '/' && char !== '#') return null
+  if (char !== '/' && char !== '#' && char !== '@') return null
 
   const query = text.slice(i + 1, caret)
   // A space closes the menu: once you have typed past the token you are writing

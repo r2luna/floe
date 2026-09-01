@@ -7,6 +7,7 @@ import { findSpecSummarySource } from './plans'
 
 import { contextTokens } from '../shared/types'
 import { collapseSkills, hasSkill } from '../shared/skills'
+import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
 import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
 
@@ -27,8 +28,13 @@ export interface ClaudeSessionMeta {
   mtime: number
   active: boolean
   // A turn is in flight on the backend right now (set by the claude:sessions
-  // handler from the live agent conns). Lets a re-attached renderer restore the
-  // "running" state it can't learn from disk — the child lives on the server.
+  // handler from the live agent conns) — for callers that read the list and
+  // nothing else, the MCP tools among them.
+  //
+  // NOT what the sidebar's spinner is drawn from: this is true as of whenever
+  // the list was last read, and a row that ORed it with the live set kept
+  // spinning long after the turn had ended. The renderer asks main directly
+  // instead (agent.active, reconciled every few seconds — see useRunning).
   running?: boolean
   permissionMode?: PermissionMode
   model?: string
@@ -44,6 +50,23 @@ export interface TranscriptItem {
   data?: string // base64, for role 'image'
   spec?: ArtifactSpec // for role 'artifact' — the decision panel, rebuilt on reload
   at?: number // epoch ms — the claude JSONL line's `timestamp`, for the "time ago" stamp
+  /**
+   * Set on a `tool` row the USER caused — a slash command they typed, which
+   * reloads as a chip rather than as the raw `<command-name>` markers. Every
+   * other tool row is the agent working, and the Log heads a run of those with
+   * the agent's nick: without this flag a command you ran yourself would be
+   * attributed to the model.
+   */
+  by?: 'user'
+  /**
+   * Who spoke, when it was neither you nor the model answering you: another
+   * voice in the channel. Two of them exist — another Claude session whose
+   * message the CLI injected here as a user turn (role 'user', see
+   * parsePeerMessage), and a subagent coming back with its report (role
+   * 'assistant', see agentReply). The transcript heads the line with this nick
+   * instead of the user's or the model's: neither of them said it.
+   */
+  from?: string
   /**
    * Which model wrote this, as the API named it. Per message rather than per
    * session: you can change model mid-conversation, and a transcript that
@@ -504,7 +527,7 @@ function questionText(input: unknown): string | undefined {
 }
 
 /** The text of a tool_result, whether the CLI wrote it as a string or blocks. */
-function resultText(content: unknown): string | undefined {
+export function resultText(content: unknown): string | undefined {
   if (typeof content === 'string') return content.trim() || undefined
   if (!Array.isArray(content)) return undefined
   const text = (content as Array<Record<string, unknown>>)
@@ -528,8 +551,60 @@ function summarizeTool(input: unknown): string | undefined {
 // `<task-notification>` — the agent's whole report — as a plain user message.
 // Nobody typed it: reloading it as a user line pastes that report into the chat
 // under your name. The live stream already discards it (see agent.ts).
-function isTaskNotification(text: string): boolean {
+export function isTaskNotification(text: string): boolean {
   return !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').trim()
+}
+
+// What a notification says: which agent finished (the id of the Task call that
+// launched it) and, when it is an agent rather than a background command, the
+// report it came back with. That report is the agent talking to the session
+// that sent it — the only place its words exist.
+export function parseTaskNotifications(text: string): Array<{ toolUseId: string; result?: string }> {
+  const out: Array<{ toolUseId: string; result?: string }> = []
+  // Per block, never over the whole string: two agents finishing at once are
+  // delivered as adjacent blocks, and matching across them would hand the first
+  // agent's id the second agent's report.
+  for (const [, block] of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const toolUseId = block.match(/<tool-use-id>([^<]+)<\/tool-use-id>/)?.[1]?.trim()
+    if (!toolUseId) continue
+    const result = block.match(/<result>([\s\S]*?)<\/result>/)?.[1]?.trim()
+    out.push({ toolUseId, result: result || undefined })
+  }
+  return out
+}
+
+// The Agent tool's async launch returns this the moment the agent starts, long
+// before it has anything to say: it closes nothing and is not a report. Takes
+// the RESULT TEXT (see resultText) rather than the raw content: the CLI writes
+// a tool_result as a string or as blocks, and a check that only understood one
+// of them let the ack through as if it were the agent's answer.
+export function isAsyncLaunchAck(text: string | undefined): boolean {
+  return !!text && text.includes('Async agent launched')
+}
+
+// Another Claude session's message: the CLI delivers it as a plain user turn —
+// a preamble, the `<cross-session-message from-name="…">` block, and a trailer
+// of instructions about how to treat it. Nobody in this window typed any of it.
+// Only the block's body is a message; the rest is addressed to the model.
+export function parsePeerMessage(text: string): { from: string; body: string } | null {
+  // The harness's own preamble, required and required FIRST: without it any
+  // user who quotes an envelope (asking about this very feature, say) would
+  // have their own words reloaded under someone else's nick.
+  if (!text.trimStart().startsWith('Another Claude session sent a message:')) return null
+  const m = text.match(/<cross-session-message\b([^>]*)>([\s\S]*?)<\/cross-session-message>/)
+  if (!m) return null
+  // The harness heads the envelope with one line: "Another Claude session sent
+  // a message:". Anything else in front of it means somebody QUOTED an envelope
+  // inside a message of their own — and their words are the message, not the
+  // name in the quote. Without this, a line typed by the user could speak as
+  // anyone. If the harness ever rewords that line the check stops matching and
+  // the envelope prints as raw text: visibly wrong, but under the nick of
+  // whoever really sent it, which is the half that matters.
+  const before = text.slice(0, m.index).trim()
+  if (before && !/(^|\n)[^\n]*sent a message:$/.test(before)) return null
+  const name = m[1].match(/from-name="([^"]*)"/)?.[1]?.trim()
+  // A nick is required to head the entry: an unnamed peer is still not you.
+  return { from: name || 'peer', body: m[2].trim() }
 }
 
 // Prettify Claude Code's local slash-command markers that show up in user
@@ -540,11 +615,18 @@ function expandUserText(text: string): TranscriptItem[] {
   if (!stripped) return []
   if (isTaskNotification(stripped)) return []
 
+  const peer = parsePeerMessage(stripped)
+  if (peer) return peer.body ? [{ role: 'user', from: peer.from, text: peer.body }] : []
+
   const nameMatch = stripped.match(/<command-name>([\s\S]*?)<\/command-name>/)
   if (nameMatch) {
     const argsMatch = stripped.match(/<command-args>([\s\S]*?)<\/command-args>/)
     const args = (argsMatch?.[1] ?? '').trim()
-    return [{ role: 'tool', name: nameMatch[1].trim() || 'command', summary: args || undefined }]
+    // `by: 'user'` — you typed this one. It is the only tool row that is not
+    // the agent working, and the Log reads that flag to keep it in your run.
+    return [
+      { role: 'tool', name: nameMatch[1].trim() || 'command', summary: args || undefined, by: 'user' }
+    ]
   }
 
   const stdoutMatch = stripped.match(/<local-command-stdout>([\s\S]*?)<\/local-command-stdout>/)
@@ -562,6 +644,18 @@ function expandUserText(text: string): TranscriptItem[] {
   }
 
   return [{ role: 'user', text: stripped }]
+}
+
+/**
+ * A subagent's report, as its own line in the channel.
+ *
+ * It reads as `assistant` because that is what wrote it — the body is markdown
+ * and belongs rendered as such — and it carries `from` because it was NOT the
+ * model you are talking to: it is the agent that model sent out, coming back
+ * with what it found.
+ */
+function agentReply(row: TranscriptItem, text: string): TranscriptItem {
+  return { role: 'assistant', from: agentNick(row.agentType, row.toolUseId, row.harness), text }
 }
 
 export function loadClaudeTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
@@ -637,7 +731,24 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         ? at - turnStartedAt
         : undefined
     if (typeof content === 'string') {
-      if (role === 'user') items.push(...expandUserText(content))
+      // An async agent finishing: the CLI injects the notification as a user
+      // message, and its <result> is the agent's report — the only copy of it.
+      // Everything else about the notification is plumbing (see expandUserText,
+      // which drops it).
+      const notices =
+        role === 'user' && isTaskNotification(content) ? parseTaskNotifications(content) : []
+      const mine = notices.filter((n) => agentRows.has(n.toolUseId))
+      if (mine.length) {
+        // Two agents can finish into one message; each closes its own row and
+        // speaks for itself, in the order they were delivered.
+        for (const notice of mine) {
+          const row = items[agentRows.get(notice.toolUseId) as number]
+          row.running = false
+          if (at && row.at && at >= row.at) row.ms = at - row.at
+          agentRows.delete(notice.toolUseId)
+          if (notice.result) items.push(agentReply(row, notice.result))
+        }
+      } else if (role === 'user') items.push(...expandUserText(content))
       else if (content.trim()) items.push({ role, text: content })
       for (let i = before; i < items.length; i++) {
         items[i].at = at
@@ -714,10 +825,22 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         typeof block.tool_use_id === 'string' &&
         agentRows.has(block.tool_use_id)
       ) {
-        const row = items[agentRows.get(block.tool_use_id) as number]
+        const at_ = agentRows.get(block.tool_use_id) as number
+        const row = items[at_]
+        const reply = resultText(block.content)
+        // An async agent answers this call immediately with a launch ack and
+        // keeps working: the row stays open, and its real report arrives later
+        // as a <task-notification> (handled above, by the same id).
+        if (isAsyncLaunchAck(reply)) continue
+        // A result the harness marked as an error is the tool failing, not the
+        // agent talking: the row closes, but nothing is said in its name.
+        const spoke = block.is_error !== true
         row.running = false
         if (at && row.at && at >= row.at) row.ms = at - row.at
         agentRows.delete(block.tool_use_id)
+        // What it came back to say, as its own line in the channel — the same
+        // shape the live stream pushes.
+        if (reply && spoke) items.push(agentReply(row, reply))
       } else if (block.type === 'image' && role === 'user') {
         // An image you attached, echoed back into the JSONL by the CLI. Without
         // this it reloads as a bare "[Image #1]" pointing at nothing.

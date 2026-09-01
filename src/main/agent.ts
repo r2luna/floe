@@ -7,6 +7,7 @@ import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
+import { isAsyncLaunchAck, isTaskNotification, parsePeerMessage, parseTaskNotifications, resultText } from './claudeSessions'
 // Circular with handoff (it imports sendAgentEvent) — safe: both sides only
 // call the other's functions at runtime, never at module top level.
 import { seedFor } from './handoff'
@@ -162,8 +163,44 @@ export function markTurnStart(key: string): void {
   replays.set(key, { running: true, lastSeq: seqs.get(key) ?? 0, events: [], startedAt: Date.now() })
 }
 
+/**
+ * Every id one session answers to: the store's, and the CLI's own.
+ *
+ * The renderer keys a brand-new chat by Floe's id and every send after the CLI
+ * reports its id by that claudeId — so which name a turn runs under depends on
+ * when it started. Anything that has to find a session by name has to try all
+ * of them; see resolveConn, which does the same for the live conn.
+ */
+export function sessionNames(key: string): string[] {
+  const names = new Set([key])
+  const stored = getCreatedSession(key)
+  for (const n of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) if (n) names.add(n)
+  // A conn the store has not linked yet still knows the id the CLI gave it.
+  const conn = conns.get(key)
+  if (conn?.sessionId) names.add(conn.sessionId)
+  for (const [k, c] of conns) if (c.sessionId === key) names.add(k)
+  return [...names]
+}
+
 export function replaySnapshot(key: string): AgentReplay {
-  return replays.get(key) ?? { running: false, lastSeq: seqs.get(key) ?? 0, events: [] }
+  const names = sessionNames(key)
+  let snapshot = replays.get(key)
+  if (!snapshot?.running) {
+    for (const name of names) {
+      const other = name === key ? undefined : replays.get(name)
+      // Only a turn that is REALLY still in flight. Where a conn is filed under
+      // that name it is the authority — a replay left `running` by a `done`
+      // that never arrived would otherwise put the typing line back on screen
+      // every time the chat is opened, which is the bug this fixes. Where there
+      // is no conn (codex and the other one-shot runtimes keep none) the replay
+      // is the only mark there is.
+      if (other?.running && (!conns.has(name) || hasActiveTurn(name))) {
+        snapshot = other
+        break
+      }
+    }
+  }
+  return { running: false, lastSeq: seqs.get(key) ?? 0, events: [], ...snapshot, names }
 }
 
 function recordForReplay(key: string, event: AgentEvent, seq: number): void {
@@ -185,14 +222,34 @@ function recordForReplay(key: string, event: AgentEvent, seq: number): void {
     }
     case 'tool':
     case 'error':
+    // Another session's line is said IN the turn: a panel that mounts after it
+    // arrived would otherwise not see it until the chat is reopened.
+    case 'peer':
     // A question is part of the turn: a panel mounting mid-question must get
     // it back or the session looks idle with the CLI still blocked on it. Same
     // for a permission prompt — both are answered from the same card, and both
     // are dropped again the moment they settle (dropSettled).
     case 'question':
     case 'permission':
+    // A subagent's whole life happens inside the turn: launched, working, and
+    // reporting back. A panel that mounts while one is out would otherwise see
+    // a row that never opened, never closed, and — worst of the three — never
+    // said what it found.
+    case 'subagent-start':
+    case 'subagent-done':
       r.events.push(event)
       break
+    case 'subagent-progress': {
+      // Progress fires several times a second per agent. Only the latest one
+      // means anything (it is a patch of the row's current state), so it
+      // replaces the pending one for that agent instead of stacking.
+      const at = r.events.findIndex(
+        (e) => e.kind === 'subagent-progress' && e.toolUseId === event.toolUseId
+      )
+      if (at === -1) r.events.push(event)
+      else r.events[at] = event
+      break
+    }
     case 'done':
       r.running = false
       r.events = []
@@ -721,9 +778,19 @@ export function anyActiveTurn(keys: (string | undefined)[]): boolean {
   return keys.some((k) => !!k && hasActiveTurn(k))
 }
 
-/** Every key with a turn in flight, for the renderer to reconcile against. */
+/**
+ * Every key with a turn in flight, for the renderer to reconcile against.
+ *
+ * Both halves matter. `conns` is Claude's, and only Claude's — codex, opencode
+ * and the local agents keep no conn here, so a list built from it alone reads
+ * every one of their turns as idle. `markTurnStart` is what they ALL call, and
+ * `done` is what clears it (see recordForReplay), which makes the replay the
+ * one mark every runtime leaves.
+ */
 export function activeTurnKeys(): string[] {
-  return [...conns].filter(([, c]) => c.turnActive).map(([k]) => k)
+  const keys = new Set([...conns].filter(([, c]) => c.turnActive).map(([k]) => k))
+  for (const [k, r] of replays) if (r.running) keys.add(k)
+  return [...keys]
 }
 
 // Everything Fleet needs about one session's live process, in a single read: the
@@ -1141,18 +1208,38 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
     // `<task-notification>` string carrying the launching tool_use id. THAT is
     // when the row is really done — the immediate "Async agent launched" ack
     // below only acknowledges the launch, it doesn't mean the work is finished.
-    if (typeof content === 'string' && content.includes('<task-notification>')) {
-      const id = content.match(/<tool-use-id>([^<]+)<\/tool-use-id>/)?.[1] ?? ''
-      if (id && conn.subagents.has(id)) {
+    if (typeof content === 'string' && isTaskNotification(content)) {
+      // One message can close several agents: two that finished together are
+      // delivered as adjacent blocks, and stopping at the first strands the
+      // rest — tracked, running, holding the turn open.
+      for (const notice of parseTaskNotifications(content)) {
+        const id = notice.toolUseId
+        if (!conn.subagents.has(id)) {
+          // A notification whose id we don't recognise can't clear its row —
+          // this is exactly how a turn strands "Thinking…" forever. Record it.
+          log('subagent-notify-unmatched', { key, id, outstanding: conn.subagents.size })
+          continue
+        }
         conn.subagents.delete(id)
         log('subagent-done', { key, id, via: 'notification', outstanding: conn.subagents.size })
-        send(win, key, { kind: 'subagent-done', toolUseId: id })
-      } else {
-        // A notification whose id we don't recognise can't clear its row — this
-        // is exactly how a turn strands "Thinking…" forever. Record the mismatch.
-        log('subagent-notify-unmatched', { key, id, outstanding: conn.subagents.size })
+        // `reply` is the agent reporting back: it speaks in the channel under
+        // its own nick. For an async agent this notification is the ONLY place
+        // its answer exists — the tool_result was just the launch ack.
+        if (notice.result) pushTranscript(conn, `agent: ${notice.result}`)
+        send(win, key, notice.result ? { kind: 'subagent-done', toolUseId: id, reply: notice.result } : { kind: 'subagent-done', toolUseId: id })
       }
       return
+    }
+    // Another session messaging this one arrives the same way: injected as a
+    // plain user turn. It is someone else talking, so it joins the channel
+    // under their nick — live, not only when the transcript is read back.
+    if (typeof content === 'string') {
+      const peer = parsePeerMessage(content)
+      if (peer && peer.body) {
+        pushTranscript(conn, `${peer.from}: ${peer.body}`)
+        send(win, key, { kind: 'peer', from: peer.from, text: peer.body })
+        return
+      }
     }
     if (Array.isArray(content)) {
       for (const block of content as Array<Record<string, unknown>>) {
@@ -1164,10 +1251,19 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
         // <task-notification> completion above. Only a classic blocking Task's
         // result (its real output) closes the row here.
         const resultFor = typeof block.tool_use_id === 'string' ? block.tool_use_id : ''
-        if (resultFor && conn.subagents.has(resultFor) && !isAsyncLaunchAck(block.content)) {
+        // A blocking Task's result IS the agent's answer to the session that
+        // launched it — it says it here, in its own voice, instead of being
+        // folded silently into the parent's next paragraph. Two results are not
+        // that: the async launch ack (the agent has not started talking yet, so
+        // its row stays open for the <task-notification> above) and an errored
+        // result (the tool failed; nothing was said in the agent's name).
+        const reply = resultText(block.content)
+        if (resultFor && conn.subagents.has(resultFor) && !isAsyncLaunchAck(reply)) {
           conn.subagents.delete(resultFor)
           log('subagent-done', { key, id: resultFor, via: 'tool_result', outstanding: conn.subagents.size })
-          send(win, key, { kind: 'subagent-done', toolUseId: resultFor })
+          const spoken = block.is_error === true ? undefined : reply
+          if (spoken) pushTranscript(conn, `agent: ${spoken}`)
+          send(win, key, spoken ? { kind: 'subagent-done', toolUseId: resultFor, reply: spoken } : { kind: 'subagent-done', toolUseId: resultFor })
         }
         if (!Array.isArray(block.content)) continue
         for (const part of block.content as Array<Record<string, unknown>>) {
@@ -1295,6 +1391,20 @@ function ensureTaskWatcher(win: BrowserWindow, key: string, conn: Conn): void {
   scan() // catch a completion that landed between the launch and the watch
 }
 
+// The notification text inside a transcript line. The file is JSONL, so the
+// notification arrives JSON-encoded — read the string out before matching, or
+// its `<result>` comes back with every newline still written as `\n`.
+function taskLineText(line: string): string {
+  try {
+    const m = JSON.parse(line) as Record<string, unknown>
+    const content = typeof m.content === 'string' ? m.content : (m.message as { content?: unknown } | undefined)?.content
+    if (typeof content === 'string') return content
+  } catch {
+    /* not JSON: the caller's own tests pass the notification verbatim */
+  }
+  return line
+}
+
 // One transcript line. A finished async agent shows up as a `<task-notification>`
 // carrying the launching tool-use id — the same id tracked in conn.subagents. Any
 // terminal status (completed/failed) means the agent is no longer running, so
@@ -1302,11 +1412,17 @@ function ensureTaskWatcher(win: BrowserWindow, key: string, conn: Conn): void {
 // `result` that would normally do it is never coming for this session.
 export function handleTaskLine(win: BrowserWindow, key: string, conn: Conn, line: string): void {
   if (!line.includes('<task-notification>')) return
-  const id = line.match(/<tool-use-id>([^<]+)<\/tool-use-id>/)?.[1] ?? ''
-  if (!id || !conn.subagents.has(id)) return
-  conn.subagents.delete(id)
-  log('subagent-done', { key, id, via: 'transcript', outstanding: conn.subagents.size })
-  send(win, key, { kind: 'subagent-done', toolUseId: id })
+  let closed = false
+  for (const notice of parseTaskNotifications(taskLineText(line))) {
+    const id = notice.toolUseId
+    if (!conn.subagents.has(id)) continue
+    conn.subagents.delete(id)
+    closed = true
+    log('subagent-done', { key, id, via: 'transcript', outstanding: conn.subagents.size })
+    if (notice.result) pushTranscript(conn, `agent: ${notice.result}`)
+    send(win, key, notice.result ? { kind: 'subagent-done', toolUseId: id, reply: notice.result } : { kind: 'subagent-done', toolUseId: id })
+  }
+  if (!closed) return
   if (!conn.turnClosed && conn.subagents.size === 0 && conn.turnActive && conn.heldForSubagentsAt != null) {
     conn.turnClosed = true
     conn.turnActive = false
@@ -1345,15 +1461,6 @@ export function parseQuestions(input: unknown): AgentQuestion[] {
       }
     })
     .filter((q): q is AgentQuestion => q !== null)
-}
-
-// The Agent tool's async launch returns this ack immediately, long before the
-// agent finishes — so it must NOT be read as the subagent's completion result.
-function isAsyncLaunchAck(content: unknown): boolean {
-  if (!Array.isArray(content)) return false
-  return (content as Array<Record<string, unknown>>).some(
-    (part) => part.type === 'text' && typeof part.text === 'string' && part.text.includes('Async agent launched')
-  )
 }
 
 function summarizeTool(block: Record<string, unknown>): string | undefined {

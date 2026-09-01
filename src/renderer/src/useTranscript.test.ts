@@ -51,16 +51,81 @@ test('progress without a tool keeps the tool the row is already showing', () => 
   assert.deepEqual([rows(s)[0].lastTool, rows(s)[0].agentTokens], ['Grep', 900])
 })
 
-test('done closes the row, drops the tool and keeps the codex reply', () => {
+test('done closes the row and drops the tool it was on', () => {
   const s = run(
     { type: 'push', item: start('c1', 'codex', 'codex') },
     { type: 'agent', toolUseId: 'c1', patch: { agentTokens: 1800, lastTool: 'shell' } },
-    { type: 'agent', toolUseId: 'c1', patch: { running: false, lastTool: '', text: 'o guard vaza', ms: 22_000 } }
+    { type: 'agent', toolUseId: 'c1', patch: { running: false, lastTool: '', ms: 22_000 } }
   )
   const [row] = rows(s)
+  assert.deepEqual([row.running, row.lastTool, row.ms, row.agentTokens], [false, '', 22_000, 1800])
+})
+
+test('what an agent reports back is a message from the agent, not a field on its row', () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'agent', toolUseId: 't1', patch: { running: false, lastTool: '' } },
+    { type: 'agent-reply', toolUseId: 't1', text: 'o guard vaza' }
+  )
+  assert.equal(rows(s)[0].text, undefined, 'the report is not tucked under the launch line')
+  const said = s.live[s.live.length - 1]
   assert.deepEqual(
-    [row.running, row.lastTool, row.text, row.ms, row.agentTokens],
-    [false, '', 'o guard vaza', 22_000, 1800]
+    [said.role, said.from, said.text],
+    ['assistant', 'explore-t1', 'o guard vaza'],
+    'it speaks in the channel under its own nick'
+  )
+})
+
+test('two agents of the same type report under two different nicks', () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'push', item: start('t2', 'Explore') },
+    { type: 'agent-reply', toolUseId: 't1', text: 'primeiro' },
+    { type: 'agent-reply', toolUseId: 't2', text: 'segundo' }
+  )
+  const said = s.live.filter((i) => i.from)
+  assert.deepEqual(said.map((i) => [i.from, i.text]), [
+    ['explore-t1', 'primeiro'],
+    ['explore-t2', 'segundo']
+  ])
+})
+
+test('a reply whose launch this panel never saw still speaks, under a bare agent nick', () => {
+  const s = run({ type: 'agent-reply', toolUseId: 'ghost', text: 'quem sou eu' })
+  assert.deepEqual(
+    s.live.map((i) => [i.role, i.from, i.text]),
+    [['assistant', 'agent', 'quem sou eu']],
+    'never under the model nick — that is the misattribution this exists to stop'
+  )
+})
+
+test("the turn's cost never lands on an agent's report", () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'text', item: { role: 'assistant', text: 'já volto' } },
+    { type: 'agent-reply', toolUseId: 't1', text: 'achei' },
+    { type: 'finish', ms: 42_000, tokens: 90_000 }
+  )
+  const report = s.live[s.live.length - 1]
+  assert.deepEqual([report.from, report.ms, report.contextTokens], ['explore-t1', undefined, undefined])
+  const answer = s.live[1]
+  assert.deepEqual([answer.ms, answer.contextTokens], [42_000, 90_000], "the parent's own line carries it")
+})
+
+test('a reply settles the streaming tail, so it lands where it was said', () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'text', item: { role: 'assistant', text: 'enquanto isso…' } },
+    { type: 'agent-reply', toolUseId: 't1', text: 'achei' }
+  )
+  assert.equal(s.tail, null)
+  assert.deepEqual(
+    s.live.map((i) => [i.role, i.from ?? null]),
+    [
+      ['subagent', null],
+      ['assistant', null],
+      ['assistant', 'explore-t1']
+    ]
   )
 })
 

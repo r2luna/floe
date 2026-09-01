@@ -41,6 +41,14 @@ export interface PendingQuestion {
 /** The one label that means yes. Compared against, so it lives in one place. */
 const ALLOW = 'Allow'
 
+/**
+ * How quiet a turn has to be before main's "not running" is believed over this
+ * panel's own state. A poll in flight when the turn started answers about the
+ * moment before it existed, and closing on that would end a turn that had just
+ * begun. Same reason (and the same window) as reconcileLive in useRunning.
+ */
+const IDLE_GRACE_MS = 5_000
+
 /** A permission prompt, worded as the two-option question the card renders. */
 function permissionQuestion(p: AgentPermission): AgentQuestion {
   return {
@@ -150,6 +158,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The session this panel has already been cleared for; see the subscribe
   // effect below.
   const clearedFor = useRef<string | null>(null)
+  // Every name this session's events can arrive under, from the replay
+  // snapshot. Seeded with the key the panel was opened with, which is the only
+  // one it knows before main answers.
+  const names = useRef<Set<string>>(new Set())
+  // When this panel last heard anything, so the reconcile below can tell a turn
+  // that just started from one main has never heard of.
+  const lastEventAt = useRef(0)
   // The running true→false edge is the barrier, so the previous value has to be
   // remembered — `running === false` is true on every idle render.
   const wasRunning = useRef(false)
@@ -217,7 +232,18 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         }
       })
     } else if (event.kind === 'tool') {
-      dispatch({ type: 'push', item: { role: 'tool', name: event.name, summary: event.summary } })
+      // Stamped: a turn that opens with work is headed by the tool row's clock
+      // (see the Log), and an unstamped one would head the run with no time at
+      // all until the chat is reopened and read back off the JSONL.
+      dispatch({
+        type: 'push',
+        item: { role: 'tool', name: event.name, summary: event.summary, at: Date.now() }
+      })
+    } else if (event.kind === 'peer') {
+      // Another session's message, spoken into this channel under its own nick.
+      // Pushed like any settled line: it arrives mid-turn, so it lands where it
+      // was said instead of after the answer it interrupted.
+      dispatch({ type: 'push', item: { role: 'user', from: event.from, text: event.text, at: Date.now() } })
     } else if (event.kind === 'subagent-start') {
       // The subagent joins the channel as a speaker of its own: nick, badge and
       // a body that is its work while it runs. It settles the tail first, so it
@@ -246,8 +272,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         toolUseId: event.toolUseId,
         // `lastTool: ''` rather than undefined: the patch merge skips undefined,
         // and a finished row must not keep advertising the tool it died on.
-        patch: { running: false, lastTool: '', text: event.reply, ms: event.ms }
+        patch: { running: false, lastTool: '', ms: event.ms }
       })
+      // What it came back with is a message, not a field on the row: the agent
+      // answers the session that sent it out, in the channel, under its nick.
+      if (event.reply?.trim()) {
+        dispatch({ type: 'agent-reply', toolUseId: event.toolUseId, text: event.reply.trim() })
+      }
     } else if (event.kind === 'tokens') {
       tokensRef.current = event.tokens
       setTokens(event.tokens)
@@ -319,20 +350,30 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       setStartedAt(undefined)
       startedRef.current = undefined
     }
+    // Until the snapshot answers, this panel only knows the one name it was
+    // opened with — so nothing is judged by name yet (see `names` below) and
+    // the buffer takes everything, to be filtered on the way out.
+    names.current = new Set([key])
     // Events that arrive before the replay snapshot resolves. Applying them
     // right away would double the text the snapshot already folded in; the
     // envelope's seq says which ones the snapshot has seen.
     let pending: AgentEventEnvelope[] | null = []
     const off = window.floe.agent.onEvent((payload: AgentEventEnvelope) => {
-      if (payload.key !== key) return
-      if (pending) pending.push(payload)
-      else apply(payload.event)
+      if (pending) return void pending.push(payload)
+      if (!names.current.has(payload.key)) return
+      lastEventAt.current = Date.now()
+      apply(payload.event)
     })
     let alive = true
     void window.floe.agent
       .replay(key)
       .then((replay) => {
         if (!alive || !pending) return
+        // Every name this session answers to. A turn started before the CLI
+        // reported its id runs under Floe's, while the panel may be keyed by
+        // the claudeId — listening for one name alone is how a chat went silent
+        // mid-turn and then kept "is typing" up with no `done` on the way.
+        if (replay.names?.length) names.current = new Set([key, ...replay.names])
         if (replay.running) {
           if (replay.model) runModel.current = replay.model
           for (const event of replay.events) apply(event)
@@ -344,11 +385,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           // The seeded turn must still produce a true→false edge for the queue.
           wasRunning.current = true
         }
-        for (const payload of pending) if (payload.seq > replay.lastSeq) apply(payload.event)
+        for (const payload of pending)
+          if (names.current.has(payload.key) && payload.seq > replay.lastSeq) apply(payload.event)
       })
       .catch(() => {
         // No snapshot is only a colder start: drain what buffered and go live.
-        if (alive && pending) for (const payload of pending) apply(payload.event)
+        if (alive && pending)
+          for (const payload of pending) if (names.current.has(payload.key)) apply(payload.event)
       })
       .finally(() => {
         pending = null
@@ -359,6 +402,43 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       off()
     }
   }, [key, apply])
+
+  /**
+   * The correction: a `done` that never arrives must not leave "is typing" up
+   * forever.
+   *
+   * Every way the turn ends is an event, and every event can be missed — the
+   * child died without a result, the turn ran under a name this panel was not
+   * listening for, the window was reloaded mid-turn. There was nothing to take
+   * the line back off, so it stayed for the life of the session. Main knows
+   * which sessions actually have a turn in flight; ask it, and believe it.
+   *
+   * Only while running: an idle panel has nothing to correct and must not poll.
+   */
+  useEffect(() => {
+    if (!running || !key) return
+    let stopped = false
+    const check = async (): Promise<void> => {
+      const keys = await window.floe.agent.active().catch(() => null)
+      if (stopped || !keys) return
+      if (keys.some((k) => names.current.has(k))) return
+      // An answer assembled BEFORE this turn started says nothing about it —
+      // and a turn that has just streamed is alive whatever the poll says. So
+      // only a quiet session is closed here.
+      if (Date.now() - Math.max(lastEventAt.current, startedRef.current ?? 0) < IDLE_GRACE_MS) return
+      dispatch({
+        type: 'finish',
+        ms: startedRef.current ? Date.now() - startedRef.current : undefined,
+        tokens: tokensRef.current
+      })
+      setRunning(false)
+    }
+    const timer = setInterval(() => void check(), 4_000)
+    return () => {
+      stopped = true
+      clearInterval(timer)
+    }
+  }, [running, key])
 
   /** Actually start a turn. Everything that sends goes through here. */
   const deliver = useCallback(

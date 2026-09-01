@@ -403,13 +403,25 @@ export default function App() {
   // one for headless runs) so a session stops reading "Session N". The main
   // process only applies it while the title is still a placeholder and the
   // user hasn't renamed it — reload just picks up whatever it decided.
+  //
+  // The list is re-read either way, and not only when a title changed: it also
+  // carries when each session was last touched and in which order the rows go,
+  // and a turn that ends is exactly the moment both of those move. Debounced,
+  // because several sessions finishing together would otherwise each pay for a
+  // worktree walk.
   useEffect(() => {
-    return window.floe.agent.onEvent(({ key, event }) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = window.floe.agent.onEvent(({ key, event }) => {
       if (event.kind !== 'done') return
-      void window.floe.claude.adoptAiTitle(key).then((title) => {
-        if (title) worktrees.reload()
+      void window.floe.claude.adoptAiTitle(key).finally(() => {
+        clearTimeout(timer)
+        timer = setTimeout(() => worktrees.reload(), 500)
       })
     })
+    return () => {
+      clearTimeout(timer)
+      off()
+    }
   }, [worktrees.reload])
   // The find bar: the query being typed, or null when it is closed. The query
   // survives closing (`n` repeats the last search, vim's way), which is why the

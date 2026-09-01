@@ -35,7 +35,11 @@ command.
    `worktree_status`, `list_branches`, `changed_files`, `file_diff`,
    `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with
-   `wait=true` for synchronous session-to-session calls), `read_session_output`,
+   `wait=true` for synchronous session-to-session calls), `ask_codex` (the local
+   Codex CLI as a second pair of eyes — read-only in the caller's worktree, one
+   resumable thread per session, capped at five exchanges before the agent has
+   to check in; it joins the chat as `@codex`, see `main/codex.ts`),
+   `read_session_output`,
    `stop_session`, `select_session`, `create_followup` / `list_followups` /
    `cancel_followup`, `list_plans`, `read_plan`, `open_plan`,
    `present_decision` (renders the inline decision panel — `agent.ts` and
