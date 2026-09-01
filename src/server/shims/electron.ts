@@ -41,7 +41,8 @@ export const app = {
   relaunch: (): void => {},
   commandLine: { appendSwitch: (): void => {} },
   getLoginItemSettings: (): { openAtLogin: boolean } => ({ openAtLogin: false }),
-  setLoginItemSettings: (): void => {}
+  setLoginItemSettings: (): void => {},
+  getAppMetrics: (): unknown[] => []
 }
 
 class FakeWebContents {
@@ -77,6 +78,12 @@ export class BrowserWindow {
     return false
   }
   isMinimized(): boolean {
+    return false
+  }
+  isFocused(): boolean {
+    return false
+  }
+  isVisible(): boolean {
     return false
   }
   setBackgroundColor(): void {}
