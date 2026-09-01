@@ -8,6 +8,7 @@ import { chatWithCodexServer } from './codexServer'
 import { touchCreatedSession } from './sessionStore'
 import { logTurn } from './runtimeLog'
 import { markTurnStart, sendAgentEvent } from './agent'
+import { seedFor } from './handoff'
 import { lmStudioServerModels } from './localAgents'
 
 // Running a turn on something other than Claude.
@@ -285,10 +286,18 @@ export async function runRuntime(
   // session was ever used. Stamp it, or the sidebar sorts it by the day it was
   // created for the rest of its life.
   touchCreatedSession(key)
-  logTurn(key, { role: 'user', text: prompt })
   // Same turn bookkeeping as Claude's sendToAgent: a panel opening mid-turn
   // asks agent.replay for what it missed, whoever is answering.
   markTurnStart(key)
+  // What this runtime has not seen — the turns another harness answered, or its
+  // own from before the restart that emptied its thread. Read BEFORE the prompt
+  // is logged, or the message being sent would come back inside its own packet.
+  const seed = seedFor(win, key, worktreePath, runtime)
+  // Logged as typed, not as sent: the packet is context we added, and a
+  // transcript that showed it would put thousands of characters of history
+  // under the user's name (and hand them straight back on the next switch).
+  logTurn(key, { role: 'user', text: prompt })
+  if (seed) prompt = seed + prompt
   // Codex already has a home: the app-server session (codexServer.ts), which
   // is also the only channel that can surface its request_user_input questions.
   // Snapped here rather than trusted: the picker snaps too, but a scheduled run

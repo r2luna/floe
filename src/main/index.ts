@@ -72,7 +72,7 @@ import { ensureAgentHookInstalled } from './hooks'
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
-import { listClaudeSessions, listResumableSessions, loadClaudeTranscript, computeProjectActivity, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, sessionHasUnansweredQuestion } from './claudeSessions'
+import { listClaudeSessions, listResumableSessions, computeProjectActivity, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, sessionHasUnansweredQuestion } from './claudeSessions'
 import {
   setSessionTitle,
   getCreatedSession,
@@ -117,7 +117,7 @@ import { authStatus, startLogin, pasteCode, cancelLogin, logout } from './claude
 import { claudeStats } from './claudeStats'
 import { forgetThread, runRuntime } from './runtimes'
 import { localAgents, localStats, localUsage } from './localAgents'
-import { readRuntimeTranscript } from './runtimeLog'
+import { forgetSeen, sessionTranscript } from './handoff'
 import { detectDevCommand, startDev, stopDev } from './devServer'
 import {
   listCommands,
@@ -466,18 +466,13 @@ function registerIpc(): void {
   handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>
     resumeSession(s)
   )
-  // The JSONL is named after CLAUDE's session id, not Floe's. Callers pass
-  // the Floe id, so resolve it here — one place, rather than making every
-  // caller carry both ids.
-  handle('claude:transcript', (_event, worktreePath: string, sessionId: string) => {
-    const claude = loadClaudeTranscript(worktreePath, getCreatedSessionClaudeId(sessionId) ?? sessionId)
-    const runtime = readRuntimeTranscript(sessionId)
-    if (!runtime.length) return claude
-    // A session can have talked to both — Claude's own file and our log for
-    // whoever else answered. Merge on time so the conversation reads in the
-    // order it happened rather than one source after the other.
-    return [...claude, ...runtime].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
-  })
+  // A session can have talked to several harnesses — Claude's own JSONL and our
+  // log for whoever else answered — so the merge (and the stripping of the
+  // handoff packets we injected) lives in main/handoff.ts, where the same view
+  // is what decides who still needs to be told what.
+  handle('claude:transcript', (_event, worktreePath: string, sessionId: string) =>
+    sessionTranscript(worktreePath, sessionId)
+  )
   handle('sessions:setTitle', (_event, claudeId: string, title: string) => setSessionTitle(claudeId, title))
   handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
   handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
@@ -509,6 +504,10 @@ function registerIpc(): void {
     // id. A closed session's history is unreachable, so drop it here.
     forgetThread(opts.id)
     if (opts.claudeId) forgetThread(opts.claudeId)
+    // And with the thread goes the record of how much of the conversation each
+    // harness was holding — the two are the same fact from opposite ends.
+    forgetSeen(opts.id)
+    if (opts.claudeId) forgetSeen(opts.claudeId)
     closeSession(opts)
   })
 

@@ -7,6 +7,9 @@ import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
+// Circular with handoff (it imports sendAgentEvent) — safe: both sides only
+// call the other's functions at runtime, never at module top level.
+import { seedFor } from './handoff'
 import { getSystemPrompt } from './appSettings'
 // Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
 // sides only call the other's functions at runtime, never at module top level.
@@ -511,7 +514,16 @@ export function sendToAgent(
   conn.stuckLogged = false
   log('turn-start', { key, promptLen: prompt.length, images: images.length, files: files.length })
   pushTranscript(conn, `user: ${prompt}`)
-  write(conn, { type: 'user', message: { role: 'user', content: buildContent(prompt, images, files) } })
+  // Everything this session said to another harness since Claude's last turn.
+  // Usually '' — a session that has only ever been Claude's is resumed from its
+  // own JSONL and needs nothing. Sent as part of the prompt (the CLI takes one
+  // user message per turn), which is why the packet is marked: it lands in
+  // Claude's transcript, and every read strips it back out.
+  const seed = seedFor(win, key, worktreePath, 'claude')
+  write(conn, {
+    type: 'user',
+    message: { role: 'user', content: buildContent(seed + prompt, images, files) }
+  })
 }
 
 // Answer a tool-permission prompt over the control channel. `allow` runs the
