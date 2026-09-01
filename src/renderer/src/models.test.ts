@@ -6,6 +6,8 @@ import {
   hostOf,
   lastChoice,
   loadChoice,
+  routeChoice,
+  setHarnessDefaults,
   setUserNick,
   speakerKey,
   userNick,
@@ -189,4 +191,51 @@ test('the nick follows the configured name, lower-cased, and never goes empty', 
   assert.equal(userNick(), 'ada')
   setUserNick('   ')
   assert.equal(userNick(), 'you', 'a blank name still has to head an entry')
+})
+
+/* --- what a routed message goes out on ------------------------------------ */
+
+test('a handle that names nothing falls back to floe.toml, then to the picker', () => {
+  setHarnessDefaults({ codex: { model: 'gpt-5.6-sol', effort: 'xhigh' } })
+  assert.deepEqual(routeChoice({ harness: 'codex' }, { model: 'opus', effort: 'low', mode: 'plan' }), {
+    model: 'gpt-5.6-sol',
+    effort: 'xhigh',
+    provider: 'codex',
+    mode: 'plan'
+  })
+})
+
+test('what the handle names beats what the file says', () => {
+  setHarnessDefaults({ codex: { model: 'gpt-5.6-sol', effort: 'xhigh' } })
+  assert.deepEqual(
+    routeChoice({ harness: 'codex', model: 'o3', effort: 'low' }, { model: 'opus', effort: 'max' }),
+    { model: 'o3', effort: 'low', provider: 'codex', mode: 'plan' }
+  )
+})
+
+test('with nothing configured, the effort travels and the model does not', () => {
+  setHarnessDefaults({})
+  // `opus` means nothing to LM Studio; empty already means "whatever you are
+  // configured for" to every runtime that is not Claude.
+  assert.deepEqual(
+    routeChoice({ harness: 'lmstudio' }, { model: 'opus', effort: 'high', mode: 'acceptEdits' }),
+    // LM Studio has no tools, so there is no mode for it to be in.
+    { model: '', effort: 'high', provider: 'lmstudio', mode: 'default' }
+  )
+})
+
+test('routing back to Claude drops the provider and borrows a real model', () => {
+  setHarnessDefaults({})
+  const back = routeChoice({ harness: 'claude' }, { model: 'gpt-5.6-sol', effort: 'high', provider: 'codex' })
+  assert.equal(back.provider, undefined)
+  assert.equal(back.model, 'opus')
+})
+
+test('no model is invented for a harness that named none', () => {
+  setHarnessDefaults({})
+  // Not codex's own default, and not the first thing on some list: an empty
+  // model is a question each harness answers for itself, and the answer of the
+  // one that cannot ("no model loaded") is more use than a guess that hangs.
+  assert.equal(routeChoice({ harness: 'codex' }, { model: 'opus', effort: 'high' }).model, '')
+  assert.equal(routeChoice({ harness: 'ollama' }, { model: 'opus', effort: 'high' }).model, '')
 })

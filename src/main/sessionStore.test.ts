@@ -30,15 +30,21 @@ export async function load(url, context, next) {
 register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.url)
 
 const { setSharedDataDir } = await import('./dataDir.ts')
-const { forgetWorktree, pruneMissingWorktrees, getCreatedSessionClaudeId, linkCreatedSession } =
-  await import('./sessionStore.ts')
+const {
+  forgetWorktree,
+  pruneMissingWorktrees,
+  getCreatedSessionClaudeId,
+  linkCreatedSession,
+  setCreatedSessionChoice,
+  createdSessionChoice
+} = await import('./sessionStore.ts')
 
 const dataDir = mkdtempSync(join(tmpdir(), 'floe-store-'))
 setSharedDataDir(dataDir)
 
 interface StoreShape {
   meta: Record<string, { title?: string }>
-  created: Array<{ id: string; worktreePath: string; claudeId?: string }>
+  created: Array<{ id: string; worktreePath: string; claudeId?: string; provider?: string }>
   view: {
     worktreeByProject: Record<string, string>
     viewByWorktree: Record<string, unknown>
@@ -130,6 +136,41 @@ test('a session key resolves by claude id, including superseded ones', () => {
     assert.equal(getCreatedSessionClaudeId('claude-gone'), 'claude-fork')
     assert.equal(getCreatedSessionClaudeId('claude-fork'), 'claude-fork')
     assert.equal(getCreatedSessionClaudeId('s1'), 'claude-fork')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a session remembers what it answers as, and Claude is the absence of one', () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  try {
+    seed(root, join(root, '.worktrees', 'feat'))
+    // Nothing chosen yet is not an answer: the transcript is still the source.
+    assert.equal(createdSessionChoice('s1'), null)
+
+    setCreatedSessionChoice('s1', { provider: 'codex', model: 'gpt-5.6-sol', effort: 'high' })
+    assert.deepEqual(createdSessionChoice('s1'), {
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      effort: 'high',
+      mode: undefined
+    })
+
+    // Only what is passed is set — a caller that knows the mode does not erase
+    // the model it said nothing about.
+    setCreatedSessionChoice('s1', { mode: 'plan' })
+    assert.equal(createdSessionChoice('s1')?.model, 'gpt-5.6-sol')
+    assert.equal(createdSessionChoice('s1')?.mode, 'plan')
+
+    // Claude is stored as no provider at all, the way it is spelled everywhere
+    // else — two spellings of the same fact is a bug waiting for a comparison.
+    setCreatedSessionChoice('s1', { provider: 'claude' })
+    assert.equal(createdSessionChoice('s1')?.provider, undefined)
+    assert.equal(readStore().created[0].provider, undefined)
+
+    // The panel keys by claudeId, so the write has to land through that name.
+    setCreatedSessionChoice('claude-gone', { provider: 'ollama' })
+    assert.equal(createdSessionChoice('s1')?.provider, 'ollama')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

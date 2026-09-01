@@ -59,3 +59,39 @@ test('attachments ride with the batch that carries their text', () => {
   // The unlinked message keeps its own image for its own turn.
   assert.deepEqual(out.rest[0].images?.map((i) => i.id), ['3'])
 })
+
+test('a queued message keeps the harness it was addressed to', () => {
+  const batch = takeBatch([
+    { id: '1', text: 'revisa isso', shown: '@codex revisa isso', choice: { model: 'gpt-5.6-sol', effort: 'high', provider: 'codex' }, linked: false },
+    { id: '2', text: 'depois', linked: false }
+  ])
+  assert.equal(batch?.text, 'revisa isso')
+  assert.equal(batch?.shown, '@codex revisa isso')
+  assert.equal(batch?.choice?.provider, 'codex')
+})
+
+test('a linked run is one message, so it goes to one harness', () => {
+  const batch = takeBatch([
+    { id: '1', text: 'revisa isso', shown: '@codex revisa isso', choice: { model: '', effort: 'high', provider: 'codex' }, linked: false },
+    { id: '2', text: 'e isso tambem', linked: true }
+  ])
+  assert.equal(batch?.text, 'revisa isso\n\ne isso tambem')
+  // The second line said "and this too", not "and ask someone else".
+  assert.equal(batch?.shown, '@codex revisa isso\n\ne isso tambem')
+  assert.equal(batch?.choice?.provider, 'codex')
+})
+
+test('a linked run stops where the target changes', () => {
+  const ollama = { model: 'llama3.2:latest', effort: 'high' as const, provider: 'ollama' }
+  const gemini = { model: '', effort: 'high' as const, provider: 'gemini' }
+  const batch = takeBatch([
+    { id: '1', text: 'analise A', shown: '@ollama analise A', choice: ollama, linked: false },
+    { id: '2', text: 'analise B', shown: '@gemini analise B', choice: gemini, linked: true }
+  ])
+  assert.equal(batch?.text, 'analise A')
+  assert.equal(batch?.choice?.provider, 'ollama')
+  // B is still there, and still linked — it takes its own turn, on its own
+  // harness, rather than being read out to the wrong one.
+  assert.equal(batch?.rest.length, 1)
+  assert.equal(batch?.rest[0].choice?.provider, 'gemini')
+})

@@ -702,3 +702,12 @@ test('activeTurnKeys: a runtime with no conn still reports its turn', () => {
   sendAgentEvent(win, 'codex-sess', { kind: 'done', ok: true })
   assert.ok(!activeTurnKeys().includes('codex-sess'))
 })
+
+test('a replay says who is answering, not just what model', () => {
+  markTurnStart('routed-sess', { provider: 'codex', effort: 'high', mode: 'plan' })
+  const snap = replaySnapshot('routed-sess')
+  assert.equal(snap.running, true)
+  // A panel opening onto this turn has no other way to know: the picker in the
+  // chat still says whatever the SESSION is set to.
+  assert.deepEqual(snap.choice, { provider: 'codex', effort: 'high', mode: 'plan' })
+})

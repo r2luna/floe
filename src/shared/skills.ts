@@ -16,9 +16,18 @@
 
 export const SKILL_TAG = 'floe-skill'
 
-/** A skill's text, wrapped so it can be found again in an echoed prompt. */
+/**
+ * A skill's text, wrapped so it can be found again in an echoed prompt.
+ *
+ * The wrapper opens with a line naming the invocation, because a block of
+ * instructions and nothing else reads to the model as material it was handed,
+ * not as a job it was given: `/setup-commands` alone came back as "I don't see
+ * a request here". The line says who asked and that the rest is to be carried
+ * out, which is exactly what typing the token meant.
+ */
 export function wrapSkill(name: string, body: string): string {
-  return `<${SKILL_TAG} name="${name}">\n${body.trim()}\n</${SKILL_TAG}>`
+  const head = `The user invoked the /${name} skill. What follows is its instructions — carry them out now.`
+  return `<${SKILL_TAG} name="${name}">\n${head}\n\n${body.trim()}\n</${SKILL_TAG}>`
 }
 
 // Non-greedy, so two skills in one message stay two blocks rather than one that
@@ -60,4 +69,31 @@ export function expandSkills(text: string, body: (name: string) => string | null
     const found = body(name)
     return found === null ? all : `${lead}${wrapSkill(name, found)}`
   })
+}
+
+/** A run of plain text, or a skill token the chat draws as a pill. */
+export type SkillPart = { text: string; skill?: undefined } | { skill: string; text?: undefined }
+
+/**
+ * Cut a collapsed message into plain runs and the skill tokens between them.
+ *
+ * The same rule as `expandSkills`, read backwards: a token counts only where
+ * that function would have expanded one, so what the chat draws as a pill is
+ * exactly what the model received as instructions. `known` is the caller's
+ * skill list — without it `/usage` and `/mcp`, which belong to the harness and
+ * were never expanded, would be drawn as skills this app owns.
+ */
+export function splitSkills(text: string, known: (name: string) => boolean): SkillPart[] {
+  const out: SkillPart[] = []
+  let last = 0
+  for (const m of text.matchAll(/(^|\s)\/([A-Za-z0-9][A-Za-z0-9:_-]*)/g)) {
+    const name = m[2]
+    if (!known(name)) continue
+    const at = m.index + m[1].length
+    if (at > last) out.push({ text: text.slice(last, at) })
+    out.push({ skill: name })
+    last = at + 1 + name.length
+  }
+  if (last < text.length) out.push({ text: text.slice(last) })
+  return out
 }

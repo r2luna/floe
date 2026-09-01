@@ -5,7 +5,7 @@ import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import { SOLID_BG, XTERM_THEME, rgbChannels } from './xtermTheme'
-import { attachTerminal, detachTerminal } from './terminalBus'
+import { attachTerminal, detachTerminal, noteTerminalOutput } from './terminalBus'
 
 /**
  * A live shell. The PTY lives in the main process keyed by `termId`, so the
@@ -163,6 +163,9 @@ export function TerminalPanel({
     const off = window.floe.terminal.onEvent((event) => {
       if (event.id !== termId) return
       if (event.kind === 'data') {
+        // Restarts the quiet window a played command waits for — while the
+        // shell is still talking, its terminal queries are still round-tripping.
+        noteTerminalOutput(termId)
         if (held) held.push(event.data)
         else term.write(event.data)
       } else if (event.kind === 'exit') {

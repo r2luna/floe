@@ -558,7 +558,16 @@ export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'skip'
 
 // Reasoning-effort level for the session, passed to `claude --effort`. Ordered
 // lightest → heaviest; higher levels think longer before answering.
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+/**
+ * How hard the harness is told to think, lightest first.
+ *
+ * The list, not just the type: main reads it out of floe.toml, the renderer
+ * offers it in two menus, and `@codex:high` is told apart from a model name by
+ * membership in it. One array, so those three can never disagree.
+ */
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+
+export type Effort = (typeof EFFORTS)[number]
 
 export interface AgentRunOptions {
   permissionMode: PermissionMode
@@ -572,6 +581,15 @@ export interface AgentRunOptions {
    * not.
    */
   provider?: string
+  /**
+   * The line as the user typed it, when that is not what was sent.
+   *
+   * A message addressed to `@codex` sends the rest — the handle is who it is
+   * for, not part of the errand — and the transcript has to keep the whole
+   * line, or reopening the session shows an answer from codex under a question
+   * that never named it.
+   */
+  shown?: string
 }
 
 export interface AgentQuestionOption {
@@ -727,6 +745,13 @@ export interface AgentReplay {
   lastSeq: number // seq of the last event folded into `events`
   startedAt?: number // epoch ms the turn began — a panel opening mid-turn times from here
   model?: string // concrete model id the CLI resolved for this turn
+  /**
+   * What this turn went out on, when it is not the session's own choice — a
+   * message addressed to `@codex` in a Claude chat. A panel that opens
+   * mid-turn has no other way to know: the picker says claude, and stamping
+   * the replayed text with it would put codex's answer under Claude's name.
+   */
+  choice?: { provider?: string; effort?: string; mode?: PermissionMode }
   events: AgentEvent[]
   /**
    * Every id this session answers to — Floe's own and the claudeId the CLI gave

@@ -117,3 +117,41 @@ test('the greeting name is optional, and blank means "use the machine\'s"', () =
     'an emptied box is the same as never having set one'
   )
 })
+
+test('a harness block says what that harness answers with', () => {
+  const raw = '[harness.codex]\nmodel = "gpt-5.6-sol"\neffort = "xhigh"\n\n[harness.lmstudio]\nmodel = "qwen/qwen3.6-35b-a3b"\n'
+  const { config, errors } = parseFloeConfig(raw, 'floe.toml')
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.harness, {
+    codex: { model: 'gpt-5.6-sol', effort: 'xhigh' },
+    lmstudio: { model: 'qwen/qwen3.6-35b-a3b', effort: undefined }
+  })
+})
+
+test('a block for something Floe cannot run is left alone, not read', () => {
+  const { config, errors } = parseFloeConfig('[harness.kimi]\nmodel = "k2"\n', 'floe.toml')
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.harness, {})
+})
+
+test('a bad effort under a harness points at its own dotted table', () => {
+  const raw = '[agent]\nmodel = "opus"\n\n[harness.codex]\nmodel  = "gpt-5.6-sol"\neffort = "turbo"\n'
+  const { config, errors } = parseFloeConfig(raw, 'floe.toml')
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0].line, 6)
+  // The bad half falls back; the good half still stands.
+  assert.deepEqual(config.harness.codex, { model: 'gpt-5.6-sol', effort: undefined })
+})
+
+test('an empty harness block is the same as no block', () => {
+  const { config } = parseFloeConfig('[harness.codex]\n', 'floe.toml')
+  assert.deepEqual(config.harness, {})
+})
+
+test('an emptied effort reads as unset, not as a bad value', () => {
+  // How Settings says "go back to the picker's": it can write a value, never
+  // delete a line.
+  const { config, errors } = parseFloeConfig('[harness.codex]\nmodel  = "gpt-5.6-sol"\neffort = ""\n', 'floe.toml')
+  assert.deepEqual(errors, [])
+  assert.deepEqual(config.harness.codex, { model: 'gpt-5.6-sol', effort: undefined })
+})

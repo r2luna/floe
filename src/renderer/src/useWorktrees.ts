@@ -57,11 +57,10 @@ export function useWorktrees(repoPath?: string): Worktrees {
       .then(async (worktrees) => {
         const rows = await Promise.all(
           worktrees.map(async (worktree) => {
-            const sessions = (await window.floe.claude.sessions(worktree.path))
-              // Most recently touched first: the session you were just in is the
-              // one you are most likely coming back to.
-              .slice()
-              .sort((a, b) => b.mtime - a.mtime)
+            // Creation order, exactly as main returns it: sorting by mtime made
+            // a row jump the moment its session got activity, which moves the
+            // list out from under the pointer.
+            const sessions = await window.floe.claude.sessions(worktree.path)
             return { worktree, sessions }
           })
         )

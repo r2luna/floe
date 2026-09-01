@@ -9,7 +9,7 @@
 // `applyZoom` in main/index.ts.
 
 import { useEffect, useState } from 'react'
-import { setDefaultChoice, setUserNick } from './models'
+import { setDefaultChoice, setHarnessDefaults, setUserNick } from './models'
 
 type Theme = 'system' | 'dark' | 'light'
 
@@ -57,6 +57,7 @@ export async function applyConfig(): Promise<void> {
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
+    setHarnessDefaults(config.harness)
     setVim(config.composer.vim)
     // Resolved in main — config first, then git/system — so the chat's nick and
     // the launcher's greeting can never disagree about who you are. NOT awaited:

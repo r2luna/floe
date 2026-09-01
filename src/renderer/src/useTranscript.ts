@@ -5,6 +5,7 @@ import type {
   AgentEventEnvelope,
   AgentPermission,
   AgentQuestion,
+  Effort,
   FileAttachment,
   ImageAttachment
 } from '../../shared/types'
@@ -88,7 +89,17 @@ export interface Transcript {
     choice?: ModelChoice,
     images?: ImageAttachment[],
     files?: FileAttachment[],
-    linked?: boolean
+    linked?: boolean,
+    /**
+     * Set when the message named its own harness. Its presence is the fact —
+     * "this went somewhere the picker did not choose" — and `shown` is the line
+     * as typed, since what goes out has the handle taken off it.
+     *
+     * An object rather than a bare string so the two never come apart: a
+     * message is addressed or it is not, and the transcript text follows from
+     * that rather than standing in for it.
+     */
+    addressed?: { shown: string }
   ) => void
   /** Drop a queued message before it is ever sent. */
   unqueue: (id: string) => void
@@ -99,6 +110,13 @@ export interface Transcript {
   answerActive: (labels: string[]) => void
   /** Toggle one option of the active multi-select question. */
   togglePick: (label: string) => void
+  /**
+   * What the turn in flight went out on — which is not the picker's choice
+   * when the message addressed a harness by name. What the "is typing" line
+   * reads, so it names whoever is actually working rather than whoever the
+   * last thing you TYPED was for.
+   */
+  answering: ModelChoice
 }
 
 /**
@@ -150,6 +168,14 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // message that waited should go out with the model in effect when it fires,
   // not the one that was selected minutes ago when it was typed.
   const choiceRef = useRef<ModelChoice>(defaultChoice())
+  // What the turn IN FLIGHT went out on — which is not the session's choice
+  // when the message addressed a harness by name. Every live reply is stamped
+  // from here, so a `@codex` answer reads as codex's and the next message still
+  // goes wherever the picker points.
+  const runChoice = useRef<ModelChoice>(defaultChoice())
+  // The same thing as state, for the header to render from. A ref alone cannot
+  // paint: the panel above has to re-render when the answering harness changes.
+  const [answering, setAnswering] = useState<ModelChoice>(defaultChoice())
   // The concrete model id the CLI resolved for the run in flight, so a live
   // message is labelled with what actually answered — not with whatever the
   // picker happens to say by the time you read it back.
@@ -226,8 +252,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           // The effort this turn was sent with. Read from the same ref the
           // send path uses, so a queued message is labelled with what it
           // actually went out as, not with the picker's current setting.
-          effort: choiceRef.current.effort,
-          provider: choiceRef.current.provider
+          effort: runChoice.current.effort,
+          provider: runChoice.current.provider
         }
       })
     } else if (event.kind === 'tool') {
@@ -375,6 +401,21 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         if (replay.names?.length) names.current = new Set([key, ...replay.names])
         if (replay.running) {
           if (replay.model) runModel.current = replay.model
+          // Whoever is answering RIGHT NOW, which the picker cannot say: this
+          // panel may have opened onto a turn that was handed to another
+          // harness. Without it the replayed text is stamped with the default
+          // and codex's answer appears under Claude's name.
+          if (replay.choice) {
+            const restored = {
+              ...choiceRef.current,
+              provider: replay.choice.provider === 'claude' ? undefined : replay.choice.provider,
+              model: replay.model ?? choiceRef.current.model,
+              effort: (replay.choice.effort as Effort) ?? choiceRef.current.effort,
+              mode: replay.choice.mode ?? choiceRef.current.mode
+            }
+            runChoice.current = restored
+            setAnswering(restored)
+          }
           for (const event of replay.events) apply(event)
           setRunning(true)
           // The turn started before this panel existed: time it from main's
@@ -445,13 +486,14 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       prompt: string,
       choice: ModelChoice,
       images?: ImageAttachment[],
-      files?: FileAttachment[]
+      files?: FileAttachment[],
+      shown?: string
     ) => {
       if (!worktreePath || !sessionId) return
       // Show it immediately. The CLI echoes it back into the JSONL, but waiting
       // for that would leave your own message missing for as long as the model
       // takes to answer.
-      dispatch({ type: 'push', item: { role: 'user', text: prompt, at: Date.now() } })
+      dispatch({ type: 'push', item: { role: 'user', text: shown ?? prompt, at: Date.now() } })
       // Show what rode along too — an image you attached is part of what you
       // said, and the JSONL echo of it only lands when the turn is over.
       for (const img of images ?? [])
@@ -483,6 +525,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // resolved its model and no new `session` event will come to restate it.
       if (!running) {
         runModel.current = choice.provider && choice.provider !== 'claude' ? choice.model : undefined
+        runChoice.current = choice
+        setAnswering(choice)
       }
       void window.floe.agent
         .start(
@@ -492,7 +536,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           // `optionsKey` in the main process is built from these, so changing
           // the picker restarts the CLI rather than silently keeping the old
           // model — or the old mode — for the rest of the session.
-          { ...choice, permissionMode: choice.mode ?? DEFAULT_MODE },
+          { ...choice, permissionMode: choice.mode ?? DEFAULT_MODE, shown },
           images ?? [],
           files ?? []
         )
@@ -532,8 +576,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           text: asked,
           at: Date.now(),
           model: runModel.current,
-          effort: choiceRef.current.effort,
-          provider: choiceRef.current.provider
+          effort: runChoice.current.effort,
+          provider: runChoice.current.provider
         }
       })
       dispatch({ type: 'push', item: { role: 'user', text: labels.join(', '), at: Date.now() } })
@@ -578,7 +622,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       choice?: ModelChoice,
       images?: ImageAttachment[],
       files?: FileAttachment[],
-      linked?: boolean
+      linked?: boolean,
+      addressed?: { shown: string }
     ) => {
       if (!worktreePath || !sessionId || !prompt.trim()) return
       // While a question is up, ⏎ answers it — free text is the "Other" lane.
@@ -588,21 +633,44 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         answerActive([prompt.trim()])
         return
       }
-      if (choice) choiceRef.current = choice
+      // A routed message does NOT become the session's choice: `@codex` is one
+      // message handed to codex, and the next line goes back to whoever the
+      // picker names.
+      if (choice && !addressed) choiceRef.current = choice
       // Busy + Claude: send anyway. The live CLI loop accepts user messages
       // mid-turn and folds them into the work in flight (a steer) — same model
       // as t3code/Claude Code. Only the one-shot runtimes (codex exec, opencode
       // run…) still queue: they have no live loop to inject into, and a second
       // exec would race the first.
+      //
+      // BOTH ends have to be Claude. A steer joins the turn in flight, so a
+      // Claude message sent while codex is answering would not join anything —
+      // it would start a second turn on the same session, and the first `done`
+      // to land would close the other one's spinner. That is the shape a
+      // message addressed to `@codex` makes possible, and it is the reason the
+      // running turn's own harness is consulted rather than the picker's.
       const provider = (choice ?? choiceRef.current).provider ?? 'claude'
-      if (running && provider !== 'claude') {
+      const answering = runChoice.current.provider ?? 'claude'
+      if (running && (provider !== 'claude' || answering !== 'claude')) {
         setQueued((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), text: prompt, images, files, linked: !!linked }
+          {
+            id: crypto.randomUUID(),
+            text: prompt,
+            shown: addressed?.shown,
+            // Only an addressed message carries a target of its own. Stamping
+            // every queued line with the picker's choice would make a linked
+            // continuation look like it named somewhere else, and split the
+            // run it was linked to.
+            choice: addressed ? choice : undefined,
+            images,
+            files,
+            linked: !!linked
+          }
         ])
         return
       }
-      deliver(prompt, choice ?? choiceRef.current, images, files)
+      deliver(prompt, choice ?? choiceRef.current, images, files, addressed?.shown)
     },
     [worktreePath, sessionId, running, deliver, question, answerActive]
   )
@@ -633,7 +701,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     if (!batch) return
     setQueued(batch.rest)
     draining.current = true
-    deliver(batch.text, choiceRef.current, batch.images, batch.files)
+    // Its own choice if it named one, the session's otherwise — the message
+    // that waited was addressed when it was typed, not when it went out.
+    deliver(batch.text, batch.choice ?? choiceRef.current, batch.images, batch.files, batch.shown)
   }, [running, queued, deliver])
 
   const stop = useCallback(() => {
@@ -661,6 +731,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     stop,
     question,
     answerActive,
-    togglePick
+    togglePick,
+    answering
   }
 }

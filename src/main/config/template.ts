@@ -109,6 +109,32 @@ system-prompt = "system-prompt.md"
 
 
 # ------------------------------------------------------------------------------
+# | Harness defaults
+# ------------------------------------------------------------------------------
+# |
+# | \`[agent]\` above says what a NEW SESSION starts on. These say what each
+# | harness answers with when a message names it but not a model — \`@codex fix
+# | this\` at the START of a line hands that one message to codex, whatever the
+# | session is set to.
+# |
+# | Both keys are optional. No \`model\` means the harness's own default; no
+# | \`effort\` means the one already in the picker. Write the slug the harness
+# | itself uses (\`codex\`'s model list, \`lms ls\`, \`ollama list\`) — it is
+# | passed straight through, so it is never checked against a list here.
+# |
+# | A message can override both inline: \`@codex:gpt-5.6-sol:high\`.
+# |
+# ------------------------------------------------------------------------------
+
+# [harness.codex]
+# model  = "gpt-5.6-sol"
+# effort = "high"
+
+# [harness.lmstudio]
+# model = "qwen/qwen3.6-35b-a3b"
+
+
+# ------------------------------------------------------------------------------
 # | Terminal
 # ------------------------------------------------------------------------------
 # |

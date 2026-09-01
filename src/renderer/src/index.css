@@ -1062,19 +1062,30 @@ button {
   box-shadow: 0 0 0 3px #0000000d;
 }
 
-/* An image reference. Tinted rather than grey so it reads as a thing that came
-   with the message, not as a path someone typed. Same box-shadow-as-padding
-   trick as .md-ref — the mirror must not change the text's metrics. */
+/* An image reference: the command pill's shape exactly — see .skill-ref — with
+   green text, because a picture came with the message rather than an
+   instruction going out with it.
+
+   Two departures, both forced by the mirror, which must stay glyph for glyph
+   over the textarea. The side padding is `1ch`, not 5px, because it stands in
+   for the two brackets the chip no longer draws. And the hairline is an
+   `outline`, not a `border`: an outline is paint and takes no width. */
 .md-attach {
-  border-radius: 3px;
-  background: #7ec69926;
-  box-shadow: 0 0 0 3px #7ec69926;
+  padding: 0 1ch;
+  border-radius: var(--radius);
+  outline: 1px solid var(--line);
+  background: var(--panel);
   color: #a8dcbc;
+  /* Lowercase like every other label in the app. Paint, not text: the token on
+     the wire stays `[Image #1]`, which is what attachments.ts renumbers and
+     what sessions already written contain. Safe over the textarea because the
+     face is monospace — `I` and `i` take the same width. */
+  text-transform: lowercase;
 }
 
 :root[data-theme='light'] .md-attach {
-  background: #3f9c6b1f;
-  box-shadow: 0 0 0 3px #3f9c6b1f;
+  outline-color: var(--edge);
+  background: var(--well);
   color: #2f7350;
 }
 
@@ -2262,6 +2273,9 @@ button {
 /* A run of three or more commands (or tool calls) closed to one line: the
    count and the programs. Same grid and marker as the rows it hides, so
    closed it still reads as "commands ran here". */
+/* Set smaller and fainter than the prose it sits between: the fold is a
+   footnote about machinery, and at prose size it competes with the sentence
+   above it for the same eye. Cursor and open restore it to full strength. */
 .run-fold {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr);
@@ -2269,8 +2283,24 @@ button {
   gap: 8px;
   padding: 1px 0;
   color: var(--dim);
+  font-size: 0.78em;
+  opacity: 0.62;
   cursor: pointer;
   user-select: none;
+}
+
+.run-fold[data-open],
+.run-fold[data-cursor] {
+  opacity: 1;
+}
+
+/* The marker is sized in em, not by the icon's px attribute: it belongs to the
+   fold's line, and a full-size caret in front of shrunken text reads as a
+   bullet the line grew out of. */
+.run-fold .bash-mark {
+  width: 1em;
+  height: 1em;
+  margin-top: 2px;
 }
 
 .run-fold:focus-visible {
@@ -4206,6 +4236,33 @@ kbd {
   font-size: 11px;
 }
 
+/* Where → has walked into the list, and the key that walks back out. Sticky so
+   it survives a scroll of the rows underneath it. */
+.composer-menu-crumb {
+  position: sticky;
+  top: -5px;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: -5px -5px 3px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--line);
+  background: var(--well);
+  color: var(--text);
+  font-size: 11px;
+}
+
+/* "This row narrows" — the same mark a nested menu carries everywhere. */
+.composer-menu-more {
+  flex: none;
+  color: var(--dim);
+}
+
+.composer-menu-row[data-at] .composer-menu-more {
+  color: var(--text);
+}
+
 
 /* --- rendered messages ---------------------------------------------------- */
 
@@ -5362,6 +5419,26 @@ kbd {
 }
 
 :root[data-theme='light'] .file-ref {
+  border-color: var(--edge);
+  background: var(--well);
+}
+
+/* A skill token in a message you sent. The same chip as a file reference —
+   both stand for something longer that went out on the wire — tinted with the
+   accent, because a skill is an instruction you gave and a file is only a thing
+   you pointed at. */
+.skill-ref {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--accent);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+:root[data-theme='light'] .skill-ref {
   border-color: var(--edge);
   background: var(--well);
 }

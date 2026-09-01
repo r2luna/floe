@@ -5,7 +5,7 @@
 // resolves them to whatever the current release points at, which means this
 // list does not go stale every time a model ships.
 
-import type { Effort, PermissionMode } from '../../shared/types'
+import { EFFORTS, type Effort, type PermissionMode } from '../../shared/types'
 import { DEFAULT_MODE, MODES, modeFromLabel, modeLabel, nearestMode } from '../../shared/modes.ts'
 
 export interface ModelChoice {
@@ -30,7 +30,9 @@ export const MODELS: { id: string; label: string }[] = [
   { id: 'haiku', label: 'Haiku 4.5' }
 ]
 
-export const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+// One list, in shared/types.ts — main reads it out of floe.toml and the handle
+// parser tells an effort from a model name by membership in it.
+export { EFFORTS } from '../../shared/types'
 
 /**
  * The built-in fallback, used until floe.toml has been read and whenever it says
@@ -76,6 +78,63 @@ export function setDefaultChoice(agent: {
 /** What a new session starts on: the config, or the built-in fallback. */
 export function defaultChoice(): ModelChoice {
   return configured
+}
+
+// `[harness.*]` from floe.toml — what each harness answers with when a message
+// names it without naming a model. Module state for the same reason as the
+// choice above: `routeChoice` is called from a keystroke handler, not from an
+// effect that could await the file.
+let harnessDefaults: Record<string, { model?: string; effort?: string }> = {}
+
+/** Install the per-harness defaults. Called from applyConfig, same as the rest. */
+export function setHarnessDefaults(harness: Record<string, { model?: string; effort?: string }>): void {
+  harnessDefaults = harness
+}
+
+/** What `[harness.<id>]` says, or nothing. */
+export function harnessDefault(id: string): { model?: string; effort?: Effort } {
+  const set = harnessDefaults[id]
+  if (!set) return {}
+  return {
+    model: set.model,
+    effort: EFFORTS.includes(set.effort as Effort) ? (set.effort as Effort) : undefined
+  }
+}
+
+/**
+ * The choice a message that opens with `@harness` goes out on.
+ *
+ * Three sources, narrowest first: what the message itself named, then that
+ * harness's block in floe.toml, then the composer's own effort — which is the
+ * one thing the user set most recently and would be surprised to lose.
+ *
+ * The model does NOT fall back to the composer's: `opus` means nothing to
+ * Ollama. Claude borrows the configured default rather than being sent an empty
+ * `--model`; everything else gets an empty one, which each harness reads as
+ * "whatever you are set to" — the CLIs use their own configured model and LM
+ * Studio uses whichever is loaded.
+ *
+ * Nothing is invented for the two that want a model NAMED (see NEEDS_MODEL).
+ * Standing the first one on the list in would pick by alphabet — here, a model
+ * far too big to load — and turn a clear "no model loaded" into a two-minute
+ * wait that ends in "insufficient system resources". Name it in
+ * `[harness.ollama]`, or in the handle.
+ */
+export function routeChoice(
+  route: { harness: string; model?: string; effort?: Effort },
+  from: ModelChoice
+): ModelChoice {
+  const set = harnessDefault(route.harness)
+  const claude = route.harness === 'claude'
+  const model = route.model ?? set.model ?? (claude ? defaultChoice().model : '')
+  return {
+    model,
+    effort: route.effort ?? set.effort ?? from.effort,
+    provider: claude ? undefined : route.harness,
+    // The mode you are on keeps travelling, snapped to what this harness can
+    // honestly do — the same rule as switching harness in the picker.
+    mode: nearestMode(from.mode ?? DEFAULT_MODE, claude ? undefined : route.harness)
+  }
 }
 
 const KEY = 'floe.model'

@@ -415,6 +415,15 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('sessions:setModel', id, model),
       setEffort: (id: string, effort: Effort): Promise<void> =>
         ipcRenderer.invoke('sessions:setEffort', id, effort),
+      /** The whole picker for one session — what it answers as, and how. */
+      setChoice: (
+        id: string,
+        choice: { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode }
+      ): Promise<void> => ipcRenderer.invoke('sessions:setChoice', id, choice),
+      choice: (
+        id: string
+      ): Promise<{ provider?: string; model?: string; effort?: Effort; mode?: PermissionMode } | null> =>
+        ipcRenderer.invoke('sessions:choice', id),
       createSession: (s: { id: string; worktreePath: string; title?: string }): Promise<string> =>
         ipcRenderer.invoke('sessions:create', s),
       renameCreated: (id: string, title: string): Promise<void> =>

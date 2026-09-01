@@ -26,6 +26,14 @@ export interface PaletteItem {
    * menu merely offered would fill the map with paths nobody asked for.
    */
   insert?: () => string
+  /**
+   * A narrower version of this row, reached with → and left with ←.
+   *
+   * What `@codex` offers once you want to say more than its name: its models,
+   * and under each of those the efforts. Every level is pickable on its own, so
+   * the drill is optional detail rather than a path you have to walk.
+   */
+  variants?: PaletteItem[]
 }
 
 export interface Scored<T> {

@@ -67,7 +67,7 @@ import {
 import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
-import { isCodexModel } from '../shared/types'
+import { startTurn } from './turn'
 import { ensureAgentHookInstalled } from './hooks'
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
@@ -80,6 +80,8 @@ import {
   setCreatedSessionMode,
   setCreatedSessionModel,
   setCreatedSessionEffort,
+  setCreatedSessionChoice,
+  createdSessionChoice,
   addCreatedSession,
   normalizeSessionTitles,
   pruneMissingWorktrees,
@@ -381,31 +383,12 @@ function registerIpc(): void {
     ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return
-      // Skills expand HERE, above the provider split, because that is the whole
-      // reason they live in Floe's config: `/deploy` has to mean the same thing
-      // whichever CLI answers. Expanding per runtime would be four copies of
-      // one rule. The wrapper the expansion carries is what lets the transcript
-      // show `/deploy` again — see shared/skills.ts.
-      prompt = expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined))
-      // Anything but Claude runs on the machine's own runtime and answers over
-      // the same agent:event channel. The provider is stated by the picker;
-      // `isCodexModel` stays only as the fallback for a choice made before
-      // providers existed (a persisted model with no provider beside it).
-      const provider = options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
-      if (provider !== 'claude') {
-        void runRuntime(
-          win,
-          key,
-          worktreePath,
-          prompt,
-          provider,
-          options.model,
-          options.effort,
-          options.permissionMode
-        )
-        return
-      }
-      sendToAgent(win, key, worktreePath, prompt, options, images, files)
+      // The composer has already read any handle at the front and picked the
+      // harness itself — it has the machine's installed list and the menu that
+      // offered them. Everything downstream of that decision (skills, the
+      // provider split) is the same work `send_message` needs, and lives in
+      // turn.ts so both doors do it once.
+      startTurn(win, key, worktreePath, prompt, options, images, files)
     }
   )
   // Composer `!` shell mode: run a one-shot command in the worktree and return
@@ -482,6 +465,14 @@ function registerIpc(): void {
   handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
   handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
   handle('sessions:setEffort', (_event, id: string, effort: Effort) => setCreatedSessionEffort(id, effort))
+  // The whole picker at once. What the composer writes when you change it, and
+  // reads when the chat opens — see the note on `provider` in sessionStore.
+  handle(
+    'sessions:setChoice',
+    (_event, id: string, choice: { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode }) =>
+      setCreatedSessionChoice(id, choice)
+  )
+  handle('sessions:choice', (_event, id: string) => createdSessionChoice(id))
   handle('sessions:create', (_event, s: { id: string; worktreePath: string; title?: string }) =>
     addCreatedSession(s)
   )

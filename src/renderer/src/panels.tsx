@@ -59,6 +59,7 @@ import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, expand, splitRefs } from './fileRefs'
+import { splitSkills } from '../../shared/skills'
 import { renderMarkdown, type MdLine } from './markdown'
 import { bashGist, bashProgram, highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
@@ -73,9 +74,22 @@ import type { Worktrees } from './useWorktrees'
 import type { Changes } from './useChanges'
 import type { PaletteItem } from './fuzzy'
 import type { Trigger } from './trigger'
-import { lastChoice, loadChoice, speakerKey, userNick, windowOf, type ModelChoice } from './models'
+import {
+  defaultChoice,
+  EFFORTS,
+  lastChoice,
+  loadChoice,
+  MODELS,
+  routeChoice,
+  speakerKey,
+  userNick,
+  windowOf,
+  type ModelChoice
+} from './models'
+import type { FloeConfig } from '../../main/config/floe'
+import { HARNESSES } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
-import { rosterOf, splitMentions } from './mentions'
+import { handleRows, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
 // Whose header a line prints under. The rules live next to their test, not in
 // the panel that draws them — see speakers.ts.
 import {
@@ -94,6 +108,7 @@ import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { RunInTerminal } from './runInTerminal'
+import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import type { Merge } from './useMerge'
@@ -107,7 +122,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -1016,7 +1031,8 @@ function ChatPanel({
     stop,
     question,
     answerActive,
-    togglePick
+    togglePick,
+    answering
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
@@ -1029,16 +1045,32 @@ function ChatPanel({
       rosterOf(tail ? [...items, tail] : items, {
         you: userNick(),
         model: choice.provider ?? 'claude',
-        runtimes: agents.map((a) => a.id)
+        // Claude is on the list whatever this session answers as: handing a
+        // message back to it has to be possible from a codex chat too, and it
+        // is not a "local agent" anyone probed for.
+        runtimes: ['claude', ...agents.map((a) => a.id)]
       }),
     [items, tail, choice.provider, agents]
   )
+  // Who this message can be HANDED to, as opposed to merely named: a harness
+  // Floe can run, that this machine has. Claude is always one.
+  const harnesses = useMemo(
+    () => HARNESSES.filter((id) => id === 'claude' || agents.some((a) => a.id === id)),
+    [agents]
+  )
+  // What a harness runs — the menu offers these, and a message that names none
+  // of them borrows the first for the runtimes that must be told one.
+  const modelsOf = useCallback(
+    (id: string): { slug: string; label?: string }[] =>
+      id === 'claude'
+        ? MODELS.map((m) => ({ slug: m.id, label: m.label }))
+        : (agents.find((a) => a.id === id)?.models ?? []),
+    [agents]
+  )
   const composerMenu = useCallback(
     (t: Trigger): PaletteItem[] =>
-      t.char === '@'
-        ? roster.map((h) => ({ id: `@${h.nick}`, title: h.nick, detail: h.detail, group: h.kind }))
-        : (menuItems?.(t) ?? []),
-    [roster, menuItems]
+      t.char === '@' ? handleRows(roster, { harnesses, modelsOf }) : (menuItems?.(t) ?? []),
+    [roster, harnesses, modelsOf, menuItems]
   )
 
   // Whoever answered last in THIS session is who the composer should be set to.
@@ -1054,9 +1086,44 @@ function ChatPanel({
     setSessionChoice(undefined)
   }
   useEffect(() => {
-    if (sessionChoice || loading || !items.length) return
-    setSessionChoice(lastChoice(items) ?? undefined)
-  }, [items, loading, sessionChoice])
+    if (sessionChoice || loading || !items.length || !session?.id) return
+    const id = session.id
+    let alive = true
+    void window.floe.claude
+      .choice(id)
+      .catch(() => null)
+      .then((stored) => {
+        if (!alive || !stored) {
+          // Nothing recorded — an old session, or one nobody has set. Read it
+          // off the transcript as before, with the ADDRESSED turns dropped:
+          // `@codex` was one message, and a chat must not become a codex chat
+          // because you once asked codex something in it.
+          //
+          // Read against EVERY harness, not the installed ones: whether a line
+          // addressed someone is a fact about the line, and `agents` arrives
+          // from an async probe that a fast transcript beats — which would read
+          // the same history two different ways depending on which landed first.
+          const guessed = lastChoice(unrouted(items, HARNESSES))
+          if (!alive) return
+          setSessionChoice(guessed ?? undefined)
+          // Written down, so the next open does not have to guess again — and
+          // so a later `@claude` turn cannot be mistaken for this session
+          // having switched to Claude. Inference is the last resort, not the
+          // mechanism; recording what it found is what retires it.
+          if (guessed) void window.floe.claude.setChoice(id, guessed).catch(() => {})
+          return
+        }
+        setSessionChoice({
+          model: stored.model ?? defaultChoice().model,
+          effort: stored.effort ?? defaultChoice().effort,
+          provider: stored.provider,
+          mode: stored.mode
+        })
+      })
+    return () => {
+      alive = false
+    }
+  }, [items, loading, sessionChoice, session?.id])
 
   // Only the newest slice of a long session is mounted — a thousand markdown
   // messages in the DOM make every delta's layout pass pay for all of them.
@@ -1172,15 +1239,20 @@ function ChatPanel({
     pinned.current = true
   }, [session?.id])
 
-  // Who the "is typing" line belongs to.
-  const typist = tail?.provider ?? choice.provider ?? 'claude'
+  // Who the "is typing" line belongs to. The turn in flight rather than the
+  // picker: a message addressed to `@codex` is answered by codex, and the
+  // composer still says claude — that is where the NEXT message goes. And the
+  // turn rather than what was last typed, since a message typed while codex
+  // works is queued, not started.
+  const typist = tail?.provider ?? (running ? answering.provider : choice.provider) ?? 'claude'
   // Who a run that OPENS with work is headed by: the model has started on your
   // message but not said anything yet, so there is no entry to read it off.
   // Memoised on what it is made of, so a delta does not hand the memoised Log a
   // fresh object and re-render the whole transcript.
+  const who = running ? answering : choice
   const pending = useMemo(
-    () => answeringWho(shown, tail, choice),
-    [shown, tail?.provider, tail?.model, tail?.effort, choice]
+    () => answeringWho(shown, tail, who),
+    [shown, tail?.provider, tail?.model, tail?.effort, who]
   )
 
   // A question is answered IN the composer (digits, free text), so it must
@@ -1213,6 +1285,13 @@ function ChatPanel({
         : null,
     [cwd]
   )
+  // The names alone, so a message can tell `/deploy` (a skill this app expanded
+  // into instructions) from `/usage` (the harness's own, sent as typed).
+  const skillNamesList = useSkills(cwd).all
+  const skillNames = useMemo(
+    () => new Set(skillNamesList.map((s) => s.name)),
+    [skillNamesList]
+  )
 
   return (
     <div className="chat-panel" ref={rootRef}>
@@ -1236,14 +1315,19 @@ function ChatPanel({
             Show {Math.min(hiddenCount, LOG_PAGE)} earlier {hiddenCount === 1 ? 'message' : 'messages'} ({hiddenCount} hidden)
           </button>
         )}
-        <RunInTerminal.Provider value={runInTerminal}>
-          <Log items={shown} cwd={cwd} base={hiddenCount} pending={pending} />
-          {tail && (
-            // The streaming tail lives outside the memoised Log: a delta flush
-            // re-renders this one entry, not the whole transcript above it.
-            <TailEntry item={tail} isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))} />
-          )}
-        </RunInTerminal.Provider>
+        <SkillNames.Provider value={skillNames}>
+          <RunInTerminal.Provider value={runInTerminal}>
+            <Log items={shown} cwd={cwd} base={hiddenCount} pending={pending} />
+            {tail && (
+              // The streaming tail lives outside the memoised Log: a delta flush
+              // re-renders this one entry, not the whole transcript above it.
+              <TailEntry
+                item={tail}
+                isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))}
+              />
+            )}
+          </RunInTerminal.Provider>
+        </SkillNames.Provider>
         {question && (
           <QuestionBlock
             q={question}
@@ -1287,7 +1371,9 @@ function ChatPanel({
             </button>
             <span className="irc-queued-mark">{q.linked ? '↳' : '⟳'}</span>
             <span className="irc-queued-text">
-              <RefText text={q.text} />
+              {/* As typed, handle and all: what is waiting has to read like
+                  what you wrote, not like what codex will receive. */}
+              <RefText text={q.shown ?? q.text} />
             </span>
           </div>
         ))}
@@ -1298,13 +1384,32 @@ function ChatPanel({
         onChange={setText}
         onSend={(choice, attached) => {
           repin()
+          // A line that OPENS with `@codex` is addressed to codex: that one
+          // message goes to it instead of to the picker's harness, and the
+          // handle comes off on the way. Mid-sentence the same handle is only a
+          // name, and `route` is null — see mentions.ts.
+          // A handle with nothing after it is not an errand — it goes out as
+          // the plain line it is, rather than starting a turn with no message.
+          const addressed = routeAt(text, harnesses)
+          const route = addressed?.prompt.trim() ? addressed : null
           // Busy or idle, ⏎ means "this is what I want to say". The hook decides
           // whether that starts a turn now or waits for the current one to end.
-          send(expand(text), choice, attached?.images, attached?.files, linking)
+          const going = route ? routeChoice(route, choice) : choice
+          if (route)
+            send(expand(route.prompt), going, attached?.images, attached?.files, linking, {
+              shown: expand(text)
+            })
+          else send(expand(text), going, attached?.images, attached?.files, linking)
           setText('')
           setLinking(false)
         }}
-        onChoice={setChoice}
+        onChoice={(next) => {
+          setChoice(next)
+          // The picker is the session's answer to "who answers here", so it is
+          // written down the moment it changes. A message addressed to
+          // `@codex` never comes through here — that is one turn, not a switch.
+          if (session?.id) void window.floe.claude.setChoice(session.id, next).catch(() => {})
+        }}
         pinned={sessionChoice}
         pinPending={!sessionChoice && loading}
         modelLeft
@@ -1362,6 +1467,22 @@ const LOG_PAGE = 100
  * as markdown would reformat their own sentence back at them.
  */
 function RefText({ text }: { text: string }) {
+  const known = useContext(SkillNames)
+  return (
+    <>
+      {splitSkills(text, (name) => known.has(name)).map((part, i) =>
+        part.skill === undefined ? (
+          <PlainText text={part.text} key={i} />
+        ) : (
+          <SkillPill name={part.skill} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+/** Everything that is not a skill token: file references, then mentions. */
+function PlainText({ text }: { text: string }) {
   return (
     <>
       {splitRefs(text).map((part, i) =>
@@ -1372,6 +1493,22 @@ function RefText({ text }: { text: string }) {
         )
       )}
     </>
+  )
+}
+
+/**
+ * `/deploy` drawn as the command it was.
+ *
+ * The message on the wire carried the skill's whole text, and the transcript
+ * has already collapsed that back to the token — see shared/skills.ts. The pill
+ * finishes the job: what you typed was a command, and it should read as one
+ * rather than as a stray word with a slash on it.
+ */
+function SkillPill({ name }: { name: string }) {
+  return (
+    <span className="skill-ref" title={`The ${name} skill's text was sent with this message`}>
+      /{name}
+    </span>
   )
 }
 
@@ -4064,6 +4201,11 @@ function Stats({ stats }: { stats: ClaudeStats }) {
 
   const peak = stats.busiestDay?.messages ?? 1
 
+  // Nothing to roll up. Drawing the grid anyway put a year of empty squares and
+  // a column of zeros on screen, which reads as a broken meter rather than an
+  // empty one — say which it is instead.
+  if (stats.error) return <p className="dialog-hint">{stats.error}</p>
+
   return (
     <div className="stats-block">
       <div className="heat-months">
@@ -4137,7 +4279,17 @@ function Stats({ stats }: { stats: ClaudeStats }) {
  */
 type SettingRow =
   | { kind: 'bool'; table: string; key: string; label: string; value: boolean; hint?: string }
-  | { kind: 'choice'; table: string; key: string; label: string; value: string; options: readonly string[]; hint?: string }
+  | {
+      kind: 'choice'
+      table: string
+      key: string
+      label: string
+      value: string
+      options: readonly string[]
+      /** Shown when the value is unset — what happens while nobody has said. */
+      placeholder?: string
+      hint?: string
+    }
   | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
   | { kind: 'penguin'; table: string; key: string; label: string; value: PenguinHeadId; hint?: string }
@@ -4151,6 +4303,48 @@ type SettingRow =
     }
 
 /**
+ * A model and an effort per harness — `[harness.codex]` and its neighbours.
+ *
+ * What `@codex revisa isso` answers with when the message names the harness and
+ * nothing else. Claude is not here: `[agent]` above already says what it runs,
+ * and two rows for one answer is one row too many.
+ *
+ * The model is a free string, not a list: only codex and LM Studio can be asked
+ * what they run, and the slug is passed to the harness untouched either way —
+ * the same reasoning as the editor command.
+ */
+function harnessRows(config: FloeConfig, agents: LocalAgent[]): SettingRow[] {
+  return HARNESSES.filter((id) => id !== 'claude' && agents.some((a) => a.id === id)).flatMap(
+    (id): SettingRow[] => {
+      const label = agents.find((a) => a.id === id)?.label ?? id
+      const set = config.harness[id]
+      return [
+        {
+          kind: 'text',
+          table: `harness.${id}`,
+          key: 'model',
+          label: `${label} model`,
+          value: set?.model ?? '',
+          placeholder: "the harness's own"
+        },
+        {
+          kind: 'choice',
+          table: `harness.${id}`,
+          key: 'effort',
+          label: `${label} effort`,
+          value: set?.effort ?? '',
+          // Unset leads the cycle, so Enter walks the five efforts and comes
+          // back out the other side. A setting you can turn on and not off is
+          // a trap, and the file cannot express "delete this line" from here.
+          options: ['', ...EFFORTS],
+          placeholder: 'whatever the picker is on'
+        }
+      ]
+    }
+  )
+}
+
+/**
  * Settings — a view of `~/.config/floe/floe.toml`.
  *
  * The file is the source of truth and this panel is one of its editors, not the
@@ -4162,6 +4356,9 @@ type SettingRow =
 function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   const settings = useSettings()
   const { config } = settings
+  // Only the harnesses this machine actually has get a row: a default model for
+  // a CLI that is not installed is a setting for something that cannot answer.
+  const agents = useLocalAgents()
 
   /**
    * Open one of the config files in your editor — `e`'s answer, from Settings.
@@ -4277,6 +4474,10 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           options: ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama']
         }
       ]
+    },
+    {
+      title: 'Harness defaults',
+      rows: harnessRows(config, agents)
     },
     {
       title: 'Composer',
@@ -4593,7 +4794,7 @@ function SettingRowView({
       <span className="row-name">{row.label}</span>
       <span className={`settings-value${row.kind === 'bool' && !row.value ? ' settings-off' : ''}`}>
         {row.kind === 'bool' && (row.value ? 'on' : 'off')}
-        {row.kind === 'choice' && row.value}
+        {row.kind === 'choice' && (row.value || row.placeholder || '—')}
         {row.kind === 'number' && `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
         {row.kind === 'penguin' && (

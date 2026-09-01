@@ -1,0 +1,90 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>run-fold — antes e depois</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body {
+    margin: 0;
+    background: var(--bg);
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+  }
+  .cols {
+    display: flex;
+    align-items: flex-start;
+  }
+  .col {
+    flex: none;
+    width: 620px;
+    min-height: 100vh;
+    padding: 10px 16px 24px;
+    border-right: 1px solid var(--line);
+    background: var(--panel-focused);
+  }
+  .col-head {
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    color: var(--dim);
+    font-size: 11.5px;
+  }
+  /* A coluna "antes" mantém o tamanho anterior; só a fonte muda entre as duas. */
+  .before .run-fold {
+    font-size: 0.85em;
+  }
+</style>
+
+<div class="cols">
+  <div class="col before">
+    <div class="col-head">antes — 0.85em (versão anterior)</div>
+    <div class="chat" id="a"></div>
+  </div>
+  <div class="col after">
+    <div class="col-head">depois — 0.78em, opacity .62</div>
+    <div class="chat" id="b"></div>
+  </div>
+</div>
+
+<script>
+  const caret = `<svg class="bash-mark" width="11" height="11" style="flex:none" viewBox="0 0 24 24" fill="currentColor"><path d="M9 6c-.5 0-1 .4-1 1v10c0 .8 1 1.3 1.7.7l5-5c.4-.4.4-1 0-1.4l-5-5c-.2-.2-.5-.3-.7-.3z"/></svg>`
+
+  const fold = (n, kind, verbs) => `
+    <div class="run-fold" role="button" aria-expanded="false">
+      ${caret}
+      <span class="run-fold-line">
+        <span class="run-fold-count">${n} ${kind}</span><span class="run-fold-verbs"> · ${verbs}</span>
+      </span>
+    </div>`
+
+  const say = (text) => `<div class="irc-entry" data-cont><div class="irc-body"><div class="md">${text}</div></div></div>`
+
+  const head = (nick, ident, host, time) => `
+    <div class="irc-head">
+      <span class="irc-nick" style="color:#7fd6c0">${nick}<span class="irc-host">!${ident}</span><span class="irc-host">@${host}</span></span>
+      <span class="irc-time">${time}</span>
+    </div>`
+
+  const log = [
+    head('claude', 'high', 'opus-5', '14:40'),
+    fold(2, 'commands', 'git, codex'),
+    say('Review substancial. Vou verificar cada afirmação antes de aceitar.'),
+    fold(1, 'command', 'grep'),
+    say('Verifiquei: Ollama gera slugs <span class="md-code">modelo:tag</span> (<span class="md-code">localAgents.ts:158</span>) e <span class="md-code">agent.ts</span> não escreve transcript.'),
+    fold(1, 'command', 'python3'),
+    say('Agora o mais grave: uma mensagem para Claude arrancando em paralelo com um turno de outro harness.'),
+    fold(2, 'commands', 'python3 ×2'),
+    say('Agora a corrida com <span class="md-code">localAgents</span>, o modelo vazio no Ollama/LM Studio, e o indicador seguindo a fila em vez do turno:'),
+    fold(4, 'commands', 'python3 ×4'),
+    say('Agora o indicador: deve vir do turno em voo, não da última mensagem enfileirada.'),
+    fold(3, 'commands', 'python3 ×2, pnpm'),
+    say('Agora a segunda rodada com o Codex — mandando o que corrigi e discutindo os três que sobraram:'),
+    fold(1, 'command', 'git'),
+    say('Verifiquei os quatro. Três procedem; corrigindo:'),
+    fold(4, 'commands', 'python3 ×2, pnpm, grep'),
+    say('Cabe em poucas linhas. Fazendo:'),
+    fold(3, 'commands', 'python3 ×3')
+  ].join('')
+
+  document.getElementById('a').innerHTML = log
+  document.getElementById('b').innerHTML = log
+</script>

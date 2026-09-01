@@ -159,8 +159,17 @@ const seqs = new Map<string, number>()
 // the panel's initial read already has it.
 const replays = new Map<string, AgentReplay>()
 
-export function markTurnStart(key: string): void {
-  replays.set(key, { running: true, lastSeq: seqs.get(key) ?? 0, events: [], startedAt: Date.now() })
+export function markTurnStart(key: string, choice?: AgentReplay['choice']): void {
+  replays.set(key, {
+    running: true,
+    lastSeq: seqs.get(key) ?? 0,
+    events: [],
+    startedAt: Date.now(),
+    // Carried so a panel opening mid-turn can name whoever is answering. Only
+    // the caller knows: by the time events flow there is nothing in them that
+    // says which harness produced them.
+    choice
+  })
 }
 
 /**
@@ -561,7 +570,7 @@ export function sendToAgent(
   // only this turn's reply, and record the prompt in the live transcript buffer.
   conn.lastAssistantText = ''
   lastErrors.delete(key) // a new turn supersedes the previous failure
-  markTurnStart(key)
+  markTurnStart(key, { provider: 'claude', effort: options.effort, mode: options.permissionMode })
   conn.turnActive = true
   conn.turnClosed = false
   conn.turnStartedAt = Date.now()

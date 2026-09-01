@@ -14,13 +14,15 @@ import { join } from 'node:path'
 import { configDir } from '../dataDir'
 import { ErrorSink, type ConfigError } from './errors'
 import { TableReader, subTable } from './read'
-import { editToml, parseToml, type TomlValue } from './toml'
+import { editToml, keyLine, parseToml, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
 import { FLOE_TOML } from './template'
 import { DEFAULT_GROUP, NOTIFY_SOUNDS, PENGUIN_COLORS, PENGUIN_HEADS } from '../../shared/types'
+import { HARNESSES } from '../../shared/modes'
+import { EFFORTS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
-export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+export { EFFORTS } from '../../shared/types'
 export const THEMES = ['system', 'dark', 'light'] as const
 
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
@@ -29,6 +31,17 @@ export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', '
 // person types in a config file.
 // `full` is the pre-rename word for `bypass`; old configs still have to read.
 export const MODES = ['plan', 'ask', 'auto', 'bypass', 'full'] as const
+
+/** One harness's own defaults. Both optional: unset means "ask the harness". */
+export interface HarnessDefault {
+  /**
+   * Not validated against a list: only codex and LM Studio can be asked what
+   * they run, and a slug we cannot check is still the runtime's own business —
+   * the same reasoning as `editor.command`.
+   */
+  model?: string
+  effort?: (typeof EFFORTS)[number]
+}
 
 export interface FloeConfig {
   appearance: {
@@ -45,6 +58,15 @@ export interface FloeConfig {
     mode: (typeof MODES)[number]
     systemPromptFile: string
   }
+  /**
+   * What each harness answers with when the message names it but not a model —
+   * `@codex revisa isso`, or a `[harness.codex]` block in the file.
+   *
+   * Separate from `agent` on purpose: `agent` is what a NEW SESSION starts on,
+   * one harness and one model. This is per harness, and applies whichever
+   * session you are in. Absent means the harness's own default.
+   */
+  harness: Record<string, HarnessDefault>
   /** Who the launcher greets. Empty means "whoever this machine says I am". */
   user: { name?: string }
   terminal: { shell?: string }
@@ -70,6 +92,9 @@ export const DEFAULTS: FloeConfig = {
     mode: 'ask',
     systemPromptFile: 'system-prompt.md'
   },
+  // Empty, not one entry per harness: a harness with nothing set here is not
+  // the same as one set to "" — it means nobody has answered the question.
+  harness: {},
   user: { name: undefined },
   terminal: { shell: undefined },
   composer: { vim: false },
@@ -115,6 +140,48 @@ export interface FloeConfigResult {
   errors: ConfigError[]
 }
 
+/**
+ * `[harness.codex]`, `[harness.lmstudio]`, … — one block per harness.
+ *
+ * Only the harnesses Floe can actually run are read. A block for anything else
+ * is left alone rather than reported: the file is hand-edited, and a name we do
+ * not know today may be a runtime we grow tomorrow.
+ *
+ * The reader is built by hand rather than through `subTable` so its errors
+ * carry the DOTTED header — an effort typo has to point at the line under
+ * `[harness.codex]`, not at a `[codex]` table that does not exist.
+ */
+function readHarnesses(
+  sink: ErrorSink,
+  raw: string,
+  root: Record<string, unknown>
+): Record<string, HarnessDefault> {
+  const table = root.harness
+  if (typeof table !== 'object' || table === null || Array.isArray(table)) {
+    if (table !== undefined) sink.add(keyLine(raw, undefined, 'harness'), 'harness must be a table')
+    return {}
+  }
+  const out: Record<string, HarnessDefault> = {}
+  for (const id of HARNESSES) {
+    const block = (table as Record<string, unknown>)[id]
+    if (block === undefined) continue
+    if (typeof block !== 'object' || block === null || Array.isArray(block)) {
+      sink.add(keyLine(raw, 'harness', id), `harness.${id} must be a table`)
+      continue
+    }
+    const reader = new TableReader(sink, raw, block as Record<string, unknown>, `harness.${id}`)
+    const model = reader.optStr('model')?.trim()
+    // An empty string is how Settings writes "unset" — it cannot delete a line,
+    // and `effort = ""` reading as an error would make the way back out of a
+    // choice look like a mistake.
+    const effort = reader.str('effort', '').trim() ? reader.optOneOf('effort', EFFORTS) : undefined
+    // An empty block is the same as no block — do not put a hole in the map
+    // that every reader would then have to check for.
+    if (model || effort) out[id] = { model: model || undefined, effort }
+  }
+  return out
+}
+
 /** Parse and validate the file. Missing file means defaults, not an error. */
 export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const sink = new ErrorSink(file, raw)
@@ -138,6 +205,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const notifications = subTable(sink, raw, root, 'notifications')
   const update = subTable(sink, raw, root, 'update')
   const projects = subTable(sink, raw, root, 'projects')
+  const harness = readHarnesses(sink, raw, root)
   const integrations = (root.integrations ?? {}) as Record<string, unknown>
   const jira = subTable(sink, raw, integrations, 'jira')
   const bitbucket = subTable(sink, raw, integrations, 'bitbucket')
@@ -160,6 +228,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         mode: agent?.oneOf('mode', MODES, d.agent.mode) ?? d.agent.mode,
         systemPromptFile: agent?.str('system-prompt', d.agent.systemPromptFile) ?? d.agent.systemPromptFile
       },
+      harness,
       // Blank is not a name: an emptied box means "go back to the machine's",
       // which is the same state as never having set one.
       user: { name: user?.optStr('name')?.trim() || undefined },

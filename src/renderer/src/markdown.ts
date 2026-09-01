@@ -61,6 +61,9 @@ function inline(text: string, out: Token[], isRef?: (token: string) => boolean):
     let last = 0
     for (const m of slice.matchAll(ATTACH)) {
       rest(slice.slice(last, m.index))
+      // One token, brackets and all. The mirror unpaints them inside a single
+      // chip — three spans would each cast their own shadow into the next and
+      // the seams would show as dark blobs at the ends.
       out.push({ text: m[0], cls: 'md-attach' })
       last = m.index + m[0].length
     }

@@ -43,6 +43,18 @@ export interface CreatedSession {
   permissionMode?: PermissionMode // last permission mode chosen for this session
   model?: string // last model chosen for this session (e.g. 'opus', 'sonnet')
   effort?: Effort // last effort level chosen for this session
+  /**
+   * Which harness this session answers as. Absent means Claude, or a session
+   * from before this was recorded — those are still read back off the
+   * transcript, by whoever answered last.
+   *
+   * Recorded rather than inferred because inference cannot tell the two apart:
+   * a message addressed to `@claude` from a codex chat leaves a Claude reply in
+   * the transcript that looks exactly like the session having switched. One
+   * turn is not a switch, and the only thing that knows the difference is the
+   * moment it happened.
+   */
+  provider?: string
   // The session id of the agent that opened this one (MCP create_session). A
   // spawned session has no human in front of it — only the parent talks to the
   // user — so the agent answers its AskUserQuestion for it. See agent.ts.
@@ -351,6 +363,42 @@ export function setCreatedSessionEffort(id: string, effort: Effort): void {
   if (!c) return
   c.effort = effort
   write(store)
+}
+
+/**
+ * The whole choice at once — what the picker is set to for this session.
+ *
+ * One write rather than four: the four parts are one answer to one question,
+ * and saving them separately would put the store through four reads, four
+ * writes and three intermediate states that never existed.
+ *
+ * Only what is passed is set. An unset key is left alone rather than cleared,
+ * so a caller that knows the harness but not the mode does not erase the mode.
+ */
+export function setCreatedSessionChoice(
+  id: string,
+  choice: { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode }
+): void {
+  const store = read()
+  const c = findByKey(store.created, id)
+  if (!c) return
+  // Claude is the absence of a provider everywhere else in the app; keep that
+  // true here rather than storing the word and having two spellings of it.
+  if (choice.provider !== undefined) c.provider = choice.provider === 'claude' ? undefined : choice.provider
+  if (choice.model !== undefined) c.model = choice.model
+  if (choice.effort !== undefined) c.effort = choice.effort
+  if (choice.mode !== undefined) c.permissionMode = choice.mode
+  write(store)
+}
+
+/** What this session answers as, for the composer to restore on open. */
+export function createdSessionChoice(
+  id: string
+): { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode } | null {
+  const c = findByKey(read().created, id)
+  // A record with nothing chosen is not an answer — the transcript still is.
+  if (!c || (!c.provider && !c.model && !c.effort && !c.permissionMode)) return null
+  return { provider: c.provider, model: c.model, effort: c.effort, mode: c.permissionMode }
 }
 
 // Record that an agent (not the user) opened this session, so the questions it

@@ -50,6 +50,27 @@ const SUPPORTED: Record<string, PermissionMode[]> = {
   ollama: []
 }
 
+/**
+ * Every harness a turn can be handed to, in menu order.
+ *
+ * The keys of SUPPORTED, because "we know what modes it can do" and "we can run
+ * it" are one fact: runtimes.ts has a branch for exactly these, and a harness
+ * missing from here fails the turn with "no runtime for …". This is also the
+ * set a message can address by opening with `@name` — see mentions.ts.
+ */
+export const HARNESSES: string[] = Object.keys(SUPPORTED)
+
+/**
+ * The harnesses that must be TOLD which model to run.
+ *
+ * LM Studio and Ollama are HTTP endpoints: the model is a required field of the
+ * request body, and an empty one is a failed call. Every other harness is a CLI
+ * with its own configured default, and omitting `--model` is how you ask for
+ * it — passing one of ours instead would override a choice the user made in
+ * that tool.
+ */
+export const NEEDS_MODEL = ['lmstudio', 'ollama']
+
 /** The modes a runtime offers. Empty means the runtime has no tools at all. */
 export function modesFor(provider?: string): PermissionMode[] {
   return SUPPORTED[provider ?? 'claude'] ?? SUPPORTED.claude

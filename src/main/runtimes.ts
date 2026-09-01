@@ -280,7 +280,9 @@ export async function runRuntime(
   runtime: string,
   model?: string,
   effort?: string,
-  mode: PermissionMode = DEFAULT_MODE
+  mode: PermissionMode = DEFAULT_MODE,
+  /** The line as typed, when the handle addressing this runtime came off it. */
+  shown?: string
 ): Promise<void> {
   // These runtimes write no transcript, so nothing on disk would say this
   // session was ever used. Stamp it, or the sidebar sorts it by the day it was
@@ -288,7 +290,7 @@ export async function runRuntime(
   touchCreatedSession(key)
   // Same turn bookkeeping as Claude's sendToAgent: a panel opening mid-turn
   // asks agent.replay for what it missed, whoever is answering.
-  markTurnStart(key)
+  markTurnStart(key, { provider: runtime, effort, mode })
   // What this runtime has not seen — the turns another harness answered, or its
   // own from before the restart that emptied its thread. Read BEFORE the prompt
   // is logged, or the message being sent would come back inside its own packet.
@@ -296,7 +298,9 @@ export async function runRuntime(
   // Logged as typed, not as sent: the packet is context we added, and a
   // transcript that showed it would put thousands of characters of history
   // under the user's name (and hand them straight back on the next switch).
-  logTurn(key, { role: 'user', text: prompt })
+  // Same rule for the `@codex` that addressed this runtime — the log is the
+  // conversation, and the conversation is what was written.
+  logTurn(key, { role: 'user', text: shown ?? prompt })
   if (seed) prompt = seed + prompt
   // Codex already has a home: the app-server session (codexServer.ts), which
   // is also the only channel that can surface its request_user_input questions.

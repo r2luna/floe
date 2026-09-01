@@ -150,6 +150,10 @@ export function Composer({
   // The `/` or `@` being typed right now, and where the menu cursor sits.
   const [trigger, setTrigger] = useState<Trigger | null>(null)
   const [menuAt, setMenuAt] = useState(0)
+  // How far → has walked INTO the list: `@codex` → its models → their efforts.
+  // The rows drilled through, so ← can put each one back. Cleared whenever the
+  // token being typed changes, since the list under it changes with it.
+  const [drill, setDrill] = useState<PaletteItem[]>([])
   const menu = useRef<HTMLDivElement>(null)
   const modelMenu = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLDivElement>(null)
@@ -383,13 +387,18 @@ export function Composer({
     return () => window.removeEventListener('keydown', onKey, true)
   })
 
-  const offered = menuItems && trigger ? menuItems(trigger) : []
+  // Drilled in, the list is the row you are standing on rather than the menu's
+  // own — and it is NOT filtered, because the query is still the `@codex` that
+  // got you here and would match none of its models.
+  const top = menuItems && trigger ? menuItems(trigger) : []
+  const into = drill[drill.length - 1]
+  const offered = into ? (into.variants ?? []) : top
   // Scoring alone would interleave sessions and files once you type. Sorting by
   // group afterwards keeps them in blocks — sort is stable, so the score order
   // inside each block survives.
   const groups = [...new Set(offered.map((i) => i.group))]
   const matches = capGroups(
-    filterItems(offered, trigger?.query ?? '').sort(
+    filterItems(offered, into ? '' : (trigger?.query ?? '')).sort(
       (a, b) => groups.indexOf(a.item.group) - groups.indexOf(b.item.group)
     ),
     10
@@ -423,6 +432,7 @@ export function Composer({
     const found = triggerAt(el.value, el.selectionStart)
     setTrigger(found)
     setMenuAt(0)
+    setDrill([])
   }
 
   /**
@@ -441,8 +451,15 @@ export function Composer({
    */
   const mentions = useMemo(() => {
     const ids = new Set<string>()
-    for (const char of ['#', '@'] as const)
-      for (const item of menuItems?.({ char, query: '', start: 0 }) ?? []) ids.add(item.id)
+    // Variants too, and all the way down: `@codex:gpt-5.6-sol:high` is a handle
+    // the menu offered, so it has to draw as one chip and erase as one thing.
+    const walk = (items: PaletteItem[]): void => {
+      for (const item of items) {
+        ids.add(item.id)
+        if (item.variants) walk(item.variants)
+      }
+    }
+    for (const char of ['#', '@'] as const) walk(menuItems?.({ char, query: '', start: 0 }) ?? [])
     return ids
   }, [menuItems])
 
@@ -467,6 +484,7 @@ export function Composer({
     onChange(next.text)
     setCaret(next.caret)
     setTrigger(null)
+    setDrill([])
   }
 
   const [images, setImages] = useState<ImageAttachment[]>([])
@@ -548,12 +566,28 @@ export function Composer({
     if (menuOpen) {
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Out of the drill first, out of the menu second. Escape undoing one
+        // step at a time is what makes → safe to press on a guess.
+        if (drill.length) return setDrill((d) => d.slice(0, -1))
         return setTrigger(null)
       }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
         const step = e.key === 'ArrowDown' ? 1 : -1
         return setMenuAt((i) => (i + step + matches.length) % matches.length)
+      }
+      // → narrows the row under the cursor, ← puts it back. Claimed ONLY when
+      // there is somewhere to go: everywhere else these arrows still belong to
+      // the caret, which is what you are actually moving most of the time.
+      if (e.key === 'ArrowRight' && matches[menuAt]?.item.variants?.length) {
+        e.preventDefault()
+        setDrill((d) => [...d, matches[menuAt].item])
+        return setMenuAt(0)
+      }
+      if (e.key === 'ArrowLeft' && drill.length) {
+        e.preventDefault()
+        setDrill((d) => d.slice(0, -1))
+        return setMenuAt(0)
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
@@ -808,11 +842,15 @@ export function Composer({
 
       <div className="composer-stack">
         <pre ref={mirror} className="composer-mirror" aria-hidden="true">
-          {mirrorTokens.map((t, i) => (
-            <span key={i} className={t.cls}>
-              {t.text}
-            </span>
-          ))}
+          {mirrorTokens.map((t, i) =>
+            t.cls === 'md-attach' ? (
+              <AttachChip token={t.text} key={i} />
+            ) : (
+              <span key={i} className={t.cls}>
+                {t.text}
+              </span>
+            )
+          )}
           {/* A trailing newline keeps the last line visible while scrolled to
               the bottom, matching how the textarea reserves that room. */}
           {'\n'}
@@ -948,6 +986,14 @@ export function Composer({
           data-drop={drop.up ? 'up' : 'down'}
           style={{ maxHeight: drop.room }}
         >
+          {/* Where → has taken you, and the way back. Without it the list of
+              efforts under a model is five words with nothing saying whose. */}
+          {into && (
+            <div className="composer-menu-crumb">
+              {drill.map((d) => d.title).join(' › ')}
+              <span className="composer-menu-detail">← back</span>
+            </div>
+          )}
           {matches.map(({ item, hits }, i) => (
             <Fragment key={item.id}>
               {item.group && item.group !== matches[i - 1]?.item.group && (
@@ -966,6 +1012,10 @@ export function Composer({
               >
                 <span className="composer-menu-title">{mark(item.title, hits)}</span>
                 {item.detail && <span className="composer-menu-detail">{item.detail}</span>}
+                {/* The row narrows. Drawn on every such row rather than only
+                    the one under the cursor: a key you can only discover by
+                    standing on the right line is a key nobody finds. */}
+                {item.variants?.length ? <span className="composer-menu-more">›</span> : null}
               </button>
             </Fragment>
           ))}
@@ -1175,4 +1225,16 @@ function clipRect(el: HTMLElement): { top: number; bottom: number } {
     }
   }
   return { top: 0, bottom: window.innerHeight }
+}
+
+/**
+ * `[Image #1]` in the mirror, drawn as the chip it stands for.
+ *
+ * The brackets are dropped, not hidden: the chip is already the fence. What
+ * pays for them is the chip's `1ch` side padding — this text lies character for
+ * character over the textarea, so the two glyphs have to come back as exactly
+ * their own width or the rest of the line slides off its caret.
+ */
+function AttachChip({ token }: { token: string }): React.JSX.Element {
+  return <span className="md-attach">{token.slice(1, -1)}</span>
 }
