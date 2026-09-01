@@ -557,9 +557,30 @@ export function pruneSettled(events: AgentEvent[], requestId: string): AgentEven
   )
 }
 
+/**
+ * Prune a settled prompt from the replay of every name this session answers to.
+ *
+ * One key is not enough: a conn stays filed under whatever name spawned it,
+ * while the panel keys itself by `claudeId ?? id` — so the key the ANSWER
+ * arrives under and the key the QUESTION was recorded under are not always the
+ * same one (the same aliasing `resolveConn` exists for). Pruning only the
+ * resolved conn key left the card sitting in the other replay, and the panel
+ * read it back as an open question the next time it mounted.
+ */
 export function dropSettled(key: string, requestId: string): void {
-  const replay = replays.get(key)
-  if (replay) replay.events = pruneSettled(replay.events, requestId)
+  for (const k of new Set([key, ...aliasKeys(key)])) {
+    const replay = replays.get(k)
+    if (replay) replay.events = pruneSettled(replay.events, requestId)
+  }
+}
+
+/** Every other name this session is known by: its Floe id and its claude ids. */
+function aliasKeys(key: string): string[] {
+  const stored = getCreatedSession(key)
+  if (!stored) return []
+  return [stored.id, stored.claudeId, ...(stored.pastClaudeIds ?? [])].filter(
+    (k): k is string => !!k
+  )
 }
 
 /**
@@ -582,6 +603,7 @@ export function respondPermission(key: string, requestId: string, allow: boolean
   // Echo back the original tool input the CLI handed us when it asked.
   const toolInput = conn.pendingPerms.get(requestId) ?? {}
   conn.pendingPerms.delete(requestId)
+  dropSettled(key, requestId)
   dropSettled(connKey, requestId)
   const response = allow
     ? { behavior: 'allow', updatedInput: toolInput }
@@ -608,7 +630,9 @@ export function answerQuestion(key: string, requestId: string, answer: string): 
   if (!found) return log('answer-no-conn', { key, requestId })
   const [connKey, conn] = found
   conn.pendingPerms.delete(requestId)
+  dropSettled(key, requestId)
   dropSettled(connKey, requestId)
+  log('question-answered', { key, connKey, requestId })
   write(conn, {
     type: 'control_response',
     response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: answer } }
@@ -987,6 +1011,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
         const questions = parseQuestions(req.input)
         if (questions.length) {
           conn.pendingPerms.set(requestId, req.input)
+          log('question-asked', { key, requestId })
           send(win, key, { kind: 'question', toolUseId: requestId, questions })
           return
         }

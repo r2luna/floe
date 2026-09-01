@@ -66,7 +66,9 @@ const {
   dropSettled
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
-const { addCreatedSession, setCreatedSessionSpawnedBy } = await import('./sessionStore.ts')
+const { addCreatedSession, setCreatedSessionSpawnedBy, linkCreatedSession } = await import(
+  './sessionStore.ts'
+)
 
 // Point the persistent stores at a throwaway dir — the spawned-session test seeds
 // a real sessions.json and must not touch the machine's store.
@@ -564,4 +566,24 @@ test('dropSettled: the answered question leaves the live replay snapshot', () =>
   assert.deepEqual(kinds(replaySnapshot('sess-1').events), ['text', 'question'])
   dropSettled('sess-1', '7')
   assert.deepEqual(kinds(replaySnapshot('sess-1').events), ['text'])
+})
+
+test('dropSettled: the card is pruned under every name the session answers to', () => {
+  // The panel keys itself by `claudeId ?? id` while the conn stays filed under
+  // whatever spawned it, so the answer can arrive under a different name than
+  // the one the question was recorded under. Pruning one of them left the other
+  // replay holding an open card for a question already answered.
+  const { win } = fakeWin()
+  addCreatedSession({ id: 'floe-id', worktreePath: '/tmp/wt' })
+  linkCreatedSession('floe-id', 'claude-id')
+  markTurnStart('floe-id')
+  sendAgentEvent(win, 'floe-id', {
+    kind: 'question',
+    toolUseId: 'rq-1',
+    questions: [{ question: 'Q?', options: [{ label: 'A' }] }]
+  })
+  assert.deepEqual(kinds(replaySnapshot('floe-id').events), ['question'])
+  // Answered under the panel's name, not the one the replay is filed under.
+  dropSettled('claude-id', 'rq-1')
+  assert.deepEqual(kinds(replaySnapshot('floe-id').events), [])
 })
