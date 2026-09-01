@@ -85,7 +85,7 @@ name = ""
 # |
 # | \`mode\` is how much the agent may do without asking: \`plan\` (reads and
 # | plans, writes nothing), \`ask\` (asks before each tool that acts), \`auto\`
-# | (edits the worktree without asking) or \`full\` (no prompts, no sandbox).
+# | (edits the worktree without asking) or \`bypass\` (no prompts, no sandbox).
 # | Not every harness has all four — codex has no \`ask\`, gemini has no
 # | \`plan\`, opencode stops at \`auto\` — and a mode a harness cannot do snaps
 # | to the nearest safer one it can. ⌃⇧M cycles it inside a chat.

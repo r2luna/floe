@@ -25,7 +25,7 @@ import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
 import { KINDS, RAIL, PanelBody, needsProject, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
-import { runCommand, type CommandContext } from './commands'
+import { installPluginCommands, runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
 import { Palette } from './Palette'
 import {
@@ -1222,8 +1222,26 @@ export default function App() {
       // be up — and focused, so the input's own focus lands inside the panel
       // the lane already calls current.
       setLane((l) => open(l, panelOf('worktrees')))
-    }
+    },
+    // Lazy wrapper: switchBackend is declared further down, after the picker
+    // helpers it uses; the property only needs it at call time.
+    useBackend: (id?: string) => switchBackend(id)
   }
+
+  // --- Plugin commands ---------------------------------------------------------
+  // Overlay the runtime plugins' commands onto the registry at mount, so the
+  // palette, the keymap and MCP run_command all reach them through the same
+  // dispatch as any built-in. The run goes back to main, where the plugin lives.
+  useEffect(() => {
+    let cancelled = false
+    void window.floe.plugins.commands().then((cmds) => {
+      if (cancelled || !cmds.length) return
+      installPluginCommands(REGISTRY, cmds, (id, arg) => void window.floe.plugins.run(id, arg))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // --- MCP control server -----------------------------------------------------
   // Commands an agent's tool pushed from main over mcp:command. run_command and
@@ -1467,6 +1485,30 @@ export default function App() {
       },
       onPick: opts.onDone
     })
+
+  /**
+   * Point the window at another machine's backend. Bare, it offers the picker;
+   * with an id it switches directly (the MCP path). Switching dispatches
+   * floe:backend-switched, which remounts <App> (see main.tsx) — every hook
+   * refetches from the new backend, while PINNED channels stay on this machine.
+   */
+  const switchBackend = (id?: string): void => {
+    const doUse = (target: string): void => {
+      if (!window.floe.backends.use(target)) return
+      window.dispatchEvent(new Event('floe:backend-switched'))
+    }
+    if (id) return doUse(id)
+    const currentId = window.floe.backends.current()
+    setPicker({
+      placeholder: 'Attach backend…',
+      items: window.floe.backends.list().map((b) => ({
+        id: b.id,
+        title: b.label,
+        detail: b.id === currentId ? 'current' : b.remote ? window.floe.backends.state(b.id) : 'this machine'
+      })),
+      onPick: doUse
+    })
+  }
 
   /**
    * "project/branch[/rest]" for a panel header — the answer to "where am I".

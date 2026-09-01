@@ -115,7 +115,10 @@
    Set by main.tsx before the first paint, from `[appearance] theme` in
    floe.toml — see appearance.ts. */
 :root[data-theme='light'] {
-  --bg: #eceef2;
+  /* The window itself is the panel colour: a darker page turned the rail's
+     gutter into a grey slab down the edge. Flat white, and the rail's icons
+     float on the background with the panels reading off their borders. */
+  --bg: #ffffff;
   --panel: #f8f9fb;
   --panel-focused: #ffffff;
   --line: #d7dae1;
@@ -228,6 +231,12 @@ button {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #ffffff26;
+  background-clip: padding-box;
+}
+
+/* White over white is not a hover state — light darkens, like --wash-*. */
+:root[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+  background: #00000026;
   background-clip: padding-box;
 }
 
@@ -403,6 +412,24 @@ button {
   background: #c07a72;
 }
 
+/* Warm tones lit for a dark bar vanish on a white one — light takes the deeper
+   pair, the same amber and red the worktree marks use. */
+:root[data-theme='light'] .ctx-meter[data-level="warn"] {
+  color: #8a6314;
+}
+
+:root[data-theme='light'] .ctx-meter[data-level="warn"] .ctx-fill {
+  background: #8a6314;
+}
+
+:root[data-theme='light'] .ctx-meter[data-level="high"] {
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .ctx-meter[data-level="high"] .ctx-fill {
+  background: #b1454a;
+}
+
 /* --- context breakdown ---------------------------------------------------- */
 
 
@@ -531,7 +558,6 @@ button {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-focused);
-  box-shadow: 0 8px 20px #00000038;
   color: var(--text);
   font-size: 11px;
   white-space: nowrap;
@@ -704,16 +730,14 @@ button {
 .launcher {
   display: flex;
   flex-direction: column;
-  /* Upper third, not dead centre — the recent list grows downward and a truly
-     centred box would drift as it fills. */
-  justify-content: flex-start;
+  /* Dead centre: with nothing below the composer there is nothing to drift. */
+  justify-content: center;
   gap: 26px;
   /* min-height, not height: once the input has grown the column must be able to
      get taller than the panel and let the panel body scroll it. */
   min-height: 100%;
   max-width: 720px;
   margin-inline: auto;
-  padding-top: 14vh;
 }
 
 .greet {
@@ -767,6 +791,12 @@ button {
 .composer[data-dropping] {
   border-color: var(--live);
   border-style: dashed;
+}
+
+/* Light gets the same veil in the page's own colour: a near-opaque dark panel
+   over a pale composer reads as the app breaking, not as a drop target. */
+:root[data-theme='light'] .drop-hint {
+  background: #f8f9fbe6;
 }
 
 .drop-hint {
@@ -864,6 +894,11 @@ button {
   color: #b98686;
 }
 
+:root[data-theme='light'] .chip-rejected {
+  border-color: #e3bdbf;
+  color: #b1454a;
+}
+
 .composer-stack {
   display: grid;
 }
@@ -915,6 +950,13 @@ button {
   background: #3a4f6a80;
 }
 
+/* The mirror paints the text; the textarea paints the selection UNDER it. A
+   half-opaque navy over white leaves the glyphs sitting on slate — light gets
+   the pale plan-blue wash instead. */
+:root[data-theme='light'] .composer-input::selection {
+  background: #3a64a833;
+}
+
 .composer-input::placeholder {
   color: var(--dim);
 }
@@ -932,6 +974,10 @@ button {
   color: #6f7bd0;
 }
 
+:root[data-theme='light'] .md-marker {
+  color: #5560b4;
+}
+
 .md-head {
   color: var(--text-strong);
   font-weight: 700;
@@ -945,6 +991,10 @@ button {
   color: #c8a06a;
 }
 
+:root[data-theme='light'] .md-code {
+  color: #a9631f;
+}
+
 .md-bold {
   color: var(--text-strong);
   font-weight: 700;
@@ -955,8 +1005,18 @@ button {
   font-style: italic;
 }
 
+/* Dark's em is the text one step brighter, so light's is one step darker —
+   #cdd1d8 on white is not emphasis, it is an empty line. */
+:root[data-theme='light'] .md-em {
+  color: var(--text-strong);
+}
+
 .md-link {
   color: #6fa8c9;
+}
+
+:root[data-theme='light'] .md-link {
+  color: #2f6f92;
 }
 
 /* A file or session reference, drawn as a chip in the composer's mirror.
@@ -1028,6 +1088,18 @@ button {
   color: var(--text);
   font-size: 11px;
   transition: opacity 0.12s ease;
+}
+
+/* In a chat the chip sits with the tool buttons on the left, under the start
+   of what you type; its menu then hangs off the button's left edge so it stays
+   inside the window. */
+.composer[data-model-left] .model {
+  margin-left: 0;
+}
+
+.composer[data-model-left] .model-menu {
+  right: auto;
+  left: anchor(left);
 }
 
 /* Until the chat's own model is read, the chip still holds the last chat's —
@@ -1183,7 +1255,6 @@ button {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 12px 32px #00000059;
 }
 
 /* The half that grows: every harness and its models, one heading each. Only
@@ -1348,22 +1419,9 @@ button {
   background: var(--wash-4);
 }
 
-:root[data-theme='light'] .model-menu {
-  box-shadow: 0 12px 32px #0000001f;
-}
-
 :root[data-theme='light'] .model:hover,
 :root[data-theme='light'] .model:focus-visible {
   background: #0000000d;
-}
-
-.recent-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px 8px;
-  color: var(--dim);
-  font-size: 11px;
 }
 
 .fold-plain {
@@ -1372,25 +1430,6 @@ button {
 }
 
 .fold-plain:hover {
-  color: var(--text-strong);
-}
-
-.recent-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 6px;
-  border-radius: var(--radius);
-  color: var(--dim);
-  text-align: left;
-}
-
-
-
-.recent-row .row-name {
-  display: flex;
-  flex-direction: column;
   color: var(--text-strong);
 }
 
@@ -1416,6 +1455,10 @@ button {
   background: #4d5f4d;
 }
 
+:root[data-theme='light'] .pipe-seg[data-state="done"] {
+  background: #9dbaa6;
+}
+
 .pipe-seg[data-state="running"] {
   background: var(--live);
   animation: pulse 1.4s ease-in-out infinite;
@@ -1423,6 +1466,10 @@ button {
 
 .pipe-seg[data-state="failed"] {
   background: #8a4b4b;
+}
+
+:root[data-theme='light'] .pipe-seg[data-state="failed"] {
+  background: #d59fa1;
 }
 
 /* skipped stays at the base fill: it never ran, and colouring it would read as
@@ -1558,18 +1605,12 @@ button {
   height: 100%;
 }
 
-.chat {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px;
-}
-
 /* --- transcript: IRC-style log -------------------------------------------- */
 
+/* No flex `gap` here: every child sets its own top margin, and the spacing is
+   not uniform — a run of calls hugs the message that caused it, a new speaker
+   gets air. A container gap would add itself to all of them and flatten the
+   difference into one wide rhythm. */
 .chat {
   display: flex;
   flex-direction: column;
@@ -1657,18 +1698,29 @@ button {
 
 /* Queued: written, not sent. Dimmer than a real message and marked, so the
    difference between "said" and "waiting" is never in doubt. */
+/* The queue stacks tight — it is one list, not a run of messages — so only the
+   first line takes the air that separates it from the conversation. */
 .irc-queued {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  margin-top: 12px;
   padding: 3px 0;
   color: var(--dim);
+}
+
+.irc-queued + .irc-queued {
+  margin-top: 0;
 }
 
 .irc-queued-mark {
   flex: none;
   color: #7f86d8;
   font-size: 11px;
+}
+
+:root[data-theme='light'] .irc-queued-mark {
+  color: #5560b4;
 }
 
 .irc-queued-text {
@@ -1704,10 +1756,20 @@ button {
   font-size: 10.5px;
 }
 
+:root[data-theme='light'] .irc-stop {
+  border-color: #e3bdbf;
+  color: #b1454a;
+}
+
 /* Armed ⌘L: outline only, like every other selected chip in the app. */
 .tool-link[data-on] {
   border: 1px solid color-mix(in srgb, #7f86d8 55%, transparent);
   color: #9aa1e8;
+}
+
+:root[data-theme='light'] .tool-link[data-on] {
+  border-color: #c2c6ec;
+  color: #5560b4;
 }
 
 .irc-dim {
@@ -1734,6 +1796,10 @@ button {
   color: #9aa1e8;
 }
 
+:root[data-theme='light'] .irc-q-title b {
+  color: #5560b4;
+}
+
 .irc-q-title[data-waiting] {
   opacity: 0.55;
 }
@@ -1745,6 +1811,10 @@ button {
 
 .irc-q-answer {
   color: #9aa1e8;
+}
+
+:root[data-theme='light'] .irc-q-answer {
+  color: #5560b4;
 }
 
 .irc-q-line {
@@ -1765,6 +1835,10 @@ button {
   color: #7f86d8;
 }
 
+:root[data-theme='light'] .irc-q-n {
+  color: #5560b4;
+}
+
 .irc-q-line[data-picked] .irc-q-n::after {
   content: ' ✓';
 }
@@ -1780,6 +1854,10 @@ button {
 
 .irc-sys[data-error] {
   color: #c08c86;
+}
+
+:root[data-theme='light'] .irc-sys[data-error] {
+  color: #b1454a;
 }
 
 /* "Show earlier" — pages the transcript window backwards. Outline-chip like
@@ -1802,6 +1880,12 @@ button {
 
 .irc-act {
   color: var(--dim);
+}
+
+/* An action line belongs to the message it follows, so it sits right under it
+   — the air goes above the next speaker, not here. */
+.chat > .irc-act {
+  margin-top: 2px;
 }
 
 .irc-act[data-live] {
@@ -1844,6 +1928,10 @@ button {
 .agent[data-state="running"] {
   border-color: #3a4a3a;
   color: var(--text);
+}
+
+:root[data-theme='light'] .agent[data-state="running"] {
+  border-color: #b6d9c3;
 }
 
 .agent[data-state="running"] > svg {
@@ -2002,12 +2090,20 @@ button {
    louder. The run reads as one thing because the rows are adjacent. */
 /* marker · command · actions. The marker keeps its column on every row, so the
    commands of a run all start in the same place. */
+/* Machinery is scanned, not read, so these rows drop the prose leading: a run
+   of calls is a list of one-line facts and reads faster stacked tight. */
+.bash-row,
+.tool-row,
+.run-fold {
+  line-height: 1.45;
+}
+
 .bash-row {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
-  padding: 2px 0;
+  padding: 1px 0;
   color: var(--dim);
   cursor: pointer;
 }
@@ -2019,7 +2115,7 @@ button {
 /* The prompt: a solid arrow, the shape a shell prompt uses, drawn on every
    command whether or not it has anything to expand. Where it does, it turns. */
 .bash-mark {
-  margin-top: 4px;
+  margin-top: 3px;
   color: #6f7bd0;
   opacity: 0.75;
   transition: transform 0.12s ease;
@@ -2144,7 +2240,7 @@ button {
   grid-template-columns: 12px minmax(0, 1fr);
   align-items: start;
   gap: 8px;
-  padding: 2px 0;
+  padding: 1px 0;
   color: var(--dim);
   cursor: pointer;
   user-select: none;
@@ -2221,7 +2317,7 @@ button {
 }
 
 .tool-mark {
-  margin-top: 4px;
+  margin-top: 3px;
   color: #6f7bd0;
   opacity: 0.6;
 }
@@ -2295,6 +2391,11 @@ button {
   color: #c08c86;
 }
 
+:root[data-theme='light'] .call[data-failed] .call-tool,
+:root[data-theme='light'] .call[data-failed] .call-result {
+  color: #b1454a;
+}
+
 /* stdout tail: spans the arg + result columns so it lines up under the command */
 .call-out {
   grid-column: 2 / -1;
@@ -2329,6 +2430,14 @@ button {
 
 .stat-del {
   color: #c07a72;
+}
+
+:root[data-theme='light'] .stat-add {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .stat-del {
+  color: #b1454a;
 }
 
 .change-row {
@@ -2518,6 +2627,23 @@ button {
 
 .change-status[data-status="R"] {
   color: #79b2cf;
+}
+
+/* The same four hues the worktree dirt marks use on a pale surface. */
+:root[data-theme='light'] .change-status[data-status="A"] {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .change-status[data-status="M"] {
+  color: #8a6314;
+}
+
+:root[data-theme='light'] .change-status[data-status="D"] {
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .change-status[data-status="R"] {
+  color: #3a64a8;
 }
 
 /* Every path in the list starts with the same prefix, so the directory is the
@@ -2714,6 +2840,10 @@ button {
   font-size: 10px;
 }
 
+:root[data-theme='light'] .merge-destructive {
+  color: #b1454a;
+}
+
 /* A live step's detail is a sentence about what is happening, so it sits under
    the name rather than beside it. */
 .merge-sub {
@@ -2801,6 +2931,10 @@ button {
   background: var(--wash-1);
   color: #7f86d8;
   overflow-x: auto;
+}
+
+:root[data-theme='light'] .diff-hunk {
+  color: #5560b4;
 }
 
 .diff-hunk:first-child {
@@ -2950,6 +3084,12 @@ button {
   user-select: none;
 }
 
+/* Dark's number column is a step below the code; on white the same hex is a
+   step ABOVE it, and the numbers start shouting over the diff. */
+:root[data-theme='light'] .diff-no {
+  color: var(--faint);
+}
+
 .diff-mark,
 .diff-code {
   color: var(--text);
@@ -2987,6 +3127,31 @@ button {
 
 .diff-row[data-kind="ctx"] .diff-code {
   color: #9aa0ac;
+}
+
+/* A dark tint at a third opacity over white is mud, not green — light gets its
+   own pale wash and the deeper text tone, the same pair the mode chips use. */
+:root[data-theme='light'] .diff-row[data-kind="add"] {
+  background: #2f7d5214;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="add"] .diff-mark,
+:root[data-theme='light'] .diff-row[data-kind="add"] .diff-code {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="del"] {
+  background: #b1454a14;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="del"] .diff-mark,
+:root[data-theme='light'] .diff-row[data-kind="del"] .diff-code {
+  color: #b1454a;
+}
+
+/* Context is most of a diff and has to stay readable, not fade to grey. */
+:root[data-theme='light'] .diff-row[data-kind="ctx"] .diff-code {
+  color: var(--text);
 }
 
 /* Shiki emits the LIGHT colour as an inline style and the dark one as the
@@ -3066,24 +3231,12 @@ button {
    lane it simply sits where it is. */
 .lane-col[data-sticky] {
   position: sticky;
-  /* The shadow below is cast by this box, and a square box around a rounded
-     panel casts a square shadow — which is what put a hard corner beside the
-     chat while every other panel had a round one. The column is invisible
-     otherwise; this radius exists only so its shadow has the panel's shape. */
-  border-radius: var(--radius);
   /* 0, not the gutter: Chromium measures the sticky offset from the lane's
      CONTENT box, which the lane's own 8px padding has already inset. Repeating
      it here pinned the column 8px further right — over the gap — so the chat and
      whatever sat beside it looked welded together. */
   left: 0;
   z-index: 3;
-  box-shadow: 6px 0 16px #0000004d;
-}
-
-/* Light gets a fraction of that: 30% black over a pale surface is a bruise, and
-   the shadow only has to say "this column is in front", not draw a wall. */
-:root[data-theme='light'] .lane-col[data-sticky] {
-  box-shadow: 6px 0 16px #00000014;
 }
 
 /* Navigable rows suppress the UA focus ring — the browser draws its own on top
@@ -3140,6 +3293,10 @@ button {
 
 .find-count[data-empty] {
   color: #c08c86;
+}
+
+:root[data-theme='light'] .find-count[data-empty] {
+  color: #b1454a;
 }
 
 /* --- a markdown file, as numbered lines ----------------------------------- */
@@ -3213,6 +3370,10 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+:root[data-theme='light'] .md-bullet {
+  color: #5560b4;
+}
+
 /* The unordered marker is drawn, not typed: a disc centred in its column and on
    the text's x-height. A font's bullet glyph is whatever size the face decided,
    sits on the baseline, and is a hollow box when the face has no bullet. */
@@ -3240,6 +3401,10 @@ button {
    rotated 45°, which is the one shape CSS draws crisply at this size. */
 .md-bullet[data-task="done"] {
   color: #6f9f78;
+}
+
+:root[data-theme='light'] .md-bullet[data-task="done"] {
+  color: #2f7d52;
 }
 
 .md-bullet[data-task="done"]::before {
@@ -3272,11 +3437,20 @@ button {
   white-space: pre;
 }
 
+/* A white wash on a white panel is nothing at all — light washes with black. */
+:root[data-theme='light'] .md-row[data-md="front"] .md-text {
+  background: var(--wash-1);
+}
+
 /* An image is not fetched and shown — this panel reads a file, it does not
    render a page. Its alt text is what the author wrote for exactly this case. */
 .md-img {
   color: #9a8fbf;
   font-style: italic;
+}
+
+:root[data-theme='light'] .md-img {
+  color: #6a5a9c;
 }
 
 .md-img::before {
@@ -3338,6 +3512,10 @@ button {
   color: var(--dimmest);
 }
 
+:root[data-theme='light'] .md-row[data-md="quote"] .md-text {
+  border-left-color: var(--edge);
+}
+
 /* A fenced block reads as one slab: the fence rows carry the same background as
    the code between them, so the block has a top and a bottom without borrowing
    a border. */
@@ -3346,6 +3524,11 @@ button {
   background: var(--wash-1);
   white-space: pre;
   color: #c8c9cd;
+}
+
+/* Only the code rows: the fence rows below keep their dimmer tone. */
+:root[data-theme='light'] .md-row[data-md="code"] .md-text {
+  color: var(--text);
 }
 
 .md-row[data-md="fence"] .md-text {
@@ -3359,6 +3542,10 @@ button {
 .md-row[data-md="table"] .md-text {
   white-space: normal;
   color: #b9bcc4;
+}
+
+:root[data-theme='light'] .md-row[data-md="table"] .md-text {
+  color: var(--text);
 }
 
 .md-cells {
@@ -3417,6 +3604,12 @@ button {
   border-radius: var(--radius);
 }
 
+/* A white wash on a white panel is no wash at all: light washes with black, the
+   same way the --wash-* variables flip. */
+:root[data-theme='light'] [data-cursor] {
+  background: var(--wash-1);
+}
+
 [data-cursor]::before {
   content: "";
   position: absolute;
@@ -3427,12 +3620,23 @@ button {
   background: #333b49;
 }
 
+/* Unfocused has to stay QUIETER than focused. On white the dark slate does the
+   opposite — it is the loudest mark on the page, and the panel that has the
+   keyboard ends up looking like the one that does not. */
+:root[data-theme='light'] [data-cursor]::before {
+  background: var(--edge);
+}
+
 .panel[data-focused] [data-cursor] {
   background: var(--wash-2);
 }
 
 .panel[data-focused] [data-cursor]::before {
   background: #55688f;
+}
+
+:root[data-theme='light'] .panel[data-focused] [data-cursor]::before {
+  background: #3a64a8;
 }
 
 .panel[data-focused] [data-cursor] .row-name,
@@ -3488,6 +3692,16 @@ button {
   background: #35496e5c;
 }
 
+/* Light selects with the plan-blue wash: the dark navy at a third opacity over
+   white is a grey smear, and the text on it stops reading as selected. */
+:root[data-theme='light'] [data-sel] {
+  background: #3a64a81f;
+}
+
+:root[data-theme='light'] .panel[data-focused] [data-sel] {
+  background: #3a64a833;
+}
+
 /* An added or removed line keeps its own tint underneath — losing it would hide
    what kind of line you picked, which is the thing you're commenting on. */
 .diff-row[data-sel][data-kind="add"] {
@@ -3496,6 +3710,14 @@ button {
 
 .diff-row[data-sel][data-kind="del"] {
   background: #4a2f3480;
+}
+
+:root[data-theme='light'] .diff-row[data-sel][data-kind="add"] {
+  background: #2f7d5233;
+}
+
+:root[data-theme='light'] .diff-row[data-sel][data-kind="del"] {
+  background: #b1454a2b;
 }
 
 .diff-row[data-cursor] {
@@ -3558,7 +3780,6 @@ button {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
-  box-shadow: 0 18px 48px #00000080;
   overflow: hidden;
 }
 
@@ -3604,6 +3825,10 @@ button {
 .palette-hit {
   color: #9db8e4;
   font-weight: 700;
+}
+
+:root[data-theme='light'] .palette-hit {
+  color: #3a64a8;
 }
 
 .palette-keys {
@@ -3684,6 +3909,10 @@ button {
   color: #c08c86;
 }
 
+:root[data-theme='light'] .empty.error {
+  color: #b1454a;
+}
+
 kbd {
   padding: 1px 5px;
   border: 1px solid var(--line);
@@ -3699,7 +3928,6 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
-  box-shadow: 0 18px 48px #00000080;
   overflow: hidden;
 }
 
@@ -3848,6 +4076,20 @@ kbd {
   border-color: #4a5a7a;
 }
 
+/* Dark's borders step UP from the line colour; on white they have to step down
+   to it, or an outline chip turns into a heavy box. */
+:root[data-theme='light'] .btn:hover:not(:disabled) {
+  border-color: var(--edge);
+}
+
+:root[data-theme='light'] .btn:disabled {
+  color: var(--faint);
+}
+
+:root[data-theme='light'] .btn-primary:not(:disabled) {
+  border-color: #a8c2e6;
+}
+
 /* --- new-worktree form (inline in the worktrees panel) -------------------- */
 
 /* Reuses the dialog's field styles, sized down for a 330px column. A rule
@@ -3892,7 +4134,6 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
-  box-shadow: 0 12px 32px #00000066;
 }
 
 .composer-menu[data-drop='down'] {
@@ -4052,6 +4293,13 @@ kbd {
   border-radius: var(--radius);
   overflow: hidden;
   background: #0f1114;
+}
+
+/* On a pale page the slab cannot be darker than the page — a black box in a
+   light transcript reads as a hole punched in it. Same shape, inverted: a well
+   one step off the panel, with the head's rule carrying the split. */
+:root[data-theme='light'] .md-block {
+  background: var(--well);
 }
 
 .md-block-head {
@@ -4289,6 +4537,11 @@ kbd {
   background: #ffffff2e;
 }
 
+:root[data-theme='light'] .splitter:hover::after,
+:root[data-theme='light'] .splitter:active::after {
+  background: #0000002e;
+}
+
 /* The handles are positioned against these two. */
 .lane-col,
 .panel {
@@ -4443,6 +4696,22 @@ kbd {
   background: #c07a72;
 }
 
+:root[data-theme='light'] .account-window[data-level="warn"] {
+  color: #8a6314;
+}
+
+:root[data-theme='light'] .account-window[data-level="warn"] .ctx-fill {
+  background: #8a6314;
+}
+
+:root[data-theme='light'] .account-window[data-level="high"] {
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .account-window[data-level="high"] .ctx-fill {
+  background: #b1454a;
+}
+
 /* Shorter than the header's gauge: two of these share one line, and the number
    beside each is what you actually read — the bar is the glance. */
 .account-window .ctx-bar {
@@ -4483,7 +4752,6 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel);
-  box-shadow: 0 12px 32px #00000059;
 }
 
 .ctx-pop-head {
@@ -4747,10 +5015,6 @@ kbd {
   border-color: #37415a;
 }
 
-:root[data-theme='light'] .update-banner {
-  box-shadow: 0 2px 8px #0000001a;
-}
-
 :root[data-theme='light'] .update-restart {
   border-color: #c2d4ef;
   background: #eef2f9;
@@ -4792,12 +5056,6 @@ kbd {
     opacity: 1;
     transform: translate(-50%, 0);
   }
-}
-
-/* The panel surface reads as a raised card on dark; on light it needs the
-   shadow to lift off a background that is nearly the same value. */
-:root[data-theme='light'] .notice {
-  box-shadow: 0 2px 8px #0000001a;
 }
 
 /* The run of text the find bar matched, inside a line of code.
@@ -4980,7 +5238,6 @@ kbd {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
-  box-shadow: 0 14px 36px #00000080;
   outline: none;
 }
 
@@ -5022,10 +5279,6 @@ kbd {
 
 .row-menu-item[data-at] .row-menu-keys {
   color: var(--text);
-}
-
-:root[data-theme='light'] .row-menu {
-  box-shadow: 0 14px 36px #0000001f;
 }
 
 /* A file reference inside a message — `docs/plan.md:12-30` drawn as one thing.

@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
 import type { AgentQuestion, PermissionMode } from '../shared/types'
-import { sendAgentEvent } from './agent'
+import { dropSettled, sendAgentEvent } from './agent'
 import { resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
 
@@ -217,6 +217,15 @@ function onQuestion(reqId: number | string, params: Record<string, unknown>): vo
 }
 
 /**
+ * Every codex session blocked on a question right now — the same authority
+ * `waitingKeys()` is for Claude, so the renderer's `?` reconciles against one
+ * answer whichever runtime asked.
+ */
+export function codexWaitingKeys(): string[] {
+  return [...questionBySession.keys()]
+}
+
+/**
  * Resolve a pending codex question with the renderer's per-question answers
  * (labels or free text, in presentation order). Returns false when this
  * session has no codex question — the caller then tries the Claude path.
@@ -225,6 +234,10 @@ export function answerCodexQuestion(key: string, answered: string[][]): boolean 
   const q = questionBySession.get(key)
   if (!q) return false
   questionBySession.delete(key)
+  // The question also lives in the turn's replay snapshot, which only grows
+  // until `done`. Leave it there and reopening the panel mid-turn re-renders
+  // the card for a question the model already got its answer to.
+  dropSettled(key, String(q.rpcId))
   const answers: Record<string, { answers: string[] }> = {}
   q.ids.forEach((id, i) => {
     answers[id] = { answers: answered[i] ?? [] }

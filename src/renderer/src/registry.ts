@@ -1362,6 +1362,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'backend.use',
+        title: 'Attach backend…',
+        group: 'Backends',
+        // With an id (the MCP path) it switches directly; bare, App offers the
+        // picker. Switching remounts the tree so every panel refetches from the
+        // new machine — how is App's business, not the registry's.
+        run: (c, arg) => c.useBackend(arg)
+      },
+      {
         id: 'palette.chord',
         title: 'Command palette',
         group: 'App',

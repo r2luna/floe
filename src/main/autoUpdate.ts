@@ -1,9 +1,10 @@
-import { ipcMain, Notification, app, type BrowserWindow } from 'electron'
+import { Notification, app, type BrowserWindow } from 'electron'
 import electronUpdater from 'electron-updater'
 
 const { autoUpdater } = electronUpdater
 
 import { floeConfig } from './config/floe'
+import { handle } from './plugins/handleMap'
 
 // Re-check this often while the app stays open, so a machine that's left running
 // still picks up releases without a relaunch. `[update] check-interval-hours` in
@@ -20,7 +21,7 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
   // next scheduled poll, which is hours away. Registered above the isPackaged
   // bail-out so the command answers in dev instead of rejecting the invoke with
   // "no handler registered".
-  ipcMain.handle('update:check', async (): Promise<string> => {
+  handle('update:check', async (): Promise<string> => {
     if (!app.isPackaged) return 'Updates only apply to a packaged build.'
     if (downloadedVersion)
       return `Floe ${downloadedVersion} is downloaded — run "Restart to update" to apply it.`
@@ -52,7 +53,7 @@ export function initAutoUpdate(getWindow: () => BrowserWindow | undefined): void
 
   // "Restart now" from the renderer banner / ⌘K command: relaunch into the
   // downloaded version immediately instead of waiting for the next quit.
-  ipcMain.handle('update:install', () => autoUpdater.quitAndInstall())
+  handle('update:install', () => autoUpdater.quitAndInstall())
 
   autoUpdater.on('error', (err) => {
     console.error('[auto-update] error:', err?.message ?? err)

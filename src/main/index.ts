@@ -2,7 +2,6 @@ import {
   app,
   shell,
   BrowserWindow,
-  ipcMain,
   dialog,
   Notification,
   nativeTheme,
@@ -65,9 +64,9 @@ import {
   worktreeDiffStat,
   type CreateWorktreeOptions
 } from './git'
-import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
-import { answerCodexQuestion } from './codexServer'
+import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { isCodexModel } from '../shared/types'
 import { ensureAgentHookInstalled } from './hooks'
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
@@ -145,6 +144,8 @@ import {
 import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
+import { handle } from './plugins/handleMap'
+import { loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
 import { launchEditor } from './editors'
 import type { TomlValue } from './config/toml'
 import {
@@ -235,39 +236,39 @@ function registerIpc(): void {
   normalizeSessionTitles()
   // One-shot: drop sessions/view state left behind by worktrees that are gone.
   pruneMissingWorktrees()
-  ipcMain.handle('projects:list', () => listProjects())
-  ipcMain.handle('projects:groups', () => listGroups())
-  ipcMain.handle('projects:addGroup', (_event, name: string) => addGroup(name))
-  ipcMain.handle('projects:deleteGroup', (_event, name: string) => deleteGroup(name))
-  ipcMain.handle('projects:renameGroup', (_event, oldName: string, newName: string) =>
+  handle('projects:list', () => listProjects())
+  handle('projects:groups', () => listGroups())
+  handle('projects:addGroup', (_event, name: string) => addGroup(name))
+  handle('projects:deleteGroup', (_event, name: string) => deleteGroup(name))
+  handle('projects:renameGroup', (_event, oldName: string, newName: string) =>
     renameGroup(oldName, newName)
   )
-  ipcMain.handle('projects:rename', (_event, path: string, newName: string) =>
+  handle('projects:rename', (_event, path: string, newName: string) =>
     renameProject(path, newName)
   )
-  ipcMain.handle('projects:add', (_event, group?: string) => addProject(group))
+  handle('projects:add', (_event, group?: string) => addProject(group))
   // Web/headless has no native folder picker — the renderer collects a path and adds it.
-  ipcMain.handle('projects:addByPath', (_event, path: string, group?: string) =>
+  handle('projects:addByPath', (_event, path: string, group?: string) =>
     addProjectByPath(path, group)
   )
   // Per-project containerized env (mode 'container' → Docker); null turns it off
   // (back to host-native provisioning). See provision.ts / compose.ts.
-  ipcMain.handle('projects:setEnv', (_event, path: string, env: ProjectEnvConfig | null) =>
+  handle('projects:setEnv', (_event, path: string, env: ProjectEnvConfig | null) =>
     setProjectEnv(path, env)
   )
-  ipcMain.handle('projects:setGroup', (_event, path: string, group: string) => setProjectGroup(path, group))
-  ipcMain.handle('projects:remove', (_event, path: string) => removeProject(path))
-  ipcMain.handle('projects:setReadOnly', (_event, path: string, value: boolean) =>
+  handle('projects:setGroup', (_event, path: string, group: string) => setProjectGroup(path, group))
+  handle('projects:remove', (_event, path: string) => removeProject(path))
+  handle('projects:setReadOnly', (_event, path: string, value: boolean) =>
     setProjectReadOnly(path, value)
   )
-  ipcMain.handle('projects:setPinned', (_event, path: string, value: boolean) =>
+  handle('projects:setPinned', (_event, path: string, value: boolean) =>
     setProjectPinned(path, value)
   )
 
   // Projects rail: a cross-project activity snapshot for every project worked
   // today (sessions touched since midnight), each with a single status glyph.
   // Home isn't a git repo and read-only projects don't run sessions — both skip.
-  ipcMain.handle('projects:activity', async () => {
+  handle('projects:activity', async () => {
     const out: ProjectActivity[] = []
     for (const project of listProjects()) {
       if (project.readOnly || project.home) continue
@@ -288,7 +289,7 @@ function registerIpc(): void {
   // on-disk scan as projects:activity, but per-session and with the worktree's
   // diff stat attached. Only worktrees that actually have a waiting session pay
   // for the (cheap) `git diff --shortstat`.
-  ipcMain.handle('sessions:needsYou', async () => {
+  handle('sessions:needsYou', async () => {
     const out: NeedsYouSession[] = []
     for (const project of listProjects()) {
       if (project.readOnly || project.home) continue
@@ -328,7 +329,7 @@ function registerIpc(): void {
   // Every session on disk, across ALL projects — the ⌘J palette's index. Same
   // walk as sessions:needsYou, without the question filter or the diff stat, so
   // the palette can pull it on open instead of paying for a poll.
-  ipcMain.handle('sessions:all', async () => {
+  handle('sessions:all', async () => {
     const out: JumpSession[] = []
     for (const project of listProjects()) {
       if (project.readOnly || project.home) continue
@@ -361,13 +362,13 @@ function registerIpc(): void {
   })
 
   // Rail visibility + the per-project hide list (both persisted in prefs).
-  ipcMain.handle('rail:get', () => getRailVisible())
-  ipcMain.handle('rail:set', (_event, on: boolean) => setRailVisible(on))
-  ipcMain.handle('projects:getHidden', () => getHiddenProjects())
-  ipcMain.handle('projects:setHidden', (_event, paths: string[]) => setHiddenProjects(paths))
-  ipcMain.handle('codex:models', () => codexModels())
+  handle('rail:get', () => getRailVisible())
+  handle('rail:set', (_event, on: boolean) => setRailVisible(on))
+  handle('projects:getHidden', () => getHiddenProjects())
+  handle('projects:setHidden', (_event, paths: string[]) => setHiddenProjects(paths))
+  handle('codex:models', () => codexModels())
 
-  ipcMain.handle(
+  handle(
     'agent:start',
     (
       event,
@@ -409,66 +410,71 @@ function registerIpc(): void {
   )
   // Composer `!` shell mode: run a one-shot command in the worktree and return
   // its output, which the renderer then hands to the agent as a prompt.
-  ipcMain.handle('shell:run', (_event, worktreePath: string, command: string) =>
+  handle('shell:run', (_event, worktreePath: string, command: string) =>
     runShellCapture(worktreePath, command)
   )
-  ipcMain.handle('agent:answer', (_event, key: string, requestId: string, answer: string, answers?: string[][]) => {
+  handle('agent:answer', (_event, key: string, requestId: string, answer: string, answers?: string[][]) => {
     // Codex questions resolve over the app-server's JSON-RPC (per-question-id
     // answers); everything else is Claude's control channel.
     if (answerCodexQuestion(key, answers ?? [[answer]])) return
     answerQuestion(key, requestId, answer)
   })
-  ipcMain.handle('agent:permission', (_event, key: string, requestId: string, allow: boolean) =>
+  handle('agent:permission', (_event, key: string, requestId: string, allow: boolean) =>
     respondPermission(key, requestId, allow)
   )
   // What a panel opening mid-turn missed: the streamed events since turn start.
-  ipcMain.handle('agent:replay', (_event, key: string) => replaySnapshot(key))
+  handle('agent:replay', (_event, key: string) => replaySnapshot(key))
   // The authoritative "who is working right now", for the renderer to reconcile
   // its live event set against. The set is built from `done` arriving; a `done`
   // that never lands (a crashed child, a window reloaded mid-turn) would leave a
   // session spinning forever with nothing to correct it.
-  ipcMain.handle('agent:active', () => activeTurnKeys())
-  ipcMain.handle('agent:stop', (event, key: string) => {
+  handle('agent:active', () => activeTurnKeys())
+  // The same correction for "who is blocked on YOU": the `?` is set by a
+  // `question`/`permission` event and cleared by the next event on that key, so
+  // an event that lands under the session's other name — or a window that
+  // reloaded while a card was up — left the mark on with nothing to turn it off.
+  handle('agent:waiting', () => [...new Set([...waitingKeys(), ...codexWaitingKeys()])])
+  handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
   })
 
   // The renderer's reply to a run_command/list_commands pushed by the MCP
   // server; resolves the waiting tool with the outcome.
-  ipcMain.handle('mcp:command-result', (_event, result: McpCommandResult) => resolveCommandResult(result))
+  handle('mcp:command-result', (_event, result: McpCommandResult) => resolveCommandResult(result))
   // Register Floe's MCP server in the user's global Claude config — the ⌘K
   // "Install Floe MCP globally" command (also auto-run at boot when the server
   // holds its preferred port; see mcpServer.ts ensureGlobalRegistered).
-  ipcMain.handle('mcp:installGlobal', () => installMcpGlobal())
+  handle('mcp:installGlobal', () => installMcpGlobal())
   // Floe's own MCP registry (config/mcpServers.ts) — the panel's CRUD. The
   // worktree path resolves to its project for the project-scope file, same as
   // skills.
-  ipcMain.handle('mcp:servers:list', (_event, worktreePath?: string) =>
+  handle('mcp:servers:list', (_event, worktreePath?: string) =>
     listMcpServers(worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
-  ipcMain.handle('mcp:servers:add', (_event, scope: 'global' | 'project', server: NewMcpServer, worktreePath?: string) =>
+  handle('mcp:servers:add', (_event, scope: 'global' | 'project', server: NewMcpServer, worktreePath?: string) =>
     addMcpServer(scope, server, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
-  ipcMain.handle('mcp:servers:update', (_event, name: string, patch: McpServerPatch, worktreePath?: string) =>
+  handle('mcp:servers:update', (_event, name: string, patch: McpServerPatch, worktreePath?: string) =>
     updateMcpServer(name, patch, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
-  ipcMain.handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
+  handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
     removeMcpServer(name, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
   )
 
-  ipcMain.handle('claude:sessions', (_event, worktreePath: string) =>
+  handle('claude:sessions', (_event, worktreePath: string) =>
     // Both names: the conn is filed under whichever the session last spawned
     // with, and `m.id` alone missed the turns that ran under the claudeId.
     listClaudeSessions(worktreePath).map((m) => ({ ...m, running: anyActiveTurn([m.id, m.claudeId]) }))
   )
-  ipcMain.handle('claude:resumable', (_event, worktreePath: string) => listResumableSessions(worktreePath))
-  ipcMain.handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>
+  handle('claude:resumable', (_event, worktreePath: string) => listResumableSessions(worktreePath))
+  handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>
     resumeSession(s)
   )
   // The JSONL is named after CLAUDE's session id, not Floe's. Callers pass
   // the Floe id, so resolve it here — one place, rather than making every
   // caller carry both ids.
-  ipcMain.handle('claude:transcript', (_event, worktreePath: string, sessionId: string) => {
+  handle('claude:transcript', (_event, worktreePath: string, sessionId: string) => {
     const claude = loadClaudeTranscript(worktreePath, getCreatedSessionClaudeId(sessionId) ?? sessionId)
     const runtime = readRuntimeTranscript(sessionId)
     if (!runtime.length) return claude
@@ -477,21 +483,21 @@ function registerIpc(): void {
     // order it happened rather than one source after the other.
     return [...claude, ...runtime].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
   })
-  ipcMain.handle('sessions:setTitle', (_event, claudeId: string, title: string) => setSessionTitle(claudeId, title))
-  ipcMain.handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
-  ipcMain.handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
-  ipcMain.handle('sessions:setEffort', (_event, id: string, effort: Effort) => setCreatedSessionEffort(id, effort))
-  ipcMain.handle('sessions:create', (_event, s: { id: string; worktreePath: string; title?: string }) =>
+  handle('sessions:setTitle', (_event, claudeId: string, title: string) => setSessionTitle(claudeId, title))
+  handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
+  handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
+  handle('sessions:setEffort', (_event, id: string, effort: Effort) => setCreatedSessionEffort(id, effort))
+  handle('sessions:create', (_event, s: { id: string; worktreePath: string; title?: string }) =>
     addCreatedSession(s)
   )
-  ipcMain.handle('sessions:renameCreated', (_event, id: string, title: string) => renameCreatedSession(id, title))
+  handle('sessions:renameCreated', (_event, id: string, title: string) => renameCreatedSession(id, title))
   // Give a session a short, smart title after a turn, unless manually renamed.
   // Interactive sessions get Claude's own ai-title; the headless runs Floe
   // drives have none, so we generate one with Haiku from the opening request —
   // but only while the title is still an auto placeholder ("Session N" or the raw
   // first-message fallback), so it's one Haiku call per session, not every turn.
   // Returns the new title so the renderer can update in place, else null.
-  ipcMain.handle('sessions:adoptAiTitle', async (_event, id: string) => {
+  handle('sessions:adoptAiTitle', async (_event, id: string) => {
     const c = getCreatedSession(id)
     if (!c?.claudeId) return null
     const aiTitle = readAiTitle(c.worktreePath, c.claudeId)
@@ -501,8 +507,8 @@ function registerIpc(): void {
     const title = await generateSessionTitle(c.worktreePath, c.claudeId)
     return title && applyAiTitle(c.claudeId, title) ? title : null
   })
-  ipcMain.handle('sessions:link', (_event, id: string, claudeId: string) => linkCreatedSession(id, claudeId))
-  ipcMain.handle('sessions:close', (_event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
+  handle('sessions:link', (_event, id: string, claudeId: string) => linkCreatedSession(id, claudeId))
+  handle('sessions:close', (_event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
     // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
     // history in memory, keyed by the session key the renderer used — either
     // id. A closed session's history is unreachable, so drop it here.
@@ -511,25 +517,25 @@ function registerIpc(): void {
     closeSession(opts)
   })
 
-  ipcMain.handle('viewState:get', () => getViewState())
-  ipcMain.handle('viewState:setProjectWorktree', (_event, projectPath: string, worktreePath: string) =>
+  handle('viewState:get', () => getViewState())
+  handle('viewState:setProjectWorktree', (_event, projectPath: string, worktreePath: string) =>
     setProjectWorktree(projectPath, worktreePath)
   )
-  ipcMain.handle('viewState:setWorktreeView', (_event, worktreePath: string, view: WorktreeView) =>
+  handle('viewState:setWorktreeView', (_event, worktreePath: string, view: WorktreeView) =>
     setWorktreeView(worktreePath, view)
   )
-  ipcMain.handle('viewState:setWorktreeAgent', (_event, worktreePath: string, sessionId: string) =>
+  handle('viewState:setWorktreeAgent', (_event, worktreePath: string, sessionId: string) =>
     setWorktreeAgent(worktreePath, sessionId)
   )
-  ipcMain.handle('viewState:setProjectUi', (_event, projectPath: string, ui: ProjectUiState) =>
+  handle('viewState:setProjectUi', (_event, projectPath: string, ui: ProjectUiState) =>
     setProjectUi(projectPath, ui)
   )
-  ipcMain.handle('viewState:setWorktreeUi', (_event, worktreePath: string, ui: WorktreeUiState) =>
+  handle('viewState:setWorktreeUi', (_event, worktreePath: string, ui: WorktreeUiState) =>
     setWorktreeUi(worktreePath, ui)
   )
 
-  ipcMain.handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
-  ipcMain.handle('claude:info', async (_event, worktreePath: string) => {
+  handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
+  handle('claude:info', async (_event, worktreePath: string) => {
     const [info, codexUsage] = await Promise.all([
       // The merged --mcp-config makes the probe's /mcp report Floe's own
       // registry with live connection state — what the MCP panel shows.
@@ -538,78 +544,78 @@ function registerIpc(): void {
     ])
     return { ...info, codexUsage }
   })
-  ipcMain.handle('claude:contextUsage', (_event, worktreePath: string, claudeId?: string) =>
+  handle('claude:contextUsage', (_event, worktreePath: string, claudeId?: string) =>
     getContextUsage(worktreePath, claudeId)
   )
   // Topbar stats: usage refresh is the only pull; memory + usage are pushed.
-  ipcMain.handle('stats:getMemory', () => sampleMemory())
-  ipcMain.handle('stats:refreshUsage', () => refreshUsageNow())
-  ipcMain.handle('stats:setUsageCwd', (_event, worktreePath: string) => setUsageProbeCwd(worktreePath))
-  ipcMain.handle('mcp:auth:start', (event, worktreePath: string, serverName: string) => {
+  handle('stats:getMemory', () => sampleMemory())
+  handle('stats:refreshUsage', () => refreshUsageNow())
+  handle('stats:setUsageCwd', (_event, worktreePath: string) => setUsageProbeCwd(worktreePath))
+  handle('mcp:auth:start', (event, worktreePath: string, serverName: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) startMcpAuth(win, worktreePath, serverName)
   })
-  ipcMain.handle('mcp:auth:cancel', (_event, worktreePath: string, serverName: string) =>
+  handle('mcp:auth:cancel', (_event, worktreePath: string, serverName: string) =>
     cancelMcpAuth(worktreePath, serverName)
   )
-  ipcMain.handle('mcp:auth:paste', (_event, worktreePath: string, serverName: string, redirectUrl: string) =>
+  handle('mcp:auth:paste', (_event, worktreePath: string, serverName: string, redirectUrl: string) =>
     pasteMcpAuth(worktreePath, serverName, redirectUrl)
   )
 
   // Signing in to the Claude account itself — see main/claudeAuth.ts.
-  ipcMain.handle('claude:auth:status', () => authStatus())
-  ipcMain.handle('claude:stats', () => claudeStats())
+  handle('claude:auth:status', () => authStatus())
+  handle('claude:stats', () => claudeStats())
   // Every AI runtime this machine has, with the models each one can run.
-  ipcMain.handle('agents:local', () => localAgents())
+  handle('agents:local', () => localAgents())
   // Separate from detection because this one spawns — only the account panel
   // asks, and only while it is open.
-  ipcMain.handle('agents:usage', () => localUsage())
-  ipcMain.handle('agents:stats', () => localStats())
-  ipcMain.handle('claude:auth:login', (event, mode: 'claudeai' | 'console') => {
+  handle('agents:usage', () => localUsage())
+  handle('agents:stats', () => localStats())
+  handle('claude:auth:login', (event, mode: 'claudeai' | 'console') => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) startLogin(win, mode)
   })
-  ipcMain.handle('claude:auth:paste', (_event, code: string) => pasteCode(code))
-  ipcMain.handle('claude:auth:cancel', () => cancelLogin())
-  ipcMain.handle('claude:auth:logout', () => logout())
+  handle('claude:auth:paste', (_event, code: string) => pasteCode(code))
+  handle('claude:auth:cancel', () => cancelLogin())
+  handle('claude:auth:logout', () => logout())
 
-  ipcMain.handle('commands:list', (_event, projectPath: string, worktreePath: string) =>
+  handle('commands:list', (_event, projectPath: string, worktreePath: string) =>
     listCommands(projectPath, worktreePath)
   )
-  ipcMain.handle(
+  handle(
     'commands:add',
     (_event, scope: CommandScope, projectPath: string, worktreePath: string, name: string, command: string) =>
       addCommand(scope, projectPath, worktreePath, name, command)
   )
-  ipcMain.handle(
+  handle(
     'commands:update',
     (_event, projectPath: string, worktreePath: string, id: string, patch: CommandPatch) =>
       updateCommand(projectPath, worktreePath, id, patch)
   )
-  ipcMain.handle('commands:remove', (_event, projectPath: string, worktreePath: string, id: string) =>
+  handle('commands:remove', (_event, projectPath: string, worktreePath: string, id: string) =>
     removeCommand(projectPath, worktreePath, id)
   )
-  ipcMain.handle(
+  handle(
     'commands:setScope',
     (_event, projectPath: string, worktreePath: string, id: string, scope: CommandScope) =>
       setCommandScope(projectPath, worktreePath, id, scope)
   )
 
-  ipcMain.handle('dev:detect', (_event, worktreePath: string) => detectDevCommand(worktreePath))
-  ipcMain.handle('dev:start', (event, worktreePath: string, branch: string) => {
+  handle('dev:detect', (_event, worktreePath: string) => detectDevCommand(worktreePath))
+  handle('dev:start', (event, worktreePath: string, branch: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     return win ? startDev(win, worktreePath, branch) : null
   })
-  ipcMain.handle('dev:stop', (_event, worktreePath: string) => stopDev(worktreePath))
+  handle('dev:stop', (_event, worktreePath: string) => stopDev(worktreePath))
 
-  ipcMain.handle(
+  handle(
     'terminal:open',
     (event, id: string, cwd: string, branch: string, cols: number, rows: number) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       return win ? openTerminal(win, id, cwd, branch, cols, rows) : null
     }
   )
-  ipcMain.handle(
+  handle(
     'editor:open',
     (
       event,
@@ -628,72 +634,72 @@ function registerIpc(): void {
   // `e` on a file: a GUI editor is launched here and the renderer is told so;
   // a terminal editor reports `panel`, and the renderer opens the editor panel
   // (which runs it on the PTY) instead. One place decides which.
-  ipcMain.handle('editor:launch', (_event, cwd: string, file: string, line?: number) =>
+  handle('editor:launch', (_event, cwd: string, file: string, line?: number) =>
     launchEditor(cwd, file, line)
   )
-  ipcMain.handle('files:list', (_event, worktreePath: string, relPath?: string) =>
+  handle('files:list', (_event, worktreePath: string, relPath?: string) =>
     // The Home workspace's path is the user's home directory — not a git repo,
     // and it is terminal-only, with no file tree to fill. Hand back nothing.
     isHomePath(worktreePath) ? [] : listDir(worktreePath, relPath)
   )
-  ipcMain.handle('files:all', (_event, worktreePath: string) =>
+  handle('files:all', (_event, worktreePath: string) =>
     // Same rule as the tree: Home is the user's home directory, not a repo.
     isHomePath(worktreePath) ? [] : searchableFiles(worktreePath)
   )
-  ipcMain.handle('files:read', (_event, worktreePath: string, relPath: string) =>
+  handle('files:read', (_event, worktreePath: string, relPath: string) =>
     readFileContent(worktreePath, relPath)
   )
-  ipcMain.handle(
+  handle(
     'files:resolveLink',
     (_event, worktreePath: string, fromRelPath: string, target: string) =>
       resolveWikiLink(worktreePath, fromRelPath, target)
   )
-  ipcMain.handle('files:apply', (_event, worktreePath: string, ops: FileOp[]) =>
+  handle('files:apply', (_event, worktreePath: string, ops: FileOp[]) =>
     applyFileOps(worktreePath, ops)
   )
-  ipcMain.handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
-  ipcMain.handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))
-  ipcMain.handle('review:fileDiff', (_event, worktreePath: string, relPath: string) => fileDiff(worktreePath, relPath))
-  ipcMain.handle('review:commits', (_event, worktreePath: string) => reviewCommits(worktreePath))
-  ipcMain.handle('review:commitDiff', (_event, worktreePath: string, hash: string, relPath: string) =>
+  handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
+  handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))
+  handle('review:fileDiff', (_event, worktreePath: string, relPath: string) => fileDiff(worktreePath, relPath))
+  handle('review:commits', (_event, worktreePath: string) => reviewCommits(worktreePath))
+  handle('review:commitDiff', (_event, worktreePath: string, hash: string, relPath: string) =>
     commitFileDiff(worktreePath, hash, relPath)
   )
-  ipcMain.handle('review:clear', (_event, worktreePath: string) => clearReview(worktreePath))
-  ipcMain.handle('review:restore', (_event, worktreePath: string) => restoreReview(worktreePath))
-  ipcMain.handle('review:isCleared', (_event, worktreePath: string) => hasReviewCheckpoint(worktreePath))
+  handle('review:clear', (_event, worktreePath: string) => clearReview(worktreePath))
+  handle('review:restore', (_event, worktreePath: string) => restoreReview(worktreePath))
+  handle('review:isCleared', (_event, worktreePath: string) => hasReviewCheckpoint(worktreePath))
 
   // Notes anchored to passages of a session's transcript.
-  ipcMain.handle('threadComments:list', (_event, sessionKey: string) => getThreadComments(sessionKey))
-  ipcMain.handle('threadComments:add', (_event, comment: ThreadComment) => addThreadComment(comment))
-  ipcMain.handle('threadComments:remove', (_event, sessionKey: string, id: string) =>
+  handle('threadComments:list', (_event, sessionKey: string) => getThreadComments(sessionKey))
+  handle('threadComments:add', (_event, comment: ThreadComment) => addThreadComment(comment))
+  handle('threadComments:remove', (_event, sessionKey: string, id: string) =>
     removeThreadComment(sessionKey, id)
   )
-  ipcMain.handle('threadComments:markSent', (_event, sessionKey: string, ids: string[]) =>
+  handle('threadComments:markSent', (_event, sessionKey: string, ids: string[]) =>
     markThreadCommentsSent(sessionKey, ids)
   )
-  ipcMain.handle('review:watch', (event, worktreePath: string) => watchChanges(event.sender, worktreePath))
-  ipcMain.handle('plans:list', (_event, worktreePath: string, branch?: string) => listPlans(worktreePath, branch))
-  ipcMain.handle('plans:read', (_event, worktreePath: string, relPath: string) => readPlan(worktreePath, relPath))
-  ipcMain.handle('plans:watch', (event, worktreePath: string) => watchPlans(event.sender, worktreePath))
-  ipcMain.handle('plans:copy', (_event, srcWorktreePath: string, relPath: string, destWorktreePath: string) =>
+  handle('review:watch', (event, worktreePath: string) => watchChanges(event.sender, worktreePath))
+  handle('plans:list', (_event, worktreePath: string, branch?: string) => listPlans(worktreePath, branch))
+  handle('plans:read', (_event, worktreePath: string, relPath: string) => readPlan(worktreePath, relPath))
+  handle('plans:watch', (event, worktreePath: string) => watchPlans(event.sender, worktreePath))
+  handle('plans:copy', (_event, srcWorktreePath: string, relPath: string, destWorktreePath: string) =>
     copyPlan(srcWorktreePath, relPath, destWorktreePath)
   )
-  ipcMain.handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
+  handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )
-  ipcMain.handle('terminal:write', (_event, id: string, data: string) => writeTerminal(id, data))
-  ipcMain.handle('terminal:resize', (_event, id: string, cols: number, rows: number) =>
+  handle('terminal:write', (_event, id: string, data: string) => writeTerminal(id, data))
+  handle('terminal:resize', (_event, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows)
   )
-  ipcMain.handle('terminal:kill', (_event, id: string) => killTerminal(id))
-  ipcMain.handle('terminal:list', (_event, worktreePath: string) => listLiveTerminals(worktreePath))
+  handle('terminal:kill', (_event, id: string) => killTerminal(id))
+  handle('terminal:list', (_event, worktreePath: string) => listLiveTerminals(worktreePath))
   // The renderer owns the resolved appearance (themeMode pref + the BROWSER's
   // prefers-color-scheme on web — the host OS knows nothing about the viewer's
   // theme), so it tells us when it flips and we fan the standard color-scheme
   // report out to every shell that subscribed via DECSET 2031.
-  ipcMain.handle('terminal:notifyTheme', (_event, dark: boolean) => notifyTerminalsTheme(dark))
+  handle('terminal:notifyTheme', (_event, dark: boolean) => notifyTerminalsTheme(dark))
 
-  ipcMain.handle(
+  handle(
     'command:start',
     (
       event,
@@ -710,10 +716,10 @@ function registerIpc(): void {
       if (win) startCommand(win, key, cwd, branch, command, cols, rows, watch, autoRestart)
     }
   )
-  ipcMain.handle('command:stop', (event, key: string) =>
+  handle('command:stop', (event, key: string) =>
     stopCommand(BrowserWindow.fromWebContents(event.sender) ?? undefined, key)
   )
-  ipcMain.handle(
+  handle(
     'command:restart',
     (
       event,
@@ -731,16 +737,16 @@ function registerIpc(): void {
     }
   )
   // What main is tracking, for a renderer that just loaded and knows nothing.
-  ipcMain.handle('command:runs', () => commandRuns())
-  ipcMain.handle('command:attach', (event, key: string, cols: number, rows: number) => {
+  handle('command:runs', () => commandRuns())
+  handle('command:attach', (event, key: string, cols: number, rows: number) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) attachCommand(win, key, cols, rows)
   })
-  ipcMain.handle('command:resize', (_event, key: string, cols: number, rows: number) =>
+  handle('command:resize', (_event, key: string, cols: number, rows: number) =>
     resizeCommand(key, cols, rows)
   )
 
-  ipcMain.handle('worktrees:list', async (event, repoPath: string) => {
+  handle('worktrees:list', async (event, repoPath: string) => {
     // The Home workspace isn't a git repo — hand back its single synthetic
     // worktree so the renderer can open a terminal in it like any worktree.
     if (isHomePath(repoPath)) return [homeWorktree()]
@@ -755,7 +761,7 @@ function registerIpc(): void {
   // The sidebar's git dirt, asked for AFTER the list is on screen so a slow
   // `git status` never delays landing on a session. One call for the whole
   // project; the worktrees run in parallel.
-  ipcMain.handle('worktrees:status', async (_event, paths: string[]) => {
+  handle('worktrees:status', async (_event, paths: string[]) => {
     const entries = await Promise.all(
       paths
         .filter((path) => !isHomePath(path))
@@ -763,23 +769,23 @@ function registerIpc(): void {
     )
     return Object.fromEntries(entries.filter(([, status]) => status))
   })
-  ipcMain.handle('branches:list', (_event, repoPath: string) => listBranches(repoPath))
-  ipcMain.handle('branches:listRemote', (_event, repoPath: string) => listRemoteBranches(repoPath))
-  ipcMain.handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
+  handle('branches:list', (_event, repoPath: string) => listBranches(repoPath))
+  handle('branches:listRemote', (_event, repoPath: string) => listRemoteBranches(repoPath))
+  handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
     createWorktree(root, branch, options)
   )
-  ipcMain.handle('worktrees:remove', (_event, root: string, target: string) => removeWorktree(root, target))
-  ipcMain.handle('worktrees:reorder', (_event, root: string, orderedPaths: string[]) =>
+  handle('worktrees:remove', (_event, root: string, target: string) => removeWorktree(root, target))
+  handle('worktrees:reorder', (_event, root: string, orderedPaths: string[]) =>
     reorderWorktrees(root, orderedPaths)
   )
-  ipcMain.handle('worktrees:setBlocked', (_event, root: string, target: string, blocked: boolean) =>
+  handle('worktrees:setBlocked', (_event, root: string, target: string, blocked: boolean) =>
     setWorktreeBlocked(root, target, blocked)
   )
-  ipcMain.handle('worktrees:merge', (_event, root: string, target: string) => mergeWorktree(root, target))
+  handle('worktrees:merge', (_event, root: string, target: string) => mergeWorktree(root, target))
 
   // Setup checklist: run the per-stack provisioning for a freshly created
   // worktree, streaming progress back as `provision:event`.
-  ipcMain.handle(
+  handle(
     'provision:run',
     (event, root: string, worktreePath: string, branch: string, opts?: { from?: string; skip?: string[] }) => {
       const win = BrowserWindow.fromWebContents(event.sender)
@@ -788,24 +794,24 @@ function registerIpc(): void {
   )
   // Bring a container-mode worktree up (idempotent, no-op for host-native
   // projects). Fire-and-forget — the renderer doesn't wait.
-  ipcMain.handle('provision:ensureUp', (_event, root: string, worktreePath: string, branch: string) => {
+  handle('provision:ensureUp', (_event, root: string, worktreePath: string, branch: string) => {
     void ensureContainerUp(root, worktreePath, branch).catch((e) =>
       console.error('[provision:ensureUp]', e instanceof Error ? e.message : e)
     )
   })
 
   // Guided merge — granular steps the renderer orchestrates with the panel.
-  ipcMain.handle('merge:preflight', (_event, root: string, target: string) => mergePreflight(root, target))
-  ipcMain.handle('merge:stash', (_event, target: string) => mergeStash(target))
-  ipcMain.handle('merge:base', (_event, target: string, base: string) => mergeBase(target, base))
-  ipcMain.handle('merge:resolveCheck', (_event, target: string) => mergeResolveCheck(target))
-  ipcMain.handle('merge:commit', (_event, target: string) => mergeCommit(target))
-  ipcMain.handle('merge:ff', (_event, root: string, base: string, branch: string) =>
+  handle('merge:preflight', (_event, root: string, target: string) => mergePreflight(root, target))
+  handle('merge:stash', (_event, target: string) => mergeStash(target))
+  handle('merge:base', (_event, target: string, base: string) => mergeBase(target, base))
+  handle('merge:resolveCheck', (_event, target: string) => mergeResolveCheck(target))
+  handle('merge:commit', (_event, target: string) => mergeCommit(target))
+  handle('merge:ff', (_event, root: string, base: string, branch: string) =>
     mergeFastForward(root, base, branch)
   )
   // Stop every process tied to a worktree (commands, dev server, terminals) and
   // remove the worktree. Agent sessions are stopped by the renderer beforehand.
-  ipcMain.handle('worktree:teardown', (_event, root: string, target: string) => {
+  handle('worktree:teardown', (_event, root: string, target: string) => {
     stopDev(target)
     killCommandsForWorktree(target)
     killTerminalsForWorktree(target)
@@ -813,20 +819,20 @@ function registerIpc(): void {
   })
 
   // Guided remove — granular steps the renderer orchestrates with the panel.
-  ipcMain.handle('remove:preflight', (_event, root: string, target: string) => removePreflight(root, target))
-  ipcMain.handle('remove:worktree', (_event, root: string, target: string, force: boolean) => {
+  handle('remove:preflight', (_event, root: string, target: string) => removePreflight(root, target))
+  handle('remove:worktree', (_event, root: string, target: string, force: boolean) => {
     stopDev(target)
     killCommandsForWorktree(target)
     killTerminalsForWorktree(target)
     return removeWorktreeGuided(root, target, force)
   })
-  ipcMain.handle('remove:branch', (_event, root: string, branch: string, force: boolean) =>
+  handle('remove:branch', (_event, root: string, branch: string, force: boolean) =>
     deleteBranch(root, branch, force)
   )
   // Drop the worktree's per-branch database (MySQL/MariaDB/Postgres). Reads the
   // worktree's .env, so the renderer runs this step before the worktree is torn
   // down. Never touches the main checkout's database.
-  ipcMain.handle('remove:dropDatabase', async (_event, root: string, target: string) => {
+  handle('remove:dropDatabase', async (_event, root: string, target: string) => {
     const lines: string[] = []
     try {
       const result = await dropWorktreeDatabase(target, root, (t) => lines.push(t))
@@ -837,12 +843,12 @@ function registerIpc(): void {
   })
 
   // Dev aid: let the renderer ask for a fresh screenshot (e.g. when an overlay opens).
-  ipcMain.handle('window:capture', (event) => {
+  handle('window:capture', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) void captureWindow(win)
   })
 
-  ipcMain.handle('open:external', (_event, url: string) => {
+  handle('open:external', (_event, url: string) => {
     // Authoritative allowlist — only safe schemes reach the OS shell.
     if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url)
   })
@@ -850,7 +856,7 @@ function registerIpc(): void {
   // Fire a native OS notification (the renderer decides when, and owns the
   // session metadata). Clicking it surfaces Floe — even from behind other
   // apps or minimized — and tells the renderer which session to open.
-  ipcMain.handle('notify:show', (event, payload: { title: string; body: string; sessionId: string }) => {
+  handle('notify:show', (event, payload: { title: string; body: string; sessionId: string }) => {
     if (!Notification.isSupported()) return
     const win = BrowserWindow.fromWebContents(event.sender)
     const note = new Notification({ title: payload.title, body: payload.body })
@@ -866,7 +872,7 @@ function registerIpc(): void {
   })
 
   // Bring this window forward. Returns whether a window was actually raised.
-  ipcMain.handle('window:focus', (event) => {
+  handle('window:focus', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return false
     if (win.isMinimized()) win.restore()
@@ -878,7 +884,7 @@ function registerIpc(): void {
 
   // Send Floe to the background — mirrors the native ⌘H (role: 'hide') so the
   // command palette can do it too. A notification click brings it back.
-  ipcMain.handle('window:hide', (event) => {
+  handle('window:hide', (event) => {
     if (process.platform === 'darwin') return app.hide()
     BrowserWindow.fromWebContents(event.sender)?.hide()
   })
@@ -888,56 +894,56 @@ function registerIpc(): void {
   // than a list of overrides on top of one. `reveal` opens it for editing
   // (keyboard-first: routed from the "Edit keybindings" command) and `rebind`
   // is what the command palette's rebind writes through.
-  ipcMain.handle('keybindings:load', () => loadKeybindings())
-  ipcMain.handle('keybindings:reveal', () => revealKeybindings())
-  ipcMain.handle('keybindings:rebind', (_event, command: string, chord: string) =>
+  handle('keybindings:load', () => loadKeybindings())
+  handle('keybindings:reveal', () => revealKeybindings())
+  handle('keybindings:rebind', (_event, command: string, chord: string) =>
     rebindCommand(command, chord)
   )
   // Regenerate the file from the built-in table, keeping the old one as .bak.
   // The way out when an update ships a binding an existing file has no entry for.
-  ipcMain.handle('keybindings:reset', () => resetKeybindings())
+  handle('keybindings:reset', () => resetKeybindings())
 
   // Settings. The panel reads and writes the same `floe.toml` the user edits by
   // hand — `set` goes through the surgical writer, so a toggle flipped in the UI
   // comes back as one changed value in a file whose comments are all still there.
   // Skills the composer's `/` menu and the skills palette read. Scoped to the
   // worktree's project, so a project skill only shows up where it applies.
-  ipcMain.handle('skills:list', (_event, worktreePath?: string) =>
+  handle('skills:list', (_event, worktreePath?: string) =>
     listSkills(worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
   )
   // What the Skills panel writes through. A skill is addressed by NAME, never by
   // a path from the renderer: the name is what the row shows and what `/name`
   // sends, and resolving it here is what keeps the UI unable to write anywhere
   // but the two skills directories. Refusals throw, so the panel can say why.
-  ipcMain.handle('skills:create', (_event, name: string, scope: 'global' | 'project', worktreePath?: string) =>
+  handle('skills:create', (_event, name: string, scope: 'global' | 'project', worktreePath?: string) =>
     createSkill(name, scope, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
   )
-  ipcMain.handle('skills:rename', (_event, name: string, to: string, worktreePath?: string) =>
+  handle('skills:rename', (_event, name: string, to: string, worktreePath?: string) =>
     renameSkill(name, to, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
   )
-  ipcMain.handle('skills:delete', (_event, name: string, worktreePath?: string) =>
+  handle('skills:delete', (_event, name: string, worktreePath?: string) =>
     deleteSkill(name, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
   )
-  ipcMain.handle('config:get', () => floeConfig())
-  ipcMain.handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
+  handle('config:get', () => floeConfig())
+  handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
     setFloeValue(table, key, value)
     return floeConfig()
   })
   // Every problem across every config file, so Settings has one place to show
   // them instead of each file failing quietly on its own.
-  ipcMain.handle('config:errors', () => configErrors())
-  ipcMain.handle('config:paths', () => configPaths())
-  ipcMain.handle('config:reveal', (_event, path?: string) => shell.openPath(path ?? configPaths().floe))
+  handle('config:errors', () => configErrors())
+  handle('config:paths', () => configPaths())
+  handle('config:reveal', (_event, path?: string) => shell.openPath(path ?? configPaths().floe))
 
   // Whether the OS is currently in dark mode. The renderer reads this once at
   // mount for the initial xterm palette.
-  ipcMain.handle('theme:get', () => nativeTheme.shouldUseDarkColors)
+  handle('theme:get', () => nativeTheme.shouldUseDarkColors)
 
   // Translucent (vibrancy) window appearance. The renderer reads `get` at mount
   // to set the matching [data-vibrancy] CSS state, and calls `set` from the
   // "Toggle transparency" command to flip it live and persist the choice.
-  ipcMain.handle('window:getVibrancy', () => getVibrancy())
-  ipcMain.handle('window:setVibrancy', (event, on: boolean) => {
+  handle('window:getVibrancy', () => getVibrancy())
+  handle('window:setVibrancy', (event, on: boolean) => {
     setVibrancy(on)
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win && !win.isDestroyed()) applyVibrancy(win, on)
@@ -945,8 +951,8 @@ function registerIpc(): void {
 
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
-  ipcMain.handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
-  ipcMain.handle('app:setLoginItem', (_event, on: boolean) => {
+  handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
+  handle('app:setLoginItem', (_event, on: boolean) => {
     app.setLoginItemSettings({ openAtLogin: on })
   })
 
@@ -960,7 +966,7 @@ function registerIpc(): void {
   // it can't change without a relaunch mattering, and the launcher asks on every
   // mount.
   let userName: string | null = null
-  ipcMain.handle('user:name', async () => {
+  handle('user:name', async () => {
     // The config wins outright — it is the user saying what to call them — and
     // is read on every call rather than cached, so editing the file (or the
     // Settings row) changes the greeting without a relaunch.
@@ -984,7 +990,7 @@ function registerIpc(): void {
     return userName
   })
 
-  ipcMain.handle('settings:probe', async () => {
+  handle('settings:probe', async () => {
     const pexec = promisify(execFile)
     let claude: { path: string | null; version: string | null } = { path: null, version: null }
     try {
@@ -1004,8 +1010,8 @@ function registerIpc(): void {
 
   // Settings → Advanced: system prompt appended to every spawned Claude session
   // (agent.ts reads it directly at spawn time — this is just the read/write UI seam).
-  ipcMain.handle('settings:getSystemPrompt', () => getSystemPrompt())
-  ipcMain.handle('settings:setSystemPrompt', (_event, value: string) => setSystemPrompt(value))
+  handle('settings:getSystemPrompt', () => getSystemPrompt())
+  handle('settings:setSystemPrompt', (_event, value: string) => setSystemPrompt(value))
 
   // Drive live light/dark switches from the main process. The renderer's
   // `matchMedia('(prefers-color-scheme: dark)')` `change` event is unreliable in
@@ -1166,6 +1172,8 @@ function createWindow(): void {
   // probing it starts a real `claude` process and can request Keychain access,
   // so opening a Floe window must not trigger it.
   localWindow = mainWindow
+  // Re-apply the plugins' send mirror on a recreated window (see plugins/host.ts).
+  pluginWindowCreated(mainWindow)
   startMemoryStats(mainWindow)
   mainWindow.on('closed', () => {
     if (localWindow === mainWindow) localWindow = null
@@ -1257,6 +1265,11 @@ void app.whenReady().then(async () => {
   buildAppMenu(openNewInstance)
   registerIpc()
   ensureAgentHookInstalled()
+  // Runtime plugins from ~/.config/floe/plugins — loaded BEFORE the window so
+  // the backends a plugin registers are already there when the preload asks
+  // (backends:get runs at window load). A broken plugin logs and is skipped;
+  // boot never dies for one.
+  await loadPlugins(app.getVersion(), () => localWindow ?? BrowserWindow.getAllWindows()[0])
   createWindow()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
   // window getter so ordering vs. createWindow doesn't matter.
@@ -1333,4 +1346,5 @@ function stopEverything(): void {
   killAllMcpAuths()
   cancelLogin()
   shutdownMcpServer()
+  shutdownPlugins()
 }

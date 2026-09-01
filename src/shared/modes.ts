@@ -25,7 +25,7 @@ export const MODES: ModeInfo[] = [
   { id: 'plan', label: 'plan', hint: 'Reads and plans. Nothing on disk changes.' },
   { id: 'default', label: 'ask', hint: 'Asks before each tool that acts.' },
   { id: 'acceptEdits', label: 'auto', hint: 'Edits this worktree without asking.' },
-  { id: 'skip', label: 'full', hint: 'No prompts, no sandbox. Anything goes.' }
+  { id: 'skip', label: 'bypass', hint: 'No prompts, no sandbox. Anything goes.' }
 ]
 
 export const DEFAULT_MODE: PermissionMode = 'default'
@@ -95,5 +95,8 @@ export function modeLabel(mode: PermissionMode): string {
  * written against the wire names still reads.
  */
 export function modeFromLabel(label: string): PermissionMode | undefined {
+  // "full" was the label for `skip` before the rename to "bypass"; configs and
+  // saved choices written against it still have to read.
+  if (label === 'full') return 'skip'
   return MODES.find((m) => m.label === label || m.id === label)?.id
 }

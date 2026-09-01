@@ -50,6 +50,7 @@ import {
   updateSkill
 } from './config/skills'
 import { projectFor } from './config/projectStore'
+import { pluginTools } from './plugins/host'
 import {
   addMcpServer,
   listMcpServers,
@@ -426,7 +427,7 @@ function registerTools(server: McpServer, token: string): void {
 
   server.tool(
     'list_sessions',
-    'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given — it reads each transcript) means the session is blocked on an unanswered question.',
+    'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given) means the session is blocked on you — an unanswered question or a tool-permission prompt.',
     { worktree: z.string().optional().describe('Limit to sessions in this worktree path.') },
     async ({ worktree }) => {
       try {
@@ -436,7 +437,14 @@ function registerTools(server: McpServer, token: string): void {
           return textResult(
             getCreatedSessions(worktree).map((s) => ({
               ...sessionSummary(s),
-              needsYou: s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false
+              // Two authorities, because neither sees the whole thing: the
+              // live conn knows about a prompt the CLI has not written to the
+              // JSONL yet (and about permission prompts, which never land
+              // there), the transcript knows about one raised before this app
+              // run.
+              needsYou:
+                sessionRuntime(connKeyFor(s)).waiting ||
+                (s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false)
             }))
           )
         }
@@ -979,6 +987,30 @@ function registerTools(server: McpServer, token: string): void {
       return textResult({ ok: true })
     }
   )
+
+  // --- Plugin tools (plugins/host.ts) ---------------------------------------
+  // Registered after the built-ins so a plugin can never shadow one: a name
+  // collision throws inside server.tool and costs only that plugin's tool.
+  for (const t of pluginTools()) {
+    const shape: Record<string, z.ZodTypeAny> = {}
+    for (const [key, p] of Object.entries(t.params ?? {})) {
+      let s: z.ZodTypeAny = p.type === 'number' ? z.number() : p.type === 'boolean' ? z.boolean() : z.string()
+      if (p.description) s = s.describe(p.description)
+      if (p.optional) s = s.optional()
+      shape[key] = s
+    }
+    try {
+      server.tool(t.name, t.description, shape, async (args: Record<string, unknown>) => {
+        try {
+          return textResult(await t.run(args))
+        } catch (e) {
+          return textResult({ error: (e as Error).message })
+        }
+      })
+    } catch {
+      // duplicate tool name — the built-in (or an earlier plugin) wins
+    }
+  }
 }
 
 // Parse the caller token out of a /mcp/<token> path. Returns '' if it doesn't match.

@@ -9,7 +9,7 @@
 // `run` gets a context rather than closing over React state so the registry
 // stays a plain data structure: listable, searchable, and callable from outside.
 
-import type { Lane, Panel } from './lane.ts'
+import { open, type Lane, type Panel } from './lane.ts'
 import type { Commands } from './useCommands.ts'
 
 export interface CommandContext {
@@ -125,6 +125,12 @@ export interface CommandContext {
   }
   /** Show the new-worktree flow. */
   newWorktree: () => void
+  /**
+   * Point the window at a backend (machine). With an id, switch directly —
+   * the MCP path; without, offer the picker. Lives in App because switching
+   * remounts the tree, and the registry must not learn how.
+   */
+  useBackend: (id?: string) => void
   /** Forget sessions, after asking: the open one, the rest of the worktree's, or all of them. */
   deleteSession: (scope?: 'one' | 'others' | 'all') => void
   /**
@@ -193,6 +199,33 @@ export function runCommand(
   }
   cmd.run(ctx, arg)
   return { ok: true }
+}
+
+/**
+ * Overlay the runtime plugins' commands onto the registry. Their ids arrive
+ * namespaced `plugin:<name>:<id>` and are exempt from the COMMAND_IDS lockstep;
+ * `run` dispatches back to the main process, where the plugin's code lives —
+ * which is why these rows need nothing from the context. Idempotent: a second
+ * call replaces the previous overlay.
+ */
+export function installPluginCommands(
+  registry: Map<string, Command>,
+  commands: { id: string; title: string; group: string; panel?: string }[],
+  run: (id: string, arg?: string) => void
+): void {
+  for (const id of [...registry.keys()]) if (id.startsWith('plugin:')) registry.delete(id)
+  for (const c of commands) {
+    registry.set(c.id, {
+      id: c.id,
+      title: c.title,
+      group: c.group,
+      // A panel command runs HERE: opening a panel is a renderer act, so it
+      // never round-trips to main. Everything else is the plugin's code in main.
+      run: c.panel
+        ? (ctx) => ctx.setLane((l) => open(l, ctx.makePanel('plugin', c.panel)))
+        : (_ctx, arg) => run(c.id, arg)
+    })
+  }
 }
 
 /** The palette's list: ids, titles and groups, without the run functions. */

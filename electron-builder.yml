@@ -12,6 +12,9 @@ files:
 # Native .node binaries can't be loaded from inside the asar archive.
 asarUnpack:
   - node_modules/node-pty/**/*
+  # The headless daemon (build:server) is executed by launchd/systemd via
+  # ELECTRON_RUN_AS_NODE — plain node can't read from inside the asar.
+  - out/server/**/*
 mac:
   icon: resources/icon.icns
   target:

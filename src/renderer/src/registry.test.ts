@@ -35,6 +35,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     movingProject: false,
     deleteGroup: () => {},
     newWorktree: () => {},
+    useBackend: () => {},
     deleteSession: () => {},
     cycleSession: () => {},
     askText: () => {},

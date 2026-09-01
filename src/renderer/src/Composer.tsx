@@ -88,7 +88,8 @@ export function Composer({
   pinned,
   pinPending,
   onDigit,
-  onEmptyEnter
+  onEmptyEnter,
+  modelLeft
 }: {
   value: string
   onChange: (next: string) => void
@@ -130,6 +131,9 @@ export function Composer({
   /** ⏎ on an empty composer — confirms a multi-select question. Return true
       to claim the key (an unclaimed empty ⏎ still does nothing). */
   onEmptyEnter?: () => boolean
+  /** Put the model chip on the left, beside the tool buttons, instead of the
+      far right — in a chat it then sits under the start of what you type. */
+  modelLeft?: boolean
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -750,6 +754,7 @@ export function Composer({
     <div
       className="composer"
       ref={box}
+      data-model-left={modelLeft || undefined}
       data-dropping={dropping || undefined}
       onDragEnter={(e) => {
         e.preventDefault()
@@ -888,7 +893,6 @@ export function Composer({
             <IconArrowBackUp size={15} stroke={1.8} />
           </button>
         )}
-        {footer}
         {vimOn && (
           <span
             className="vim-mode"
@@ -931,6 +935,7 @@ export function Composer({
           )}
           <IconChevronDown size={13} stroke={1.8} />
         </button>
+        {footer}
       </div>
 
       {menuOpen && (

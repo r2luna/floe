@@ -1,6 +1,6 @@
 {
   "name": "floe",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
   "main": "./out/main/index.js",
@@ -8,15 +8,16 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:server": "node scripts/build-server.mjs",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "test": "node --test --test-reporter spec 'src/**/*.test.ts'",
-    "build:mac": "electron-vite build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux",
-    "release": "electron-vite build && electron-builder --mac --publish always",
-    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications \u2014 abra com duplo-clique.'",
+    "build:mac": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac",
+    "build:linux": "electron-vite build && node scripts/build-server.mjs && electron-builder --linux",
+    "release": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac --publish always",
+    "install:local": "rm -rf /Applications/Floe.app && cp -R dist/mac-arm64/Floe.app /Applications/ && xattr -dr com.apple.quarantine /Applications/Floe.app && echo 'Floe instalado em /Applications — abra com duplo-clique.'",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
@@ -41,6 +42,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.2.0",
     "electron-builder": "^26.15.2",
@@ -49,6 +51,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "ws": "^8.21.3"
   }
 }
