@@ -1948,10 +1948,6 @@ button {
 /* A run of shell commands. No frame around it: the marker at the head of each
    row already says "this is a command", and a box would say it a second time,
    louder. The run reads as one thing because the rows are adjacent. */
-.bash-blk {
-  margin: 6px 0;
-}
-
 /* marker · command · actions. The marker keeps its column on every row, so the
    commands of a run all start in the same place. */
 .bash-row {
@@ -2048,9 +2044,12 @@ button {
 
 /* Shell highlighting: the program, its flags, quoted strings and the plumbing.
    Four roles, because those are the four things you actually look for in a
-   command you are scanning past. */
+   command you are scanning past.
+
+   Everything here stays at or below the row's dim — machinery is scanned past,
+   prose is read, and nothing that ran may outshine what was said. The program
+   keeps only its weight as the row's anchor. */
 .sh-cmd {
-  color: var(--text);
   font-weight: 700;
 }
 
@@ -2115,8 +2114,8 @@ button {
   text-overflow: ellipsis;
 }
 
+/* Same rule as .sh-cmd: weight for the anchor, never the prose's colour. */
 .run-fold-count {
-  color: var(--text);
   font-weight: 700;
 }
 
@@ -2154,8 +2153,10 @@ button {
 
 /* Tool rows are shell rows with a different word in front: same marker column,
    same grid, so a run of reads and a run of commands read as one thing. */
+/* Closed to one line and kept tight: the fold is a footnote between two
+   paragraphs of prose, not a paragraph of its own. */
 .tool-run {
-  margin: 6px 0;
+  margin: 2px 0;
 }
 
 .tool-row {
@@ -2187,7 +2188,6 @@ button {
 }
 
 .tool-verb {
-  color: var(--text);
   font-weight: 700;
 }
 
@@ -2197,7 +2197,7 @@ button {
 }
 
 .tool-base {
-  color: var(--text);
+  color: var(--dim);
 }
 
 /* --- expanded tool calls -------------------------------------------------- */
@@ -2230,7 +2230,7 @@ button {
 .call-arg {
   min-width: 0;
   overflow-wrap: anywhere;
-  color: var(--text);
+  color: var(--dim);
 }
 
 .call-result {

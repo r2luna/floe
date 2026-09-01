@@ -1699,15 +1699,15 @@ const Log = memo(function Log({
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
 
-    // A run of shell calls is one block, not one line each: the agent exploring
-    // is a single act of work, and five bordered rows in a row would read as
-    // five separate things happening.
-    if (isBash(item)) {
-      const commands: string[] = []
+    // A run of calls — commands and tool calls alike — is one act of work, so
+    // it is one block: the agent exploring reads as one thing happening, not as
+    // a stack of separate events between two paragraphs.
+    if (item.role === 'tool') {
+      const run: TranscriptItem[] = []
       const at = i
-      while (i < items.length && isBash(items[i])) commands.push(items[i++].summary as string)
+      while (i < items.length && items[i].role === 'tool') run.push(items[i++])
       i--
-      out.push(<BashBlock commands={commands} key={base + at} />)
+      out.push(<CallsFold items={run} cwd={cwd} key={base + at} />)
       continue
     }
 
@@ -1740,17 +1740,6 @@ const Log = memo(function Log({
           />
         </div>
       )
-      continue
-    }
-
-    // Every other tool call is a run of rows shaped like the shell rows above:
-    // a run of them is one act of work, and they are read the same way.
-    if (item.role === 'tool') {
-      const run: TranscriptItem[] = []
-      const at = i
-      while (i < items.length && items[i].role === 'tool' && !isBash(items[i])) run.push(items[i++])
-      i--
-      out.push(<ToolRun items={run} cwd={cwd} key={base + at} />)
       continue
     }
 
@@ -1826,21 +1815,31 @@ function Zoomable({
 }
 
 /**
- * A run of tool calls, drawn as the shell rows are: marker, verb, argument.
+ * A run of calls — commands and tool calls alike — closed behind one line.
  *
- * Reading a transcript is reading down the left edge, and a tool call answers
- * two questions — what did it do, to what. So the verb comes first and in full
- * strength, the directory fades, and the filename (the part you are actually
- * looking for) stays legible. Same grid as a command, so a run of reads and a
- * run of greps sit in one family instead of two.
+ * ALWAYS folded, whatever the count: the transcript is what was said, and the
+ * machinery is only ever context for it. Reading is hunting for the model's
+ * words, so a call may never sit in the way — one dim line says work happened,
+ * and the rows cost no screen until they are asked for.
+ *
+ * Opened, a tool call answers two questions — what did it do, to what — so the
+ * verb leads, the directory fades, and the filename stays legible. Commands
+ * keep their own rows (gist, expand, copy/run). Same grid for both, so a run
+ * of reads and a run of greps sit in one family instead of two.
  */
-function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): ReactNode {
+function CallsFold({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): ReactNode {
   // The same call repeated is one line with a count: five edits to one file is
-  // one fact about that file, not five rows to scroll past.
+  // one fact about that file, not five rows to scroll past. Commands stay
+  // whole — a BashRow carries its own expand/copy/run and no count slot.
   const rows: Array<{ item: TranscriptItem; n: number }> = []
   for (const item of items) {
     const last = rows[rows.length - 1]
-    if (last && last.item.name === item.name && last.item.summary === item.summary) {
+    if (
+      last &&
+      !isBash(item) &&
+      last.item.name === item.name &&
+      last.item.summary === item.summary
+    ) {
       last.n++
       continue
     }
@@ -1848,6 +1847,7 @@ function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): Rea
   }
 
   const lines = rows.map(({ item, n }, i) => {
+    if (isBash(item)) return <BashRow command={item.summary as string} key={i} />
     const arg = toolArg(item.summary, cwd)
     return (
       <div className="tool-row" key={i}>
@@ -1867,10 +1867,14 @@ function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): Rea
     )
   })
 
-  if (rows.length < FOLD_AT) return <div className="tool-run">{lines}</div>
+  const bashN = items.filter(isBash).length
+  const one = items.length === 1
+  const kind =
+    bashN === items.length ? (one ? 'command' : 'commands') : bashN ? 'calls' : one ? 'tool call' : 'tool calls'
+  const verbs = items.map((it) => (isBash(it) ? bashProgram(it.summary as string) : toolVerb(it.name)))
   return (
     <div className="tool-run">
-      <RunFold count={items.length} kind="tool calls" verbs={items.map((it) => toolVerb(it.name))}>
+      <RunFold count={items.length} kind={kind} verbs={verbs}>
         {lines}
       </RunFold>
     </div>
@@ -1878,12 +1882,6 @@ function ToolRun({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): Rea
 }
 
 /* --- folded runs ---------------------------------------------------------- */
-
-/**
- * Below this many rows a fold saves less than it costs: a keypress to reveal
- * one or two lines that could just be there.
- */
-const FOLD_AT = 3
 
 /** `python3 ×3, grep ×2` — the run's programs, most frequent first. */
 function verbSummary(verbs: string[]): string {
@@ -1970,25 +1968,6 @@ function toolArg(
 /** A shell call, which is the only tool whose argument is worth showing whole. */
 const isBash = (item: TranscriptItem): boolean =>
   item.role === 'tool' && item.name?.toLowerCase() === 'bash' && !!item.summary
-
-/**
- * A run of shell commands, as rows.
- *
- * No frame: the rows sit in the transcript like everything else, and the prompt
- * marker at the head of each one is what says "this is a command" — a box would
- * be a second way of saying it, and a heavier one.
- */
-function BashBlock({ commands }: { commands: string[] }) {
-  const rows = commands.map((command, i) => <BashRow command={command} key={i} />)
-  if (commands.length < FOLD_AT) return <div className="bash-blk">{rows}</div>
-  return (
-    <div className="bash-blk">
-      <RunFold count={commands.length} kind="commands" verbs={commands.map(bashProgram)}>
-        {rows}
-      </RunFold>
-    </div>
-  )
-}
 
 /**
  * One command.
