@@ -704,16 +704,14 @@ button {
 .launcher {
   display: flex;
   flex-direction: column;
-  /* Upper third, not dead centre — the recent list grows downward and a truly
-     centred box would drift as it fills. */
-  justify-content: flex-start;
+  /* Dead centre: with nothing below the composer there is nothing to drift. */
+  justify-content: center;
   gap: 26px;
   /* min-height, not height: once the input has grown the column must be able to
      get taller than the panel and let the panel body scroll it. */
   min-height: 100%;
   max-width: 720px;
   margin-inline: auto;
-  padding-top: 14vh;
 }
 
 .greet {
@@ -1317,40 +1315,12 @@ button {
   background: #0000000d;
 }
 
-.recent-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 6px 8px;
-  color: var(--dim);
-  font-size: 11px;
-}
-
 .fold-plain {
   color: var(--dim);
   font-size: 11px;
 }
 
 .fold-plain:hover {
-  color: var(--text-strong);
-}
-
-.recent-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 6px;
-  border-radius: var(--radius);
-  color: var(--dim);
-  text-align: left;
-}
-
-
-
-.recent-row .row-name {
-  display: flex;
-  flex-direction: column;
   color: var(--text-strong);
 }
 
