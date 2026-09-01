@@ -15,13 +15,11 @@ import {
   focusAt,
   laneOf,
   open,
-  patchPanel,
   resizePanel,
   setCursor,
-  toggleDock,
-  toggleKind
+  toggleDock
 } from './lane'
-import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
+import { selRange } from './diff'
 import { KINDS, RAIL, PanelBody, needsProject, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'

@@ -379,11 +379,6 @@ function hasUnansweredQuestion(file: string): boolean {
     }
     const content = (m.message as { content?: unknown } | null)?.content
     if (!Array.isArray(content)) continue
-    // Images you attached ride in the same message as the text, but ahead of it
-    // (see buildContent in agent.ts). Held back and appended after the blocks so
-    // a reopened chat shows what the live stream showed: your line, then the
-    // thumbnails under it — instead of the picture floating above the sentence.
-    const attached: TranscriptItem[] = []
     for (const block of content as Array<Record<string, unknown>>) {
       if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && typeof block.id === 'string') {
         asked.push(block.id)

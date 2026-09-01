@@ -85,7 +85,6 @@ import {
   pruneMissingWorktrees,
   renameCreatedSession,
   linkCreatedSession,
-  getCreatedSessionClaudeId,
   resumeSession,
   closeSession,
   getViewState,
@@ -175,7 +174,7 @@ import {
 import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { watchChanges } from './reviewWatch'
-import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
+import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp } from './provision'
 import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
