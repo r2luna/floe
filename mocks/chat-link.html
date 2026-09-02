@@ -1,0 +1,45 @@
+<!doctype html>
+<html data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../src/renderer/src/index.css" />
+    <style>
+      body { padding: 16px; }
+      .panel { width: 620px; }
+    </style>
+  </head>
+  <body>
+    <div class="panel" data-focused>
+      <div class="panel-body">
+        <div class="irc-entry">
+          <div class="irc-head">
+            <span class="irc-nick">you</span><span class="irc-time">18:42</span>
+          </div>
+          <div class="irc-body">
+            olha <a class="chat-link" href="https://floe.dev/docs" data-nav>https://floe.dev/docs</a> e
+            <a class="chat-link" href="https://www.floe.dev" data-nav>www.floe.dev</a> aqui
+          </div>
+        </div>
+        <div class="irc-entry">
+          <div class="irc-body">
+            com o cursor em cima:
+            <a class="chat-link" href="https://floe.dev/docs" data-nav data-cursor>https://floe.dev/docs</a>
+            no meio da frase
+          </div>
+        </div>
+        <div class="irc-body irc-act">
+          <span class="irc-star">*</span> <span class="irc-by">WebFetch </span>
+          <a class="chat-link" href="https://example.com/a?b=1" data-nav>https://example.com/a?b=1</a>
+        </div>
+        <div class="irc-entry">
+          <div class="md">
+            <p>
+              markdown do modelo com <a class="chat-link" href="https://floe.dev" data-nav>um link</a>
+              no meio de um parágrafo que continua depois dele.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

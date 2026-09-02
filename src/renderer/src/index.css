@@ -4367,13 +4367,36 @@ kbd {
   border-top: 1px solid var(--line-soft);
 }
 
-.md a {
+/* Every address in the chat, wherever it was written: a markdown link from the
+   model, a URL in your own message, one printed on a tool's line. One class so
+   they all read the same, and one behaviour — clicking opens it in the browser,
+   never in this window. */
+.chat-link {
   color: #79b2cf;
   text-decoration: none;
+  cursor: pointer;
 }
 
-.md a:hover {
+.chat-link:hover {
   text-decoration: underline;
+}
+
+/* On white, the dark theme's blue sits at about the contrast of body text and
+   stops reading as a link at all. */
+:root[data-theme='light'] .chat-link {
+  color: #2a6f9e;
+}
+
+/* A link is a cursor row (j/k walks onto it, Enter opens it), but it sits
+   INSIDE a sentence — and the row cursor draws a 2px bar down the left edge of
+   what it marks, which mid-paragraph is a stripe through the words. The
+   underline says "you are on this one" without moving a glyph. */
+.chat-link[data-cursor] {
+  text-decoration: underline;
+}
+
+.chat-link[data-cursor]::before {
+  content: none;
 }
 
 .md strong {

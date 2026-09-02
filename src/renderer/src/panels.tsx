@@ -59,6 +59,7 @@ import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, expand, splitRefs } from './fileRefs'
+import { hrefOf, splitLinks } from './links'
 import { splitSkills } from '../../shared/skills'
 import { renderMarkdown, type MdLine } from './markdown'
 import { bashGist, bashProgram, highlightShell } from './shell'
@@ -1500,12 +1501,75 @@ function RefText({ text }: { text: string }) {
     <>
       {splitSkills(text, (name) => known.has(name)).map((part, i) =>
         part.skill === undefined ? (
-          <PlainText text={part.text} key={i} />
+          <RefLinks text={part.text} key={i} />
         ) : (
           <SkillPill name={part.skill} key={i} />
         )
       )}
     </>
+  )
+}
+
+/**
+ * Links first, then the rest of the pipeline.
+ *
+ * Order matters: `www.floe.dev/docs.md` is shaped exactly like a file
+ * reference, and whichever splitter runs first claims it. It is an address —
+ * the chip would name a file nobody can open.
+ */
+function RefLinks({ text }: { text: string }) {
+  return (
+    <>
+      {splitLinks(text).map((part, i) =>
+        part.url === undefined ? (
+          <PlainText text={part.text} key={i} />
+        ) : (
+          <ChatLink url={part.url} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+/** Plain text with the links in it drawn as links, and nothing else touched. */
+function LinkText({ text }: { text: string }) {
+  return (
+    <>
+      {splitLinks(text).map((part, i) =>
+        part.url === undefined ? (
+          <Fragment key={i}>{part.text}</Fragment>
+        ) : (
+          <ChatLink url={part.url} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * A URL in the transcript, opened in the browser.
+ *
+ * An anchor rather than a button so it can be copied and dragged like the
+ * address it is, and `data-nav` so the lane's cursor walks onto it: j/k reaches
+ * the link and ⏎ opens it, the same as every other row in the chat. Enter comes
+ * from the anchor's own activation — the href is real, only the navigation is
+ * intercepted.
+ */
+function ChatLink({ url }: { url: string }) {
+  return (
+    <a
+      className="chat-link"
+      href={hrefOf(url)}
+      data-nav
+      title={hrefOf(url)}
+      onClick={(e) => {
+        // Never navigate the app away — this window is the app.
+        e.preventDefault()
+        void window.floe.openExternal(hrefOf(url))
+      }}
+    >
+      {url}
+    </a>
   )
 }
 
@@ -2003,7 +2067,7 @@ const Log = memo(function Log({
         <div className="irc-body irc-act" key={base + i}>
           <span className="irc-star">*</span>{' '}
           {item.name && <span className="irc-by">{item.name} </span>}
-          {item.summary || item.text || item.role}
+          <LinkText text={item.summary || item.text || item.role} />
         </div>
       )
       continue
