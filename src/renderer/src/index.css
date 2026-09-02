@@ -101,6 +101,29 @@
      so they stay in proportion when --radius moves. */
   --radius-sm: calc(var(--radius) / 2);
   --head-h: 34px;
+
+  /* Who is speaking, by colour.
+     One ring of fourteen evenly spaced hues (L*72 C*40). The seven voices always
+     in the channel — you, and each harness — take every other slot, so no two of
+     them are ever a near-miss; the rest are the pool a subagent or another
+     session hashes into. See nickColor in panels.tsx.
+     Variables rather than literals because a mid-tone that reads on the dark
+     background is nearly invisible on the flat white one — the light values below
+     are the same hues, darkened and saturated to carry on white. */
+  --nick-you: #f494b2;
+  --nick-claude: #ec9e79;
+  --nick-codex: #b9b368;
+  --nick-gemini: #70c190;
+  --nick-opencode: #00c3cf;
+  --nick-lmstudio: #5db9f7;
+  --nick-ollama: #c2a3ea;
+  --nick-0: #f79693;
+  --nick-1: #d6a969;
+  --nick-2: #96bc76;
+  --nick-3: #42c4af;
+  --nick-4: #19c0e9;
+  --nick-5: #95aff7;
+  --nick-6: #e399d1;
 }
 
 /* --- light --------------------------------------------------------------- */
@@ -147,6 +170,24 @@
   --wash-3: #0000000d;
   --wash-4: #00000012;
   --wash-5: #00000014;
+
+  /* The same seven and the same pool, at L*46 C*52: on flat white a mid-tone
+     nick is a smudge, and the whole point of the colour is being read at a
+     glance. Same hues, same order — only the lightness moves. */
+  --nick-you: #b9416f;
+  --nick-claude: #ab5529;
+  --nick-codex: #717105;
+  --nick-gemini: #007f45;
+  --nick-opencode: #008192;
+  --nick-lmstudio: #0077c2;
+  --nick-ollama: #7e5cb1;
+  --nick-0: #ba464a;
+  --nick-1: #92640c;
+  --nick-2: #487922;
+  --nick-3: #00816c;
+  --nick-4: #007eb0;
+  --nick-5: #346cc2;
+  --nick-6: #a64b94;
 }
 
 *,
@@ -4777,6 +4818,12 @@ kbd {
   font-size: 11px;
 }
 
+/* The probe spawns a `claude`, so this holds the row's height for a few
+   seconds. Faint on purpose — it is a placeholder, not a reading. */
+.account-usage-wait {
+  color: var(--faint);
+}
+
 .account-plan {
   color: var(--faint);
   text-transform: uppercase;
@@ -4963,6 +5010,45 @@ kbd {
   height: 22px;
   padding: 0 6px;
   font-size: 11px;
+}
+
+/* The font-size handle. Drawn from theme variables only, so it follows a light
+   flip without a second rule: a hairline track in --line, and an outline thumb
+   rather than a filled one, like every other control here. */
+.settings-slider {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.settings-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--line);
+  border-radius: 1px;
+}
+
+.settings-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  /* Half the thumb, less half the track, so it rides centred on the line. */
+  margin-top: -5px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  background: var(--bg);
+}
+
+/* Focus fills the thumb instead of ringing it: the app draws separations with
+   borders, never shadows. */
+.settings-slider:focus-visible {
+  outline: none;
+}
+
+.settings-slider:focus-visible::-webkit-slider-thumb {
+  background: var(--accent);
 }
 
 /* The pinguim's tones. Each one is a pair — the dark value is what the app is

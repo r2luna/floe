@@ -693,6 +693,11 @@ export interface SubagentInfo {
 
 export type AgentEvent =
   | { kind: 'session'; sessionId: string; model?: string } // model = concrete id the CLI resolved, e.g. "claude-opus-4-8"
+  // Who is answering the turn that just started. Emitted by whoever starts it,
+  // because a panel does not always start its own: an agent's `send_message`
+  // can address `@codex` into a chat a person is watching, and without this the
+  // reply is stamped with whatever that panel's picker last said.
+  | { kind: 'turn'; provider?: string; model?: string; effort?: string; mode?: PermissionMode }
   | { kind: 'text'; text: string }
   | { kind: 'reasoning'; text: string } // extended-thinking delta (streams before the text answer)
   | { kind: 'tool'; name: string; summary?: string }
@@ -751,7 +756,7 @@ export interface AgentReplay {
    * mid-turn has no other way to know: the picker says claude, and stamping
    * the replayed text with it would put codex's answer under Claude's name.
    */
-  choice?: { provider?: string; effort?: string; mode?: PermissionMode }
+  choice?: { provider?: string; model?: string; effort?: string; mode?: PermissionMode }
   events: AgentEvent[]
   /**
    * Every id this session answers to — Floe's own and the claudeId the CLI gave

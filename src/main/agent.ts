@@ -142,11 +142,30 @@ export function sendAgentEvent(win: BrowserWindow, key: string, event: AgentEven
   // unobservable anywhere in main. Fleet reads it to show `error` instead of a
   // session that just quietly went idle. Cleared when a new turn starts.
   if (event.kind === 'error') lastErrors.set(key, { at: Date.now(), message: event.message })
+  // A turn answered by anything but Claude has nothing accumulating its reply,
+  // so `send_message(wait)` had nowhere to read one from. Every runtime emits
+  // through here, so here is the one place that can hold the answer for them.
+  //
+  // Decided by WHO IS ANSWERING, not by whether a conn exists: a session that
+  // has ever run Claude keeps its conn forever, so a later codex turn in the
+  // same chat would take Claude's branch and resolve the waiter with Claude's
+  // last answer — the reply to the message before this one.
+  const answering = replays.get(key)?.choice?.provider
+  if (answering && answering !== 'claude') {
+    if (event.kind === 'text') runtimeText.set(key, (runtimeText.get(key) ?? '') + event.text)
+    if (event.kind === 'done') {
+      resolveWaiters(key, runtimeText.get(key) ?? '')
+      runtimeText.delete(key)
+    }
+  }
   const seq = (seqs.get(key) ?? 0) + 1
   seqs.set(key, seq)
   recordForReplay(key, event, seq)
   if (!win.isDestroyed()) win.webContents.send('agent:event', { key, event, seq })
 }
+
+// What a conn-less runtime has said this turn, for waitForTurn to resolve with.
+const runtimeText = new Map<string, string>()
 const send = sendAgentEvent
 
 const lastErrors = new Map<string, { at: number; message: string }>()
@@ -159,7 +178,10 @@ const seqs = new Map<string, number>()
 // the panel's initial read already has it.
 const replays = new Map<string, AgentReplay>()
 
-export function markTurnStart(key: string, choice?: AgentReplay['choice']): void {
+export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?: BrowserWindow): void {
+  // Last turn's answer is not this one's — a waiter parked now must not be
+  // handed the reply to the question before it.
+  runtimeText.delete(key)
   replays.set(key, {
     running: true,
     lastSeq: seqs.get(key) ?? 0,
@@ -170,6 +192,10 @@ export function markTurnStart(key: string, choice?: AgentReplay['choice']): void
     // says which harness produced them.
     choice
   })
+  // And announced, for the panel already open. It may not have started this
+  // turn — an agent can send into a chat someone is reading — so its picker is
+  // not the answer to who is working.
+  if (win && choice) sendAgentEvent(win, key, { kind: 'turn', ...choice })
 }
 
 /**
@@ -570,7 +596,7 @@ export function sendToAgent(
   // only this turn's reply, and record the prompt in the live transcript buffer.
   conn.lastAssistantText = ''
   lastErrors.delete(key) // a new turn supersedes the previous failure
-  markTurnStart(key, { provider: 'claude', effort: options.effort, mode: options.permissionMode })
+  markTurnStart(key, { provider: 'claude', effort: options.effort, mode: options.permissionMode }, win)
   conn.turnActive = true
   conn.turnClosed = false
   conn.turnStartedAt = Date.now()

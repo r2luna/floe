@@ -43,6 +43,11 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { readSessionBuffer, sendToAgent, sessionRuntime, stopAgent, waitForTurn } from './agent'
+// One turn, one door: the same dispatcher the composer's `agent:start` uses, so
+// an agent gets the harness, the skills and the handle exactly as a person does.
+import { optionsForRoute, routeOf, startTurn } from './turn'
+import { HARNESSES, MODES, nearestMode } from '../shared/modes'
+import { EFFORTS, type Effort } from '../shared/types'
 import {
   createSkill,
   deleteSkill,
@@ -177,9 +182,61 @@ function runOptionsFor(s: CreatedSession): AgentRunOptions {
   return {
     // A session an agent drives has no human in front of it to answer prompts,
     // so default to skip unless the session was explicitly set stricter.
-    permissionMode: s.permissionMode ?? 'skip',
+    permissionMode: nearestMode(s.permissionMode ?? 'skip', s.provider),
     model: s.model,
-    effort: s.effort
+    effort: s.effort,
+    // What the session answers AS. Without it every agent-sent message went to
+    // Claude, whatever the chat was set to — an agent writing into a codex
+    // session got a different harness than the person looking at it.
+    provider: s.provider
+  }
+}
+
+/**
+ * Who answers this one message: what the caller named, else the handle at the
+ * front of the prompt, else the session itself.
+ *
+ * Both spellings, because both are real. An agent that knows it wants codex
+ * says so in the arguments; an agent relaying something a person wrote passes
+ * `@codex …` through untouched and gets the same result the composer would
+ * have given. Neither changes what the session answers as afterwards — one
+ * message is not a switch, the same as in the UI.
+ */
+function sendOptions(
+  target: CreatedSession,
+  prompt: string,
+  named: { harness?: string; model?: string; effort?: Effort; mode?: PermissionMode }
+): { prompt: string; options: AgentRunOptions } {
+  const handle = named.harness ? null : routeOf(prompt)
+  const harness = named.harness ?? handle?.harness
+  if (!harness) {
+    const options = runOptionsFor(target)
+    return {
+      prompt,
+      options: {
+        ...options,
+        model: named.model ?? options.model,
+        effort: named.effort ?? options.effort,
+        permissionMode: named.mode ?? options.permissionMode
+      }
+    }
+  }
+  const route = {
+    harness,
+    model: named.model ?? handle?.model,
+    effort: named.effort ?? handle?.effort,
+    prompt: handle?.prompt ?? prompt
+  }
+  const options = optionsForRoute(route, target.id)
+  return {
+    // Sent without the handle, shown with it — the same split the composer
+    // makes, so a transcript read back says who the message was for.
+    prompt: route.prompt,
+    options: {
+      ...options,
+      permissionMode: named.mode ? nearestMode(named.mode, options.provider) : options.permissionMode,
+      shown: handle ? prompt : undefined
+    }
   }
 }
 
@@ -514,24 +571,39 @@ function registerTools(server: McpServer, token: string): void {
     'Send a prompt to another Floe session. With wait=true, block until that session finishes its turn and return its final assistant text.',
     {
       session_id: z.string().describe('The Floe session id to send to.'),
-      prompt: z.string().describe('The message to send.'),
-      wait: z.boolean().optional().describe('Wait for the turn to complete and return the assistant reply.')
+      prompt: z
+        .string()
+        .describe(
+          'The message to send. Opening it with a handle — `@codex revisa isso` — hands that one message to that harness, exactly as it would in the composer.'
+        ),
+      wait: z.boolean().optional().describe('Wait for the turn to complete and return the assistant reply.'),
+      harness: z
+        .enum(HARNESSES as [string, ...string[]])
+        .optional()
+        .describe('Who answers this one message. Overrides a handle in the prompt. The session keeps answering as whatever it did before.'),
+      model: z.string().optional().describe("That harness's own slug. Empty means whatever it is configured for."),
+      effort: z.enum(EFFORTS).optional().describe('How hard to think.'),
+      mode: z
+        .enum(MODES.map((m) => m.id) as [PermissionMode, ...PermissionMode[]])
+        .optional()
+        .describe('How much it may do: plan, default (ask), acceptEdits (auto) or skip (bypass).')
     },
-    async ({ session_id, prompt, wait }) => {
+    async ({ session_id, prompt, wait, harness, model, effort, mode }) => {
       try {
         const target = findSessionAny(session_id)
         if (!target) return textResult({ error: `Unknown session: ${session_id}` })
         const win = getWindow()
         if (!win) return textResult({ error: 'No window available to run the session.' })
         const key = connKeyFor(target)
+        const sent = sendOptions(target, prompt, { harness, model, effort, mode })
         // Spawn the conn (if needed) BEFORE waiting, so a brand-new session has a
         // live process for waitForTurn to resolve against.
-        sendToAgent(win, key, target.worktreePath, expandPrompt(target.worktreePath, prompt), runOptionsFor(target))
+        startTurn(win, key, target.worktreePath, sent.prompt, sent.options)
         if (wait) {
           const text = await waitForTurn(key)
-          return textResult({ sessionId: target.id, reply: text })
+          return textResult({ sessionId: target.id, reply: text, answeredBy: sent.options.provider ?? 'claude' })
         }
-        return textResult({ sessionId: target.id, ack: true })
+        return textResult({ sessionId: target.id, ack: true, answeredBy: sent.options.provider ?? 'claude' })
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

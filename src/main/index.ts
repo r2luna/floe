@@ -64,7 +64,7 @@ import {
   worktreeDiffStat,
   type CreateWorktreeOptions
 } from './git'
-import { sendToAgent, answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { startTurn } from './turn'
@@ -113,11 +113,11 @@ import {
 import { discoverSlashCommands } from './slashCommands'
 import { getClaudeInfo, getContextUsage } from './claudeInfo'
 import { sampleMemory, startMemoryStats, stopMemoryStats } from './systemStats'
-import { refreshUsageNow, setUsageProbeCwd } from './usageMonitor'
+import { lastUsage, refreshUsageNow, setUsageProbeCwd } from './usageMonitor'
 import { startMcpAuth, cancelMcpAuth, pasteMcpAuth, killAllMcpAuths } from './mcpAuth'
 import { authStatus, startLogin, pasteCode, cancelLogin, logout } from './claudeAuth'
 import { claudeStats } from './claudeStats'
-import { forgetThread, runRuntime } from './runtimes'
+import { forgetThread } from './runtimes'
 import { localAgents, localStats, localUsage } from './localAgents'
 import { forgetSeen, sessionTranscript } from './handoff'
 import { detectDevCommand, startDev, stopDev } from './devServer'
@@ -143,7 +143,6 @@ import {
   type McpServerPatch,
   type NewMcpServer
 } from './config/mcpServers'
-import { expandSkills } from '../shared/skills'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
 import { handle } from './plugins/handleMap'
@@ -540,6 +539,9 @@ function registerIpc(): void {
   // Topbar stats: usage refresh is the only pull; memory + usage are pushed.
   handle('stats:getMemory', () => sampleMemory())
   handle('stats:refreshUsage', () => refreshUsageNow())
+  // The probe spawns a `claude` and takes seconds. This is the instant answer
+  // the account panel paints first, so the row is never blank while it waits.
+  handle('stats:lastUsage', () => lastUsage())
   handle('stats:setUsageCwd', (_event, worktreePath: string) => setUsageProbeCwd(worktreePath))
   handle('mcp:auth:start', (event, worktreePath: string, serverName: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -917,6 +919,11 @@ function registerIpc(): void {
   handle('config:get', () => floeConfig())
   handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
     setFloeValue(table, key, value)
+    // Straight away rather than through the watcher: the font-size slider is
+    // dragged, and 120ms of watcher debounce between the handle and the app
+    // resizing is the difference between adjusting a size and guessing one. The
+    // watcher still fires after, on the same value — setZoomFactor is idempotent.
+    for (const win of BrowserWindow.getAllWindows()) applyZoom(win)
     return floeConfig()
   })
   // Every problem across every config file, so Settings has one place to show

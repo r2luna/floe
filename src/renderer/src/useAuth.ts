@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AuthStatus,
   ClaudeAuthEvent,
@@ -17,6 +17,13 @@ export interface Auth {
    * because asking spawns (see main/localAgents.localUsage).
    */
   usage: Record<string, HarnessUsage>
+  /**
+   * Whether Claude's own probe is still out. It spawns a `claude` and takes
+   * seconds, so without this the row sits blank long enough to read as a
+   * runtime that reports nothing — which is what Codex's row looks like when
+   * it genuinely reports nothing.
+   */
+  usageBusy: boolean
   /** Lifetime history for the other runtimes, keyed by runtime id. */
   harnessStats: Record<string, ClaudeStats>
   /** The consent URL, while a login is waiting for its code. */
@@ -42,6 +49,12 @@ export function useAuth(): Auth {
   const [status, setStatus] = useState<AuthStatus | null>(null)
   const [stats, setStats] = useState<ClaudeStats | null>(null)
   const [usage, setUsage] = useState<Record<string, HarnessUsage>>({})
+  const [usageBusy, setUsageBusy] = useState(false)
+  // How many probes are still out. A count, not a boolean: the main process
+  // answers a second request while the first is running by handing back its
+  // cached reading at once, so the fast one would otherwise clear the flag
+  // while the slow one — the one actually fetching — is still going.
+  const probes = useRef(0)
   const [harnessStats, setHarnessStats] = useState<Record<string, ClaudeStats>>({})
   const [url, setUrl] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -60,14 +73,28 @@ export function useAuth(): Auth {
     void window.floe.claude.localUsage().then((others) =>
       setUsage((prev) => ({ ...prev, ...others }))
     )
-    void window.floe.stats.refreshUsage().then((u: UsageStats | null) => {
-      if (!u) return
+    const showClaude = (u: UsageStats | null): boolean => {
+      if (!u) return false
       const windows = [
         u.session && { label: '5h', usedPercent: u.session.pct },
         u.week && { label: 'week', usedPercent: u.week.pct }
       ].filter((w): w is { label: string; usedPercent: number } => !!w)
-      if (windows.length) setUsage((prev) => ({ ...prev, claude: { windows } }))
-    })
+      if (!windows.length) return false
+      setUsage((prev) => ({ ...prev, claude: { windows } }))
+      return true
+    }
+    // Paint the last reading first — it costs no spawn and is seconds old at
+    // worst — then replace it with the fresh one when the probe lands.
+    probes.current += 1
+    setUsageBusy(true)
+    void window.floe.stats.lastUsage().then(showClaude)
+    void window.floe.stats
+      .refreshUsage()
+      .then(showClaude)
+      .finally(() => {
+        probes.current -= 1
+        if (probes.current === 0) setUsageBusy(false)
+      })
   }, [])
 
   useEffect(reload, [reload])
@@ -94,6 +121,7 @@ export function useAuth(): Auth {
     status,
     stats,
     usage,
+    usageBusy,
     harnessStats,
     url,
     busy,

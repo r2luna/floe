@@ -7,7 +7,8 @@ import type {
   AgentQuestion,
   Effort,
   FileAttachment,
-  ImageAttachment
+  ImageAttachment,
+  PermissionMode
 } from '../../shared/types'
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
@@ -176,6 +177,31 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The same thing as state, for the header to render from. A ref alone cannot
   // paint: the panel above has to re-render when the answering harness changes.
   const [answering, setAnswering] = useState<ModelChoice>(defaultChoice())
+  /**
+   * Install who is answering the turn in flight.
+   *
+   * Three callers, because a panel does not always start its own turns: its own
+   * send, the replay when it opened mid-turn, and the `turn` event for one an
+   * agent started over MCP. Whatever the source, the reply has to be stamped
+   * with the harness that produced it and not with what the picker says.
+   */
+  const setAnsweringChoice = useCallback(
+    (next: { provider?: string; model?: string; effort?: string; mode?: PermissionMode }): void => {
+      const restored: ModelChoice = {
+        ...choiceRef.current,
+        provider: !next.provider || next.provider === 'claude' ? undefined : next.provider,
+        model: next.model ?? choiceRef.current.model,
+        effort: (next.effort as Effort) ?? choiceRef.current.effort,
+        mode: next.mode ?? choiceRef.current.mode
+      }
+      runChoice.current = restored
+      setAnswering(restored)
+      // Only another runtime reports the model it ran; Claude states its own in
+      // the `session` event, and a name from here would be the alias, not the id.
+      if (restored.provider) runModel.current = restored.model
+    },
+    []
+  )
   // The concrete model id the CLI resolved for the run in flight, so a live
   // message is labelled with what actually answered — not with whatever the
   // picker happens to say by the time you read it back.
@@ -256,6 +282,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           provider: runChoice.current.provider
         }
       })
+    } else if (event.kind === 'turn') {
+      // Someone started a turn here. Usually us, in which case this only
+      // restates what `deliver` already set — but when an agent addressed
+      // `@codex` into this chat over MCP, it is the only thing that says so.
+      setAnsweringChoice(event)
     } else if (event.kind === 'tool') {
       // Stamped: a turn that opens with work is headed by the tool row's clock
       // (see the Log), and an unstamped one would head the run with no time at
@@ -405,17 +436,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           // panel may have opened onto a turn that was handed to another
           // harness. Without it the replayed text is stamped with the default
           // and codex's answer appears under Claude's name.
-          if (replay.choice) {
-            const restored = {
-              ...choiceRef.current,
-              provider: replay.choice.provider === 'claude' ? undefined : replay.choice.provider,
-              model: replay.model ?? choiceRef.current.model,
-              effort: (replay.choice.effort as Effort) ?? choiceRef.current.effort,
-              mode: replay.choice.mode ?? choiceRef.current.mode
-            }
-            runChoice.current = restored
-            setAnswering(restored)
-          }
+          if (replay.choice)
+            setAnsweringChoice({ ...replay.choice, model: replay.model ?? replay.choice.model })
           for (const event of replay.events) apply(event)
           setRunning(true)
           // The turn started before this panel existed: time it from main's

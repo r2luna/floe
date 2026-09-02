@@ -1,21 +1,12 @@
 import { homedir } from 'node:os'
 import { getClaudeInfo } from './claudeInfo'
-import type { UsageStats, UsageWindow } from '../shared/types'
+import { parseUsage } from './usageText'
+import type { UsageStats } from '../shared/types'
 
 // Reads Claude's account usage on demand. The probe spawns a throwaway `claude`
 // (up to ~20s), so it must never run merely because a Floe window opened.
 // Callers that explicitly request a refresh can reuse this module and its cache.
-//
-// The /usage text looks like:
-//   You are currently using your subscription to power your Claude Code usage
-//
-//   Current session: 10% used · resets Jun 13 at 1am (America/Denver)
-//   Current week (all models): 2% used · resets Jun 15 at 10pm (America/Denver)
-//   Current week (Sonnet only): 0% used
-//
-// We map "session" → 5h window, "week (all models)" → week, and (if a plan ever
-// reports it) "month" → month. The "Sonnet only" line is ignored. The parser is
-// deliberately tolerant: if nothing matches it returns {} and the UI hides.
+// The text it comes back with is parsed in usageText.ts.
 
 let cwd = homedir()
 let inFlight = false
@@ -24,24 +15,6 @@ let inFlight = false
 // the probe's transient session file local to a real project dir.
 export function setUsageProbeCwd(path: string | undefined): void {
   if (path) cwd = path
-}
-
-export function parseUsage(text: string | undefined): UsageStats {
-  if (!text) return {}
-  const stats: UsageStats = {}
-  for (const rawLine of text.split('\n')) {
-    const line = rawLine.trim()
-    // "Current <label>: NN% used[ · resets <when>]"
-    const m = line.match(/^current\s+(.+?):\s*(\d+)%\s*used(?:\s*·\s*resets\s+(.+))?$/i)
-    if (!m) continue
-    const label = m[1].toLowerCase()
-    const window: UsageWindow = { pct: Number(m[2]), resetsAt: m[3]?.trim() || undefined }
-    if (label.includes('sonnet') || label.includes('opus') || label.includes('haiku')) continue // model-specific breakdowns
-    if (label.includes('session')) stats.session ??= window
-    else if (label.includes('month')) stats.month ??= window
-    else if (label.includes('week')) stats.week ??= window
-  }
-  return stats
 }
 
 // The last probe's result, so a reader that must not spawn a 20s `claude` (the
@@ -53,13 +26,19 @@ export function lastUsage(): UsageStats {
 }
 
 async function refresh(): Promise<UsageStats> {
-  if (inFlight) return {}
+  // A probe already running means the answer is seconds away, but the caller
+  // asked now. Handing back the last reading beats handing back nothing: the
+  // renderer drops an empty result, so `{}` here blanked the row for anyone
+  // who opened the account panel while a refresh was in flight.
+  if (inFlight) return last
   inFlight = true
   try {
     const info = await getClaudeInfo(cwd)
     const stats = parseUsage(info.usageText)
-    last = stats
-    return stats
+    // A probe that timed out or could not spawn parses to {}. One bad spawn
+    // should not erase a good number that is still roughly true.
+    if (stats.session || stats.week || stats.month) last = stats
+    return last
   } finally {
     inFlight = false
   }

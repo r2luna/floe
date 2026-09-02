@@ -155,7 +155,16 @@ export const KINDS = {
     // three.
     action: { icon: IconPlus, title: 'Add project…', command: 'project.add' }
   },
-  worktrees: { icon: IconGitBranch, title: 'worktrees', width: 330, order: 10, needsProject: true },
+  worktrees: {
+    icon: IconGitBranch,
+    title: 'worktrees',
+    width: 330,
+    order: 10,
+    needsProject: true,
+    // The same command ⌘N runs — the header button is a second way in, not a
+    // second create flow.
+    action: { icon: IconPlus, title: 'New worktree…', command: 'worktree.new' }
+  },
   // A branch with no session open. Its whole body is the launcher, so it is as
   // wide as the chat it turns into — sending must not make the lane jump.
   // `bare` drops the card and header: there is no content to frame yet, and a
@@ -901,13 +910,32 @@ function Subagents({ subs }: { subs: Sub[] }) {
 /* --- transcript ----------------------------------------------------------- */
 
 // mIRC assigned every nick a colour by hashing it, so you learned to recognise
-// people by colour before reading the name. Same trick, muted for this theme.
-const NICK_COLORS = ['#7fb3d5', '#c9a05f', '#8fc98f', '#c48fb8', '#6fc3c3', '#c98f7f']
+// people by colour before reading the name. Same trick — but the voices you most
+// need to tell apart are a KNOWN set, so they are not left to a hash that can
+// collide. It did: `you` and `codex` came out the same pink, in a chat whose
+// whole point was seeing which of them answered.
+//
+// So the seven that are always in the channel — you, and each harness — get a
+// colour each by name, and everyone else (subagents, other sessions) hashes over
+// what is left. The fourteen are one ring of evenly spaced hues: the reserved
+// seven take every other slot, which puts each of them a clear step from the
+// next (ΔE 34 at the closest) rather than wherever a hash happened to land.
+//
+// The values live in the CSS, one variable per slot with a light-theme override
+// — a mid-tone that reads on the dark background is nearly invisible on the
+// light one. See `--nick-*` in index.css.
+const NICK_HASH_SLOTS = 7
+
+/** The voices that are always here. The user's nick is whatever floe.toml or the
+    machine says, so it is matched at call time rather than listed. */
+const RESERVED_NICKS = ['claude', 'codex', 'gemini', 'opencode', 'lmstudio', 'ollama']
 
 const nickColor = (nick: string): string => {
+  if (nick === userNick()) return 'var(--nick-you)'
+  if (RESERVED_NICKS.includes(nick)) return `var(--nick-${nick})`
   let h = 0
   for (const ch of nick) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return NICK_COLORS[h % NICK_COLORS.length]
+  return `var(--nick-${h % NICK_HASH_SLOTS})`
 }
 
 const clock = (at?: number): string => (at ? new Date(at).toTimeString().slice(0, 5) : '')
@@ -4015,6 +4043,7 @@ function AccountPanel({ onOpen }: { onOpen: OpenFn }) {
           badge={signedIn ? auth.status.subscriptionType : undefined}
           out={!signedIn}
           usage={auth.usage.claude}
+          usageBusy={auth.usageBusy}
         >
           {signedIn ? (
             <button className="btn" onClick={auth.logout}>
@@ -4091,6 +4120,7 @@ function AccountRow({
   out,
   title,
   usage,
+  usageBusy,
   children
 }: {
   name: string
@@ -4101,6 +4131,8 @@ function AccountRow({
   title?: string
   /** How much of this runtime's allowance is gone, when it reports one. */
   usage?: HarnessUsage
+  /** Its allowance is still being asked for — say so rather than show nothing. */
+  usageBusy?: boolean
   children?: ReactNode
 }) {
   return (
@@ -4119,6 +4151,7 @@ function AccountRow({
       {/* The allowance sits on its own line under the name, spanning the row:
           it is about the account above it, and it must not fight the detail
           for the same strip of width. */}
+      {!usage && usageBusy && <span className="account-usage account-usage-wait">checking limits…</span>}
       {usage && (
         <span className="account-usage">
           {usage.plan && <span className="account-plan">{usage.plan}</span>}
@@ -4292,6 +4325,19 @@ type SettingRow =
     }
   | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
+  | {
+      kind: 'slider'
+      table: string
+      key: string
+      label: string
+      value: number
+      /** The same bounds the config reader validates against — never a range that writes a value the file would reject. */
+      min: number
+      max: number
+      step?: number
+      suffix?: string
+      hint?: string
+    }
   | { kind: 'penguin'; table: string; key: string; label: string; value: PenguinHeadId; hint?: string }
   | {
       kind: 'penguinColor'
@@ -4418,7 +4464,18 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           value: config.appearance.fontFamily ?? '',
           placeholder: 'system monospace'
         },
-        { kind: 'number', table: 'appearance', key: 'font-size', label: 'Font size', value: config.appearance.fontSize },
+        {
+          kind: 'slider',
+          table: 'appearance',
+          key: 'font-size',
+          label: 'Font size',
+          value: config.appearance.fontSize,
+          // 6–48 is what the config reader accepts; a slider that stops short of
+          // it would make a hand-edited file unreachable from this row.
+          min: 6,
+          max: 48,
+          hint: 'scales the whole surface — the app resizes as you drag'
+        },
         {
           kind: 'choice',
           table: 'appearance',
@@ -4691,7 +4748,13 @@ function SettingRowView({
   const box = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    if (editing) box.current?.focus()
+    // Selected, not just focused: the box opens on the value that is already
+    // set, and a cursor parked after it turns "change my name" into typing the
+    // new one onto the end of the old one.
+    if (editing) {
+      box.current?.focus()
+      box.current?.select()
+    }
   }, [editing])
 
   // Coming back out of an editor, focus returns to the row it opened from. The
@@ -4755,6 +4818,10 @@ function SettingRowView({
     )
   }
 
+  if (editing && row.kind === 'slider') {
+    return <SettingSlider row={row} onSet={onSet} onLeave={leave} />
+  }
+
   if (editing && (row.kind === 'text' || row.kind === 'number')) {
     return (
       <div className="row settings-row settings-editing">
@@ -4784,7 +4851,7 @@ function SettingRowView({
       const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
       return onSet(row.table, row.key, next)
     }
-    if (row.kind === 'penguin' || row.kind === 'penguinColor') return onEdit()
+    if (row.kind === 'penguin' || row.kind === 'penguinColor' || row.kind === 'slider') return onEdit()
     setDraft(row.kind === 'number' ? String(row.value) : row.value)
     onEdit()
   }
@@ -4795,7 +4862,7 @@ function SettingRowView({
       <span className={`settings-value${row.kind === 'bool' && !row.value ? ' settings-off' : ''}`}>
         {row.kind === 'bool' && (row.value ? 'on' : 'off')}
         {row.kind === 'choice' && (row.value || row.placeholder || '—')}
-        {row.kind === 'number' && `${row.value}${row.suffix ?? ''}`}
+        {(row.kind === 'number' || row.kind === 'slider') && `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
         {row.kind === 'penguin' && (
           <>
@@ -4815,6 +4882,81 @@ function SettingRowView({
         )}
       </span>
     </button>
+  )
+}
+
+/**
+ * A number you drag — the font size.
+ *
+ * Live rather than on-commit: font size is a window zoom, so the only honest
+ * preview of a size is the app already drawn at it. Writes are coalesced,
+ * because one drag crosses forty values and each one rewrites floe.toml.
+ *
+ * The range input is here for its keyboard as much as its handle — arrows step
+ * it, Home/End take the ends — so the row is fully drivable with the mouse
+ * unplugged. Enter keeps what is showing, Escape puts back what was there.
+ */
+function SettingSlider({
+  row,
+  onSet,
+  onLeave
+}: {
+  row: Extract<SettingRow, { kind: 'slider' }>
+  onSet: (table: string, key: string, value: number) => void
+  onLeave: () => void
+}) {
+  const [value, setValue] = useState(row.value)
+  // What the row was on when it opened — the only thing Escape can put back,
+  // since a live write has already been to disk by then.
+  const start = useRef(row.value)
+  const box = useRef<HTMLInputElement>(null)
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    box.current?.focus()
+    return () => {
+      if (pending.current) clearTimeout(pending.current)
+    }
+  }, [])
+
+  const write = (next: number): void => {
+    setValue(next)
+    if (pending.current) clearTimeout(pending.current)
+    pending.current = setTimeout(() => onSet(row.table, row.key, next), 80)
+  }
+
+  const finish = (next: number): void => {
+    if (pending.current) clearTimeout(pending.current)
+    pending.current = null
+    if (next !== row.value) onSet(row.table, row.key, next)
+    onLeave()
+  }
+
+  return (
+    <div className="row settings-row settings-editing">
+      <span className="row-name">{row.label}</span>
+      <input
+        ref={box}
+        type="range"
+        className="settings-slider"
+        min={row.min}
+        max={row.max}
+        step={row.step ?? 1}
+        value={value}
+        onChange={(e) => write(Number(e.target.value))}
+        onKeyDown={(e) => {
+          // The lane binds j/k and Escape; inside the slider the arrows are the
+          // input's own and must not also move the cursor behind it.
+          e.stopPropagation()
+          if (e.key === 'Enter') finish(value)
+          if (e.key === 'Escape') finish(start.current)
+        }}
+      />
+      <span className="settings-value">
+        {value}
+        {row.suffix ?? ''}
+      </span>
+    </div>
   )
 }
 
