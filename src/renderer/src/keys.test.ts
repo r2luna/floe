@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { DEFAULT_KEYMAP } from '../../shared/defaultKeymap.ts'
+import { normalizeChord } from '../../shared/keymap.ts'
 import { resolveKey, type KeyContext, type KeyInput, type Resolved } from './keys.ts'
 
 const r = (e: KeyInput, ctx?: KeyContext): Resolved | null => resolveKey(e, ctx)
@@ -168,16 +170,28 @@ test('ctrl+i/o walk the branch sessions, even mid-sentence', () => {
   assert.deepEqual(r({ key: 'i' }), { id: 'composer.focus' })
 })
 
-test('the vim set moves the cursor: g/G, ⌃D/⌃U, / and n/N', () => {
+test('the vim set moves the cursor: g, ⌃D/⌃U, / and n', () => {
   assert.deepEqual(r({ key: 'g' }), { id: 'cursor.top' })
-  assert.deepEqual(r({ key: 'G', shift: true }), { id: 'cursor.bottom' })
   assert.deepEqual(r({ key: 'd', ctrl: true }), { id: 'cursor.halfDown' })
   assert.deepEqual(r({ key: 'u', ctrl: true }), { id: 'cursor.halfUp' })
   assert.deepEqual(r({ key: '/' }), { id: 'find.open' })
   assert.deepEqual(r({ key: 'n' }), { id: 'find.next' })
-  assert.deepEqual(r({ key: 'N', shift: true }), { id: 'find.prev' })
   // ⌘/ is still the project palette — the bare key is the panel search.
   assert.deepEqual(r({ key: '/', meta: true }), { id: 'palette.open' })
   // And none of them fire while you are typing.
   for (const key of ['g', '/', 'n']) assert.equal(r({ key }, { typing: true }), null)
+})
+
+// No default binds a bare shift+letter. Shift is how you type a capital, so a
+// binding on one is a letter the composer can never receive — ⇧G and ⇧N were
+// both dropped for exactly that. The commands stay, reachable from the palette.
+test('no default is a bare shift+letter', () => {
+  for (const bind of DEFAULT_KEYMAP) {
+    const first = normalizeChord(bind.key).split(' ')[0]
+    const mods = first.split('+').slice(0, -1)
+    assert.ok(
+      !(mods.length === 1 && mods[0] === 'shift'),
+      `${bind.key} (${bind.command}) shadows a capital letter`
+    )
+  }
 })

@@ -112,7 +112,6 @@ Pane-focus keys only act inside a split terminal; with a single pane they pass t
 |------|--------|
 | `⇧S` | Start command |
 | `⇧T` | Stop command |
-| `⇧R` | Restart command |
 
 Many more actions live in the command palette without default bindings — all remappable: **pipeline** start/cancel/resume, **PR** approve / merge / refresh, **rename / remove project**, **toggle read-only mode**, new/rename/close terminals, rename sessions, group management, collapse/expand all, mode/model direct-set, refresh review, and more.
 

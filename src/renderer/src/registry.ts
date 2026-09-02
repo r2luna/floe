@@ -512,7 +512,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'cursor.bottom',
         title: 'Move cursor to the bottom',
         group: 'Cursor',
-        keys: '⇧G',
         run: (c) => {
           const rows = c.rowsOf(c.panelEl(c.lane.focus))
           landOn(c, rows, rows.length - 1)
@@ -550,7 +549,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'find.prev',
         title: 'Previous match',
         group: 'Cursor',
-        keys: '⇧N',
         run: (c) => c.findNext(-1)
       },
       {
@@ -1483,7 +1481,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.restart',
         title: 'Restart command',
         group: 'Commands',
-        keys: '⇧R',
         enabled: (c) => !!commandTarget(c),
         unavailable: () => 'no command under the cursor',
         run: (c) => {

@@ -140,7 +140,6 @@ rename re-keys it and orphans the output of a process that is still running —
     binds: [
       { key: 'r', command: 'command.run', when: 'panel == "commands"' },
       { key: 's', command: 'command.stop', when: 'panel == "commands"' },
-      { key: 'shift+r', command: 'command.restart', when: 'panel == "commands"' },
       { key: 'enter', command: 'command.logs', when: 'panel == "commands"' },
       { key: 'a', command: 'command.add', when: 'panel == "commands"' },
       { key: 'e', command: 'command.edit', when: 'panel == "commands"' },
@@ -308,19 +307,20 @@ the cursor in the composer.`,
       { key: 'arrowup', command: 'cursor.up' },
       { key: 'j', command: 'cursor.down' },
       { key: 'k', command: 'cursor.up' },
-      { key: 'g', command: 'cursor.top' },
-      { key: 'shift+g', command: 'cursor.bottom' }
+      { key: 'g', command: 'cursor.top' }
     ]
   },
   {
     title: 'Find',
-    doc: `\`/\` searches the focused panel, \`n\` and \`⇧N\` walk the matches forward and
-back. The matches are cursor positions, so find works in any panel that has
-lines.`,
+    doc: `\`/\` searches the focused panel and \`n\` walks the matches forward. The
+matches are cursor positions, so find works in any panel that has lines.
+
+Walking BACK has no default key on purpose: a bare shift+letter is how you type
+a capital, and a binding on one is a letter the composer cannot have. Reach for
+\`find.prev\` in the palette, or give it a chord of your own.`,
     binds: [
       { key: '/', command: 'find.open' },
-      { key: 'n', command: 'find.next' },
-      { key: 'shift+n', command: 'find.prev' }
+      { key: 'n', command: 'find.next' }
     ]
   },
   {

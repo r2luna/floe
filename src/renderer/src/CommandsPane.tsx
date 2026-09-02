@@ -147,7 +147,7 @@ export function CommandsPane({
                     <span
                       className="cmd-act"
                       role="button"
-                      title="Restart (⇧R)"
+                      title="Restart"
                       onMouseDown={(e) => {
                         e.preventDefault()
                         e.stopPropagation()
