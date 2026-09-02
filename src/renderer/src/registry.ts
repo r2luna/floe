@@ -16,9 +16,11 @@ import {
   open,
   patchPanel,
   resizePanel,
+  setCursor,
   toggleDock,
   toggleKind
 } from './lane.ts'
+import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
@@ -233,6 +235,41 @@ function moveCursor(c: CommandContext, delta: number): void {
  * say about the old one). Null when the focused panel is none of those, which
  * is what dims the command.
  */
+/**
+ * The file line a row stands for, when the panel says so on the row itself.
+ *
+ * The prose view cannot be counted through the patch: a rewritten line is ONE
+ * row standing for two of the patch's, and a run of changes is reordered into
+ * file order. So it writes the number it means onto the row, and the commands
+ * that need a line read it there rather than re-deriving one that would be off.
+ */
+function lineOnRow(c: CommandContext, index: number): number | undefined {
+  const line = Number(c.rowsOf(c.panelEl(c.lane.focus))[index]?.dataset.line)
+  return Number.isFinite(line) && line > 0 ? line : undefined
+}
+
+/**
+ * Move the cursor to the next change, treating a run of changed rows as one.
+ *
+ * A rewritten paragraph is a dozen rows; stepping into the middle of it would
+ * mean pressing the key once per line of something you already read as a single
+ * edit. So: walk out of the run you are in, then on to the next one.
+ */
+function stepChange(c: CommandContext, dir: number): void {
+  const rows = c.rowsOf(c.panelEl(c.lane.focus))
+  const at = c.lane.panels[c.lane.focus]?.cursor ?? 0
+  const changed = (i: number): boolean => {
+    const kind = rows[i]?.dataset.kind
+    return kind === 'add' || kind === 'del' || kind === 'mod'
+  }
+
+  let i = at + dir
+  if (changed(at)) while (i >= 0 && i < rows.length && changed(i)) i += dir
+  while (i >= 0 && i < rows.length && !changed(i)) i += dir
+  if (i < 0 || i >= rows.length) return
+  c.setLane((l) => setCursor(l, l.focus, i))
+}
+
 function editTargetOf(c: CommandContext): { path: string; line?: number } | null {
   const panel = c.lane.panels[c.lane.focus]
   if (!panel) return null
@@ -246,6 +283,8 @@ function editTargetOf(c: CommandContext): { path: string; line?: number } | null
   if (panel.kind === 'file') return { path: panel.sub ?? '', line: (panel.cursor ?? 0) + 1 }
   if (panel.kind === 'diff') {
     const path = panel.sub ?? ''
+    const marked = lineOnRow(c, panel.cursor ?? 0)
+    if (marked !== undefined) return { path, line: marked }
     // The parse, not the DOM, for the same reason the quote uses it: the row the
     // cursor indexes has to be the row we read a line number off.
     const { rows } = parseUnifiedDiff(c.patchFor(path))
@@ -260,6 +299,17 @@ function commentOnSelection(c: CommandContext): void {
   const panel = c.lane.panels[c.lane.focus]
   const r = selRange(panel?.selection)
   if (!panel || !r) return
+
+  // A prose row knows its own file line, and the patch's rows are not the rows
+  // on screen there — so the selection is sent as a `path:12-30` reference, the
+  // same shape a file panel sends, rather than as a quoted patch that would name
+  // the wrong lines.
+  const from = lineOnRow(c, r[0])
+  const to = lineOnRow(c, r[1])
+  if (panel.kind === 'diff' && from !== undefined && to !== undefined) {
+    sendToComposer(c, shorten(fileRef(panel.sub ?? '', from, to).trim()) + '\n\n')
+    return
+  }
 
   // Rows here must be the SAME list the cursor indexes: the parse, not the DOM,
   // so the quote cannot drift from what is highlighted.
@@ -277,7 +327,11 @@ function commentOnSelection(c: CommandContext): void {
           return quoteSelection(rows, r[0] - offset, r[1] - offset, panel.sub ?? '')
         })()
   if (!quote) return
+  sendToComposer(c, quote)
+}
 
+/** Put a quote or a reference in the composer, and hand the keyboard over. */
+function sendToComposer(c: CommandContext, quote: string): void {
   // Any composer, not only the chat's: the launcher has one too, and a comment
   // that silently does nothing because the session hasn't started yet is worse
   // than one that lands where you can see it.
@@ -542,6 +596,42 @@ export const REGISTRY: Map<string, Command> = new Map(
               selection: panel.selection ? null : { anchor: at, head: at }
             })
           })
+      },
+      {
+        // Markdown only: every other file IS its source, so there is no second
+        // way to read it and the chip would toggle between one thing and itself.
+        id: 'diff.view',
+        title: 'Read markdown as prose, or as a patch',
+        group: 'Diff',
+        keys: 'p',
+        enabled: (c) => {
+          const panel = c.lane.panels[c.lane.focus]
+          return panel?.kind === 'diff' && READS_AS_PROSE.test(panel.sub ?? '')
+        },
+        run: (c) =>
+          c.setLane((l) =>
+            patchPanel(l, l.focus, {
+              view: l.panels[l.focus]?.view === 'code' ? 'prose' : 'code',
+              // The two views have different rows, so an index into one means
+              // nothing in the other.
+              cursor: 0,
+              selection: null
+            })
+          )
+      },
+      {
+        id: 'diff.nextChange',
+        title: 'Go to the next change',
+        group: 'Diff',
+        keys: ']',
+        run: (c) => stepChange(c, 1)
+      },
+      {
+        id: 'diff.prevChange',
+        title: 'Go to the previous change',
+        group: 'Diff',
+        keys: '[',
+        run: (c) => stepChange(c, -1)
       },
       {
         id: 'selection.cancel',

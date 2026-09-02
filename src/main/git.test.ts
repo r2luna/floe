@@ -36,7 +36,7 @@ void existsSync
 void fileURLToPath
 void pathToFileURL
 
-const { createWorktree, mergeFastForward } = await import('./git.ts')
+const { createWorktree, fileDiff, mergeFastForward } = await import('./git.ts')
 
 const g = (cwd: string, ...args: string[]): string =>
   execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim()
@@ -106,6 +106,36 @@ test('createWorktree reuses an existing branch, or resets it onto a new base', a
     assert.equal(g(wt, 'rev-parse', 'HEAD'), otherHead)
     assert.equal(g(root, 'rev-parse', 'feat'), otherHead)
     assert.equal(readFileSync(join(wt, '.gw-base'), 'utf8').trim(), 'other')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// The prose view reads a document, so it asks for a context wider than the file
+// and gets one hunk spanning it. Without the width, a reworded sentence comes
+// back as three lines of neighbours and nothing else — fragments, not a file.
+test('fileDiff widens its context on request', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-diff-'))
+  try {
+    g(root, 'init', '-q', '-b', 'trunk')
+    g(root, 'config', 'user.email', 't@t')
+    g(root, 'config', 'user.name', 't')
+    const lines = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`)
+    writeFileSync(join(root, 'notes.md'), lines.join('\n') + '\n')
+    g(root, 'add', '-A')
+    g(root, 'commit', '-q', '-m', 'c1')
+
+    lines[20] = 'line 21, reworded'
+    writeFileSync(join(root, 'notes.md'), lines.join('\n') + '\n')
+
+    const narrow = await fileDiff(root, 'notes.md')
+    assert.ok(narrow.includes('line 21, reworded'), 'the change is in both')
+    assert.ok(!narrow.includes('line 1\n'), 'git default keeps its three lines of context')
+
+    const whole = await fileDiff(root, 'notes.md', 100000)
+    assert.ok(whole.includes(' line 1\n'), 'the whole document came back')
+    assert.ok(whole.includes(' line 40'), 'including the far end of it')
+    assert.equal(whole.match(/^@@ /gm)?.length, 1, 'as one hunk')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

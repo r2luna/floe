@@ -291,6 +291,20 @@ comes before the \`selecting\` one.`,
     ]
   },
   {
+    title: 'Reading a Diff',
+    doc: `\`]\` and \`[\` walk the changes, a run of changed lines counting as one —
+a rewritten paragraph is one edit, not twelve.
+
+\`p\` switches a markdown diff between prose and its source. Prose is the
+default for \`.md\`: the document with only the changed WORDS marked inside it,
+rather than a rewritten sentence shown as one red line and one green one.`,
+    binds: [
+      { key: 'p', command: 'diff.view', when: 'panel == "diff"' },
+      { key: ']', command: 'diff.nextChange', when: 'panel == "diff"' },
+      { key: '[', command: 'diff.prevChange', when: 'panel == "diff"' }
+    ]
+  },
+  {
     title: 'Line Selection',
     doc: `Visual-line selection, only in the panels where lines exist to select — a
 diff and a file (which includes a rendered .md, one row per source line). \`c\`

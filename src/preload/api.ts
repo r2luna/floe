@@ -663,8 +663,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('review:changedFiles', worktreePath),
       lastCommit: (worktreePath: string): Promise<LastCommit | null> =>
         ipcRenderer.invoke('review:lastCommit', worktreePath),
-      fileDiff: (worktreePath: string, relPath: string): Promise<string> =>
-        ipcRenderer.invoke('review:fileDiff', worktreePath, relPath),
+      fileDiff: (worktreePath: string, relPath: string, context?: number): Promise<string> =>
+        ipcRenderer.invoke('review:fileDiff', worktreePath, relPath, context),
       // The commits this branch added since its base, each with the files it
       // touched (Commit Story timeline); commitDiff = one commit's patch for a file.
       commits: (worktreePath: string): Promise<ReviewCommit[]> =>

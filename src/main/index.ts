@@ -649,7 +649,9 @@ function registerIpc(): void {
   )
   handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
   handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))
-  handle('review:fileDiff', (_event, worktreePath: string, relPath: string) => fileDiff(worktreePath, relPath))
+  handle('review:fileDiff', (_event, worktreePath: string, relPath: string, context?: number) =>
+    fileDiff(worktreePath, relPath, context)
+  )
   handle('review:commits', (_event, worktreePath: string) => reviewCommits(worktreePath))
   handle('review:commitDiff', (_event, worktreePath: string, hash: string, relPath: string) =>
     commitFileDiff(worktreePath, hash, relPath)
