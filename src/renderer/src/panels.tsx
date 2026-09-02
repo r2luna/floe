@@ -114,9 +114,11 @@ import { useTranscript, type PendingQuestion } from './useTranscript'
 import { RunInTerminal } from './runInTerminal'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
+import { RemovePanel } from './RemovePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
+import type { Remove } from './useRemove'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
   NOTIFY_SOUNDS,
@@ -215,6 +217,11 @@ export const KINDS = {
   // the same reason: the review checkpoint sends you to the diff, and both have
   // to be readable at once.
   merge: { icon: IconGitMerge, title: 'merge', width: 340, min: 260, order: 41, needsProject: true },
+  // The guided removal's checklist. Same shape and width as the merge — it is
+  // the same kind of thing — but deliberately NOT on the rail: an icon you can
+  // click any time is an invitation, and nothing about removing a worktree
+  // should be one. It arrives only when ⌘K X starts a removal.
+  remove: { icon: IconTrash, title: 'remove', width: 340, min: 260, order: 41, needsProject: true },
   // The worktree's tree. Same shape as `changes`: a narrow list whose rows open
   // something wider beside it, so it spends as little width as it can.
   files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsProject: true },
@@ -412,7 +419,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -475,6 +482,7 @@ export function PanelBody({
   worktrees,
   changes,
   merge,
+  remove,
   onEnterProject,
   onEnterWorktree,
   newWorktree,
@@ -508,6 +516,8 @@ export function PanelBody({
   changes: Changes
   /** The guided merge in flight, for the merge panel. See useMerge. */
   merge: Merge
+  /** The guided removal in flight, for the remove panel. See useRemove. */
+  remove: Remove
   /**
    * Go to a project, or to a worktree, restoring what it was left showing —
    * App.enterProject / App.enterWorktree. A plain `select` would move the
@@ -624,6 +634,7 @@ export function PanelBody({
   // The checklist draws itself from the flow and dispatches command ids for
   // everything it offers — the chips and the keys are the same commands.
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
+  if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} find={find} />
   if (kind === 'plans')
     return (

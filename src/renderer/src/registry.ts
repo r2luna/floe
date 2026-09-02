@@ -1407,6 +1407,50 @@ export const REGISTRY: Map<string, Command> = new Map(
           })
         }
       },
+      // --- guided remove --------------------------------------------------
+      // Same rule as the merge above: the panel's chips dispatch these ids, and
+      // so do ⏎ / esc over it.
+      {
+        id: 'worktree.remove',
+        title: 'Remove worktree and delete its branch',
+        group: 'Worktrees',
+        keys: '⌘K X',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to remove — open one first',
+        run: (c) => c.remove.start()
+      },
+      {
+        id: 'remove.confirm',
+        // One key for the one thing the checklist is waiting for: it stops
+        // either at the force checkpoint or on a failed step, never both.
+        title: 'Remove: force past the dirty tree, or retry the failed step',
+        group: 'Worktrees',
+        keys: '⏎',
+        enabled: (c) => c.remove.awaitingForce || c.remove.failed,
+        unavailable: () => 'the removal is not waiting on you',
+        run: (c) => (c.remove.failed ? c.remove.retry() : c.remove.force())
+      },
+      {
+        id: 'remove.cancel',
+        title: 'Remove: cancel',
+        group: 'Worktrees',
+        keys: 'esc',
+        enabled: (c) => c.remove.active,
+        unavailable: () => 'no removal running',
+        // What git has already removed stays removed — this drops the checklist,
+        // it does not put the worktree back.
+        //
+        // The panel goes with it, like the merge's: a dismissed checklist
+        // holding the focus is the stranded focus the keyboard-first rule is
+        // about.
+        run: (c) => {
+          c.remove.cancel()
+          c.setLane((l) => {
+            const at = l.panels.findIndex((p) => p.kind === 'remove')
+            return at === -1 ? l : close(l, at)
+          })
+        }
+      },
       {
         id: 'command.run',
         title: 'Run command',

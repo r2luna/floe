@@ -3005,6 +3005,27 @@ button {
   border-color: #b1454a;
 }
 
+/* The uncommitted work the force checkpoint is asking about, listed under the
+   step that would destroy it. Porcelain lines, monospaced so the two-column
+   status prefix lines up, and capped: the answer to "is there anything here I
+   still want" does not need the two hundredth file. */
+.remove-changes {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.remove-changes li {
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The keys that are live right now. A hint, not a control — the chips on the
    active step are what you click, this is what you press. */
 .merge-foot {

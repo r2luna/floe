@@ -50,6 +50,7 @@ import { useWorktrees } from './useWorktrees'
 import { useChanges } from './useChanges'
 import { useCommands } from './useCommands'
 import { useMerge } from './useMerge'
+import { useRemove } from './useRemove'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
@@ -856,6 +857,37 @@ export default function App() {
     show: () => setLane((l) => open(l, panelOf('merge')))
   })
 
+  /**
+   * The guided removal, one flow per project.
+   *
+   * Given the same two seams the merge's teardown uses — stop the turns running
+   * in the worktree, then clear what it had on screen — because it is the same
+   * teardown, reached without the merge in front of it.
+   */
+  const remove = useRemove({
+    root: projects.current?.path,
+    stopAgents: (worktreePath) => {
+      const row = worktrees.rows.find((r) => r.worktree.path === worktreePath)
+      for (const s of row?.sessions ?? []) void window.floe.agent.stop(s.claudeId ?? s.id)
+    },
+    onWorktreeGone: (worktreePath) => {
+      setLane((l) => {
+        let next = l
+        for (;;) {
+          const i = next.panels.findIndex(
+            (p) =>
+              p.session?.worktreePath === worktreePath ||
+              (p.kind === 'terminal' && p.sub === worktreePath)
+          )
+          if (i === -1) return next
+          next = closePanel(next, i, () => panelOf('branch'))
+        }
+      })
+      worktrees.reload()
+    },
+    show: () => setLane((l) => open(l, panelOf('remove')))
+  })
+
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
     const p = alternate.current
@@ -1215,6 +1247,23 @@ export default function App() {
       retry: merge.retry,
       stashRetry: merge.stashRetry,
       cancel: merge.cancel
+    },
+    // Same flattening as the merge's, and `here` for the same reason: the
+    // branch you are in is the one ⌘K X means, whether you got there from the
+    // sidebar or from a chat.
+    remove: {
+      active: !!remove.flow,
+      failed: !!remove.flow?.steps.some((s) => s.status === 'error'),
+      awaitingForce: remove.flow?.awaiting === 'force',
+      start: () => {
+        const wt = worktrees.rows.find((r) => r.worktree.path === here)?.worktree
+        if (!wt) return say('no worktree to remove')
+        const why = remove.start(wt)
+        if (why) say(why)
+      },
+      force: remove.force,
+      retry: remove.retry,
+      cancel: remove.cancel
     },
     deleteSession,
     cycleSession,
@@ -1829,6 +1878,7 @@ export default function App() {
                     changes={changes}
                     commands={commands}
                     merge={merge}
+                    remove={remove}
                     // Picking a project or a branch is never just a selection:
                     // it restores everything that place was left showing.
                     onEnterProject={enterProject}

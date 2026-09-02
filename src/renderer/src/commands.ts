@@ -123,6 +123,24 @@ export interface CommandContext {
     stashRetry: () => void
     cancel: () => void
   }
+  /**
+   * The guided removal, as the registry sees it. Same shape as `merge` and for
+   * the same reason: the chips in the panel and the keys over it have to run
+   * the same commands, or the panel's "⏎ force remove" is a lie.
+   */
+  remove: {
+    /** A flow exists for the open project. */
+    active: boolean
+    /** It stopped on a failed step, so ⏎ means retry. */
+    failed: boolean
+    /** It is at the dirty-tree checkpoint, so ⏎ means force the removal. */
+    awaitingForce: boolean
+    /** Remove the worktree the app is in, or show the flow already running. */
+    start: () => void
+    force: () => void
+    retry: () => void
+    cancel: () => void
+  }
   /** Show the new-worktree flow. */
   newWorktree: () => void
   /**

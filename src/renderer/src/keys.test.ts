@@ -38,7 +38,7 @@ test('an unmapped key cancels the chord instead of falling through', () => {
   // Without this, ⌘K then j would scroll the list — a chord that silently does
   // something else is worse than one that does nothing.
   assert.equal(r({ key: 'j' }, { chord: true }), null)
-  assert.equal(r({ key: 'x' }, { chord: true }), null)
+  assert.equal(r({ key: 'q' }, { chord: true }), null)
 })
 
 test('⌘W closes and ⌘1-9 jump to a panel', () => {

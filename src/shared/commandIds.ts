@@ -105,6 +105,9 @@ export const COMMAND_IDS: string[] = [
   'merge.review',
   'merge.stash',
   'merge.cancel',
+  'worktree.remove',
+  'remove.confirm',
+  'remove.cancel',
   // Commands (the worktree's registered processes)
   'command.run',
   'command.stop',

@@ -267,6 +267,26 @@ approval waiting for you.`,
     ]
   },
   {
+    title: 'Guided remove',
+    doc: `\`⌘K X\` removes the worktree you are in and deletes its branch, as
+the same kind of checklist: it inspects the tree, drops the branch's database,
+removes the worktree and deletes the branch.
+
+It stops in exactly one place. A tree with uncommitted work pauses and lists
+what is about to be destroyed, and \`⏎\` is what says yes to that — the same
+key that retries a step that failed, since it never stops at both. Escape drops
+the checklist and its panel with it, and does not put back what has already
+gone.
+
+There is no rail icon for it: an icon you can click at any time is an
+invitation, and this is not one.`,
+    binds: [
+      { key: 'super+k x', command: 'worktree.remove' },
+      { key: 'enter', command: 'remove.confirm', when: 'panel == "remove"' },
+      { key: 'escape', command: 'remove.cancel', when: 'panel == "remove"' }
+    ]
+  },
+  {
     title: 'Cursor & Scrolling',
     doc: `The vim set, and it means the same thing in a file, a diff and a list,
 because all of these move the CURSOR. \`⌃D\` and \`⌃U\` take half a screen and
