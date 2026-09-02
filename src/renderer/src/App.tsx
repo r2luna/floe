@@ -1822,6 +1822,7 @@ export default function App() {
                   <PanelBody
                     kind={kind}
                     sub={panel.sub}
+                    view={panel.view}
                     projects={projects}
                     movingProject={moving}
                     worktrees={worktrees}

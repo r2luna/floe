@@ -5,8 +5,11 @@ export interface Changes {
   files: ChangedFile[]
   loading: boolean
   error?: string
-  /** The unified diff for one file, fetched on demand. */
-  diffOf: (relPath: string) => Promise<string>
+  /**
+   * The unified diff for one file, fetched on demand. `context` is git's -U:
+   * the prose view asks for the whole file, the code view takes git's default.
+   */
+  diffOf: (relPath: string, context?: number) => Promise<string>
 }
 
 /**
@@ -49,8 +52,10 @@ export function useChanges(worktreePath?: string): Changes {
   }, [worktreePath, reload])
 
   const diffOf = useCallback(
-    (relPath: string) =>
-      worktreePath ? window.floe.review.fileDiff(worktreePath, relPath) : Promise.resolve(''),
+    (relPath: string, context?: number) =>
+      worktreePath
+        ? window.floe.review.fileDiff(worktreePath, relPath, context)
+        : Promise.resolve(''),
     [worktreePath]
   )
 

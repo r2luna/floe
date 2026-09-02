@@ -81,6 +81,13 @@ export type Panel = {
    * survive leaving the panel and coming back.
    */
   selection?: { anchor: number; head: number } | null
+  /**
+   * Which view a diff panel is showing. Markdown opens as `prose` — a document
+   * with the changed words marked inside it — and `code` is the line diff every
+   * other file gets. Panel state, so flipping one file's view does not flip the
+   * next one you open, and so it survives save and restore.
+   */
+  view?: 'prose' | 'code'
 }
 
 export type Lane = {

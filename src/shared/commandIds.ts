@@ -45,6 +45,9 @@ export const COMMAND_IDS: string[] = [
   'composer.focus',
   'composer.leave',
   // Diff
+  'diff.view',
+  'diff.nextChange',
+  'diff.prevChange',
   'selection.toggle',
   'selection.cancel',
   'selection.comment',

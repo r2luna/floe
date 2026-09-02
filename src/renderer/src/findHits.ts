@@ -42,12 +42,27 @@ export function splitByHits<S>(
   tokens: ReadonlyArray<{ content: string; style: S }>,
   query: string | undefined
 ): Array<Piece<S>> {
-  const untouched = (): Array<Piece<S>> => tokens.map((t) => ({ ...t, hit: false }))
   const q = query?.trim()
-  if (!q) return untouched()
+  if (!q) return splitByRanges(tokens, [])
+  return splitByRanges(tokens, hitRanges(tokens.map((t) => t.content).join(''), q))
+}
 
-  const hits = hitRanges(tokens.map((t) => t.content).join(''), q)
-  if (!hits.length) return untouched()
+/**
+ * The same cut, against ranges the caller already has.
+ *
+ * The find bar computes its ranges from a query; the markdown review computes
+ * them from a word-level diff. Both need the identical thing afterwards — a
+ * token list cut at arbitrary boundaries with every piece keeping its own
+ * style — and that is the part worth having in one place.
+ *
+ * Ranges are [from, to) over the tokens' concatenated text, in order and
+ * non-overlapping.
+ */
+export function splitByRanges<S>(
+  tokens: ReadonlyArray<{ content: string; style: S }>,
+  hits: ReadonlyArray<[number, number]>
+): Array<Piece<S>> {
+  if (!hits.length) return tokens.map((t) => ({ ...t, hit: false }))
 
   const out: Array<Piece<S>> = []
   // Zero-length pieces are dropped rather than emitted: a token can be empty, and

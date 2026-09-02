@@ -48,6 +48,7 @@ import {
 import { Composer } from './Composer'
 import { Spinner } from './Spinner'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
+import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { hitRanges, splitByHits } from './findHits.ts'
 import { usePlans } from './usePlans'
@@ -276,7 +277,19 @@ export const KINDS = {
     order: 47,
     action: { icon: IconPlus, title: 'Add MCP server…', command: 'mcp.new' }
   },
-  diff: { icon: IconFileDiff, title: 'diff', width: 760, grow: true, min: 460, order: 50, needsProject: true },
+  diff: {
+    icon: IconFileDiff,
+    title: 'diff',
+    width: 760,
+    grow: true,
+    min: 460,
+    order: 50,
+    needsProject: true,
+    // The prose/source switch. The command decides whether it applies — only
+    // markdown has two ways to be read — so the button is the same `p` the
+    // keymap dispatches and the palette lists.
+    action: { icon: IconFileText, title: 'Prose or source (p)', command: 'diff.view' }
+  },
   // A command's output. Shares the diff's slot: both are "the thing the list to
   // the left just opened", and two of them side by side would be two logs from
   // one list. `sub` is the runner key, `<worktreePath>#<id>`.
@@ -480,10 +493,13 @@ export function PanelBody({
   onCommand,
   onEditSkill,
   commands,
+  view,
   onOpen
 }: {
   kind: PanelKind
   sub?: string
+  /** Which view a diff panel is showing — see Panel.view. */
+  view?: 'prose' | 'code'
   projects: Projects
   /** The project being moved between groups, while `m` has a move running. */
   movingProject?: { path: string; group: string } | null
@@ -665,7 +681,7 @@ export function PanelBody({
     )
   }
   if (kind === 'diff')
-    return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} find={find} />
+    return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} find={find} view={view} />
   if (kind === 'commands')
     return commands ? (
       <CommandsPane commands={commands} worktreePath={cwd} onOpen={onOpen} onCommand={onCommand} />
@@ -2522,18 +2538,32 @@ function ChangesList({
   )
 }
 
+/**
+ * The context the prose view asks git for: larger than any file worth reading
+ * in a panel, so the patch comes back as one hunk spanning the document.
+ * Fragments of prose three lines wide are not a document.
+ */
+const WHOLE_FILE = 100000
+
+const MARK: Record<string, string> = { add: '+', del: '−', mod: '~', ctx: ' ' }
+
 /** One file's diff, fetched on demand and highlighted once Shiki is ready. */
 function FileDiff({
   path,
   changes,
   onPatch,
-  find
+  find,
+  view
 }: {
   path: string
   changes: Changes
   onPatch?: (patch: string) => void
   find?: string
+  view?: 'prose' | 'code'
 }) {
+  // Markdown opens as prose: that is the whole point of the view, and the
+  // reader who wants the literal patch is one keystroke away (`p`).
+  const prose = view !== 'code' && READS_AS_PROSE.test(path)
   // The stable half of `changes`. Depending on the object itself would re-run
   // the fetch on every render — clearing the patch, rebuilding every row, and
   // taking the focused line (and the cursor on it) down with them.
@@ -2546,7 +2576,7 @@ function FileDiff({
     let live = true
     setPatch('')
     setFailed(undefined)
-    diffOf(path)
+    diffOf(path, prose ? WHOLE_FILE : undefined)
       .then((text) => {
         if (!live) return
         setPatch(text)
@@ -2559,7 +2589,7 @@ function FileDiff({
       live = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, diffOf])
+  }, [path, prose, diffOf])
 
   const { rows } = useMemo(() => parseUnifiedDiff(patch), [patch])
   const sides = useMemo(() => diffSides(rows), [rows])
@@ -2567,12 +2597,24 @@ function FileDiff({
   // Highlighting is per SIDE, not per line: a block comment or a template
   // string only tokenizes correctly with the rest of the file around it. That's
   // what diffSides reconstructs, and `map` puts each row's tokens back.
+  // Prose is drawn from the document rather than from tokens: renderMarkdown
+  // over each reconstructed side gives every line its shape, and proseRows
+  // pairs the rewritten lines and marks the words inside them.
+  const document = useMemo(
+    () =>
+      prose && rows.length
+        ? proseRows(rows, sides, renderMarkdown(sides.newCode), renderMarkdown(sides.oldCode))
+        : [],
+    [prose, rows, sides]
+  )
+
   const [hl, setHl] = useState<{ new: HlToken[][]; old: HlToken[][] } | null>(null)
 
   useEffect(() => {
     setHl(null)
     const lang = langForPath(path)
-    if (!lang || !patch) return
+    // Prose has no grammar to load: its colour comes from the markdown renderer.
+    if (prose || !lang || !patch) return
     let live = true
     // Shiki is async (it loads a WASM grammar), so the diff renders as plain
     // text first and gains colour when it arrives — never blocking the panel.
@@ -2584,11 +2626,40 @@ function FileDiff({
     return () => {
       live = false
     }
-  }, [path, patch, sides.newCode, sides.oldCode])
+  }, [path, patch, prose, sides.newCode, sides.oldCode])
 
   if (failed) return <p className="empty error">{failed}</p>
   if (!patch) return <p className="empty">Loading…</p>
   if (!rows.length) return <p className="empty">No textual diff.</p>
+
+  if (prose)
+    return (
+      <div className="diff md-lines">
+        {document.map((row, i) => (
+          <div
+            className="diff-row md-row"
+            key={i}
+            data-kind={row.kind}
+            data-md={row.line.kind}
+            data-level={row.line.level}
+            // The file line this row stands for. Read by the comment and
+            // reference commands, which cannot count rows here: a rewritten
+            // line is ONE row standing for two of the patch's.
+            data-line={row.newNo}
+            // A destination that moved has nowhere to show in prose — the URL
+            // is not on screen — so the row carries it and the link is tinted.
+            title={row.relink ? `link: ${row.relink.from} → ${row.relink.to}` : undefined}
+            data-nav
+            tabIndex={-1}
+          >
+            <span className="diff-no">{row.oldNo ?? ''}</span>
+            <span className="diff-no">{row.newNo ?? ''}</span>
+            <span className="diff-mark">{MARK[row.kind]}</span>
+            <MarkdownText line={row.line} />
+          </div>
+        ))}
+      </div>
+    )
 
   return (
     <div className="diff">
@@ -2866,45 +2937,59 @@ function MarkdownLines({ text }: { text: string }) {
           tabIndex={-1}
         >
           <span className="diff-no">{i + 1}</span>
-          {/* Not `.diff-code`: that class carries Shiki's `!important` colour
-              override for code tokens, which would repaint every bold, link
-              and code span here in one flat grey. */}
-          <span className="md-text" style={indentOf(line)}>
-            {line.kind === 'rule' && <span className="md-rule" />}
-            {line.kind === 'list' && (
-              // No marker text means an unordered item — the dot (or the
-              // checkbox) is a CSS shape sized in pixels, which a font's bullet
-              // glyph is not.
-              <span
-                className="md-bullet"
-                data-dot={(!line.marker && !line.task) || undefined}
-                data-task={line.task}
-                data-depth={Math.min(line.depth ?? 0, 2)}
-                // The block's shared marker column: "10." makes it 4ch and
-                // every item of that list gets the same, so the numbers line up
-                // on the period and all the text starts in one column.
-                style={{ minWidth: `${line.markerWidth ?? 2}ch` }}
-              >
-                {line.marker}
-              </span>
-            )}
-            {line.kind === 'table' ? (
-              <MarkdownRow line={line} />
-            ) : (
-              line.spans.map((span, j) =>
-                span.cls ? (
-                  <span className={span.cls} key={j}>
-                    {span.text}
-                  </span>
-                ) : (
-                  <Fragment key={j}>{span.text}</Fragment>
-                )
-              )
-            )}
-          </span>
+          <MarkdownText line={line} />
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * A rendered line's text column: the bullet, the hanging indent, the spans.
+ *
+ * Its own component because the markdown review draws the same line beside a
+ * diff's gutters (see ProseDiffView). One line of a document has to look the
+ * same whichever of the two is showing it, and that is only guaranteed while
+ * there is one place that draws it.
+ */
+function MarkdownText({ line }: { line: MdLine }): ReactNode {
+  return (
+    // Not `.diff-code`: that class carries Shiki's `!important` colour
+    // override for code tokens, which would repaint every bold, link
+    // and code span here in one flat grey.
+    <span className="md-text" style={indentOf(line)}>
+      {line.kind === 'rule' && <span className="md-rule" />}
+      {line.kind === 'list' && (
+        // No marker text means an unordered item — the dot (or the
+        // checkbox) is a CSS shape sized in pixels, which a font's bullet
+        // glyph is not.
+        <span
+          className="md-bullet"
+          data-dot={(!line.marker && !line.task) || undefined}
+          data-task={line.task}
+          data-depth={Math.min(line.depth ?? 0, 2)}
+          // The block's shared marker column: "10." makes it 4ch and
+          // every item of that list gets the same, so the numbers line up
+          // on the period and all the text starts in one column.
+          style={{ minWidth: `${line.markerWidth ?? 2}ch` }}
+        >
+          {line.marker}
+        </span>
+      )}
+      {line.kind === 'table' ? (
+        <MarkdownRow line={line} />
+      ) : (
+        line.spans.map((span, j) =>
+          span.cls ? (
+            <span className={span.cls} key={j}>
+              {span.text}
+            </span>
+          ) : (
+            <Fragment key={j}>{span.text}</Fragment>
+          )
+        )
+      )}
+    </span>
   )
 }
 

@@ -3252,6 +3252,77 @@ button {
   color: var(--text);
 }
 
+/* --- a markdown diff, read as a document ---------------------------------- */
+
+/* A line whose WORDS changed. It gets no row wash: the line was not added or
+   removed, so tinting all of it would say the wrong thing — the marks inside
+   carry the change, and the mark column names it. Amber, the same hue the
+   changes list uses for a modified file. */
+.diff-row[data-kind="mod"] .diff-mark {
+  color: #c9a05f;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="mod"] .diff-mark {
+  color: #8a6314;
+}
+
+/* The row's colours are wired to .diff-mark and .diff-code; prose sits in
+   .md-text, so the two tones have to reach it too. A removed line is struck as
+   well as tinted: this view is read as a document, where a line you are meant
+   to skip has to look skippable. */
+.diff-row[data-kind="add"] .md-text {
+  color: #a7cfa0;
+}
+
+.diff-row[data-kind="del"] .md-text {
+  color: #d2a09a;
+  text-decoration: line-through;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="add"] .md-text {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="del"] .md-text {
+  color: #b1454a;
+}
+
+/* The words themselves, in the same two hues and washes the add/del ROWS carry
+   — a word that changed has to read as the same colour as a line that did, or
+   the two halves of the view would be answering in different languages. */
+.md-cut {
+  border-radius: var(--radius-sm);
+  background: #3b23234d;
+  color: #d2a09a;
+  text-decoration: line-through;
+}
+
+.md-new {
+  border-radius: var(--radius-sm);
+  background: #22371f4d;
+  color: #a7cfa0;
+}
+
+/* A dark tint at a third opacity over white is mud: light gets the pale wash
+   and the deeper text tone, the same pair the diff rows and mode chips use. */
+:root[data-theme='light'] .md-cut {
+  background: #b1454a14;
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .md-new {
+  background: #2f7d5214;
+  color: #2f7d52;
+}
+
+/* A link whose destination moved. Prose drops the URL, so the change has
+   nowhere to show in the text — the link itself carries it, and the row's
+   tooltip says where it went. */
+.md-link.md-relink {
+  border-bottom: 1px solid currentColor;
+  color: var(--accent);
+}
+
 /* Shiki emits the LIGHT colour as an inline style and the dark one as the
    --shiki-dark custom property. An inline style outranks any stylesheet rule,
    so on dark the swap needs !important — Shiki's own documented dual-theme
