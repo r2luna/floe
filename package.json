@@ -1,6 +1,6 @@
 {
   "name": "floe",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
   "main": "./out/main/index.js",
