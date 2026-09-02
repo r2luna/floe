@@ -95,6 +95,7 @@ stay free everywhere else.`,
       { key: 'super+k g', command: 'panel.goto', arg: 'changes' },
       { key: 'super+k f', command: 'panel.goto', arg: 'files' },
       { key: 'super+k p', command: 'panel.goto', arg: 'plans' },
+      { key: 'super+k d', command: 'panel.goto', arg: 'draw' },
       { key: 'super+k c', command: 'panel.goto', arg: 'commands' },
       { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel in ["projects", "worktrees"]' },
       { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel in ["projects", "worktrees"]' }
@@ -178,6 +179,29 @@ the menu focuses the row it was opened on and dispatches an id.`,
       { key: 'r', command: 'skill.rename', when: 'panel == "skills"' },
       { key: 'd', command: 'skill.delete', when: 'panel == "skills"' },
       { key: 'e', command: 'skill.edit', when: 'panel == "skills"' }
+    ]
+  },
+  {
+    title: 'Drawings',
+    doc: `The draw panel's own letters, and deliberately the same ones the skills
+and file lists use: \`n\` starts a new drawing, \`r\` renames the one under the
+cursor, \`d\` deletes it and \`o\` reveals the file on disk. \`⏎\` opens it on the
+canvas beside the list.
+
+\`n\` writes into the branch's \`specs/\` folder: a drawing is part of the work,
+so it travels with the branch and turns up in the commit. \`s\` moves an older
+draft out of the gitignored \`.floe/draw/\` and into that same folder, and the
+canvas follows it there.
+
+Inside the canvas none of these apply: Excalidraw owns every bare key there
+(\`r\` rectangle, \`o\` ellipse, \`d\` diamond), which is what the \`raw\` rule in
+keymap.ts is for. \`⌃H\`/\`⌃L\` still get you out, because they hold a modifier.`,
+    binds: [
+      { key: 'n', command: 'draw.new', when: 'panel == "draw"' },
+      { key: 'r', command: 'draw.rename', when: 'panel == "draw"' },
+      { key: 'd', command: 'draw.delete', when: 'panel == "draw"' },
+      { key: 's', command: 'draw.promote', when: 'panel == "draw"' },
+      { key: 'o', command: 'draw.reveal', when: 'panel == "draw"' }
     ]
   },
   {

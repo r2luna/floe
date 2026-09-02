@@ -15,6 +15,7 @@ import {
   IconGitMerge,
   IconMessage,
   IconNotes,
+  IconPalette,
   IconPencil,
   IconPlug,
   IconPlus,
@@ -50,6 +51,7 @@ import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { hitRanges, splitByHits } from './findHits.ts'
 import { usePlans } from './usePlans'
+import { useDrawings } from './useDrawings'
 import { useSkills } from './useSkills'
 import { useMcpServers } from './useMcpServers'
 import { RowMenu, type MenuAction } from './RowMenu'
@@ -135,6 +137,9 @@ const MessageBody = lazy(async () => ({ default: (await import('./MessageBody'))
 // Lazy for the same reason the terminal is: xterm is a large chunk, and it
 // should not load for a session that never opens a command's output.
 const CommandLog = lazy(async () => ({ default: (await import('./CommandLog')).CommandLog }))
+// The canvas is ~1MB gzip. lazy() is what keeps that off everyone who never
+// opens a drawing — see R2 in specs/draw/spec.md.
+const DrawingPanel = lazy(async () => ({ default: (await import('./DrawingPanel')).DrawingPanel }))
 
 /**
  * Every panel kind the lane can hold. The rail on the right is generated from
@@ -216,6 +221,20 @@ export const KINDS = {
   // width. Rows open a `file` panel, so a plan is read (and quoted, and
   // commented on) with exactly the machinery every other markdown file gets.
   plans: { icon: IconNotes, title: 'plans', width: 300, min: 220, order: 44, needsProject: true },
+  // Excalidraw scenes — the same two sources the plans list reads, and the same
+  // narrow-list-opens-something-wide shape, so it sits right beside it. The
+  // pencil icon is already the `edit` panel's, hence the palette.
+  draw: {
+    icon: IconPalette,
+    title: 'draw',
+    width: 300,
+    min: 220,
+    order: 45,
+    needsProject: true,
+    // The same command `n` runs — the header button is a second way in, not a
+    // second create flow.
+    action: { icon: IconPlus, title: 'New drawing…', command: 'draw.new' }
+  },
   // The skills you can type after `/`. A narrow list whose rows open the reader
   // beside it, like `plans` and `changes` — which is also why it is ordered
   // here and not with Settings: a list whose rows open something wide has to
@@ -288,6 +307,21 @@ export const KINDS = {
     slot: 'diff',
     needsProject: true
   },
+  // The canvas a `draw` row opens. Framed like every other panel — card, border,
+  // header with the drawing's name — so the lane reads as one app; Excalidraw's
+  // own toolbar floats INSIDE that frame rather than replacing it.
+  // Deliberately NOT in the diff slot: you read the diff of a drawing nowhere,
+  // and two canvases side by side (a spec's and a draft's) is a real thing to
+  // want.
+  drawing: {
+    icon: IconPalette,
+    title: 'drawing',
+    width: 900,
+    grow: true,
+    min: 480,
+    order: 55,
+    needsProject: true
+  },
   // Grows like the chat does. Both can be open at once — the one further right
   // takes the leftover, which is the terminal, and the chat falls back to its
   // own width. Neither ever disappears.
@@ -349,9 +383,22 @@ export function needsProject(kind: string): boolean {
   return !!spec && 'needsProject' in spec
 }
 
+/**
+ * The panel a file opens in.
+ *
+ * A `.excalidraw` is a canvas, not text — the reader would show you its JSON,
+ * which is nobody's idea of opening a drawing. Everything else is the reader.
+ *
+ * Here rather than at each call site so the file tree, `⌘P` and the search hits
+ * cannot disagree about what pressing Enter on a drawing does.
+ */
+export function panelForFile(relPath: string): PanelKind {
+  return relPath.endsWith('.excalidraw') ? 'drawing' : 'file'
+}
+
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -367,7 +414,7 @@ export const RAIL_GROUPS: PanelKind[][] = [
   // Where the work lives.
   ['projects', 'worktrees'],
   // What the work did to the tree — read it, review it, land it.
-  ['changes', 'merge', 'files', 'plans'],
+  ['changes', 'merge', 'files', 'plans', 'draw'],
   // What the agents are made of: the skills they can run and the servers they
   // get. Both are global, both are edited the same way, so they sit together.
   ['skills', 'mcp'],
@@ -569,6 +616,24 @@ export function PanelBody({
         onOpen={onOpen}
         find={find}
       />
+    )
+  if (kind === 'draw')
+    return (
+      <DrawList
+        root={cwd}
+        branch={worktrees.rows.find((r) => r.worktree.path === cwd)?.worktree.branch}
+        onOpen={onOpen}
+        onCommand={onCommand}
+        find={find}
+      />
+    )
+  // Keyed on the file so picking another row builds a fresh canvas rather than
+  // loading a second scene into the first one's Excalidraw instance.
+  if (kind === 'drawing')
+    return (
+      <Suspense fallback={null}>
+        <DrawingPanel key={`${root ?? cwd}:${sub ?? ''}`} root={root ?? cwd} path={sub ?? ''} />
+      </Suspense>
     )
   // `find` reaches the code views too: `/` searches whatever panel is focused,
   // and a file is the panel where a match is hardest to spot unaided.
@@ -2704,7 +2769,7 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
               key={path}
               title={path}
               data-file={path}
-              onClick={() => onOpen({ kind: 'file', sub: path })}
+              onClick={() => onOpen({ kind: panelForFile(path), sub: path })}
             >
               <span className="file-mark" />
               {/* Name first, path after — the name is what you typed and must
@@ -2756,7 +2821,9 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
             data-file={node.type === 'file' ? node.relPath : undefined}
             data-open={open || undefined}
             data-parent={cut === -1 ? '' : node.relPath.slice(0, cut)}
-            onClick={() => (node.type === 'file' ? onOpen({ kind: 'file', sub: node.relPath }) : toggle(node))}
+            onClick={() =>
+              node.type === 'file' ? onOpen({ kind: panelForFile(node.relPath), sub: node.relPath }) : toggle(node)
+            }
           >
             {node.type === 'dir' ? (
               open ? (
@@ -3034,6 +3101,94 @@ function PlansList({
           </Fragment>
         )
       })}
+    </>
+  )
+}
+
+/**
+ * The worktree's drawings, grouped exactly the way the plans list groups its
+ * docs: the branch's `specs/<folder>/` scenes first under their folder's name,
+ * then the gitignored `.floe/draw/` drafts.
+ *
+ * A row opens a `drawing` panel — a canvas, not the reader, because a `.excalidraw`
+ * is JSON and reading it is not what anyone came here to do. The four things you
+ * do to one (open, new, rename, delete) are commands, dispatched by key and by
+ * the right-click menu, so the mouse and the keyboard cannot drift apart.
+ *
+ * `data-drawing` is what those commands read off the focused row — the same
+ * trick the skills list plays with `data-skill`.
+ */
+function DrawList({
+  root,
+  branch,
+  onOpen,
+  onCommand,
+  find
+}: {
+  root?: string
+  branch?: string
+  onOpen: OpenFn
+  /** Dispatch a command id — what the right-click menu runs. See commands.ts. */
+  onCommand?: (id: string) => void
+  find?: string
+}) {
+  const { drawings, loading, error } = useDrawings(root, branch)
+  // Where the right-click menu is, and the row that opened it — closing hands
+  // focus back so the list continues where it was rather than nowhere.
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  if (error) return <p className="empty error">{error}</p>
+  if (loading && !drawings.length) return <p className="empty">Loading…</p>
+  if (!drawings.length) return <p className="empty">No drawings yet. Press n.</p>
+
+  const items: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    { label: 'Rename…', keys: 'r', run: () => onCommand?.('draw.rename') },
+    { label: 'Save into the project', keys: 's', run: () => onCommand?.('draw.promote') },
+    { label: 'Reveal on disk', keys: 'o', run: () => onCommand?.('draw.reveal') },
+    { label: 'Delete…', keys: 'd', run: () => onCommand?.('draw.delete') },
+    { label: 'New drawing…', keys: 'n', run: () => onCommand?.('draw.new') }
+  ]
+
+  return (
+    <>
+      {drawings.map((drawing, i) => {
+        // Head a group whenever the folder changes — `.floe/draw/` drafts have
+        // no group and get no heading, being the default.
+        const group = drawing.group && drawing.group !== drawings[i - 1]?.group ? drawing.group : null
+        return (
+          <Fragment key={drawing.relPath}>
+            {group && <div className="group-label">{group.toUpperCase()}</div>}
+            <button
+              className="row"
+              title={drawing.relPath}
+              data-drawing={drawing.relPath}
+              // The spec folder this one lives in, when it lives in one — what
+              // `draw.new` reads to decide where the next drawing goes.
+              data-drawing-group={drawing.group}
+              onClick={() => onOpen({ kind: 'drawing', sub: drawing.relPath })}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                const row = e.currentTarget as HTMLElement
+                row.focus()
+                setMenu({ x: e.clientX, y: e.clientY, row })
+              }}
+            >
+              <span className="row-name">{markAll(drawing.name.replace(/\.excalidraw$/, ''), find)}</span>
+              <span className="draw-count">{drawing.elements}</span>
+              <span className="plan-age">{timeAgo(drawing.mtime)}</span>
+            </button>
+          </Fragment>
+        )
+      })}
+      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
     </>
   )
 }

@@ -5708,3 +5708,98 @@ kbd {
 :root[data-theme='light'] .cmd-runall {
   border-color: var(--edge);
 }
+
+/* --- draw ----------------------------------------------------------------- */
+
+/* How many elements a drawing holds, between its name and its age. Dim and
+   tabular so a column of counts lines up — it is the number that tells an empty
+   scene from one with a diagram in it, which the name never does. */
+.draw-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.draw-count::after {
+  content: ' el';
+  color: var(--line);
+}
+
+/* The canvas fills the panel's body, inside the normal card and under the normal
+   header — a strip of panel fill around it would read as two surfaces instead of
+   one. The padding is dropped rather than cancelled with a negative margin (the
+   terminal's trick): a negative bottom margin does not STRETCH a `height: 100%`
+   box, so the canvas came up 8px short and left a seam above the card's edge.
+
+   `hidden` replaces the body's usual scrolling — the canvas pans and zooms
+   itself, and a scrollbar beside it would be a second, disagreeing way to move.
+   It also clips: the canvas paints edge to edge and .panel rounds its corners
+   without hiding overflow, so untreated the canvas squares off the bottom two. */
+.panel[data-kind='drawing'] .panel-body {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.drawing {
+  height: 100%;
+  background: var(--panel);
+}
+
+/* The canvas is drawn with `viewBackgroundColor: transparent` (see
+   DrawingPanel), so what you actually see behind the shapes is this — the same
+   fill every other panel has, following the theme by itself.
+
+   `--ui-font` is Excalidraw's own variable for its chrome (toolbar, menus,
+   dialogs). Pointing it at `--mono` is the CSS half of what useAppFont does for
+   the canvas: the panel reads as part of Floe rather than as a guest app with
+   its own typeface. */
+.drawing .excalidraw {
+  --default-bg-color: transparent;
+  --ui-font: var(--mono);
+}
+
+/* Excalidraw separates its floating islands — toolbar, panels, menus — with
+   drop shadows. Floe separates with borders and never shadows (see
+   docs/ui-conventions.md), so they are swapped out here rather than left as the
+   one surface in the app that reads as a different program. */
+.drawing .excalidraw .Island,
+.drawing .excalidraw .App-toolbar,
+.drawing .excalidraw .dropdown-menu-container,
+.drawing .excalidraw .dropdown-menu-button,
+.drawing .excalidraw .sidebar-trigger,
+.drawing .excalidraw .zoom-actions,
+.drawing .excalidraw .undo-redo-buttons,
+.drawing .excalidraw .help-icon {
+  box-shadow: none !important;
+  border: 1px solid var(--line);
+}
+
+/* The canvas's own surfaces, so the panel does not look like a white sheet
+   pasted into a dark app. */
+.drawing .excalidraw.theme--dark {
+  --island-bg-color: var(--panel);
+  --default-border-color: var(--line);
+  --color-surface-low: var(--panel);
+  --color-surface-mid: var(--panel-focused);
+  --color-surface-high: var(--panel-focused);
+}
+
+/* Light theme: the same swap, against the lighter fill. The dark `--line` is
+   invisible on white, which would leave the islands with neither a shadow nor
+   an edge — nothing at all separating them from the canvas. */
+:root[data-theme='light'] .drawing .excalidraw .Island,
+:root[data-theme='light'] .drawing .excalidraw .App-toolbar,
+:root[data-theme='light'] .drawing .excalidraw .dropdown-menu-container,
+:root[data-theme='light'] .drawing .excalidraw .dropdown-menu-button,
+:root[data-theme='light'] .drawing .excalidraw .sidebar-trigger,
+:root[data-theme='light'] .drawing .excalidraw .zoom-actions,
+:root[data-theme='light'] .drawing .excalidraw .undo-redo-buttons,
+:root[data-theme='light'] .drawing .excalidraw .help-icon {
+  border-color: var(--edge);
+}
+
+:root[data-theme='light'] .draw-count::after {
+  color: var(--edge);
+}

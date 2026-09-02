@@ -11,6 +11,11 @@ export default defineConfig({
     resolve: {
       alias: { '@': resolve('src/renderer/src') }
     },
+    // @excalidraw/excalidraw ships one bundle for React and one for Preact and
+    // picks between them by reading this at module scope. Vite has no `process`
+    // in the browser, so without the define the import throws before the canvas
+    // ever mounts.
+    define: { 'process.env.IS_PREACT': '"false"' },
     build: { minify: 'esbuild' },
     plugins: [react()]
   }

@@ -136,6 +136,13 @@ function mcpRow(c: CommandContext): HTMLElement | null {
   return row?.dataset.mcp ? row : null
 }
 
+/** The drawing row the cursor is on — same contract as skillRow. */
+function drawRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'draw') return null
+  const row = fileRow(c)
+  return row?.dataset.drawing ? row : null
+}
+
 /**
  * The command row the cursor is on, as its id.
  *
@@ -869,6 +876,138 @@ export const REGISTRY: Map<string, Command> = new Map(
           const root = row?.dataset.skillRoot
           const file = row?.dataset.skillFile
           if (root && file) c.editSkill(root, file)
+        }
+      },
+      {
+        // The panel, not a palette, for the reason skills got one: a drawing is
+        // something you keep coming back to, and the list is where you name,
+        // rename and throw one away.
+        id: 'draw.open',
+        title: 'Drawings…',
+        group: 'App',
+        keys: '⏎ / ⌘K D',
+        enabled: (c) => c.canOpen('draw'),
+        unavailable: (c) => c.whyCannotOpen('draw'),
+        // On a row, open THAT drawing — the same thing ⏎ does, so the palette
+        // and the key cannot mean two things. Otherwise open the list.
+        run: (c) => {
+          const row = drawRow(c)
+          if (row) row.click()
+          else c.setLane((l) => toggleKind(l, 'draw', () => c.makePanel('draw')))
+        }
+      },
+      {
+        // Opens the panel if it is not up, then asks for the name. It lands in
+        // the branch's `specs/` folder — a drawing is part of the work, so it
+        // travels with the branch and shows up in the commit rather than
+        // sitting in a gitignored scratch directory nobody reviews. The verb on
+        // the prompt names the folder, so where it goes is visible before you
+        // type. `draw.promote` is how an older draft catches up.
+        id: 'draw.new',
+        title: 'New drawing…',
+        group: 'Draw',
+        keys: 'n',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'draw — open a project first',
+        run: (c) => {
+          const worktree = c.worktree
+          if (!worktree) return
+          if (!c.lane.panels.some((p) => p.kind === 'draw')) {
+            c.setLane((l) => open(l, c.makePanel('draw')))
+          }
+          c.askText({
+            placeholder: 'Drawing name',
+            verb: 'New drawing in specs/',
+            onDone: (name) => {
+              const clean = name.trim()
+              if (!clean) return
+              void window.floe.draw
+                .create(worktree.path, clean, 'spec', worktree.branch)
+                // Straight onto the canvas: you asked for a drawing, not for a
+                // row that you then have to press Enter on.
+                .then((file) => c.setLane((l) => open(l, c.makePanel('drawing', file.relPath))))
+                .catch((err: unknown) => c.say(reason(err)))
+            }
+          })
+        }
+      },
+      {
+        id: 'draw.rename',
+        title: 'Rename drawing…',
+        group: 'Draw',
+        keys: 'r',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (!rel || !root) return
+          const slash = rel.lastIndexOf('/')
+          const dir = rel.slice(0, slash)
+          const file = rel.slice(slash + 1)
+          c.askText({
+            placeholder: 'Drawing name',
+            value: file.replace(/\.excalidraw$/, ''),
+            verb: 'Rename to',
+            onDone: (name) => {
+              const clean = name.trim()
+              if (!clean) return
+              const to = `${dir}/${clean.endsWith('.excalidraw') ? clean : `${clean}.excalidraw`}`
+              if (to !== rel) applyOps(c, root, [{ kind: 'rename', from: rel, to }])
+            }
+          })
+        }
+      },
+      {
+        id: 'draw.delete',
+        title: 'Delete drawing…',
+        group: 'Draw',
+        keys: 'd',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (!rel || !root) return
+          // Like a file and unlike a project: this one really does remove from
+          // disk, so it says the word.
+          if (!window.confirm(`Delete "${rel}"? This removes the file from disk.`)) return
+          applyOps(c, root, [{ kind: 'delete', path: rel }])
+        }
+      },
+      {
+        // The one drawing action that is not about this file but about where it
+        // lives. Only offered on a draft, because a drawing already in specs/ is
+        // where this would put it.
+        id: 'draw.promote',
+        title: 'Save drawing into the project',
+        group: 'Draw',
+        keys: 's',
+        enabled: (c) => !!drawRow(c) && !drawRow(c)?.dataset.drawingGroup,
+        unavailable: (c) => (drawRow(c) ? 'already in the project' : 'no drawing selected'),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const worktree = c.worktree
+          if (!rel || !worktree) return
+          void window.floe.draw
+            .promote(worktree.path, rel, worktree.branch)
+            // Follow it: the canvas showing the old path would be pointed at a
+            // file that no longer exists, and you asked to keep working on this
+            // drawing, not to close it.
+            .then((file) => c.setLane((l) => open(l, c.makePanel('drawing', file.relPath))))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // A .excalidraw is a portable file. This is how it gets to
+        // excalidraw.com, or into a message, without Floe in the way.
+        id: 'draw.reveal',
+        title: 'Reveal drawing on disk',
+        group: 'Draw',
+        keys: 'o',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (rel && root) void window.floe.draw.reveal(root, rel).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

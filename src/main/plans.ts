@@ -110,10 +110,29 @@ function matchSpecDir(branch: string, dirNames: string[]): string | null {
   return null
 }
 
-// Recursively gather .md files under a spec folder (contracts/ and friends are
-// nested), each with its path relative to that folder so the panel can show
-// "contracts/atlassian-create-issue.md" rather than a bare, ambiguous filename.
-function collectMd(absDir: string, relPrefix: string, out: { rel: string; mtime: number }[]): void {
+/**
+ * The `specs/` folder that belongs to `branch`, or null when none does.
+ *
+ * Exported for the draw panel's create flow, which has to put a new
+ * `.excalidraw` in the SAME folder the branch's spec docs live in — resolving
+ * that a second way is how the two lists start disagreeing.
+ */
+export function specDirFor(worktreePath: string, branch: string): string | null {
+  if (!branch) return null
+  let entries
+  try {
+    entries = readdirSync(join(worktreePath, SPECS_DIR), { withFileTypes: true, encoding: 'utf8' })
+  } catch {
+    return null
+  }
+  return matchSpecDir(branch, entries.filter((e) => e.isDirectory()).map((e) => e.name))
+}
+
+// Recursively gather files with `ext` under a spec folder (contracts/ and
+// friends are nested), each with its path relative to that folder so the panel
+// can show "contracts/atlassian-create-issue.md" rather than a bare, ambiguous
+// filename.
+function collect(absDir: string, relPrefix: string, ext: string, out: { rel: string; mtime: number }[]): void {
   let entries
   try {
     entries = readdirSync(absDir, { withFileTypes: true, encoding: 'utf8' })
@@ -123,8 +142,8 @@ function collectMd(absDir: string, relPrefix: string, out: { rel: string; mtime:
   for (const e of entries) {
     const rel = relPrefix ? `${relPrefix}/${e.name}` : e.name
     if (e.isDirectory()) {
-      collectMd(join(absDir, e.name), rel, out)
-    } else if (e.isFile() && e.name.endsWith('.md')) {
+      collect(join(absDir, e.name), rel, ext, out)
+    } else if (e.isFile() && e.name.endsWith(ext)) {
       try {
         out.push({ rel, mtime: statSync(join(absDir, e.name)).mtimeMs })
       } catch {
@@ -134,11 +153,30 @@ function collectMd(absDir: string, relPrefix: string, out: { rel: string; mtime:
   }
 }
 
-// The spec-pipeline docs to show for a branch: the matching `specs/<dir>/`
-// folder's .md files, or — when no folder clearly matches — every folder's
-// files (so the user can pick). Grouped by folder (most-recently-touched first),
-// newest file first within each, with `group` set so the panel headers them.
-export function listSpecPlans(worktreePath: string, branch: string): PlanFile[] {
+const collectMd = (absDir: string, relPrefix: string, out: { rel: string; mtime: number }[]): void =>
+  collect(absDir, relPrefix, '.md', out)
+
+// One file a spec folder holds, as both the plans panel and the draw panel list
+// them — same shape as PlanFile, which is what the plans panel returns directly.
+export interface SpecFile {
+  name: string
+  relPath: string
+  mtime: number
+  group: string
+}
+
+/**
+ * The `specs/<dir>/` files with extension `ext` to show for a branch: the
+ * matching folder's, or — when no folder clearly matches — every folder's (so
+ * the user can pick). Grouped by folder (most-recently-touched first), newest
+ * file first within each, with `group` set so the panel headers them.
+ *
+ * Shared with the draw panel, which lists `.excalidraw` out of the very same
+ * folders: the branch→folder match is the interesting part and there must be
+ * exactly one of it, or a spec's plans and its diagrams could disagree about
+ * which folder belongs to this branch.
+ */
+export function listSpecFiles(worktreePath: string, branch: string, ext: string): SpecFile[] {
   const specsRoot = join(worktreePath, SPECS_DIR)
   let entries
   try {
@@ -152,10 +190,10 @@ export function listSpecPlans(worktreePath: string, branch: string): PlanFile[] 
   const matched = branch ? matchSpecDir(branch, dirNames) : null
   const targets = matched ? [matched] : dirNames
 
-  const groups: { files: PlanFile[]; mtime: number }[] = []
+  const groups: { files: SpecFile[]; mtime: number }[] = []
   for (const dir of targets) {
     const collected: { rel: string; mtime: number }[] = []
-    collectMd(join(specsRoot, dir), '', collected)
+    collect(join(specsRoot, dir), '', ext, collected)
     if (collected.length === 0) continue
     collected.sort((a, b) => b.mtime - a.mtime)
     const files = collected.map((c) => ({
@@ -168,6 +206,11 @@ export function listSpecPlans(worktreePath: string, branch: string): PlanFile[] 
   }
   groups.sort((a, b) => b.mtime - a.mtime)
   return groups.flatMap((g) => g.files)
+}
+
+// The spec-pipeline docs to show for a branch — listSpecFiles narrowed to .md.
+export function listSpecPlans(worktreePath: string, branch: string): PlanFile[] {
+  return listSpecFiles(worktreePath, branch, '.md')
 }
 
 // The spec doc that best describes a worktree — the `spec.md` (falling back to

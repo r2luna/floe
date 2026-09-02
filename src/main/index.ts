@@ -174,9 +174,10 @@ import {
 } from './commandRunner'
 import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
+import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
-import type { AgentRunOptions, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
+import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
 // wouldn't be found. Prepend the usual locations.
@@ -676,6 +677,26 @@ function registerIpc(): void {
   handle('plans:copy', (_event, srcWorktreePath: string, relPath: string, destWorktreePath: string) =>
     copyPlan(srcWorktreePath, relPath, destWorktreePath)
   )
+  // Drawings. `draw:apply` is the ONLY write: nobody sends a whole scene, because
+  // the canvas and an agent write the same file concurrently. See draw/index.ts.
+  handle('draw:list', (_event, worktreePath: string, branch?: string) => listDrawings(worktreePath, branch))
+  handle('draw:read', (_event, worktreePath: string, relPath: string) => readDrawing(worktreePath, relPath))
+  handle('draw:apply', (_event, worktreePath: string, relPath: string, delta: DrawDelta) =>
+    applyDelta(worktreePath, relPath, delta)
+  )
+  handle('draw:create', (_event, worktreePath: string, name: string, scope?: DrawScope, branch?: string) =>
+    createDrawing(worktreePath, name, scope, branch)
+  )
+  handle('draw:promote', (_event, worktreePath: string, relPath: string, branch?: string) =>
+    promoteDrawing(worktreePath, relPath, branch)
+  )
+  handle('draw:watch', (event, worktreePath: string) => watchDraw(event.sender, worktreePath))
+  // A drawing is a portable file — this is how it gets out of Floe and into
+  // excalidraw.com or another tool.
+  handle('draw:reveal', (_event, worktreePath: string, relPath: string) =>
+    shell.showItemInFolder(join(worktreePath, relPath))
+  )
+
   handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )

@@ -49,6 +49,10 @@ import type {
   PermissionMode,
   NeedsYouSession,
   PlanFile,
+  DrawDelta,
+  DrawFile,
+  DrawScene,
+  DrawScope,
   ThreadComment,
   Project,
   ProjectActivity,
@@ -723,6 +727,34 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, event: { worktreePath: string }): void => cb(event)
         ipcRenderer.on('plans:event', listener)
         return () => ipcRenderer.removeListener('plans:event', listener)
+      }
+    },
+    // Drawings. `apply` is the only write there is — see draw/index.ts for why
+    // nobody, canvas included, is allowed to send a whole scene.
+    draw: {
+      list: (worktreePath: string, branch?: string): Promise<DrawFile[]> =>
+        ipcRenderer.invoke('draw:list', worktreePath, branch),
+      read: (worktreePath: string, relPath: string): Promise<DrawScene> =>
+        ipcRenderer.invoke('draw:read', worktreePath, relPath),
+      // Answers with the MERGED scene, which is what the panel keeps as its new
+      // baseline: what it sent is not necessarily what landed.
+      apply: (worktreePath: string, relPath: string, delta: DrawDelta): Promise<DrawScene> =>
+        ipcRenderer.invoke('draw:apply', worktreePath, relPath, delta),
+      create: (worktreePath: string, name: string, scope?: DrawScope, branch?: string): Promise<DrawFile> =>
+        ipcRenderer.invoke('draw:create', worktreePath, name, scope, branch),
+      // Move a draft into the project — .floe/draw/ → specs/<branch>/. Answers
+      // with the drawing's new row, so the caller can open it where it landed.
+      promote: (worktreePath: string, relPath: string, branch?: string): Promise<DrawFile> =>
+        ipcRenderer.invoke('draw:promote', worktreePath, relPath, branch),
+      watch: (worktreePath: string): Promise<void> => ipcRenderer.invoke('draw:watch', worktreePath),
+      // Show the .excalidraw in the OS file manager — a drawing is a portable
+      // file, and this is how it leaves Floe for another tool.
+      reveal: (worktreePath: string, relPath: string): Promise<void> =>
+        ipcRenderer.invoke('draw:reveal', worktreePath, relPath),
+      onEvent: (cb: (event: { worktreePath: string }) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, event: { worktreePath: string }): void => cb(event)
+        ipcRenderer.on('draw:changed', listener)
+        return () => ipcRenderer.removeListener('draw:changed', listener)
       }
     },
     editor: {
