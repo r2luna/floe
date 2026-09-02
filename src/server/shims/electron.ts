@@ -153,7 +153,12 @@ export const safeStorage = {
   decryptString: (b: Buffer): string => b.toString('utf8')
 }
 
+export const protocol = {
+  registerSchemesAsPrivileged: (): void => {},
+  handle: (): void => {}
+}
+
 // Type-only names (IpcMainInvokeEvent, WebContents, MenuItemConstructorOptions)
 // erase at compile time and need no runtime value.
 
-export default { app, BrowserWindow, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, shell, safeStorage }
+export default { app, BrowserWindow, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, shell, safeStorage, protocol }
