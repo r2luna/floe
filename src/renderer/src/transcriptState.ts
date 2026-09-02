@@ -18,13 +18,25 @@ export interface LiveState {
   base: TranscriptItem[]
   live: TranscriptItem[]
   tail: TranscriptItem | null
+  /**
+   * Epoch ms the turn the live stream is carrying began. Everything the CLI has
+   * written to the JSONL since then is the SAME turn the stream already holds,
+   * so it is dropped from `base` — see `mine` for the lines that are still read
+   * off disk after it.
+   */
+  since?: number
 }
 
 export type LiveAction =
   | { type: 'reset' }
+  // The live stream owns the turn that started at `at`: whoever knows when the
+  // turn began (this panel's own send, the `turn` event, the replay snapshot)
+  // says so here, and the disk copy of that turn stops being shown.
+  | { type: 'live-since'; at: number }
   // The transcript read off disk, once it lands. Rows the live stream already
   // pushed are dropped from it: the same agent must not arrive twice because
-  // its launch was both written to the JSONL and streamed here.
+  // its launch was both written to the JSONL and streamed here, and neither
+  // must the turn in flight (see `since`).
   | { type: 'load'; items: TranscriptItem[] }
   // A settled entry (user turn, tool row): settles the tail first, so a tool
   // call that interrupts the text keeps its place in the conversation.
@@ -44,6 +56,52 @@ export type LiveAction =
   // The turn ended: settle the tail, then stamp what it cost onto the LAST
   // assistant entry of the run — the one the footer prints under.
   | { type: 'finish'; ms?: number; tokens: number }
+
+/**
+ * Is this disk line one the live stream never carries?
+ *
+ * The replay of a turn in flight holds what the MODEL produced — its text, its
+ * tool rows, its subagents, the peer lines said into it. What YOU put in is not
+ * in there (the CLI writes your prompt to the JSONL at submit, and the replay
+ * deliberately skips it), and neither are the artifacts a decision panel leaves
+ * behind. Those are still read off disk however recent they are; everything
+ * else from the turn in flight would be a second copy.
+ */
+function mine(item: TranscriptItem): boolean {
+  if (item.by === 'user') return true
+  if (item.role === 'image' || item.role === 'artifact') return true
+  // `from` is another session speaking — the stream replays that as a `peer`.
+  return item.role === 'user' && !item.from
+}
+
+/** What you said, as the live stream is already showing it. */
+function saidLive(live: TranscriptItem[]): Set<string> {
+  const said = new Set<string>()
+  for (const i of live) if (mine(i) && i.text) said.add(i.text)
+  return said
+}
+
+/**
+ * The disk transcript with the turn the live stream already has cut out of it.
+ *
+ * `live` is passed so the one line that is in BOTH — a message typed into the
+ * running turn, which the stream carries and the CLI writes to the JSONL when
+ * it absorbs it — is kept once rather than shown twice.
+ */
+function beforeTurn(items: TranscriptItem[], since?: number, live: TranscriptItem[] = []): TranscriptItem[] {
+  if (!since) return items
+  const said = saidLive(live)
+  return items.filter((i) => {
+    if (!i.at || i.at < since) return true
+    return mine(i) && !(i.text && said.has(i.text))
+  })
+}
+
+/** Drop the first line of the running turn that says exactly this. */
+function dropOnce(items: TranscriptItem[], text: string, since: number): TranscriptItem[] {
+  const at = items.findIndex((i) => i.text === text && mine(i) && i.at !== undefined && i.at >= since)
+  return at === -1 ? items : [...items.slice(0, at), ...items.slice(at + 1)]
+}
 
 /**
  * Where a subagent row is, newest first and `live` before `base`.
@@ -73,6 +131,11 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
   switch (action.type) {
     case 'reset':
       return { base: [], live: [], tail: null }
+    case 'live-since':
+      // Applied to what is already loaded too: the read can land before the
+      // replay resolves, in which case the duplicate is on screen by the time
+      // anyone knows a turn is in flight.
+      return { ...state, since: action.at, base: beforeTurn(state.base, action.at, state.live) }
     case 'load': {
       // A subagent the live stream already opened is not loaded a second time:
       // the streamed copy is the one the events are patching.
@@ -82,7 +145,7 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
       const items = known.size
         ? action.items.filter((i) => i.role !== 'subagent' || !known.has(i.toolUseId))
         : action.items
-      return { ...state, base: items }
+      return { ...state, base: beforeTurn(items, state.since, state.live) }
     }
     case 'push': {
       // A subagent row this panel already has (read off disk on open) must not
@@ -98,7 +161,14 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
         if (row?.running) return state
       }
       const live = state.tail ? [...state.live, state.tail] : state.live
-      return { ...state, live: [...live, action.item], tail: null }
+      // A steer replayed into a panel that already read the JSONL copy of it:
+      // one message, said once. Only the first match goes — the same line typed
+      // twice into one turn is two lines, and both were really said.
+      const base =
+        state.since && mine(action.item) && action.item.text
+          ? dropOnce(state.base, action.item.text, state.since)
+          : state.base
+      return { ...state, base, live: [...live, action.item], tail: null }
     }
     case 'text':
       return state.tail
@@ -174,7 +244,9 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
         live[i] = { ...live[i], ms: action.ms, contextTokens: action.tokens || live[i].contextTokens }
         break
       }
-      return { base, live, tail: null }
+      // `since` survives the turn: a transcript read slow enough to land after
+      // the answer would still be carrying a copy of it.
+      return { ...state, base, live, tail: null }
     }
   }
 }

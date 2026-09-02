@@ -22,9 +22,14 @@ Notes on the steer path:
   options apply from the next idle send, which respawns on `optionsKey` change
   as before.
 - **No `markTurnStart`.** The running turn's replay buffer stays intact; a
-  panel mounting mid-turn still replays the whole turn. The steered user
-  message reaches other viewers the same way ordinary prompts do — the CLI
-  echoes it into the session JSONL.
+  panel mounting mid-turn still replays the whole turn.
+- **The steered message is kept twice, shown once.** The CLI does NOT echo it
+  as a user line: it queues it, folds it into the turn, and writes what it
+  absorbed as an `attachment` line (`queued_command`) — only when the tool call
+  in flight ends. `loadClaudeTranscript` reads that line as your message, and
+  until it exists `sendToAgent` keeps a `steer` event in the replay so a panel
+  mounting mid-turn still shows what was said. The renderer drops the disk copy
+  of a line the stream already carries (`transcriptState.ts`, `dropOnce`).
 - **Paused turns too.** A pending permission/question flips the renderer's
   `running` to false but leaves `conn.turnActive` true, so a send while paused
   is also a steer — the CLI holds it until the prompt is resolved, exactly like

@@ -688,6 +688,22 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
     } catch {
       continue
     }
+    // A message typed while the turn was running. The CLI does NOT echo it as
+    // a user line — it queues it, folds it into the turn in flight, and records
+    // what it absorbed as this one `attachment` line. Skipping it is how a
+    // steer vanished from the chat the moment the panel was reopened: the only
+    // copy was the one the renderer had pushed locally.
+    if (m.type === 'attachment') {
+      const a = m.attachment as { type?: string; prompt?: string } | undefined
+      if (a?.type === 'queued_command' && typeof a.prompt === 'string' && a.prompt.trim()) {
+        // `at` is the line's own timestamp — when it was TYPED, not when the
+        // turn got round to it. It also must not move `turnStartedAt`: a steer
+        // joins the turn in flight rather than starting one.
+        const at = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || undefined : undefined
+        items.push({ role: 'user', text: a.prompt.trim(), at })
+      }
+      continue
+    }
     if (m.type !== 'user' && m.type !== 'assistant') continue
     // A subagent's own steps are written into the SAME file, flagged as a
     // sidechain. They are the child's transcript, not the parent's: replaying
