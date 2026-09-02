@@ -19,7 +19,7 @@ import { routeAt, type Route } from '../shared/mentions'
 import { sendToAgent } from './agent'
 // Circular with relay.ts (it starts the turns it relays) — safe: neither side
 // touches the other at module top level.
-import { armRelay } from './relay'
+import { armAddress, armRelay } from './relay'
 import { runRuntime } from './runtimes'
 import { expandSkills } from '../shared/skills'
 import { readSkill } from './config/skills'
@@ -85,10 +85,12 @@ export function optionsForSession(key: string): AgentRunOptions {
  * live in Floe's config: `/deploy` has to mean the same thing whichever CLI
  * answers. Expanding per runtime would be four copies of one rule.
  *
- * A turn handed to a harness the session does NOT answer as arms the relay: the
- * answer comes back to the session's own model, which says what it makes of it
- * and can ask the harness more. See relay.ts — that is what makes `@codex` a
- * conversation instead of a message you then have to carry by hand.
+ * Every turn is watched for where it should go next. Handed to a harness the
+ * session does NOT answer as, the answer comes back to the session's own model,
+ * which says what it makes of it and can ask the harness more; answered in the
+ * session's own voice, a handle the model wrote is delivered to the harness it
+ * names. See relay.ts — that is what makes `@codex` a conversation instead of a
+ * message you then have to carry by hand.
  */
 export function startTurn(
   win: BrowserWindow,
@@ -106,7 +108,12 @@ export function startTurn(
   // providers existed (a persisted model with no provider beside it).
   const provider = options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
   const own = optionsForSession(key)
+  // Either way, somebody is listening to how this turn ends. Handed to another
+  // harness, the relay brings the answer back here; answered in the session's
+  // own voice, armAddress delivers whatever IT addresses — which is what makes
+  // `@codex` written by the model reach codex, and not just read like it did.
   if (provider !== (own.provider ?? 'claude')) armRelay(win, key, worktreePath, provider, own)
+  else armAddress(win, key, worktreePath, own)
   if (provider !== 'claude') {
     void runRuntime(
       win,
