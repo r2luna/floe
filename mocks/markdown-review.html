@@ -1,0 +1,988 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Markdown Review — prototype</title>
+<style>
+  *,::before,::after { box-sizing: border-box; }
+
+  :root {
+    --bg:         #1b1917;
+    --bg-side:    #211e1b;
+    --bg-band:    #262220;
+    --line:       #322d29;
+    --fg:         #ece5db;
+    --fg-dim:     #a89c8d;
+    --fg-faint:   #6f6559;
+    --accent:     #e0975a;
+
+    --del-fg:     #e08d81;
+    --del-bg:     rgba(198, 84, 72, 0.16);
+    --ins-fg:     #8ecda6;
+    --ins-bg:     rgba(88, 170, 118, 0.15);
+
+    --serif: Charter, "Iowan Old Style", "Source Serif 4", Palatino, Georgia, serif;
+    --mono: "Fira Code", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #0f0e0d;
+    color: var(--fg);
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ---------- window chrome ---------- */
+  .win {
+    width: min(1400px, 100vw);
+    height: min(900px, 100vh);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 260px 1fr;
+  }
+
+  .side {
+    background: var(--bg-side);
+    border-right: 1px solid var(--line);
+    padding: 14px 0;
+    overflow: auto;
+  }
+  .lights { display: flex; gap: 8px; padding: 4px 16px 20px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #e0655b; }
+  .lights i:nth-child(2) { background: #e0b246; }
+  .lights i:nth-child(3) { background: #62c458; }
+
+  .side h4 {
+    margin: 0; padding: 0 16px 6px;
+    font: 400 11px/1 var(--mono);
+    letter-spacing: .08em; text-transform: uppercase; color: var(--fg-faint);
+  }
+  .repo { padding: 0 16px 18px; }
+  .repo .name { font-size: 13px; color: var(--fg); }
+  .repo .range { font-size: 12px; color: var(--fg-dim); margin-top: 4px; }
+
+  .files { margin-top: 4px; }
+  .file {
+    display: grid; grid-template-columns: 18px 1fr;
+    padding: 6px 16px; cursor: default;
+  }
+  .file.active { background: #2b2521; }
+  .file .badge { font-size: 11px; color: var(--fg-faint); }
+  .file .badge.M { color: var(--accent); }
+  .file .badge.A { color: var(--ins-fg); }
+  .file .badge.D { color: var(--del-fg); }
+  .file .fname { font-size: 13px; }
+  .file .fpath { font-size: 11px; color: var(--fg-faint); grid-column: 2; }
+
+  /* ---------- top bar ---------- */
+  .pane { display: flex; flex-direction: column; min-width: 0; }
+  .top {
+    height: 52px; flex: none;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+    padding: 0 16px; position: relative;
+    border-bottom: 1px solid transparent;
+  }
+  .pill {
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 5px 12px; font-size: 12px; color: var(--fg-dim);
+  }
+  .arrow { color: var(--fg-faint); }
+  .seg {
+    position: absolute; right: 68px;
+    display: flex; background: #2a2522; border-radius: 999px; padding: 3px;
+  }
+  .seg button {
+    border: 0; background: none; color: var(--fg-dim);
+    font: 400 12px var(--mono); padding: 5px 14px; border-radius: 999px; cursor: pointer;
+  }
+  .seg button.on { background: #3a332e; color: var(--fg); }
+  .mode-play .seg { opacity: .35; pointer-events: none; }
+
+  .go {
+    position: absolute; right: 16px;
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 0; background: var(--accent); color: #2a1a0c;
+    font-size: 14px; cursor: pointer;
+    display: grid; place-items: center;
+  }
+  .go.exit { background: none; color: var(--fg-dim); border: 1px solid var(--line); }
+
+
+  /* ---------- document ---------- */
+  .main { flex: 1; overflow: auto; scroll-behavior: smooth; padding: 24px 0 220px; }
+  .doc { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+  .filehead {
+    display: grid; grid-template-columns: 72px 1fr; margin-bottom: 26px;
+  }
+  .filehead .path { font-size: 13px; color: var(--fg-dim); }
+  .filehead .path b { color: var(--accent); font-weight: 400; font-size: 11px; letter-spacing: .08em; }
+
+  .blk {
+    display: grid; grid-template-columns: 72px 1fr;
+    position: relative; padding: 2px 0;
+  }
+  .blk .gut {
+    font-size: 12px; color: var(--fg-faint);
+    display: flex; gap: 6px; justify-content: flex-end; padding: 10px 12px 0 0;
+    user-select: none;
+  }
+  .blk .gut .md { color: var(--del-fg); }
+  .blk .gut .mi { color: var(--ins-fg); }
+  .blk .gut .now, .blk .gut .next { display: none; font-size: 10px; letter-spacing: .1em; }
+
+  .body { min-width: 0; font-family: var(--serif); }
+
+  h1.t { font: 600 40px/1.15 var(--serif); margin: 8px 0 20px; letter-spacing: -.01em; }
+  h2.t { font: 600 25px/1.25 var(--serif); margin: 34px 0 10px; }
+  h3.t { font: 600 20px/1.3 var(--serif); margin: 26px 0 8px; }
+  p.t   { font-size: 19px; line-height: 1.62; margin: 0 0 18px; }
+  ul.t  { margin: 0 0 18px; padding-left: 22px; list-style: none; }
+  ul.t li { font-size: 19px; line-height: 1.62; margin-bottom: 4px; }
+  ul.t li::before { content: "•"; color: var(--accent); margin-right: 10px; margin-left: -20px; }
+  blockquote.t {
+    margin: 0 0 18px; padding-left: 16px; border-left: 2px solid var(--fg-faint);
+    font-style: italic; color: var(--fg-dim); font-size: 19px; line-height: 1.6;
+  }
+  a.t { color: inherit; text-decoration: none; border-bottom: 1px solid var(--fg-faint); }
+  a.chg { color: var(--accent); border-bottom-color: var(--accent); background: rgba(224,151,90,.12); }
+  code.t { font-family: var(--mono); font-size: .85em; background: #2a2522; padding: 1px 5px; border-radius: 4px; }
+
+  /* frontmatter */
+  .meta { margin: 0 0 26px; }
+  .meta .cap { font: 400 10px var(--mono); letter-spacing: .1em; color: var(--fg-faint); text-transform: uppercase; margin-bottom: 10px; }
+  .meta .row { display: grid; grid-template-columns: 160px 1fr; padding: 7px 0; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 13px; }
+  .meta .k { color: var(--fg-dim); }
+
+  /* diff marks */
+  del.d {
+    text-decoration: line-through; text-decoration-thickness: 1px;
+    color: var(--del-fg); background: var(--del-bg);
+    box-decoration-break: clone; padding: 1px 0;
+  }
+  ins.i {
+    text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+    color: var(--ins-fg); background: var(--ins-bg);
+    box-decoration-break: clone; padding: 1px 0;
+  }
+
+  /* annotations */
+  .annot { display: flex; gap: 8px; align-items: baseline; font-family: var(--mono); font-size: 13px; color: var(--accent); margin: -6px 0 10px; }
+  .snip { background: #221f1c; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin: 0 0 20px; font-family: var(--mono); font-size: 13px; color: var(--fg-dim); }
+  .snip .lang { display: block; color: var(--fg-faint); font-size: 11px; margin-bottom: 6px; }
+
+  /* ---------- source view ---------- */
+  .src { font-family: var(--mono); font-size: 13px; max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .srow { display: grid; grid-template-columns: 44px 18px 1fr; white-space: pre-wrap; padding: 1px 0; }
+  .srow .ln { color: var(--fg-faint); text-align: right; padding-right: 12px; }
+  .srow.del { background: var(--del-bg); }
+  .srow.ins { background: var(--ins-bg); }
+  .srow.del .sg, .srow.del .code { color: var(--del-fg); }
+  .srow.ins .sg, .srow.ins .code { color: var(--ins-fg); }
+  .srow .code { color: var(--fg-dim); }
+
+  /* ---------- playback ---------- */
+  .mode-play .blk .gut .md, .mode-play .blk .gut .mi { display: none; }
+  .mode-play .blk.now .gut .now { display: block; color: var(--accent); }
+  .mode-play .blk.next .gut .next { display: block; color: var(--fg-faint); }
+
+  .mode-play .blk.now { background: var(--bg-band); }
+  .mode-play .blk.now::before {
+    content: ""; position: absolute; left: 60px; top: 0; bottom: 0; width: 2px; background: var(--accent);
+  }
+  .mode-play .blk.next { background: rgba(38,34,32,.5); }
+  .mode-play .blk.next::before {
+    content: ""; position: absolute; left: 60px; top: 0; bottom: 0; width: 2px; background: var(--line);
+  }
+
+  /* a list item that exists only in the new version is not there yet */
+  .mode-play .blk.pending li.only-ins { display: none; }
+  .mode-play .blk.now li.only-ins:not(.typing) { display: none; }
+  .mode-play .blk.applied:not(.now) li.only-del { display: none; }
+  .mode-play .blk.vanished { display: none; }
+  /* keep the highlight band tight around the block */
+  .mode-play .blk.now .body > *:last-child,
+  .mode-play .blk.next .body > *:last-child { margin-bottom: 4px; }
+
+  /* pending: read the document as it was */
+  .mode-play .blk.pending del.d { color: inherit; background: none; text-decoration: none; }
+  .mode-play .blk.pending ins.i { display: none; }
+  /* applied and left behind: read the document as it is */
+  .mode-play .blk.applied:not(.now) del.d { display: none; }
+  .mode-play .blk.applied:not(.now) ins.i {
+    color: inherit; background: none; text-decoration: none;
+    transition: color .5s ease, background .5s ease;
+  }
+  /* the hunk being played */
+  .mode-play .blk.now del.d { transition: opacity .45s ease, color .45s ease; }
+  .mode-play .blk.now del.d.gone { display: none; }
+  .ch.hide { display: none; }
+  .ch.caret { border-right: 2px solid var(--accent); margin-right: -2px; }
+
+  .transport {
+    position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+    display: none; align-items: center; gap: 10px;
+    background: #2a2522; border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 16px; font-family: var(--mono); font-size: 12px;
+  }
+  .mode-play .transport { display: flex; }
+  .transport button {
+    border: 0; background: none; color: var(--fg-dim); white-space: nowrap;
+    font: 400 13px var(--mono); cursor: pointer; padding: 4px 6px; border-radius: 6px;
+  }
+  .transport button:hover { color: var(--fg); }
+  .transport button.pp { background: var(--accent); color: #2a1a0c; padding: 4px 10px; }
+  .transport input[type=range] { width: 340px; accent-color: var(--accent); }
+  .transport .n { color: var(--fg-dim); min-width: 60px; text-align: center; white-space: nowrap; }
+  .transport select {
+    background: none; border: 0; color: var(--fg-dim); font: 400 12px var(--mono); cursor: pointer;
+  }
+
+  .pane { position: relative; }
+</style>
+</head>
+<body>
+
+<div class="win" id="win">
+  <aside class="side">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <h4>Repository</h4>
+    <div class="repo">
+      <div class="name">📁 markdiff-demo</div>
+      <div class="range">HEAD → Working Tree</div>
+    </div>
+    <h4>Markdown changes</h4>
+    <div class="files" id="files"></div>
+  </aside>
+
+  <section class="pane">
+    <header class="top">
+      <span class="pill">HEAD ⌄</span>
+      <span class="arrow">→</span>
+      <span class="pill">Working Tree ⌄</span>
+      <div class="seg">
+        <button id="btn-rendered" class="on">Rendered</button>
+        <button id="btn-source">Source</button>
+      </div>
+      <button class="go" id="btn-play" title="Play the edits">▶</button>
+    </header>
+
+    <div class="main" id="main"></div>
+
+    <div class="transport">
+      <button id="t-first" title="First change">⏮</button>
+      <button id="t-prev" title="Previous change">‹</button>
+      <button id="t-pp" class="pp" title="Play / pause">▶</button>
+      <button id="t-next" title="Next change">›</button>
+      <input type="range" id="t-scrub" min="0" max="1" value="0" />
+      <span class="n" id="t-n">0 / 0</span>
+      <select id="t-speed">
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="0.5">0.5×</option>
+      </select>
+    </div>
+  </section>
+</div>
+
+<script>
+/* =========================================================================
+   Sample document — chapters/02-happy-accidents.md
+   ========================================================================= */
+
+const BEFORE = `---
+title: A Happy Accident
+chapter: 2
+point_of_view: Bob
+mood: hopeful
+---
+
+# A Happy Accident
+
+The next morning, Bob found Clara repairing a trail sign behind the visitor center. A streak of blue paint crossed her cheek, though the sign itself was green.
+
+"That color has traveled," he said.
+
+Clara touched the wrong cheek. "Occupational hazard."
+
+Bob offered her a clean handkerchief. She accepted it with the solemn care of someone receiving a tiny flag of surrender.
+
+They walked to the north overlook carrying:
+
+- one field easel,
+- two tin cups,
+- a thermos of coffee,
+- and more curiosity than either admitted.
+
+At the overlook, wind caught Bob's reference sketch and lifted it over the railing. Clara lunged for the page. Bob caught the back of her coat, and for one breath they balanced together between laughter and the valley below.
+
+The sketch sailed into a spruce tree and lodged among the needles like a small white bird.
+
+"A happy accident?" Clara asked.
+
+"The happiest kind," Bob said, still holding her hand.
+
+He painted from memory. She stayed until the light faded, naming every distant ridge while he mixed their colors.
+
+> Some views ask you to look twice. Some people do, too.
+
+See the [field notes](/drafts) for the rest of the walk.`;
+
+const AFTER = `---
+title: The Sketch in the Spruce
+chapter: 2
+point_of_view: Bob
+mood: playful
+---
+
+# The Sketch in the Spruce
+
+The next morning arrived bright and windy. Bob found Clara behind the visitor center arguing with a crooked trail sign.
+
+"That color has traveled," he said.
+
+Clara touched the wrong cheek. "Occupational hazard."
+
+Bob offered her a clean handkerchief. She accepted it with the solemn care of someone receiving a tiny flag of truce.
+
+They walked to the north overlook carrying:
+
+- one well-traveled field easel,
+- two tin cups,
+- a heroic thermos of coffee,
+- three oatmeal cookies,
+- and considerably more curiosity than either admitted.
+
+The overlook had never seemed dangerous to Clara until Bob smiled at her beside it. Then the wind stole his sketch, her hat, and every sensible sentence she had prepared. He caught the hat; she caught his sleeve; together they missed the sketch completely.
+
+The page wheeled above the valley, flashed once in the sun, and settled high in a spruce like a small white bird.
+
+"A happy accident?" Clara asked.
+
+"The happiest kind," Bob said, still holding her hand — and making no effort to let go.
+
+> Some views ask you to look twice. Some people do, too.
+
+See the [field notes](/reviews) for the rest of the walk.`;
+
+/* =========================================================================
+   Word-level diff
+   ========================================================================= */
+
+const DEL_O = "\u0001", DEL_C = "\u0002", INS_O = "\u0003", INS_C = "\u0004", LINK = "\u0005";
+
+const tokenize = (s) => s.match(/\s+|\S+/g) || [];
+
+function diffOps(a, b) {
+  const n = a.length, m = b.length;
+  const dp = [];
+  for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { ops.push(["=", a[i]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) { ops.push(["-", a[i++]]); }
+    else { ops.push(["+", b[j++]]); }
+  }
+  while (i < n) ops.push(["-", a[i++]]);
+  while (j < m) ops.push(["+", b[j++]]);
+  return ops;
+}
+
+// Keep the highlight tight: leading/trailing whitespace stays outside the marks.
+function tight(s, open, close) {
+  const m = s.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  return m[2] ? m[1] + open + m[2] + close + m[3] : s;
+}
+
+const words = (s) => tokenize(s).filter((t) => t.trim()).length;
+
+function groupRuns(ops) {
+  const runs = [];
+  for (const [op, text] of ops) {
+    const last = runs[runs.length - 1];
+    if (last && last.op === op) last.text += text;
+    else runs.push({ op, text });
+  }
+  return runs;
+}
+
+// A one or two word island between two changes reads as noise. Fold it in.
+function absorbIslands(runs) {
+  const out = [];
+  for (let i = 0; i < runs.length; i++) {
+    const r = runs[i];
+    const flanked = i > 0 && i < runs.length - 1 && runs[i - 1].op !== "=" && runs[i + 1].op !== "=";
+    if (r.op === "=" && flanked && words(r.text) <= 2) {
+      out.push({ op: "-", text: r.text }, { op: "+", text: r.text });
+    } else out.push(r);
+  }
+  return groupRuns(out.map((r) => [r.op, r.text]));
+}
+
+function changeRatio(ops) {
+  let same = 0, diff = 0;
+  for (const [op, t] of ops) {
+    if (!t.trim()) continue;
+    if (op === "=") same++; else diff++;
+  }
+  return diff / (same + diff || 1);
+}
+
+function markWords(before, after) {
+  const ops = diffOps(tokenize(before), tokenize(after));
+
+  // Past roughly half the words changed, a word-level diff is confetti.
+  // Show the block as a straight replacement instead.
+  if (changeRatio(ops) > 0.5) {
+    const sep = /\n/.test(before) || /\n/.test(after) ? "\n" : " ";
+    return tight(before, DEL_O, DEL_C) + sep + tight(after, INS_O, INS_C);
+  }
+
+  const runs = absorbIslands(groupRuns(ops));
+  let out = "", i = 0;
+  while (i < runs.length) {
+    if (runs[i].op === "=") { out += runs[i].text; i++; continue; }
+    let del = "", ins = "";
+    while (i < runs.length && runs[i].op !== "=") {
+      if (runs[i].op === "-") del += runs[i].text; else ins += runs[i].text;
+      i++;
+    }
+    let chunk = tight(del, DEL_O, DEL_C);
+    if (del && ins && !/\s$/.test(del) && !/^\s/.test(ins)) chunk += " ";
+    out += chunk + tight(ins, INS_O, INS_C);
+  }
+  return out;
+}
+
+// Multi-line blocks (lists) diff line by line first, so a del/ins run never
+// straddles two list items.
+function markLines(before, after) {
+  const ops = diffOps(before.split("\n"), after.split("\n"));
+  const out = [];
+  let i = 0;
+  while (i < ops.length) {
+    if (ops[i][0] === "=") { out.push(ops[i][1]); i++; continue; }
+    const dels = [], inss = [];
+    while (i < ops.length && ops[i][0] !== "=") {
+      (ops[i][0] === "-" ? dels : inss).push(ops[i][1]);
+      i++;
+    }
+    while (dels.length && inss.length) {
+      if (similarity(dels[0], inss[0]) > 0.3) out.push(markWords(dels.shift(), inss.shift()));
+      else if (dels.length >= inss.length) out.push(tight(dels.shift(), DEL_O, DEL_C));
+      else out.push(tight(inss.shift(), INS_O, INS_C));
+    }
+    dels.forEach((d) => out.push(tight(d, DEL_O, DEL_C)));
+    inss.forEach((a) => out.push(tight(a, INS_O, INS_C)));
+  }
+  return out.join("\n");
+}
+
+// Link destinations are reported as annotations, not as inline word noise.
+function maskLinks(s) {
+  const urls = [];
+  const masked = s.replace(/\]\(([^)]+)\)/g, (_, u) => { urls.push(u); return "](" + LINK + ")"; });
+  return { masked, urls };
+}
+
+function unmaskLinks(marked, beforeUrls, afterUrls) {
+  const before = beforeUrls.slice(), after = afterUrls.slice();
+  let inDel = false, out = "";
+  for (const ch of marked) {
+    if (ch === DEL_O) inDel = true;
+    else if (ch === DEL_C) inDel = false;
+    if (ch === LINK) {
+      const url = (inDel ? before.shift() : after.shift()) ?? after.shift() ?? "";
+      out += escapeHtml(url);
+    } else out += ch;
+  }
+  return out;
+}
+
+/* =========================================================================
+   Block splitting and pairing
+   ========================================================================= */
+
+function classify(raw) {
+  if (/^#{1,6}\s/.test(raw)) return "heading";
+  if (/^>\s/.test(raw)) return "quote";
+  if (/^[-*]\s/.test(raw)) return "list";
+  return "para";
+}
+
+function splitBlocks(md) {
+  const lines = md.split("\n");
+  const blocks = [];
+  let i = 0;
+  if (lines[0].trim() === "---") {
+    let j = 1;
+    while (j < lines.length && lines[j].trim() !== "---") j++;
+    blocks.push({ type: "front", raw: lines.slice(1, j).join("\n") });
+    i = j + 1;
+  }
+  let buf = [];
+  const flush = () => { if (buf.length) { const raw = buf.join("\n"); blocks.push({ type: classify(raw), raw }); buf = []; } };
+  for (; i < lines.length; i++) {
+    if (!lines[i].trim()) flush(); else buf.push(lines[i]);
+  }
+  flush();
+  return blocks;
+}
+
+function similarity(a, b) {
+  const A = tokenize(a).filter((t) => t.trim());
+  const B = new Set(tokenize(b).filter((t) => t.trim()));
+  if (!A.length) return 0;
+  let hit = 0;
+  for (const t of A) if (B.has(t)) hit++;
+  return hit / Math.max(A.length, B.size);
+}
+
+// LCS over whole blocks, then pair leftovers inside each gap by similarity.
+function pairBlocks(bs, as) {
+  const n = bs.length, m = as.length;
+  const dp = [];
+  for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = bs[i].raw === as[j].raw ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const out = [];
+  let i = 0, j = 0, gapB = [], gapA = [];
+  const drainGap = () => {
+    const dels = gapB.slice(), adds = gapA.slice();
+    const count = (list, t) => list.filter((x) => x.type === t).length;
+    while (dels.length && adds.length) {
+      const d = dels[0];
+      let best = -1, score = 0;
+      adds.forEach((a, k) => {
+        const s = a.type === d.type ? similarity(d.raw, a.raw) : 0;
+        if (s > score) { score = s; best = k; }
+      });
+      // A rewritten heading shares no words with the old one, so similarity
+      // alone would split it into a delete plus an add. When the gap holds the
+      // same number of blocks of that type on both sides, pair them in order.
+      const balanced = count(dels, d.type) === count(adds, d.type);
+      const firstOfType = adds.findIndex((a) => a.type === d.type);
+      if (best >= 0 && score > 0.3) {
+        out.push({ kind: "mod", before: dels.shift(), after: adds.splice(best, 1)[0] });
+      } else if (balanced && firstOfType >= 0) {
+        out.push({ kind: "mod", before: dels.shift(), after: adds.splice(firstOfType, 1)[0] });
+      } else {
+        out.push({ kind: "del", before: dels.shift() });
+      }
+    }
+    dels.forEach((d) => out.push({ kind: "del", before: d }));
+    adds.forEach((a) => out.push({ kind: "add", after: a }));
+    gapB = []; gapA = [];
+  };
+
+  while (i < n && j < m) {
+    if (bs[i].raw === as[j].raw) { drainGap(); out.push({ kind: "same", after: as[j] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) gapB.push(bs[i++]);
+    else gapA.push(as[j++]);
+  }
+  while (i < n) gapB.push(bs[i++]);
+  while (j < m) gapA.push(as[j++]);
+  drainGap();
+  return out;
+}
+
+/* =========================================================================
+   Markdown rendering (marked source → HTML)
+   ========================================================================= */
+
+const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code class="t">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a class="t" href="$2">$1</a>');
+}
+
+const marksToTags = (s) =>
+  s.replace(/\u0001/g, '<del class="d">').replace(/\u0002/g, "</del>")
+   .replace(/\u0003/g, '<ins class="i">').replace(/\u0004/g, "</ins>");
+
+// A del/ins run may span several source lines. Close it at the end of each
+// line and reopen it on the next so every line is independently renderable.
+function balanceLines(marked) {
+  const out = [];
+  let open = null;
+  for (const line of marked.split("\n")) {
+    let s = open === "d" ? DEL_O : open === "i" ? INS_O : "";
+    for (const ch of line) {
+      if (ch === DEL_O) open = "d";
+      else if (ch === INS_O) open = "i";
+      else if (ch === DEL_C || ch === INS_C) open = null;
+      s += ch;
+    }
+    if (open === "d") s += DEL_C;
+    if (open === "i") s += INS_C;
+    out.push(s);
+  }
+  return out;
+}
+
+const stripMarks = (s) => s.replace(/[\u0001-\u0004]/g, "");
+
+function renderBody(type, marked) {
+  const lines = balanceLines(marked);
+  const html = (s) => marksToTags(inline(s));
+
+  if (type === "heading") {
+    const m = stripMarks(lines[0]).match(/^(#{1,6})\s/);
+    const level = Math.min(m ? m[1].length : 1, 3);
+    const text = lines[0].replace(/(^|[\u0001-\u0004])#{1,6}\s+/g, "$1");
+    return `<h${level} class="t">${html(text)}</h${level}>`;
+  }
+  if (type === "quote") {
+    const text = lines.map((l) => l.replace(/(^|[\u0001-\u0004])(?:&gt;|>)\s?/g, "$1")).join(" ");
+    return `<blockquote class="t">${html(text)}</blockquote>`;
+  }
+  if (type === "list") {
+    const items = lines.map((l) => `<li>${html(l.replace(/(^|[\u0001-\u0004])[-*]\s+/g, "$1"))}</li>`);
+    return `<ul class="t">${items.join("")}</ul>`;
+  }
+  return `<p class="t">${html(lines.join(" "))}</p>`;
+}
+
+function renderFrontmatter(beforeRaw, afterRaw) {
+  const parse = (raw) => {
+    const map = new Map();
+    raw.split("\n").forEach((l) => {
+      const m = l.match(/^([\w-]+):\s*(.*)$/);
+      if (m) map.set(m[1], m[2]);
+    });
+    return map;
+  };
+  const b = parse(beforeRaw ?? ""), a = parse(afterRaw ?? "");
+  const keys = [...new Set([...b.keys(), ...a.keys()])];
+  let changed = false;
+  const rows = keys.map((k) => {
+    const bv = b.get(k), av = a.get(k);
+    let cell;
+    if (bv === undefined) { cell = INS_O + av + INS_C; changed = true; }
+    else if (av === undefined) { cell = DEL_O + bv + DEL_C; changed = true; }
+    else if (bv !== av) { cell = markWords(bv, av); changed = true; }
+    else cell = av;
+    return `<div class="row"><span class="k">${escapeHtml(k)}</span><span>${marksToTags(escapeHtml(cell))}</span></div>`;
+  });
+  return {
+    changed,
+    html: `<div class="meta"><div class="cap">Document metadata · ${keys.length} fields</div>${rows.join("")}</div>`,
+  };
+}
+
+function linkAnnotations(beforeUrls, afterUrls, afterRaw) {
+  const notes = [];
+  const texts = [...afterRaw.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map((m) => m[1]);
+  afterUrls.forEach((url, i) => {
+    if (beforeUrls[i] !== undefined && beforeUrls[i] !== url) {
+      notes.push({ from: beforeUrls[i], to: url, text: texts[i] ?? "" });
+    }
+  });
+  return notes;
+}
+
+/* =========================================================================
+   Views
+   ========================================================================= */
+
+const main = document.getElementById("main");
+const win = document.getElementById("win");
+
+function buildRendered() {
+  const entries = pairBlocks(splitBlocks(BEFORE), splitBlocks(AFTER));
+  let hunk = 0;
+  let out = `<div class="doc"><div class="filehead"><span></span><span class="path">chapters/02-happy-accidents.md &nbsp;<b>MODIFIED</b></span></div>`;
+
+  for (const e of entries) {
+    const type = (e.after ?? e.before).type;
+    let body = "", isHunk = false, annots = [];
+
+    if (type === "front") {
+      const fm = renderFrontmatter(e.before?.raw, e.after?.raw);
+      body = fm.html;
+      isHunk = fm.changed;
+    } else if (e.kind === "same") {
+      body = renderBody(type, escapeHtml(e.after.raw));
+    } else if (e.kind === "mod") {
+      const bm = maskLinks(e.before.raw), am = maskLinks(e.after.raw);
+      const multiline = /\n/.test(bm.masked) || /\n/.test(am.masked);
+      const marked = multiline ? markLines(bm.masked, am.masked) : markWords(bm.masked, am.masked);
+      body = renderBody(type, unmaskLinks(escapeHtml(marked), bm.urls, am.urls));
+      annots = linkAnnotations(bm.urls, am.urls, e.after.raw);
+      isHunk = true;
+    } else if (e.kind === "add") {
+      body = renderBody(type, INS_O + escapeHtml(e.after.raw) + INS_C);
+      isHunk = true;
+    } else {
+      body = renderBody(type, DEL_O + escapeHtml(e.before.raw) + DEL_C);
+      isHunk = true;
+    }
+
+    for (const a of annots) {
+      // point at the link the note is about
+      body = body.replace(`<a class="t" href="${a.to}"`, `<a class="t chg" href="${a.to}"`);
+      body += `<div class="annot"><span>🔗</span><span>Link destination changed from ${escapeHtml(a.from)} to ${escapeHtml(a.to)}.</span></div>` +
+              `<pre class="snip"><span class="lang">markdown</span>[${escapeHtml(a.text)}](${escapeHtml(a.to)})</pre>`;
+    }
+
+    const n = isHunk ? ++hunk : 0;
+    const gut = isHunk
+      ? `<span class="md">−</span><span class="mi">+</span><span class="now">NOW ▸</span><span class="next">NEXT ▸</span>`
+      : "";
+    out += `<div class="blk"${isHunk ? ` data-hunk="${n}"` : ""}><div class="gut">${gut}</div><div class="body">${body}</div></div>`;
+  }
+  return out + "</div>";
+}
+
+function buildSource() {
+  const b = BEFORE.split("\n"), a = AFTER.split("\n");
+  const ops = diffOps(b, a);
+  let out = `<div class="src"><div class="filehead"><span></span><span class="path">chapters/02-happy-accidents.md &nbsp;<b>SOURCE</b></span></div>`;
+  let bn = 0, an = 0;
+  for (const [op, text] of ops) {
+    if (op !== "+") bn++;
+    if (op !== "-") an++;
+    const cls = op === "-" ? "del" : op === "+" ? "ins" : "";
+    const sign = op === "=" ? "" : op;
+    const n = op === "-" ? bn : an;
+    out += `<div class="srow ${cls}"><span class="ln">${n}</span><span class="sg">${sign}</span><span class="code">${escapeHtml(text) || "&nbsp;"}</span></div>`;
+  }
+  return out + "</div>";
+}
+
+/* =========================================================================
+   Playback — follow the edits as they happen
+   ========================================================================= */
+
+let hunks = [], cur = 0, playing = false, runToken = 0, speed = 1;
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// One span per character, so insertions can be typed without losing inline markup.
+function wrapChars(el) {
+  const chars = [];
+  const walk = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 3) {
+        const frag = document.createDocumentFragment();
+        for (const ch of child.nodeValue) {
+          const s = document.createElement("span");
+          s.className = "ch";
+          s.textContent = ch;
+          frag.appendChild(s);
+          chars.push(s);
+        }
+        node.replaceChild(frag, child);
+      } else walk(child);
+    }
+  };
+  walk(el);
+  return chars;
+}
+
+const textOf = (el, sel) => [...el.querySelectorAll(sel)].map((n) => n.textContent).join("").trim();
+
+function collectHunks() {
+  main.querySelectorAll("li").forEach((li) => {
+    const t = li.textContent.trim();
+    if (!t) return;
+    if (li.querySelector("ins.i") && t === textOf(li, "ins.i")) li.classList.add("only-ins");
+    if (li.querySelector("del.d") && t === textOf(li, "del.d")) li.classList.add("only-del");
+  });
+
+  hunks = [...main.querySelectorAll(".blk[data-hunk]")]
+    .sort((x, y) => +x.dataset.hunk - +y.dataset.hunk)
+    .map((el) => {
+      const body = el.querySelector(".body");
+      return {
+        el,
+        // nothing survives the change: the block itself goes away
+        pure: !!body.querySelector("del.d") && body.textContent.trim() === textOf(body, "del.d"),
+        dels: [...el.querySelectorAll("del.d")],
+        inss: [...el.querySelectorAll("ins.i")].map((ins) => ({ el: ins, chars: wrapChars(ins) })),
+      };
+    });
+}
+
+function clearCaret() {
+  main.querySelectorAll(".ch.caret").forEach((c) => c.classList.remove("caret"));
+}
+
+function paint(k, animating) {
+  hunks.forEach((h, idx) => {
+    const n = idx + 1;
+    const applied = n <= k;
+    h.el.classList.toggle("applied", applied);
+    h.el.classList.toggle("pending", !applied);
+    h.el.classList.toggle("now", n === k);
+    h.el.classList.toggle("next", n === k + 1);
+
+    if (!animating || n !== k) {
+      h.dels.forEach((d) => { d.classList.toggle("gone", applied); d.classList.remove("struck"); });
+      h.inss.forEach((i) => i.chars.forEach((c) => c.classList.toggle("hide", !applied)));
+      h.el.classList.toggle("vanished", applied && h.pure);
+      h.el.querySelectorAll("li.only-ins").forEach((li) => li.classList.toggle("typing", applied));
+    }
+  });
+  document.getElementById("t-n").textContent = `${k} / ${hunks.length}`;
+  document.getElementById("t-scrub").value = String(k);
+}
+
+function jumpTo(k) {
+  runToken++;
+  cur = Math.max(0, Math.min(k, hunks.length));
+  clearCaret();
+  paint(cur, false);
+  if (cur > 0) hunks[cur - 1].el.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+async function stepForward() {
+  if (cur >= hunks.length) return false;
+  const token = ++runToken;
+  const h = hunks[cur];
+  cur++;
+
+  // Show the hunk in its "before" shape, then morph it.
+  paint(cur, true);
+  h.el.classList.remove("vanished");
+  h.dels.forEach((d) => d.classList.remove("gone", "struck"));
+  h.inss.forEach((i) => i.chars.forEach((c) => c.classList.add("hide")));
+  h.el.querySelectorAll("li.only-ins").forEach((li) => li.classList.remove("typing"));
+  h.el.scrollIntoView({ block: "center", behavior: "smooth" });
+  await wait(420 / speed);
+  if (token !== runToken) return false;
+
+  if (h.dels.length) {
+    h.dels.forEach((d) => d.classList.add("struck"));
+    await wait(560 / speed);
+    if (token !== runToken) return false;
+    h.dels.forEach((d) => d.classList.add("gone"));
+    if (h.pure) h.el.classList.add("vanished");
+    await wait(220 / speed);
+    if (token !== runToken) return false;
+  }
+
+  const total = h.inss.reduce((n, i) => n + i.chars.length, 0);
+  const per = Math.max(4, Math.min(22, 1100 / Math.max(total, 1))) / speed;
+  for (const ins of h.inss) {
+    ins.el.closest("li")?.classList.add("typing");
+    for (const ch of ins.chars) {
+      ch.classList.remove("hide");
+      clearCaret();
+      ch.classList.add("caret");
+      await wait(per);
+      if (token !== runToken) return false;
+    }
+  }
+  clearCaret();
+  await wait(650 / speed);
+  return token === runToken;
+}
+
+async function playLoop() {
+  while (playing && cur < hunks.length) {
+    const ok = await stepForward();
+    if (!ok) return;
+  }
+  if (cur >= hunks.length) setPlaying(false);
+}
+
+function setPlaying(on) {
+  playing = on;
+  document.getElementById("t-pp").textContent = on ? "⏸" : "▶";
+  if (on) playLoop();
+  else runToken++;
+}
+
+/* =========================================================================
+   Wiring
+   ========================================================================= */
+
+const FILES = [
+  ["M", "01-the-cabin.md", "/chapters"],
+  ["M", "02-happy-accidents.md", "/chapters", true],
+  ["M", "03-the-gallery.md", "/chapters"],
+  ["A", "04-the-sunset-picnic.md", "/chapters"],
+  ["A", "bonus-scene.md", "/extras"],
+  ["D", "rainy-day.md", "/interludes"],
+  ["M", "a-note-from-bob.md", "/letters"],
+  ["R", "cast.md", "notes/character-sketches.md…"],
+];
+document.getElementById("files").innerHTML = FILES.map(
+  ([b, n, p, act]) =>
+    `<div class="file${act ? " active" : ""}"><span class="badge ${b}">${b}</span><span class="fname">${n}</span><span class="fpath">${p}</span></div>`
+).join("");
+
+let mode = "rendered";
+
+function show(next) {
+  mode = next;
+  win.classList.toggle("mode-play", mode === "play");
+  document.getElementById("btn-rendered").classList.toggle("on", mode === "rendered");
+  document.getElementById("btn-source").classList.toggle("on", mode === "source");
+
+  const go = document.getElementById("btn-play");
+  go.classList.toggle("exit", mode === "play");
+  go.textContent = mode === "play" ? "↺" : "▶";
+  go.title = mode === "play" ? "Back to the diff" : "Play the edits";
+
+  main.innerHTML = mode === "source" ? buildSource() : buildRendered();
+
+  if (mode === "play") {
+    collectHunks();
+    document.getElementById("t-scrub").max = String(hunks.length);
+    cur = 0;
+    paint(0, false);
+    main.scrollTop = 0;
+    setPlaying(true);
+  } else {
+    setPlaying(false);
+    hunks = [];
+  }
+}
+
+document.getElementById("btn-rendered").onclick = () => show("rendered");
+document.getElementById("btn-source").onclick = () => show("source");
+document.getElementById("btn-play").onclick = () => show(mode === "play" ? "rendered" : "play");
+
+document.getElementById("t-pp").onclick = () => setPlaying(!playing);
+document.getElementById("t-next").onclick = () => { setPlaying(false); jumpTo(cur + 1); };
+document.getElementById("t-prev").onclick = () => { setPlaying(false); jumpTo(cur - 1); };
+document.getElementById("t-first").onclick = () => { setPlaying(false); jumpTo(0); };
+document.getElementById("t-scrub").oninput = (e) => { setPlaying(false); jumpTo(+e.target.value); };
+document.getElementById("t-speed").onchange = (e) => { speed = +e.target.value; };
+
+document.addEventListener("keydown", (e) => {
+  if (mode !== "play") return;
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  if (e.code === "ArrowRight") { setPlaying(false); jumpTo(cur + 1); }
+  if (e.code === "ArrowLeft") { setPlaying(false); jumpTo(cur - 1); }
+  if (e.code === "Escape") show("rendered");
+});
+
+// ?view=rendered|source|play &step=N — handy for linking to a state.
+const qs = new URLSearchParams(location.search);
+show(qs.get("view") || "rendered");
+if (qs.has("step")) { setPlaying(false); jumpTo(+qs.get("step")); }
+</script>
+</body>
+</html>
