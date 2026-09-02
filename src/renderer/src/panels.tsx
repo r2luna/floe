@@ -647,6 +647,9 @@ export function PanelBody({
 
 /* --- launcher ------------------------------------------------------------ */
 
+/** No conversation yet — a stable identity so the roster memo holds. */
+const NO_TRANSCRIPT: TranscriptItem[] = []
+
 /**
  * Morning / afternoon / evening, by the clock on this machine.
  *
@@ -747,6 +750,15 @@ function Launcher({
   const [text, setText] = useDraft(`branch:${cwd}`)
   const greeting = useGreeting()
   const penguin = usePenguinMark()
+  // Mirrors the composer's picker, so `@` names the model this message would
+  // actually go to. There is no transcript to read it from yet.
+  const [choice, setChoice] = useState<ModelChoice>(loadChoice)
+  const agents = useLocalAgents()
+  const { menu: composerMenu } = useComposerMenu(menuItems, {
+    items: NO_TRANSCRIPT,
+    provider: choice.provider,
+    agents
+  })
 
   // Sending creates the session for real, then opens the ordinary chat panel
   // for it and hands over the first prompt. The launcher is a way in, not a
@@ -808,9 +820,10 @@ function Launcher({
         value={text}
         onChange={setText}
         onSend={start}
+        onChoice={setChoice}
         placeholder="Describe the task…"
         autoFocus
-        menuItems={menuItems}
+        menuItems={composerMenu}
       />
 
       {/* Gated on "none exist", not "none selected": with projects added but
@@ -1011,6 +1024,59 @@ function GitDirt({ status }: { status?: WorktreeStatus }) {
 }
 
 /**
+ * The whole composer menu: `/` and `#` from the caller, `@` from who is in the
+ * channel.
+ *
+ * Both boxes mount this. The launcher has no transcript, so its roster is only
+ * you, the model and the runtimes you can still call — but `@` has to mean the
+ * same thing in both, and without this it fell through to the `#` list and
+ * offered files.
+ */
+function useComposerMenu(
+  base: ((t: Trigger) => PaletteItem[]) | undefined,
+  opts: { items: TranscriptItem[]; provider?: string; agents: LocalAgent[] }
+): { menu: (t: Trigger) => PaletteItem[]; harnesses: string[] } {
+  const { items, provider, agents } = opts
+  // Everyone this message could name: the voices already in the channel, plus
+  // the runtimes installed on this machine that you can still call into it.
+  // Answered here rather than in useMenuItems because it is the only menu that
+  // depends on THIS conversation.
+  const roster = useMemo(
+    () =>
+      rosterOf(items, {
+        you: userNick(),
+        model: provider ?? 'claude',
+        // Claude is on the list whatever this session answers as: handing a
+        // message back to it has to be possible from a codex chat too, and it
+        // is not a "local agent" anyone probed for.
+        runtimes: ['claude', ...agents.map((a) => a.id)]
+      }),
+    [items, provider, agents]
+  )
+  // Who this message can be HANDED to, as opposed to merely named: a harness
+  // Floe can run, that this machine has. Claude is always one.
+  const harnesses = useMemo(
+    () => HARNESSES.filter((id) => id === 'claude' || agents.some((a) => a.id === id)),
+    [agents]
+  )
+  // What a harness runs — the menu offers these, and a message that names none
+  // of them borrows the first for the runtimes that must be told one.
+  const modelsOf = useCallback(
+    (id: string): { slug: string; label?: string }[] =>
+      id === 'claude'
+        ? MODELS.map((m) => ({ slug: m.id, label: m.label }))
+        : (agents.find((a) => a.id === id)?.models ?? []),
+    [agents]
+  )
+  const menu = useCallback(
+    (t: Trigger): PaletteItem[] =>
+      t.char === '@' ? handleRows(roster, { harnesses, modelsOf }) : (base?.(t) ?? []),
+    [roster, harnesses, modelsOf, base]
+  )
+  return { menu, harnesses }
+}
+
+/**
  * A session's transcript, in the IRC layout: who spoke on one line, what they
  * said full-width beneath, and a run of entries from one speaker printing a
  * single header.
@@ -1066,42 +1132,12 @@ function ChatPanel({
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
-  // Everyone this message could name: the voices already in the channel, plus
-  // the runtimes installed on this machine that you can still call into it.
-  // Answered here rather than in useMenuItems because it is the only menu that
-  // depends on THIS conversation.
-  const roster = useMemo(
-    () =>
-      rosterOf(tail ? [...items, tail] : items, {
-        you: userNick(),
-        model: choice.provider ?? 'claude',
-        // Claude is on the list whatever this session answers as: handing a
-        // message back to it has to be possible from a codex chat too, and it
-        // is not a "local agent" anyone probed for.
-        runtimes: ['claude', ...agents.map((a) => a.id)]
-      }),
-    [items, tail, choice.provider, agents]
-  )
-  // Who this message can be HANDED to, as opposed to merely named: a harness
-  // Floe can run, that this machine has. Claude is always one.
-  const harnesses = useMemo(
-    () => HARNESSES.filter((id) => id === 'claude' || agents.some((a) => a.id === id)),
-    [agents]
-  )
-  // What a harness runs — the menu offers these, and a message that names none
-  // of them borrows the first for the runtimes that must be told one.
-  const modelsOf = useCallback(
-    (id: string): { slug: string; label?: string }[] =>
-      id === 'claude'
-        ? MODELS.map((m) => ({ slug: m.id, label: m.label }))
-        : (agents.find((a) => a.id === id)?.models ?? []),
-    [agents]
-  )
-  const composerMenu = useCallback(
-    (t: Trigger): PaletteItem[] =>
-      t.char === '@' ? handleRows(roster, { harnesses, modelsOf }) : (menuItems?.(t) ?? []),
-    [roster, harnesses, modelsOf, menuItems]
-  )
+  const transcript = useMemo(() => (tail ? [...items, tail] : items), [items, tail])
+  const { menu: composerMenu, harnesses } = useComposerMenu(menuItems, {
+    items: transcript,
+    provider: choice.provider,
+    agents
+  })
 
   // Whoever answered last in THIS session is who the composer should be set to.
   // Pinned once, when the transcript lands: after that the picker is yours, and
@@ -1158,14 +1194,30 @@ function ChatPanel({
   // Only the newest slice of a long session is mounted — a thousand markdown
   // messages in the DOM make every delta's layout pass pay for all of them.
   // "Earlier" pages the window backwards; everything is still in memory.
+  //
+  // The window is counted in MESSAGES, not transcript rows: one turn is a
+  // message and a hundred tool rows, and a window counted in rows both cut the
+  // message you had just sent and reported "43 hidden" for work sitting folded
+  // in plain sight. Rows are cheap here — a run of calls is one folded line —
+  // so only what was said is worth budgeting for.
   const [shownCount, setShownCount] = useState(LOG_PAGE)
   useEffect(() => setShownCount(LOG_PAGE), [session?.id])
-  const hiddenCount = Math.max(0, items.length - shownCount)
-  // Memoised so the slice keeps one identity per settle — Log memoises on it.
-  const shown = useMemo(
-    () => (hiddenCount ? items.slice(hiddenCount) : items),
-    [items, hiddenCount]
+  // Where the window starts, as a transcript index: walk back until the budget
+  // of messages is spent, and keep everything after that message.
+  const cut = useMemo(() => {
+    let seen = 0
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (!isMessage(items[i])) continue
+      if (++seen > shownCount) return i + 1
+    }
+    return 0
+  }, [items, shownCount])
+  const hiddenCount = useMemo(
+    () => items.slice(0, cut).filter(isMessage).length,
+    [items, cut]
   )
+  // Memoised so the slice keeps one identity per settle — Log memoises on it.
+  const shown = useMemo(() => (cut ? items.slice(cut) : items), [items, cut])
 
   // The gauge: what this turn filled, against the window of whoever is
   // answering. Reported rather than rendered here — the header belongs to the
@@ -1347,7 +1399,7 @@ function ChatPanel({
         )}
         <SkillNames.Provider value={skillNames}>
           <RunInTerminal.Provider value={runInTerminal}>
-            <Log items={shown} cwd={cwd} base={hiddenCount} pending={pending} />
+            <Log items={shown} cwd={cwd} base={cut} pending={pending} />
             {tail && (
               // The streaming tail lives outside the memoised Log: a delta flush
               // re-renders this one entry, not the whole transcript above it.
@@ -1483,6 +1535,10 @@ function ChatPanel({
 
 // How many transcript entries mount at once; "earlier" pages back by the same.
 const LOG_PAGE = 100
+
+/** Something someone said — as opposed to the work between two of them. */
+const isMessage = (item: TranscriptItem): boolean =>
+  item.role === 'user' || item.role === 'assistant'
 
 /** One spoken entry, shared by the settled Log and the streaming tail. */
 /**
