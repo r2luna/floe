@@ -40,6 +40,7 @@ import type {
   McpCommand,
   McpCommandResult,
   McpServerEntry,
+  MediaFile,
   AuthStatus,
   ClaudeAuthEvent,
   ClaudeStats,
@@ -636,6 +637,15 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.on('dev:event', listener)
         return () => ipcRenderer.removeListener('dev:event', listener)
       }
+    },
+    media: {
+      /**
+       * Can this path be played, and at what address? Null when the file the
+       * message named is not there (or is not a video), which is what keeps a
+       * mention of a deleted recording from drawing a dead player.
+       */
+      probe: (path: string, cwd?: string): Promise<MediaFile | null> =>
+        ipcRenderer.invoke('media:probe', path, cwd)
     },
     files: {
       /** One directory's entries — omit `relPath` for the worktree root. */

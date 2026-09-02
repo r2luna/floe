@@ -112,6 +112,7 @@ import { RunInTerminal } from './runInTerminal'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
+import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
@@ -1795,12 +1796,15 @@ function Entry({
   item,
   isNew,
   cost,
+  cwd,
   streaming
 }: {
   item: TranscriptItem
   isNew: boolean
   /** What the whole run cost, shown on the header this entry opens. */
   cost?: TranscriptItem
+  /** The tree this session works in — what a relative video path is relative to. */
+  cwd?: string
   streaming?: boolean
 }) {
   return (
@@ -1825,6 +1829,8 @@ function Entry({
         ) : (
           <RefText text={item.text ?? ''} />
         )}
+        {/* A recording the message named plays right here — see Video.tsx. */}
+        <VideoRefs text={item.text ?? ''} cwd={cwd} streaming={streaming} />
       </div>
     </div>
   )
@@ -2083,6 +2089,7 @@ const Log = memo(function Log({
         item={item}
         isNew={isNew}
         cost={last?.role === 'assistant' ? last : undefined}
+        cwd={cwd}
         key={base + i}
       />
     )

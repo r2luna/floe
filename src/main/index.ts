@@ -6,7 +6,8 @@ import {
   Notification,
   nativeTheme,
   Menu,
-  clipboard
+  clipboard,
+  protocol
 } from 'electron'
 import { join, basename } from 'path'
 import { writeFileSync } from 'node:fs'
@@ -173,6 +174,7 @@ import {
   runShellCapture
 } from './commandRunner'
 import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files'
+import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
@@ -641,6 +643,10 @@ function registerIpc(): void {
   handle('files:read', (_event, worktreePath: string, relPath: string) =>
     readFileContent(worktreePath, relPath)
   )
+  // A video the chat found named in a message: is it really there? The bytes
+  // never come back through IPC — only the `floe-media://` URL that streams
+  // them (see media.ts).
+  handle('media:probe', (_event, path: string, cwd?: string) => probeMedia(path, cwd))
   handle(
     'files:resolveLink',
     (_event, worktreePath: string, fromRelPath: string, target: string) =>
@@ -1248,6 +1254,17 @@ isolateUserDataPerWorktree()
 if (!app.isPackaged && process.env.FLOE_CDP_PORT)
   app.commandLine.appendSwitch('remote-debugging-port', process.env.FLOE_CDP_PORT)
 
+// The chat's video player loads `floe-media://…`. Registered before ready
+// because that is the only moment Chromium accepts a new scheme's privileges,
+// and it needs all three: fetch/stream so <video> can request byte ranges, and
+// `secure` so a page served over http in dev may load it at all.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true }
+  }
+])
+
 void app.whenReady().then(async () => {
   fixPath()
   // Generate anything missing under ~/.config/floe before anything reads it, so
@@ -1260,6 +1277,7 @@ void app.whenReady().then(async () => {
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
   buildAppMenu(openNewInstance)
+  protocol.handle(MEDIA_SCHEME, (req) => mediaResponse(req.url, req.headers.get('Range')))
   registerIpc()
   ensureAgentHookInstalled()
   // Runtime plugins from ~/.config/floe/plugins — loaded BEFORE the window so

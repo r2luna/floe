@@ -3089,6 +3089,72 @@ button {
   outline: none;
 }
 
+/* --- video in the chat ---------------------------------------------------- */
+
+/* A recording sits under the message that named it, wider than a screenshot
+   thumbnail: a video is watched where it is, not opened elsewhere first. */
+.irc-videos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.irc-video {
+  margin: 0;
+  max-width: min(420px, 100%);
+}
+
+.irc-video-el {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #000;
+  outline: none;
+}
+
+.irc-video-el:hover,
+.irc-video-el:focus-visible {
+  border-color: var(--muted-2);
+}
+
+/* The cursor landing on a player has to be as visible as it is on any other
+   row — the frame alone reads as "a video", not as "you are here". */
+.irc-video-el:focus-visible {
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.irc-video-cap {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.irc-video-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.irc-video-size {
+  color: var(--muted-2);
+}
+
+/* A file that is there but Chromium will not decode (a codec it does not
+   ship). Says so instead of showing a black rectangle. */
+.irc-video-dead {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* --- lightbox ------------------------------------------------------------- */
 
 /* The gallery, over everything. Above the palette and the row menu: it is the

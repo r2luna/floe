@@ -374,6 +374,17 @@ export type FileContent =
   | { kind: 'pdf'; dataUrl: string }
   | { kind: 'binary' }
 
+// A video the chat found named in a message and can play: the file is there,
+// and `url` is the `floe-media://` address that streams it (see main/media.ts).
+// Never the bytes — a recording is tens of megabytes and is served, not carried.
+export interface MediaFile {
+  url: string
+  mediaType: string
+  size: number
+  name: string
+  path: string
+}
+
 // --- Review (changed files + diff comments) --------------------------------
 
 // One entry in the changed-files review list — a file that differs from the
