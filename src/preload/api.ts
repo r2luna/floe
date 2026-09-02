@@ -258,10 +258,16 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('projects:deleteGroup', name),
       rename: (path: string, newName: string): Promise<Project[]> =>
         ipcRenderer.invoke('projects:rename', path, newName),
-      add: (group?: string): Promise<{ project?: Project; error?: string }> =>
+      // `created` is false for a re-add: main answers with the project it
+      // already had, and only a project Floe has never seen starts the setup
+      // flow. See addProjectByPath.
+      add: (group?: string): Promise<{ project?: Project; created?: boolean; error?: string }> =>
         ipcRenderer.invoke('projects:add', group),
       // Web/headless has no native folder picker — add by an explicit server-side path.
-      addByPath: (path: string, group?: string): Promise<{ project?: Project; error?: string }> =>
+      addByPath: (
+        path: string,
+        group?: string
+      ): Promise<{ project?: Project; created?: boolean; error?: string }> =>
         ipcRenderer.invoke('projects:addByPath', path, group),
       // Set (or clear, with null) a project's containerized-env config.
       setEnv: (path: string, env: ProjectEnvConfig | null): Promise<Project[]> =>

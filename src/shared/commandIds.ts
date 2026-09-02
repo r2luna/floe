@@ -108,6 +108,11 @@ export const COMMAND_IDS: string[] = [
   'worktree.remove',
   'remove.confirm',
   'remove.cancel',
+  // Project setup (the commands a project gets registered)
+  'setup.start',
+  'setup.retry',
+  'setup.cancel',
+  'setup.chat',
   // Commands (the worktree's registered processes)
   'command.run',
   'command.stop',

@@ -1449,6 +1449,58 @@ export const REGISTRY: Map<string, Command> = new Map(
           })
         }
       },
+      // --- project setup --------------------------------------------------
+      // The setup checklist, same rule again: its chips dispatch these ids, and
+      // so do ⏎ / esc over the panel.
+      {
+        id: 'setup.start',
+        title: 'Set up this project\u2019s commands',
+        group: 'Projects',
+        enabled: (c) => c.setup.canStart,
+        unavailable: () => 'no project open',
+        // Also the way in for a project added before this flow existed: the
+        // preflight ends it right away when the commands are already there.
+        run: (c) => c.setup.start()
+      },
+      {
+        id: 'setup.retry',
+        title: 'Setup: retry the failed step',
+        group: 'Projects',
+        keys: 'r',
+        enabled: (c) => c.setup.failed,
+        unavailable: () => 'the setup has not failed',
+        run: (c) => c.setup.retry()
+      },
+      {
+        id: 'setup.chat',
+        title: 'Setup: open the session\u2019s chat',
+        group: 'Projects',
+        keys: '\u23ce',
+        // The session runs in the background (D1), so this is the only way to
+        // the question it is waiting on.
+        enabled: (c) => c.setup.awaitingChoice,
+        unavailable: () => 'the setup is not waiting on you',
+        run: (c) => c.setup.openChat()
+      },
+      {
+        id: 'setup.cancel',
+        title: 'Setup: cancel',
+        group: 'Projects',
+        keys: 'esc',
+        enabled: (c) => c.setup.active,
+        unavailable: () => 'no setup running',
+        // The session stays where it is — this drops the checklist, it does not
+        // stop the agent. The panel goes with it, like the merge's and the
+        // removal's: a dismissed checklist holding the focus is the stranded
+        // focus the keyboard-first rule is about.
+        run: (c) => {
+          c.setup.cancel()
+          c.setLane((l) => {
+            const at = l.panels.findIndex((p) => p.kind === 'setup')
+            return at === -1 ? l : close(l, at)
+          })
+        }
+      },
       {
         id: 'command.run',
         title: 'Run command',

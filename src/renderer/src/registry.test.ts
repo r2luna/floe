@@ -75,6 +75,16 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       force: () => {},
       retry: () => {},
       cancel: () => {}
+    },
+    setup: {
+      active: false,
+      failed: false,
+      awaitingChoice: false,
+      canStart: false,
+      start: () => {},
+      retry: () => {},
+      cancel: () => {},
+      openChat: () => {}
     }
   }
   return ctx

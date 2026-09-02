@@ -20,9 +20,9 @@ export interface Projects {
   /** Every group name, including empty ones — the add dialog offers them all. */
   groupNames: string[]
   /** Native folder picker (desktop) — resolves to the added project or an error. */
-  add: (group?: string) => Promise<string | undefined>
+  add: (group?: string) => Promise<AddResult>
   /** Add by an explicit path, which is the only way on a remote machine. */
-  addByPath: (path: string, group?: string) => Promise<string | undefined>
+  addByPath: (path: string, group?: string) => Promise<AddResult>
   /** Create an empty group. A name that already exists is a no-op. */
   addGroup: (name: string) => Promise<void>
   /** Remove a group; its projects fall back to the default. */
@@ -32,6 +32,22 @@ export interface Projects {
   /** Forget a project. Its folder on disk is untouched — Floe just stops listing it. */
   remove: (path: string) => Promise<void>
   reload: () => void
+}
+
+/**
+ * What an add came back with.
+ *
+ * `created` rather than "we got a project back": a re-add answers with the
+ * project Floe already had, and the two are indistinguishable at the call site
+ * without it — which matters because the setup flow fires for a project that is
+ * new and for no other. See addProjectByPath in main.
+ */
+export interface AddResult {
+  error?: string
+  /** The project's root path, once it is in the list. */
+  path?: string
+  /** It was not already known. */
+  created?: boolean
 }
 
 export function useProjects(): Projects {
@@ -63,15 +79,18 @@ export function useProjects(): Projects {
   }, [])
 
   const landOn = useCallback(
-    (res: { project?: { path: string }; error?: string }) => {
-      if (res.error) return res.error
+    (res: { project?: { path: string }; created?: boolean; error?: string }): AddResult => {
+      if (res.error) return { error: res.error }
       if (res.project) {
         reload()
         // Land on what you just added — adding a project and then having to go
         // find it is a step the app can take for you.
         setCurrentPath(res.project.path)
       }
-      return undefined
+      // `created` is carried through untouched: main is the only one that knows
+      // whether the project was already stored, and the caller decides what to
+      // do about it (App starts the setup flow).
+      return { path: res.project?.path, created: res.created }
     },
     [reload]
   )

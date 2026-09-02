@@ -1,15 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  load,
   persistable,
   remember,
   rememberSession,
   rememberWorktree,
+  save,
   scopedOf,
   sessionKeyOf,
   withScoped
 } from './laneStore.ts'
 import type { Lane, Panel } from './lane.ts'
+
+// The store writes to localStorage, which a `node --test` process has none of.
+// A Map is the whole contract it uses.
+const store = new Map<string, string>()
+;(globalThis as { localStorage?: unknown }).localStorage = {
+  getItem: (k: string) => store.get(k) ?? null,
+  setItem: (k: string, v: string) => void store.set(k, v),
+  removeItem: (k: string) => void store.delete(k)
+}
 
 const panel = (kind: string, order: number, extra: Partial<Panel> = {}): Panel => ({
   id: `${kind}:${extra.sub ?? ''}`,
@@ -126,4 +137,70 @@ test('the places you have not been in a hundred switches fall off', () => {
   assert.equal(Object.keys(by).length, 100)
   assert.equal('/wt0' in by, false)
   assert.equal(by['/wt104'], 's104')
+})
+
+// The project's checklists are keyed by project root, not by session, so a
+// session switch must leave them exactly where they are. The setup flow is why
+// this is not a nicety: its `choose` step sends you to the session's chat to
+// answer, and that switch used to close the very checklist you were answering.
+test('a project checklist survives a session switch', () => {
+  const lane = laneWith('s1', panel('setup', 41), panel('changes', 40))
+  assert.deepEqual(
+    scopedOf(lane).map((p) => p.kind),
+    ['changes'],
+    'the checklist is not the session’s to carry'
+  )
+  assert.deepEqual(
+    withScoped(lane, [panel('diff', 50, { sub: 'a.ts' })]).panels.map((p) => p.kind),
+    ['projects', 'worktrees', 'chat', 'setup', 'diff']
+  )
+})
+
+test('merge and remove are project checklists too', () => {
+  for (const kind of ['merge', 'remove']) {
+    const lane = laneWith('s1', panel(kind, 41))
+    assert.deepEqual(scopedOf(lane), [], `${kind} belongs to the project`)
+    assert.ok(
+      withScoped(lane, []).panels.some((p) => p.kind === kind),
+      `${kind} should survive the swap`
+    )
+  }
+})
+
+// A set remembered before these panels became project-owned still names one.
+test('a remembered checklist is not added a second time', () => {
+  const lane = laneWith('s1', panel('setup', 41))
+  const next = withScoped(lane, [panel('setup', 41)])
+  assert.equal(next.panels.filter((p) => p.kind === 'setup').length, 1)
+})
+
+// The lane is sorted by `order` everywhere else (see open()), and a swap is no
+// exception: a kept checklist (41) must not push the restored changes list (40)
+// to the wrong side of it.
+test('a restored set lands at its order, not behind the kept checklist', () => {
+  const lane = laneWith('s1', panel('setup', 41))
+  assert.deepEqual(
+    withScoped(lane, [panel('changes', 40), panel('diff', 50, { sub: 'a.ts' })]).panels.map(
+      (p) => p.kind
+    ),
+    ['projects', 'worktrees', 'chat', 'changes', 'setup', 'diff']
+  )
+})
+
+// The flows live in the hooks, not in storage: a checklist restored on the next
+// launch has nothing to show, so it is not written down in the first place.
+test('a checklist is not persisted', () => {
+  const panels = [panel('worktrees', 10), panel('setup', 41), panel('changes', 40)]
+  assert.deepEqual(
+    persistable(panels).map((p) => p.kind),
+    ['worktrees', 'changes']
+  )
+})
+
+test('the saved focus never points past what was saved', () => {
+  const lane = { panels: [panel('worktrees', 10), panel('setup', 41)], focus: 1 }
+  save({ lane, bySession: {}, byProject: {}, byWorktree: {} })
+  const back = load()
+  assert.deepEqual(back?.lane.panels.map((p) => p.kind), ['worktrees'])
+  assert.equal(back?.lane.focus, 0, 'the checklist it pointed at is gone')
 })

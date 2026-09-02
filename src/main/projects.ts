@@ -140,7 +140,9 @@ export function deleteGroup(name: string): { groups: string[]; projects: Project
   return { groups, projects: all() }
 }
 
-export async function addProject(group?: string): Promise<{ project?: Project; error?: string }> {
+export async function addProject(
+  group?: string
+): Promise<{ project?: Project; created?: boolean; error?: string }> {
   const result = await dialog.showOpenDialog({
     title: 'Select a project folder',
     properties: ['openDirectory']
@@ -152,10 +154,15 @@ export async function addProject(group?: string): Promise<{ project?: Project; e
 // Add a project by an explicit path (no dialog) — used by the `floe` CLI.
 // Validates it's a git repo, resolves to the repo root, and dedupes by root
 // (re-adding an existing project just returns it, keeping its current group).
+//
+// `created` tells the two apart. A re-add answers with the project it already
+// had, which reads identically to a fresh one at the call site — and the setup
+// flow must fire for a project Floe has never seen and for no other, so the
+// distinction has to be stated here rather than guessed at upstream.
 export async function addProjectByPath(
   picked: string,
   group?: string
-): Promise<{ project?: Project; error?: string }> {
+): Promise<{ project?: Project; created?: boolean; error?: string }> {
   if (!existsSync(picked)) return { error: `Path does not exist: ${picked}` }
   if (!(await isGitRepo(picked))) {
     return { error: `"${basename(picked)}" is not a git repository.` }
@@ -163,12 +170,12 @@ export async function addProjectByPath(
 
   const root = (await repoRoot(picked)) ?? picked
   const existing = stored(root)
-  if (existing) return { project: toProject(existing) }
+  if (existing) return { project: toProject(existing), created: false }
 
   const groups = currentGroups()
   const targetGroup = (group && group.trim()) || groups[0] || DEFAULT_GROUP
   if (!groups.includes(targetGroup)) writeGroups([...groups, targetGroup])
-  return { project: toProject(createProject(root, { group: targetGroup })) }
+  return { project: toProject(createProject(root, { group: targetGroup })), created: true }
 }
 
 export function renameGroup(
