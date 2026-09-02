@@ -1,0 +1,125 @@
+// Making the two harnesses in one chat actually talk.
+//
+// The policy — what is said and for how long — is shared/relay.ts. This is the
+// wiring: it waits for the routed turn to end, starts the turn that answers it,
+// and hands anything the model addresses back to the harness it named.
+//
+// It lives in main rather than in the panel because a relay is not something
+// you can only have while looking at it: send `@codex revisa isso`, switch to
+// another session, and the answer and the take on it must both still happen.
+// Same reason turn.ts is where a turn begins — both doors, one behaviour.
+
+import type { BrowserWindow } from 'electron'
+import type { AgentRunOptions } from '../shared/types'
+import { HARNESSES } from '../shared/modes'
+import { relayBack, relayMark, relayPrompt } from '../shared/relay'
+import { activeTurnKeys, onceTurnDone, sessionNames } from './agent'
+// Circular with turn.ts (it arms the relay, the relay starts turns) — safe on
+// the same terms as agent↔mcpServer: neither side runs the other at import.
+import { optionsForRoute, startTurn } from './turn'
+import { log } from './log'
+
+/**
+ * How long the relay waits before taking the turn.
+ *
+ * Not a pause for effect: the `done` that fires this reaches the panel in the
+ * same breath, and the panel answers it — it drains whatever you typed while
+ * the harness was working. That message is yours and goes first, so the relay
+ * looks again after the round trip and steps aside if it finds a turn running.
+ */
+const YIELD_MS = 400
+
+/** Nothing to relay into: something else is already answering this chat. */
+const busy = (key: string): boolean => {
+  const names = new Set(sessionNames(key))
+  return activeTurnKeys().some((k) => names.has(k))
+}
+
+/**
+ * Do it after the current turn's `done` has finished being delivered — and
+ * after anything that `done` sets off has had its say.
+ */
+function later(fn: () => void): void {
+  setTimeout(fn, YIELD_MS).unref?.()
+}
+
+/**
+ * Exchanges already spent on this chat's relay, carried across the hop.
+ *
+ * Set by the relay just before it hands a message back to the harness, and
+ * consumed by the arm that message triggers. A routed turn with nothing here is
+ * one a person just sent, and starts the count at zero — which is what makes a
+ * new `@codex …` a fresh conversation rather than the tail of the last one.
+ */
+const spent = new Map<string, number>()
+
+/**
+ * Which generation of relay a chat is on. Cancelling bumps it, and a callback
+ * holding a stale number does nothing — a waiter already parked cannot be
+ * unparked, so it has to be able to tell that it was called off.
+ */
+const epochs = new Map<string, number>()
+
+/** Stop the relay for this chat: what `stop` means when a harness is answering. */
+export function cancelRelay(key: string): void {
+  epochs.set(key, (epochs.get(key) ?? 0) + 1)
+  spent.delete(key)
+}
+
+/**
+ * Answer this routed turn with a turn of your own.
+ *
+ * Armed from turn.ts, for every turn handed to a harness that is not the one
+ * the session answers as. `back` is what the session itself runs on — the relay
+ * turn is an ordinary turn for it, at its own model, effort and mode.
+ */
+export function armRelay(
+  win: BrowserWindow,
+  key: string,
+  worktreePath: string,
+  harness: string,
+  back: AgentRunOptions
+): void {
+  const hops = spent.get(key) ?? 0
+  spent.delete(key)
+  const epoch = epochs.get(key) ?? 0
+  const live = (): boolean => (epochs.get(key) ?? 0) === epoch
+
+  onceTurnDone(key, (answer) => {
+    // Nothing came back — the harness is not installed, the turn was stopped,
+    // it died on spawn. There is nothing to have an opinion about, and firing a
+    // turn to say so would be the model reporting our own plumbing.
+    if (!live() || !answer.trim()) return
+    later(() => {
+      // You typed while it worked, and your message went out at the same
+      // boundary. It wins: the model reads what the harness said either way —
+      // the handoff packet under your message carries it (see handoff.ts) —
+      // and two turns into one session is the one thing the queue exists to
+      // prevent.
+      if (!live() || busy(key)) return
+      log('relay', { key, from: harness, to: back.provider ?? 'claude', hops })
+      startTurn(win, key, worktreePath, relayPrompt(harness, hops), back)
+
+      // And what the model says back. Only the line it OPENS with routes, so an
+      // answer that merely mentions `@codex` stays in the chat where it was said.
+      onceTurnDone(key, (reply) => {
+        const route = live() ? relayBack(reply, HARNESSES, hops + 1) : null
+        if (!route) return
+        later(() => {
+          if (!live() || busy(key)) return
+          spent.set(key, hops + 1)
+          startTurn(
+            win,
+            key,
+            worktreePath,
+            route.prompt,
+            // Shown as nothing: the model's words are already in the chat, one
+            // line above, under its own name. Printing them again as a user
+            // message would say the person typed what the model just said.
+            { ...optionsForRoute(route, key), shown: relayMark(back.provider ?? 'claude') }
+          )
+        })
+      })
+    })
+  })
+}

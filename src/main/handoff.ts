@@ -33,8 +33,9 @@
 import type { BrowserWindow } from 'electron'
 import { loadClaudeTranscript, type TranscriptItem } from './claudeSessions'
 import { readRuntimeTranscript, logTurn } from './runtimeLog'
-import { getCreatedSessionClaudeId } from './sessionStore'
+import { getCreatedSession, getCreatedSessionClaudeId } from './sessionStore'
 import { buildPacket, PACKET_OPEN, stripPacket } from '../shared/handoff'
+import { hasRelay, stripRelay } from '../shared/relay'
 // Circular with agent.ts (it imports seedFor) — safe on the same terms as
 // agent↔mcpServer: neither side touches the other at module top level.
 import { sendAgentEvent } from './agent'
@@ -87,12 +88,31 @@ function authoredBy(item: TranscriptItem): string | undefined {
  */
 export function sessionTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
   const claude = loadClaudeTranscript(worktreePath, getCreatedSessionClaudeId(sessionId) ?? sessionId)
-  const runtime = readRuntimeTranscript(sessionId)
+  // Under every name this session has answered to, not just the one asked for.
+  // The log is keyed by whatever key the turn ran under — Floe's own id for a
+  // session an agent drives, the CLI's for a panel that has been through a
+  // Claude turn — so a chat where both harnesses have spoken has its history in
+  // two files, and reading one of them dropped codex out of the conversation
+  // entirely. Same rule as agent.ts's sessionNames, for the same reason.
+  const stored = getCreatedSession(sessionId)
+  const names = [
+    ...new Set(
+      [sessionId, stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])].filter(
+        (n): n is string => !!n
+      )
+    )
+  ]
+  const runtime = names.flatMap(readRuntimeTranscript)
   const all = runtime.length
     ? [...claude, ...runtime].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     : claude
   return all
     .map((i) => (i.text?.includes(PACKET_OPEN) ? { ...i, text: stripPacket(i.text) } : i))
+    // Relay envelopes go the same way, and for the same reason: the note that
+    // told the model to read what codex said is ours, and read back it would
+    // look like a message the user typed. What is left of one is nothing, so
+    // the filter below drops the line entirely. See shared/relay.ts.
+    .map((i) => (i.text && hasRelay(i.text) ? { ...i, text: stripRelay(i.text) } : i))
     .filter((i) => i.role !== 'user' || (i.text ?? '').trim().length > 0)
 }
 

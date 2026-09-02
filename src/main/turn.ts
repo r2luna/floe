@@ -17,6 +17,9 @@ import {
 import { HARNESSES, nearestMode } from '../shared/modes'
 import { routeAt, type Route } from '../shared/mentions'
 import { sendToAgent } from './agent'
+// Circular with relay.ts (it starts the turns it relays) — safe: neither side
+// touches the other at module top level.
+import { armRelay } from './relay'
 import { runRuntime } from './runtimes'
 import { expandSkills } from '../shared/skills'
 import { readSkill } from './config/skills'
@@ -60,11 +63,32 @@ export function optionsForRoute(route: Route, sessionId?: string): AgentRunOptio
 }
 
 /**
+ * What the session itself runs on — the picker's answer to "who answers here".
+ *
+ * The same shape as a route's, so the relay turn is an ordinary turn: what the
+ * session last chose, falling back to the harness block and then to floe.toml,
+ * exactly as a message addressed to that harness would.
+ */
+export function optionsForSession(key: string): AgentRunOptions {
+  const session = getCreatedSession(key)
+  const harness = session?.provider ?? 'claude'
+  const base = optionsForRoute({ harness, prompt: '' }, key)
+  // The session's OWN model, not the harness default: a chat pinned to sonnet
+  // must not answer on opus because the last message went to codex.
+  return { ...base, model: session?.model || base.model }
+}
+
+/**
  * Run one turn.
  *
  * Skills expand ABOVE the provider split, because that is the whole reason they
  * live in Floe's config: `/deploy` has to mean the same thing whichever CLI
  * answers. Expanding per runtime would be four copies of one rule.
+ *
+ * A turn handed to a harness the session does NOT answer as arms the relay: the
+ * answer comes back to the session's own model, which says what it makes of it
+ * and can ask the harness more. See relay.ts — that is what makes `@codex` a
+ * conversation instead of a message you then have to carry by hand.
  */
 export function startTurn(
   win: BrowserWindow,
@@ -81,6 +105,8 @@ export function startTurn(
   // `isCodexModel` stays only as the fallback for a choice made before
   // providers existed (a persisted model with no provider beside it).
   const provider = options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
+  const own = optionsForSession(key)
+  if (provider !== (own.provider ?? 'claude')) armRelay(win, key, worktreePath, provider, own)
   if (provider !== 'claude') {
     void runRuntime(
       win,

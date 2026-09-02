@@ -34,6 +34,7 @@ register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.u
 
 const { seedFor, forgetSeen, sessionTranscript } = await import('./handoff.ts')
 const { PACKET_OPEN } = await import('../shared/handoff.ts')
+const { relayPrompt } = await import('../shared/relay.ts')
 
 const WORKTREE = '/tmp/wt'
 let clock = 0
@@ -183,4 +184,48 @@ test('an empty session hands nothing to anybody', () => {
   writeFileSync(join(dir, 'blank.jsonl'), '')
   assert.equal(seedFor(null, 'blank', WORKTREE, 'codex'), '')
   assert.equal(seedFor(null, 'blank', WORKTREE, 'claude'), '')
+})
+
+/** Link a Floe session to a Claude id, the way the store does after a turn. */
+function linked(id: string, claudeId: string): void {
+  writeFileSync(
+    join(process.env.FLOE_TEST_USERDATA!, 'sessions.json'),
+    JSON.stringify({
+      meta: {},
+      created: [{ id, claudeId, worktreePath: WORKTREE, title: id, createdAt: 0 }],
+      view: {},
+      prefs: {},
+      reviewCheckpoints: {},
+      threadComments: {}
+    })
+  )
+}
+
+test('a chat both harnesses have spoken in reads whole, under either of its names', () => {
+  fresh()
+  linked('floe-id', 'claude-id')
+  // Written under the key each turn actually ran under: Floe's own id for the
+  // codex turn, the CLI's for the one after it. Asked for by either name, the
+  // conversation has to come back whole — reading one file alone is how codex
+  // dropped out of a chat it had just answered in.
+  runtimeSaid('floe-id', { role: 'user', text: '@codex olha isso' })
+  runtimeSaid('floe-id', { role: 'assistant', text: 'olhei', provider: 'codex' })
+  claudeSaid('claude-id', 'assistant', 'concordo com o codex')
+  for (const name of ['floe-id', 'claude-id']) {
+    const said = sessionTranscript(WORKTREE, name).map((i) => i.text)
+    assert.deepEqual(said, ['@codex olha isso', 'olhei', 'concordo com o codex'])
+  }
+})
+
+test('a relay envelope is plumbing, and never reads back as something you typed', () => {
+  fresh()
+  linked('relay-id', 'relay-claude')
+  runtimeSaid('relay-id', { role: 'user', text: '@codex e ai?' })
+  runtimeSaid('relay-id', { role: 'assistant', text: 'e ai', provider: 'codex' })
+  claudeSaid('relay-claude', 'user', relayPrompt('codex', 0))
+  claudeSaid('relay-claude', 'assistant', 'meu parecer')
+  assert.deepEqual(
+    sessionTranscript(WORKTREE, 'relay-id').map((i) => i.text),
+    ['@codex e ai?', 'e ai', 'meu parecer']
+  )
 })

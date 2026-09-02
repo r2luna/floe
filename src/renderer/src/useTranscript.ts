@@ -287,6 +287,20 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // restates what `deliver` already set — but when an agent addressed
       // `@codex` into this chat over MCP, it is the only thing that says so.
       setAnsweringChoice(event)
+      // And a turn nobody in this panel started is still a turn. The relay
+      // answers a `@codex` message with one of its own (see main/relay.ts), and
+      // without this it streamed into a panel that showed no "is typing" line
+      // and let you send into a session that was already working.
+      //
+      // The clock is only started when the panel was idle: a steer joins the
+      // turn in flight, and restarting it there would put the timer back to 0s
+      // in the middle of a turn.
+      if (!wasRunning.current) {
+        startedRef.current = Date.now()
+        setStartedAt(startedRef.current)
+      }
+      wasRunning.current = true
+      setRunning(true)
     } else if (event.kind === 'tool') {
       // Stamped: a turn that opens with work is headed by the tool row's clock
       // (see the Log), and an unstamped one would head the run with no time at

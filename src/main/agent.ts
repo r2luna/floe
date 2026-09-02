@@ -11,6 +11,9 @@ import { isAsyncLaunchAck, isTaskNotification, parsePeerMessage, parseTaskNotifi
 // Circular with handoff (it imports sendAgentEvent) — safe: both sides only
 // call the other's functions at runtime, never at module top level.
 import { seedFor } from './handoff'
+// Circular with relay.ts (it parks a waiter here) — safe: neither side touches
+// the other at module top level.
+import { cancelRelay } from './relay'
 import { getSystemPrompt } from './appSettings'
 // Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
 // sides only call the other's functions at runtime, never at module top level.
@@ -102,6 +105,21 @@ export function waitForTurn(key: string, timeoutMs = 120_000): Promise<string> {
     arr.push(finish)
     turnWaiters.set(key, arr)
   })
+}
+
+/**
+ * Call `cb` with the final assistant text of the turn this session is running,
+ * once, whenever it ends.
+ *
+ * waitForTurn's promise with no clock on it. The relay (relay.ts) waits for a
+ * turn it started itself, and a timeout there would not be a slow answer to
+ * give up on — it would be a second turn fired into a session still working on
+ * the first, which is the one thing the queue exists to prevent.
+ */
+export function onceTurnDone(key: string, cb: (text: string) => void): void {
+  const arr = turnWaiters.get(key) ?? []
+  arr.push(cb)
+  turnWaiters.set(key, arr)
 }
 
 // The joined live transcript buffer for a session, for the MCP read_session_output
@@ -744,6 +762,11 @@ export function answerQuestion(key: string, requestId: string, answer: string): 
 }
 
 export function stopAgent(win: BrowserWindow, key: string): void {
+  // Before the early return, and before the conn is looked at: stop means stop,
+  // and a relay armed on this chat would otherwise answer the turn you just
+  // cancelled. It is also the only stop a one-shot runtime gets — those keep no
+  // conn, so everything below this line is skipped for them.
+  cancelRelay(key)
   const conn = conns.get(key)
   if (!conn) return
   // Deregister first so the child's late `close` (guarded by isCurrent) is a
