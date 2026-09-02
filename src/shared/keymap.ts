@@ -153,7 +153,15 @@ export function formatChord(chord: string): string {
     .join(' ')
 }
 
-const hasModifier = (chord: string): boolean => chord.split(' ')[0].includes('+')
+// Shift does NOT count. It is not a modifier you reach for, it is how you type
+// a capital letter — so `shift+n` is still a bare letter, and still has to hold
+// its fire while you are writing a message.
+const hasModifier = (chord: string): boolean =>
+  chord
+    .split(' ')[0]
+    .split('+')
+    .slice(0, -1)
+    .some((m) => m !== 'shift')
 
 // ---------------------------------------------------------------------------
 // `when`

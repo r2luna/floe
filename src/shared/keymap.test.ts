@@ -84,6 +84,16 @@ test('a modifier-less binding gets an implicit "not typing"', () => {
   assert.equal(resolveIn(map, { key: 'j' }, { typing: true }), null)
 })
 
+test('shift is not a modifier: shift+n stays out of the way while typing', () => {
+  const map = compileKeymap([{ key: 'shift+n', command: 'find.prev' }])
+  assert.deepEqual(resolveIn(map, { key: 'N', shift: true }), { id: 'find.prev' })
+  assert.equal(
+    resolveIn(map, { key: 'N', shift: true }, { typing: true }),
+    null,
+    'a capital N in the composer is a letter, not a command'
+  )
+})
+
 test('a binding that names typing itself keeps its own rule', () => {
   const map = compileKeymap([{ key: 'escape', command: 'composer.leave', when: 'typing' }])
   assert.deepEqual(resolveIn(map, { key: 'Escape' }, { typing: true }), { id: 'composer.leave' })
