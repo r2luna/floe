@@ -5,7 +5,7 @@
 // resolves them to whatever the current release points at, which means this
 // list does not go stale every time a model ships.
 
-import { EFFORTS, type Effort, type PermissionMode } from '../../shared/types'
+import { EFFORTS, type Effort, type PermissionMode } from '../../shared/types.ts'
 import { DEFAULT_MODE, MODES, modeFromLabel, modeLabel, nearestMode } from '../../shared/modes.ts'
 
 export interface ModelChoice {
@@ -32,7 +32,7 @@ export const MODELS: { id: string; label: string }[] = [
 
 // One list, in shared/types.ts — main reads it out of floe.toml and the handle
 // parser tells an effort from a model name by membership in it.
-export { EFFORTS } from '../../shared/types'
+export { EFFORTS } from '../../shared/types.ts'
 
 /**
  * The built-in fallback, used until floe.toml has been read and whenever it says

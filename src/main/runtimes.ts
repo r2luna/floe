@@ -290,7 +290,7 @@ export async function runRuntime(
   touchCreatedSession(key)
   // Same turn bookkeeping as Claude's sendToAgent: a panel opening mid-turn
   // asks agent.replay for what it missed, whoever is answering.
-  markTurnStart(key, { provider: runtime, effort, mode })
+  markTurnStart(key, { provider: runtime, model, effort, mode }, win)
   // What this runtime has not seen — the turns another harness answered, or its
   // own from before the restart that emptied its thread. Read BEFORE the prompt
   // is logged, or the message being sent would come back inside its own packet.
@@ -328,6 +328,10 @@ export async function runRuntime(
       const { text, tokens } = await openAiChat(base, id, thread.messages)
       thread.messages.push({ role: 'assistant', content: text })
       if (text) say(win, key, text, { model: id, effort, provider: runtime })
+      // A reasoning model that spent its whole budget thinking answers with
+      // nothing at all. Saying so beats a turn that ends with no line in the
+      // chat, which reads as the message never having been sent.
+      else emit(win, key, { kind: 'error', message: `${runtime} answered with nothing — the model ran out of room before it wrote anything. Try again, or a shorter message.` })
       if (tokens > 0) emit(win, key, { kind: 'tokens', tokens })
       emit(win, key, { kind: 'done', ok: true })
       return

@@ -196,3 +196,20 @@ test('mcpConfigFor merges the enabled registry entries into the per-session conf
     removeMcpServer('dark')
   }
 })
+
+test('send_message can name the harness, and reads a handle when it does not', async () => {
+  const client = await connect()
+  try {
+    const { tools } = await client.listTools()
+    const send = tools.find((t) => t.name === 'send_message')
+    const props = (send?.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    // Everything the composer's picker can say, an agent can say too — that is
+    // the agent-first rule, and the schema is where it is either true or not.
+    for (const key of ['harness', 'model', 'effort', 'mode'])
+      assert.ok(key in props, `send_message should take ${key} (got ${Object.keys(props).join(', ')})`)
+    // And the literal parity: `@codex …` in the prompt does what it does in the box.
+    assert.match(String((props.prompt as { description?: string }).description), /@codex/)
+  } finally {
+    await client.close()
+  }
+})

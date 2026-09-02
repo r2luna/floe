@@ -547,6 +547,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // has nothing to show until the number moves — it pulls the current value.
       getMemory: (): Promise<MemoryStats> => ipcRenderer.invoke('stats:getMemory'),
       refreshUsage: (): Promise<UsageStats> => ipcRenderer.invoke('stats:refreshUsage'),
+      // The reading from the last probe, with no spawn — what to show while
+      // refreshUsage is still out.
+      lastUsage: (): Promise<UsageStats> => ipcRenderer.invoke('stats:lastUsage'),
       setUsageCwd: (worktreePath: string): Promise<void> => ipcRenderer.invoke('stats:setUsageCwd', worktreePath)
     },
     // "Where I was" persistence: the last worktree per project and the last view

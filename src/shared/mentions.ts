@@ -6,7 +6,7 @@
 // lives here rather than in either of them. See renderer/src/mentions.ts for
 // the rest of what a handle does (the chips, the menu, the roster).
 
-import { EFFORTS, type Effort } from './types'
+import { EFFORTS, type Effort } from './types.ts'
 
 /** A message handed to a named harness instead of to the session's own model. */
 export interface Route {
