@@ -41,6 +41,16 @@ export interface KeyContext {
   stackDown?: boolean
   /** There is a panel to move to above the focused one. */
   stackUp?: boolean
+  /**
+   * Focus is inside a panel that owns the raw keyboard — the drawing canvas.
+   *
+   * Stronger than `typing`, and deliberately a third state rather than a reuse
+   * of it. The canvas has its own full keymap (`r` `o` `d` `a` `t` `v`, `⌘Z`),
+   * so Floe has to stop eating bare keys entirely — including Escape, which
+   * `typing` explicitly lets through so the composer can be left. See the rule
+   * in resolveIn.
+   */
+  raw?: boolean
 }
 
 export interface Keybind {
@@ -316,6 +326,14 @@ export interface CompiledBind {
   command: string
   arg?: string
   predicate: WhenPredicate | null
+  /**
+   * The chord (its first step, for a sequence) holds a modifier.
+   *
+   * What survives `raw`: a panel that owns the keyboard gets every bare key,
+   * and Floe keeps the chords that get you back out (`⌃H`/`⌃L`, `⌘K`, `⌘1`–`⌘9`,
+   * `⌘W`). Positional, so no existing binding had to be edited to say so.
+   */
+  modified: boolean
 }
 
 /**
@@ -347,7 +365,8 @@ export function compileKeymap(binds: Keybind[]): CompiledBind[] {
       holdable: steps.length > 1 ? steps[0].split('+').slice(0, -1) : [],
       command: bind.command,
       arg: bind.arg,
-      predicate
+      predicate,
+      modified: hasModifier(chord)
     })
   }
   return out
@@ -364,16 +383,23 @@ function withoutMods(chord: string, mods: string[]): string {
 /**
  * What this press means under these bindings, or null.
  *
- * Two rules live here rather than in the table, because neither is the user's to
- * change: an open palette owns the keyboard, and a pending chord swallows the
- * next key whatever it is — an unmapped one cancels rather than leaking through
- * as a normal binding.
+ * Three rules live here rather than in the table, because none is the user's to
+ * change: an open palette owns the keyboard; a pending chord swallows the next
+ * key whatever it is — an unmapped one cancels rather than leaking through as a
+ * normal binding; and under `raw` only chords with a modifier resolve.
+ *
+ * That last one is positional on purpose. A `not raw` written onto each bare
+ * letter would leave the one binding that names `typing` — Escape, which is
+ * `activeElement.blur()` — still firing, and inside a canvas's text editor
+ * `typing` and `raw` are true at once, so Escape would blur you mid-word. Read
+ * off the chord instead, it cannot be escaped by naming a flag.
  */
 export function resolveIn(keymap: CompiledBind[], e: KeyInput, ctx: KeyContext = {}): Resolved | null {
   if (ctx.palette) return null
   const chord = chordFor(e)
   if (chord === null) return null
   for (const bind of keymap) {
+    if (ctx.raw && !bind.modified) continue
     const hit = ctx.chord
       ? bind.chordTail !== null && withoutMods(chord, bind.holdable) === bind.chordTail
       : bind.chordTail === null && bind.chord === chord

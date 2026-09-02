@@ -19,6 +19,11 @@
       document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: light)').matches
         ? 'light'
         : 'dark'
+      // Where the drawing panel's canvas loads its fonts from. Left unset,
+      // @excalidraw/excalidraw fetches them from a CDN — which a desktop app
+      // offline cannot do, and the first text you type would fall back to a
+      // system font. scripts/copy-excalidraw-assets.mjs puts them here.
+      window.EXCALIDRAW_ASSET_PATH = './excalidraw/'
     </script>
   </head>
   <body>

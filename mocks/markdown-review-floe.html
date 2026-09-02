@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Markdown review — Floe</title>
+
+<!-- The app's own stylesheet, unmodified. Everything below is what this
+     feature would ADD to it: the fonts, tokens, panel chrome, rows, diff
+     colours, cursor and hints all come from here already. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+
+<style>
+/* ========================================================================
+   NEW — markdown review. Everything in this block is what index.css would
+   gain; nothing here restates a rule the app already has.
+   ======================================================================== */
+
+/* A line whose WORDS changed. It gets no row wash: the line was not added or
+   removed, so tinting all of it would say the wrong thing — the marks inside
+   carry the change, and the mark column names it. */
+.diff-row[data-kind="mod"] .diff-mark {
+  color: #c9a05f;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="mod"] .diff-mark {
+  color: #8a6314;
+}
+
+/* Sub-line marks: the same two hues and washes the add/del ROWS already use,
+   so a word that changed reads as the same colour as a line that did. */
+.md-cut {
+  border-radius: var(--radius-sm);
+  background: #3b23234d;
+  color: #d2a09a;
+  text-decoration: line-through;
+}
+
+.md-new {
+  border-radius: var(--radius-sm);
+  background: #22371f4d;
+  color: #a7cfa0;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+:root[data-theme='light'] .md-cut {
+  background: #b1454a14;
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .md-new {
+  background: #2f7d5214;
+  color: #2f7d52;
+}
+
+/* Old words and new words that meet with no space between them need one — but
+   only while both are on screen. Drawn, not written: a space in the text would
+   outlive whichever half playback hides, and a space inside the mark would be
+   struck through or underlined along with the words. */
+.md-cut + .md-new {
+  margin-left: 1ch;
+}
+
+/* The diff row's colours are wired to .diff-mark and .diff-code; prose sits in
+   .md-text, so the two tones have to reach it too. A removed line is struck as
+   well as tinted: this view is read as a document, where a line you are meant
+   to skip has to look skippable. */
+.diff-row[data-kind="add"] .md-text {
+  color: #a7cfa0;
+}
+
+.diff-row[data-kind="del"] .md-text {
+  color: #d2a09a;
+  text-decoration: line-through;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="add"] .md-text {
+  color: #2f7d52;
+}
+
+:root[data-theme='light'] .diff-row[data-kind="del"] .md-text {
+  color: #b1454a;
+}
+
+/* A link whose destination changed. Prose drops the URL, so the change has
+   nowhere to show — the text carries it, and the diff view has the detail. */
+.md-link[data-relink] {
+  border-bottom: 1px solid currentColor;
+  color: var(--accent);
+}
+
+/* The header's view switch and step counter — the outline-chip pattern from
+   docs/ui-conventions.md, at the .model-mode size. */
+.rev-chip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.rev-chip[data-on] {
+  border-color: var(--edge);
+  color: var(--text-strong);
+}
+
+/* Playing: the accent, which in this app already means "something is live". */
+.rev-chip[data-live] {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+.rev-count {
+  flex: none;
+  color: var(--dim);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- playback ------------------------------------------------------------- */
+
+/* One hunk of consecutive changed lines. It exists so the cursor can mark a
+   whole change at once instead of one row of it; the wash and the left bar are
+   [data-cursor]'s, unchanged. */
+.rev-hunk {
+  border-radius: var(--radius);
+}
+
+/* Before the change happens the document must read as HEAD did: additions are
+   not there yet, and the words that will go still read as ordinary prose. */
+.mode-play .rev-hunk:not([data-done]) .diff-row[data-kind="add"] {
+  display: none;
+}
+
+.mode-play .rev-hunk:not([data-done]) .diff-row[data-kind="del"] {
+  background: none;
+}
+
+.mode-play .rev-hunk:not([data-done]) .diff-row[data-kind="del"] .md-text {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.mode-play .rev-hunk:not([data-done]) .md-cut {
+  background: none;
+  color: inherit;
+  text-decoration: none;
+}
+
+/* P2 — while the edits play, the document is read, not audited: the marks
+   would tell you what is about to happen on lines you have not reached. Only
+   the change under the cursor names itself. */
+.mode-play .diff-mark {
+  visibility: hidden;
+}
+
+.mode-play [data-cursor] .diff-mark {
+  visibility: visible;
+}
+
+.mode-play .rev-hunk:not([data-done]) .md-new {
+  display: none;
+}
+
+/* After it, the document reads as the working tree does: the marks fade out
+   rather than cutting, so the eye can follow the line it was just reading. */
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .diff-row[data-kind="del"],
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .md-cut {
+  display: none;
+}
+
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .diff-row[data-kind="add"] {
+  background: none;
+}
+
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .md-cut + .md-new {
+  margin-left: 0;
+}
+
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .md-new,
+.mode-play .rev-hunk[data-done]:not([data-cursor]) .diff-row[data-kind="add"] .md-text {
+  background: none;
+  color: var(--text);
+  text-decoration: none;
+  transition: color 0.5s ease, background 0.5s ease;
+}
+
+/* The line on its way out: struck first, gone after — the two halves of a
+   deletion, in the order a person makes it. */
+.rev-hunk .cut-now .md-text {
+  color: #d2a09a;
+  text-decoration: line-through;
+  transition: color 0.35s ease;
+}
+
+.rev-hunk .cut-gone {
+  display: none;
+}
+
+/* The space that only separates the two versions from each other. It is in
+   neither the old file nor the new one, so playback — which shows one version
+   at a time — must not print it. */
+.mode-play .md-sep {
+  display: none;
+}
+
+/* An insertion is typed, so it needs a per-character handle. Hidden with
+   display so the line re-wraps exactly as it will when the text is all there. */
+.md-type {
+  display: none;
+}
+
+.md-type[data-in] {
+  display: inline;
+}
+
+.md-type[data-caret] {
+  border-right: 1px solid var(--accent);
+  margin-right: -1px;
+}
+
+/* --- mock only ------------------------------------------------------------ */
+
+/* Not part of the feature: the app takes its appearance from floe.toml. */
+.mock-theme {
+  position: fixed;
+  right: 10px;
+  bottom: 8px;
+  z-index: 50;
+}
+</style>
+</head>
+
+<body>
+<div class="app">
+  <div class="workspace">
+    <div class="lane">
+
+      <!-- changes — the panel the app already has -->
+      <section class="panel" style="flex: 0 0 250px">
+        <header class="panel-head">
+          <svg class="panel-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="6" cy="6" r="2" /><circle cx="18" cy="18" r="2" />
+            <path d="M8 6h7a3 3 0 0 1 3 3v7M16 18H9a3 3 0 0 1-3-3V8" />
+          </svg>
+          <span class="panel-name">changes</span>
+          <span class="panel-sub">markdiff-demo</span>
+        </header>
+        <div class="panel-body">
+          <div class="changes-head">
+            <span>8 files</span>
+            <span class="stat-add">+34</span>
+            <span class="stat-del">−21</span>
+          </div>
+          <div id="files"></div>
+        </div>
+      </section>
+
+      <!-- review — the same panel a .md file already opens in -->
+      <section class="panel" data-focused id="panel">
+        <header class="panel-head">
+          <svg class="panel-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+            <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z" />
+            <path d="M9 9h1M9 13h6M9 17h6" />
+          </svg>
+          <span class="panel-name">02-happy-accidents.md</span>
+          <span class="panel-sub">chapters/</span>
+          <button class="rev-chip" id="c-review" data-on>review</button>
+          <button class="rev-chip" id="c-diff">diff</button>
+          <button class="rev-chip" id="c-play">play</button>
+          <span class="rev-count" id="count">10 changes</span>
+        </header>
+        <div class="panel-body" id="body"></div>
+        <p class="panel-hint" id="hint"></p>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<button class="rev-chip mock-theme" id="theme">light</button>
+
+<script>
+/* =========================================================================
+   The file under review — chapters/02-happy-accidents.md
+   ========================================================================= */
+
+const BEFORE = `---
+title: A Happy Accident
+chapter: 2
+point_of_view: Bob
+mood: hopeful
+---
+
+# A Happy Accident
+
+The next morning, Bob found Clara repairing a trail sign behind the visitor center. A streak of blue paint crossed her cheek, though the sign itself was green.
+
+"That color has traveled," he said.
+
+Clara touched the wrong cheek. "Occupational hazard."
+
+Bob offered her a clean handkerchief. She accepted it with the solemn care of someone receiving a tiny flag of surrender.
+
+They walked to the north overlook carrying:
+
+- one field easel,
+- two tin cups,
+- a thermos of coffee,
+- and more curiosity than either admitted.
+
+At the overlook, wind caught Bob's reference sketch and lifted it over the railing. Clara lunged for the page.
+
+The sketch sailed into a spruce tree and lodged among the needles like a small white bird.
+
+"A happy accident?" Clara asked.
+
+"The happiest kind," Bob said, still holding her hand.
+
+He painted from memory. She stayed until the light faded, naming every distant ridge while he mixed their colors.
+
+> Some views ask you to look twice. Some people do, too.
+
+See the [field notes](/drafts) for the rest of the walk.`;
+
+const AFTER = `---
+title: The Sketch in the Spruce
+chapter: 2
+point_of_view: Bob
+mood: playful
+---
+
+# The Sketch in the Spruce
+
+The next morning arrived bright and windy. Bob found Clara behind the visitor center arguing with a crooked trail sign.
+
+"That color has traveled," he said.
+
+Clara touched the wrong cheek. "Occupational hazard."
+
+Bob offered her a clean handkerchief. She accepted it with the solemn care of someone receiving a tiny flag of truce.
+
+They walked to the north overlook carrying:
+
+- one well-traveled field easel,
+- two tin cups,
+- a heroic thermos of coffee,
+- three oatmeal cookies,
+- and considerably more curiosity than either admitted.
+
+At the overlook, wind stole Bob's reference sketch and carried it over the railing. Clara lunged for the page and caught nothing but weather.
+
+The page wheeled above the valley, flashed once in the sun, and settled high in a spruce like a small white bird.
+
+"A happy accident?" Clara asked.
+
+"The happiest kind," Bob said, still holding her hand.
+
+> Some views ask you to look twice. Some people do, too.
+
+See the [field notes](/reviews) for the rest of the walk.`;
+
+/* =========================================================================
+   Diff — lines first, then words inside the lines that pair up
+   ========================================================================= */
+
+const CUT_O = "\u0001", CUT_C = "\u0002", NEW_O = "\u0003", NEW_C = "\u0004", URL = "\u0005";
+const isMark = (ch) => ch >= "\u0001" && ch <= "\u0005";
+
+const tokenize = (s) => s.match(/\s+|\S+/g) || [];
+const strip = (s) => s.replace(/[\u0001-\u0005]/g, "");
+const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+function diffOps(a, b) {
+  const n = a.length, m = b.length;
+  const dp = [];
+  for (let i = 0; i <= n; i++) dp.push(new Uint16Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+
+  const ops = [];
+  let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { ops.push(["=", a[i]]); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) ops.push(["-", a[i++]]);
+    else ops.push(["+", b[j++]]);
+  }
+  while (i < n) ops.push(["-", a[i++]]);
+  while (j < m) ops.push(["+", b[j++]]);
+  return ops;
+}
+
+function similarity(a, b) {
+  const A = tokenize(a).filter((t) => t.trim());
+  const B = new Set(tokenize(b).filter((t) => t.trim()));
+  if (!A.length) return 0;
+  let hit = 0;
+  for (const t of A) if (B.has(t)) hit++;
+  return hit / Math.max(A.length, B.size);
+}
+
+const words = (s) => tokenize(s).filter((t) => t.trim()).length;
+
+function groupRuns(ops) {
+  const runs = [];
+  for (const [op, text] of ops) {
+    const last = runs[runs.length - 1];
+    if (last && last.op === op) last.text += text;
+    else runs.push({ op, text });
+  }
+  return runs;
+}
+
+/* A one or two word island between two changes reads as noise, not as text
+   that survived. Fold it into the change on either side of it. */
+function absorbIslands(runs) {
+  const out = [];
+  runs.forEach((r, i) => {
+    const flanked = i > 0 && i < runs.length - 1 && runs[i - 1].op !== "=" && runs[i + 1].op !== "=";
+    if (r.op === "=" && flanked && words(r.text) <= 2) out.push({ op: "-", text: r.text }, { op: "+", text: r.text });
+    else out.push(r);
+  });
+  return groupRuns(out.map((r) => [r.op, r.text]));
+}
+
+/* A run keeps the space that FOLLOWS it and gives up the one before it. The
+   trailing space came in with those words and has to leave with them: outside
+   the mark, hiding the run during playback strands it as a double space. */
+function tight(s, open, close) {
+  const m = s.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  return m[2] ? m[1] + open + m[2] + m[3] + close : s;
+}
+
+function markWords(before, after) {
+  /* Peel the words both sides open and close with. A line that only swaps its
+     last clause should not be judged — or marked — on the half that never
+     moved, and `title: ` printed twice is noise, not a change. */
+  const A = tokenize(before), B = tokenize(after);
+  let head = 0;
+  while (head < A.length && head < B.length && A[head] === B[head]) head++;
+  let tail = 0;
+  while (tail < A.length - head && tail < B.length - head && A[A.length - 1 - tail] === B[B.length - 1 - tail]) tail++;
+  if (head || tail) {
+    return (
+      A.slice(0, head).join("") +
+      markMiddle(A.slice(head, A.length - tail).join(""), B.slice(head, B.length - tail).join("")) +
+      A.slice(A.length - tail).join("")
+    );
+  }
+  return markMiddle(before, after);
+}
+
+function markMiddle(before, after) {
+  if (!before.trim()) return tight(after, NEW_O, NEW_C);
+  if (!after.trim()) return tight(before, CUT_O, CUT_C);
+  const ops = diffOps(tokenize(before), tokenize(after));
+
+  /* Past roughly half the words, a word-level diff is confetti — the line was
+     rewritten, and saying so is more useful than pointing at the survivors. */
+  let same = 0, diff = 0;
+  for (const [op, t] of ops) {
+    if (!t.trim()) continue;
+    if (op === "=") same++; else diff++;
+  }
+  if (same + diff >= 6 && diff / (same + diff) > 0.5) {
+    return tight(before, CUT_O, CUT_C) + tight(after, NEW_O, NEW_C);
+  }
+
+  const runs = absorbIslands(groupRuns(ops));
+  let out = "", i = 0;
+  while (i < runs.length) {
+    if (runs[i].op === "=") { out += runs[i].text; i++; continue; }
+    let cut = "", add = "";
+    while (i < runs.length && runs[i].op !== "=") {
+      if (runs[i].op === "-") cut += runs[i].text; else add += runs[i].text;
+      i++;
+    }
+    /* No separator is written between the two halves. The space they need
+       when both are on screen is drawn by CSS (.md-cut + .md-new::before) —
+       in the text it would survive whichever half playback hides. */
+    out += tight(cut, CUT_O, CUT_C) + tight(add, NEW_O, NEW_C);
+  }
+  return out;
+}
+
+/* A link's destination is not in the prose, so diffing it there would mark
+   words that never changed. Mask it, and report it on the link itself. */
+function maskLinks(s) {
+  const urls = [];
+  const masked = s.replace(/\]\(([^)]+)\)/g, (_, u) => { urls.push(u); return "](" + URL + ")"; });
+  return { masked, urls };
+}
+
+/**
+ * The file, as rows: one per source line, the way the panel already reads a
+ * .md file. A del/add pair that still looks like the same sentence becomes one
+ * `mod` row carrying word marks, which is the whole point of the view.
+ */
+function buildRows() {
+  const ops = diffOps(BEFORE.split("\n"), AFTER.split("\n"));
+  const rows = [];
+  let bn = 0, an = 0;
+  let i = 0;
+
+  while (i < ops.length) {
+    if (ops[i][0] === "=") {
+      bn++; an++;
+      rows.push({ kind: "ctx", bn, an, text: ops[i][1] });
+      i++;
+      continue;
+    }
+    const cuts = [], adds = [];
+    while (i < ops.length && ops[i][0] !== "=") {
+      (ops[i][0] === "-" ? cuts : adds).push(ops[i][1]);
+      i++;
+    }
+
+    /* Which removed line each added line is a rewrite OF. A rewritten line can
+       share no words with the one it replaces, so similarity alone would split
+       it into a delete plus an add — when both sides of the gap are the same
+       length, they are the same lines in the same order. */
+    const pairs = new Map();
+    const free = cuts.map((_, k) => k);
+    const inOrder = cuts.length === adds.length;
+    adds.forEach((a, j) => {
+      let best = -1, score = 0.3;
+      free.forEach((k) => {
+        const sim = similarity(cuts[k], a);
+        if (sim > score) { score = sim; best = k; }
+      });
+      if (best < 0 && inOrder && free.includes(j)) best = j;
+      if (best < 0) return;
+      pairs.set(j, best);
+      free.splice(free.indexOf(best), 1);
+    });
+
+    // A line that was only removed goes first: it left before the rest arrived.
+    free.sort((x, y) => x - y).forEach((k) => rows.push({ kind: "del", bn: ++bn, text: cuts[k] }));
+    // Then the new lines, in the order they appear in the file.
+    adds.forEach((text, j) => {
+      if (!pairs.has(j)) { rows.push({ kind: "add", an: ++an, text }); return; }
+      bn++; an++;
+      const b = maskLinks(cuts[pairs.get(j)]), a = maskLinks(text);
+      rows.push({ kind: "mod", bn, an, text: markWords(b.masked, a.masked), urls: a.urls, wasUrls: b.urls });
+    });
+  }
+  return rows;
+}
+
+/* =========================================================================
+   Markdown — the same shapes panels.tsx draws, markers dropped
+   ========================================================================= */
+
+/* Drop n leading characters of the source line without dropping the marks that
+   sit among them. */
+/**
+ * Drop a block's marker — the `#`, the `>`, the bullet. Not just the one at the
+ * start: a wholesale swap puts the new line's marker after an opening mark, and
+ * a `#` left in the prose is the marker showing through the render.
+ */
+function dropMarker(s, marker) {
+  return s.replace(new RegExp(`(^|[\\u0001\\u0003])${marker.source}`, "g"), "$1");
+}
+
+/** Put the masked link destinations back, in the order they were taken. */
+function unmask(text, urls = []) {
+  let i = 0;
+  return text.replace(/\]\(\u0005\)/g, () => `](${urls[i++] ?? ""})`);
+}
+
+/** One side of a marked line, as plain text: what the diff view prints. */
+function sideOf(marked, keep) {
+  let out = "", skip = false;
+  for (const ch of marked) {
+    if (ch === CUT_O) { skip = keep === "new"; continue; }
+    if (ch === NEW_O) { skip = keep === "cut"; continue; }
+    if (ch === CUT_C || ch === NEW_C) { skip = false; continue; }
+    if (!skip) out += ch;
+  }
+  return out;
+}
+
+function inlineSpans(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<span class="md-code">$1</span>')
+    .replace(/\*\*([^*]+)\*\*/g, '<span class="md-bold">$1</span>')
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, '$1<span class="md-em">$2</span>')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '<span class="md-link">$1</span>');
+}
+
+const marksToTags = (s) =>
+  s.replace(/\u0001/g, '<del class="md-cut">').replace(/\u0002/g, "</del>")
+   .replace(/\u0003/g, '<ins class="md-new">').replace(/\u0004/g, "</ins>");
+
+/** One source line: which shape it is, and its prose with the markers gone. */
+function mdLine(marked, inFront) {
+  const bare = strip(marked);
+  if (inFront) return { md: "front", html: marksToTags(escapeHtml(marked)) };
+  if (!bare.trim()) return { md: "text", html: "" };
+
+  if (/^\s*([-*_])(?:\s*\1){2,}\s*$/.test(bare)) return { md: "rule", html: "" };
+
+  const heading = bare.match(/^(#{1,6})\s+/);
+  if (heading) {
+    return { md: "heading", level: heading[1].length, html: body(dropMarker(marked, /#{1,6}[ \t]+/)) };
+  }
+
+  const quote = bare.match(/^\s*>\s?/);
+  if (quote) return { md: "quote", html: body(dropMarker(marked, /[ \t]*>[ \t]?/)) };
+
+  const list = bare.match(/^(\s*)([-*+]|\d+[.)])(\s+)/);
+  if (list) {
+    return {
+      md: "list",
+      depth: Math.min(Math.floor(list[1].length / 2), 2),
+      marker: /^\d/.test(list[2]) ? list[2] : "",
+      html: body(dropMarker(marked, /[ \t]*(?:[-*+]|\d+[.)])[ \t]+/)),
+    };
+  }
+  return { md: "text", html: body(marked) };
+}
+
+const body = (marked) => marksToTags(inlineSpans(escapeHtml(marked)));
+
+/* =========================================================================
+   Views
+   ========================================================================= */
+
+const panelBody = document.getElementById("body");
+const panel = document.getElementById("panel");
+const ROWS = buildRows();
+
+/* Consecutive changed rows are one change: what a person did in one edit, and
+   what `]` should step over in one press. */
+function hunkIndex() {
+  const hunks = [];
+  ROWS.forEach((r, i) => {
+    if (r.kind === "ctx") return;
+    const last = hunks[hunks.length - 1];
+    if (last && last.to === i - 1) last.to = i;
+    else hunks.push({ from: i, to: i });
+  });
+  return hunks;
+}
+const HUNKS = hunkIndex();
+
+const no = (n) => `<span class="diff-no">${n ?? ""}</span>`;
+
+function reviewHtml() {
+  let out = '<div class="diff md-lines">';
+  let front = false, frontDone = false, hunk = -1, open = false;
+
+  ROWS.forEach((row, i) => {
+    const at = HUNKS.findIndex((h) => i >= h.from && i <= h.to);
+    if (at !== hunk) {
+      if (open) out += "</div>";
+      open = at >= 0;
+      if (open) out += `<div class="rev-hunk" data-hunk="${at}">`;
+      hunk = at;
+    }
+
+    const raw = strip(row.text);
+    const delim = /^---\s*$/.test(raw) && !frontDone;
+    if (delim) { if (front) { front = false; frontDone = true; } else front = true; }
+    const line = mdLine(row.text, front || delim);
+
+    const mark = row.kind === "add" ? "+" : row.kind === "del" ? "−" : row.kind === "mod" ? "~" : "";
+    // indentOf() in panels.tsx: the marker starts where a paragraph starts and
+    // the item's text sits one marker column further in.
+    const indent =
+      line.md === "list"
+        ? ` style="padding-left:calc(8px + ${(line.depth ?? 0) * 2 + 2}ch);text-indent:-2ch"`
+        : line.md === "quote"
+          ? ' style="padding-left:16px"'
+          : "";
+    const bullet =
+      line.md === "list"
+        ? `<span class="md-bullet" ${line.marker ? "" : "data-dot"} data-depth="${line.depth}" style="min-width:2ch">${line.marker}</span>`
+        : "";
+    const rule = line.md === "rule" ? '<span class="md-rule"></span>' : "";
+
+    out +=
+      `<div class="diff-row md-row" data-kind="${row.kind}" data-md="${line.md}"` +
+      (line.level ? ` data-level="${line.level}"` : "") +
+      `>${no(row.bn)}${no(row.an)}<span class="diff-mark">${mark}</span>` +
+      `<span class="md-text"${indent}>${rule}${bullet}${line.html}</span></div>`;
+  });
+
+  return out + (open ? "</div>" : "") + "</div>";
+}
+
+/* The diff the app draws today, for the same file — unchanged, and the place
+   the review view sends you when you need the literal text. */
+function diffHtml() {
+  let out = '<div class="diff">';
+  for (const row of ROWS) {
+    const kind = row.kind === "mod" ? null : row.kind;
+    const text = strip(row.text);
+    if (kind) {
+      const mark = kind === "add" ? "+" : kind === "del" ? "−" : " ";
+      out += `<div class="diff-row" data-kind="${kind}">${no(row.bn)}${no(row.an)}` +
+             `<span class="diff-mark">${mark}</span><span class="diff-code">${escapeHtml(text) || " "}</span></div>`;
+      continue;
+    }
+    // A modified line is two whole lines here, however few words moved. That is
+    // exactly what the review view exists to fix.
+    out += `<div class="diff-row" data-kind="del">${no(row.bn)}${no("")}` +
+           `<span class="diff-mark">−</span><span class="diff-code">${escapeHtml(unmask(sideOf(row.text, "cut"), row.wasUrls))}</span></div>`;
+    out += `<div class="diff-row" data-kind="add">${no("")}${no(row.an)}` +
+           `<span class="diff-mark">+</span><span class="diff-code">${escapeHtml(unmask(sideOf(row.text, "new"), row.urls))}</span></div>`;
+  }
+  return out + "</div>";
+}
+
+/* A link whose destination moved: the prose cannot show a URL, so the link
+   itself carries the fact and the title says where it went. */
+function markRelinks() {
+  ROWS.forEach((row, i) => {
+    if (row.kind !== "mod" || !row.urls?.length) return;
+    const el = panelBody.querySelectorAll(".diff-row")[i];
+    if (!el) return;
+    el.querySelectorAll(".md-link").forEach((a, k) => {
+      if (row.wasUrls[k] !== undefined && row.wasUrls[k] !== row.urls[k]) {
+        a.dataset.relink = "";
+        a.title = `${row.wasUrls[k]} → ${row.urls[k]}`;
+      }
+    });
+  });
+}
+
+/* =========================================================================
+   Playback — the edits, in the order they were made
+   ========================================================================= */
+
+let mode = "review", cur = 0, playing = false, token = 0;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* One span per character, so an insertion can be typed without losing the
+   inline markup around it. */
+function wrapChars(el) {
+  const chars = [];
+  const walk = (node) => {
+    for (const child of [...node.childNodes]) {
+      if (child.nodeType === 3) {
+        const frag = document.createDocumentFragment();
+        for (const ch of child.nodeValue) {
+          const s = document.createElement("span");
+          s.className = "md-type";
+          s.textContent = ch;
+          frag.appendChild(s);
+          chars.push(s);
+        }
+        node.replaceChild(frag, child);
+      } else walk(child);
+    }
+  };
+  walk(el);
+  return chars;
+}
+
+let hunks = [];
+
+function collectHunks() {
+  hunks = [...panelBody.querySelectorAll(".rev-hunk")].map((el) => ({
+    el,
+    cuts: [...el.querySelectorAll('.diff-row[data-kind="del"]')],
+    ins: [...el.querySelectorAll("ins.md-new")].map((n) => ({ el: n, chars: wrapChars(n) })),
+  }));
+}
+
+function clearCaret() {
+  panelBody.querySelectorAll("[data-caret]").forEach((c) => delete c.dataset.caret);
+}
+
+function paint(k, animating) {
+  hunks.forEach((h, i) => {
+    const done = i < k || (i === k && !animating);
+    h.el.toggleAttribute("data-done", done || i === k);
+    h.el.toggleAttribute("data-cursor", i === k);
+    if (animating && i === k) return;
+    h.cuts.forEach((c) => {
+      c.classList.toggle("cut-now", done && i === k);
+      c.classList.toggle("cut-gone", done && i !== k);
+    });
+    h.ins.forEach((n) => n.chars.forEach((c) => c.toggleAttribute("data-in", done)));
+  });
+  status();
+}
+
+function jumpTo(k) {
+  token++;
+  cur = Math.max(0, Math.min(k, hunks.length - 1));
+  clearCaret();
+  paint(cur, false);
+  hunks[cur]?.el.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+async function step() {
+  if (cur >= hunks.length - 1 && hunks[cur]?.el.hasAttribute("data-done")) return false;
+  const mine = ++token;
+  if (hunks[cur]?.el.hasAttribute("data-done")) cur++;
+  const h = hunks[cur];
+
+  paint(cur, true);
+  h.cuts.forEach((c) => c.classList.remove("cut-now", "cut-gone"));
+  h.ins.forEach((n) => n.chars.forEach((c) => c.removeAttribute("data-in")));
+  h.el.scrollIntoView({ block: "center", behavior: "smooth" });
+  await wait(380);
+  if (mine !== token) return false;
+
+  if (h.cuts.length) {
+    h.cuts.forEach((c) => c.classList.add("cut-now"));
+    await wait(520);
+    if (mine !== token) return false;
+    h.cuts.forEach((c) => c.classList.add("cut-gone"));
+    await wait(200);
+    if (mine !== token) return false;
+  }
+
+  const total = h.ins.reduce((n, x) => n + x.chars.length, 0);
+  const per = Math.max(4, Math.min(20, 1000 / Math.max(total, 1)));
+  for (const n of h.ins) {
+    for (const ch of n.chars) {
+      ch.setAttribute("data-in", "");
+      clearCaret();
+      ch.dataset.caret = "";
+      await wait(per);
+      if (mine !== token) return false;
+    }
+  }
+  clearCaret();
+  paint(cur, false);
+  await wait(560);
+  return mine === token;
+}
+
+async function loop() {
+  while (playing && (await step())) { /* the next change follows the last */ }
+  if (playing) setPlaying(false);
+}
+
+function setPlaying(on) {
+  playing = on;
+  if (on) loop(); else token++;
+  status();
+}
+
+/* =========================================================================
+   Chrome
+   ========================================================================= */
+
+const FILES = [
+  ["M", "01-the-cabin.md", "chapters/", "+6", "−2"],
+  ["M", "02-happy-accidents.md", "chapters/", "+12", "−9", true],
+  ["M", "03-the-gallery.md", "chapters/", "+4", "−1"],
+  ["A", "04-the-sunset-picnic.md", "chapters/", "+8", ""],
+  ["A", "bonus-scene.md", "extras/", "+3", ""],
+  ["D", "rainy-day.md", "interludes/", "", "−7"],
+  ["M", "a-note-from-bob.md", "letters/", "+1", "−2"],
+  ["R", "cast.md", "notes/", "", ""],
+];
+
+document.getElementById("files").innerHTML = FILES.map(
+  ([s, name, dir, add, del, active]) =>
+    `<div class="row change-row"${active ? " data-cursor" : ""}>` +
+    `<span class="change-status" data-status="${s}">${s}</span>` +
+    `<span class="row-name"><span class="change-dir">${dir}</span>${name}</span>` +
+    `<span class="change-stat">${add ? `<span class="stat-add">${add}</span>` : ""}` +
+    `${del ? `<span class="stat-del">${del}</span>` : ""}</span></div>`
+).join("");
+
+const chips = { review: "c-review", diff: "c-diff", play: "c-play" };
+const hint = document.getElementById("hint");
+const count = document.getElementById("count");
+
+function status() {
+  for (const [m, id] of Object.entries(chips)) {
+    const el = document.getElementById(id);
+    el.toggleAttribute("data-on", mode === m);
+    el.toggleAttribute("data-live", m === "play" && mode === "play" && playing);
+  }
+  count.textContent =
+    mode === "play" ? `${cur + 1} / ${hunks.length}` : `${HUNKS.length} changes`;
+  hint.innerHTML =
+    mode === "play"
+      ? `<kbd>space</kbd> ${playing ? "pause" : "play"} · <kbd>]</kbd> next · <kbd>[</kbd> prev · <kbd>r</kbd> restart · <kbd>s</kbd> diff · <kbd>esc</kbd> review`
+      : `<kbd>]</kbd> next change · <kbd>[</kbd> prev change · <kbd>space</kbd> play the edits · <kbd>s</kbd> ${mode === "diff" ? "review" : "diff"}`;
+}
+
+function show(next) {
+  mode = next;
+  panel.classList.toggle("mode-play", mode === "play");
+  panelBody.innerHTML = mode === "diff" ? diffHtml() : reviewHtml();
+  if (mode !== "diff") markRelinks();
+
+  if (mode === "play") {
+    collectHunks();
+    cur = 0;
+    paint(-1, false);
+    panelBody.scrollTop = 0;
+    setPlaying(true);
+  } else {
+    setPlaying(false);
+    // Outside playback the cursor still marks a change, so `]` means the same
+    // thing in both — it is the panel's cursor, not the player's.
+    hunks = [...panelBody.querySelectorAll(".rev-hunk")].map((el) => ({ el, cuts: [], ins: [] }));
+    cur = 0;
+    hunks[0]?.el.setAttribute("data-cursor", "");
+  }
+  status();
+}
+
+document.getElementById("c-review").onclick = () => show("review");
+document.getElementById("c-diff").onclick = () => show("diff");
+document.getElementById("c-play").onclick = () => show("play");
+
+document.getElementById("theme").onclick = (e) => {
+  const light = document.documentElement.dataset.theme === "light";
+  document.documentElement.dataset.theme = light ? "dark" : "light";
+  e.target.textContent = light ? "light" : "dark";
+};
+
+function move(delta) {
+  if (mode === "play") { setPlaying(false); jumpTo(cur + delta); return; }
+  if (!hunks.length) return;
+  hunks[cur]?.el.removeAttribute("data-cursor");
+  cur = Math.max(0, Math.min(cur + delta, hunks.length - 1));
+  hunks[cur].el.setAttribute("data-cursor", "");
+  hunks[cur].el.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "]") { move(1); e.preventDefault(); }
+  else if (e.key === "[") { move(-1); e.preventDefault(); }
+  else if (e.key === " ") {
+    e.preventDefault();
+    if (mode !== "play") show("play");
+    else setPlaying(!playing);
+  } else if (e.key === "r" && mode === "play") { setPlaying(false); cur = 0; paint(-1, false); panelBody.scrollTop = 0; }
+  else if (e.key === "s") show(mode === "diff" ? "review" : "diff");
+  else if (e.key === "Escape" && mode === "play") show("review");
+  else if (e.key === "t") document.getElementById("theme").click();
+});
+
+// ?view=review|diff|play &step=N &theme=light — for linking to a state.
+const qs = new URLSearchParams(location.search);
+if (qs.get("theme")) document.getElementById("theme").click();
+show(qs.get("view") || "review");
+if (qs.has("step")) { setPlaying(false); jumpTo(+qs.get("step")); }
+</script>
+</body>
+</html>

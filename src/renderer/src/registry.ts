@@ -16,9 +16,11 @@ import {
   open,
   patchPanel,
   resizePanel,
+  setCursor,
   toggleDock,
   toggleKind
 } from './lane.ts'
+import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
@@ -136,6 +138,13 @@ function mcpRow(c: CommandContext): HTMLElement | null {
   return row?.dataset.mcp ? row : null
 }
 
+/** The drawing row the cursor is on — same contract as skillRow. */
+function drawRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'draw') return null
+  const row = fileRow(c)
+  return row?.dataset.drawing ? row : null
+}
+
 /**
  * The command row the cursor is on, as its id.
  *
@@ -233,6 +242,41 @@ function moveCursor(c: CommandContext, delta: number): void {
  * say about the old one). Null when the focused panel is none of those, which
  * is what dims the command.
  */
+/**
+ * The file line a row stands for, when the panel says so on the row itself.
+ *
+ * The prose view cannot be counted through the patch: a rewritten line is ONE
+ * row standing for two of the patch's, and a run of changes is reordered into
+ * file order. So it writes the number it means onto the row, and the commands
+ * that need a line read it there rather than re-deriving one that would be off.
+ */
+function lineOnRow(c: CommandContext, index: number): number | undefined {
+  const line = Number(c.rowsOf(c.panelEl(c.lane.focus))[index]?.dataset.line)
+  return Number.isFinite(line) && line > 0 ? line : undefined
+}
+
+/**
+ * Move the cursor to the next change, treating a run of changed rows as one.
+ *
+ * A rewritten paragraph is a dozen rows; stepping into the middle of it would
+ * mean pressing the key once per line of something you already read as a single
+ * edit. So: walk out of the run you are in, then on to the next one.
+ */
+function stepChange(c: CommandContext, dir: number): void {
+  const rows = c.rowsOf(c.panelEl(c.lane.focus))
+  const at = c.lane.panels[c.lane.focus]?.cursor ?? 0
+  const changed = (i: number): boolean => {
+    const kind = rows[i]?.dataset.kind
+    return kind === 'add' || kind === 'del' || kind === 'mod'
+  }
+
+  let i = at + dir
+  if (changed(at)) while (i >= 0 && i < rows.length && changed(i)) i += dir
+  while (i >= 0 && i < rows.length && !changed(i)) i += dir
+  if (i < 0 || i >= rows.length) return
+  c.setLane((l) => setCursor(l, l.focus, i))
+}
+
 function editTargetOf(c: CommandContext): { path: string; line?: number } | null {
   const panel = c.lane.panels[c.lane.focus]
   if (!panel) return null
@@ -246,6 +290,8 @@ function editTargetOf(c: CommandContext): { path: string; line?: number } | null
   if (panel.kind === 'file') return { path: panel.sub ?? '', line: (panel.cursor ?? 0) + 1 }
   if (panel.kind === 'diff') {
     const path = panel.sub ?? ''
+    const marked = lineOnRow(c, panel.cursor ?? 0)
+    if (marked !== undefined) return { path, line: marked }
     // The parse, not the DOM, for the same reason the quote uses it: the row the
     // cursor indexes has to be the row we read a line number off.
     const { rows } = parseUnifiedDiff(c.patchFor(path))
@@ -260,6 +306,17 @@ function commentOnSelection(c: CommandContext): void {
   const panel = c.lane.panels[c.lane.focus]
   const r = selRange(panel?.selection)
   if (!panel || !r) return
+
+  // A prose row knows its own file line, and the patch's rows are not the rows
+  // on screen there — so the selection is sent as a `path:12-30` reference, the
+  // same shape a file panel sends, rather than as a quoted patch that would name
+  // the wrong lines.
+  const from = lineOnRow(c, r[0])
+  const to = lineOnRow(c, r[1])
+  if (panel.kind === 'diff' && from !== undefined && to !== undefined) {
+    sendToComposer(c, shorten(fileRef(panel.sub ?? '', from, to).trim()) + '\n\n')
+    return
+  }
 
   // Rows here must be the SAME list the cursor indexes: the parse, not the DOM,
   // so the quote cannot drift from what is highlighted.
@@ -277,7 +334,11 @@ function commentOnSelection(c: CommandContext): void {
           return quoteSelection(rows, r[0] - offset, r[1] - offset, panel.sub ?? '')
         })()
   if (!quote) return
+  sendToComposer(c, quote)
+}
 
+/** Put a quote or a reference in the composer, and hand the keyboard over. */
+function sendToComposer(c: CommandContext, quote: string): void {
   // Any composer, not only the chat's: the launcher has one too, and a comment
   // that silently does nothing because the session hasn't started yet is worse
   // than one that lands where you can see it.
@@ -542,6 +603,42 @@ export const REGISTRY: Map<string, Command> = new Map(
               selection: panel.selection ? null : { anchor: at, head: at }
             })
           })
+      },
+      {
+        // Markdown only: every other file IS its source, so there is no second
+        // way to read it and the chip would toggle between one thing and itself.
+        id: 'diff.view',
+        title: 'Read markdown as prose, or as a patch',
+        group: 'Diff',
+        keys: 'p',
+        enabled: (c) => {
+          const panel = c.lane.panels[c.lane.focus]
+          return panel?.kind === 'diff' && READS_AS_PROSE.test(panel.sub ?? '')
+        },
+        run: (c) =>
+          c.setLane((l) =>
+            patchPanel(l, l.focus, {
+              view: l.panels[l.focus]?.view === 'code' ? 'prose' : 'code',
+              // The two views have different rows, so an index into one means
+              // nothing in the other.
+              cursor: 0,
+              selection: null
+            })
+          )
+      },
+      {
+        id: 'diff.nextChange',
+        title: 'Go to the next change',
+        group: 'Diff',
+        keys: ']',
+        run: (c) => stepChange(c, 1)
+      },
+      {
+        id: 'diff.prevChange',
+        title: 'Go to the previous change',
+        group: 'Diff',
+        keys: '[',
+        run: (c) => stepChange(c, -1)
       },
       {
         id: 'selection.cancel',
@@ -869,6 +966,138 @@ export const REGISTRY: Map<string, Command> = new Map(
           const root = row?.dataset.skillRoot
           const file = row?.dataset.skillFile
           if (root && file) c.editSkill(root, file)
+        }
+      },
+      {
+        // The panel, not a palette, for the reason skills got one: a drawing is
+        // something you keep coming back to, and the list is where you name,
+        // rename and throw one away.
+        id: 'draw.open',
+        title: 'Drawings…',
+        group: 'App',
+        keys: '⏎ / ⌘K D',
+        enabled: (c) => c.canOpen('draw'),
+        unavailable: (c) => c.whyCannotOpen('draw'),
+        // On a row, open THAT drawing — the same thing ⏎ does, so the palette
+        // and the key cannot mean two things. Otherwise open the list.
+        run: (c) => {
+          const row = drawRow(c)
+          if (row) row.click()
+          else c.setLane((l) => toggleKind(l, 'draw', () => c.makePanel('draw')))
+        }
+      },
+      {
+        // Opens the panel if it is not up, then asks for the name. It lands in
+        // the branch's `specs/` folder — a drawing is part of the work, so it
+        // travels with the branch and shows up in the commit rather than
+        // sitting in a gitignored scratch directory nobody reviews. The verb on
+        // the prompt names the folder, so where it goes is visible before you
+        // type. `draw.promote` is how an older draft catches up.
+        id: 'draw.new',
+        title: 'New drawing…',
+        group: 'Draw',
+        keys: 'n',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'draw — open a project first',
+        run: (c) => {
+          const worktree = c.worktree
+          if (!worktree) return
+          if (!c.lane.panels.some((p) => p.kind === 'draw')) {
+            c.setLane((l) => open(l, c.makePanel('draw')))
+          }
+          c.askText({
+            placeholder: 'Drawing name',
+            verb: 'New drawing in specs/',
+            onDone: (name) => {
+              const clean = name.trim()
+              if (!clean) return
+              void window.floe.draw
+                .create(worktree.path, clean, 'spec', worktree.branch)
+                // Straight onto the canvas: you asked for a drawing, not for a
+                // row that you then have to press Enter on.
+                .then((file) => c.setLane((l) => open(l, c.makePanel('drawing', file.relPath))))
+                .catch((err: unknown) => c.say(reason(err)))
+            }
+          })
+        }
+      },
+      {
+        id: 'draw.rename',
+        title: 'Rename drawing…',
+        group: 'Draw',
+        keys: 'r',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (!rel || !root) return
+          const slash = rel.lastIndexOf('/')
+          const dir = rel.slice(0, slash)
+          const file = rel.slice(slash + 1)
+          c.askText({
+            placeholder: 'Drawing name',
+            value: file.replace(/\.excalidraw$/, ''),
+            verb: 'Rename to',
+            onDone: (name) => {
+              const clean = name.trim()
+              if (!clean) return
+              const to = `${dir}/${clean.endsWith('.excalidraw') ? clean : `${clean}.excalidraw`}`
+              if (to !== rel) applyOps(c, root, [{ kind: 'rename', from: rel, to }])
+            }
+          })
+        }
+      },
+      {
+        id: 'draw.delete',
+        title: 'Delete drawing…',
+        group: 'Draw',
+        keys: 'd',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (!rel || !root) return
+          // Like a file and unlike a project: this one really does remove from
+          // disk, so it says the word.
+          if (!window.confirm(`Delete "${rel}"? This removes the file from disk.`)) return
+          applyOps(c, root, [{ kind: 'delete', path: rel }])
+        }
+      },
+      {
+        // The one drawing action that is not about this file but about where it
+        // lives. Only offered on a draft, because a drawing already in specs/ is
+        // where this would put it.
+        id: 'draw.promote',
+        title: 'Save drawing into the project',
+        group: 'Draw',
+        keys: 's',
+        enabled: (c) => !!drawRow(c) && !drawRow(c)?.dataset.drawingGroup,
+        unavailable: (c) => (drawRow(c) ? 'already in the project' : 'no drawing selected'),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const worktree = c.worktree
+          if (!rel || !worktree) return
+          void window.floe.draw
+            .promote(worktree.path, rel, worktree.branch)
+            // Follow it: the canvas showing the old path would be pointed at a
+            // file that no longer exists, and you asked to keep working on this
+            // drawing, not to close it.
+            .then((file) => c.setLane((l) => open(l, c.makePanel('drawing', file.relPath))))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // A .excalidraw is a portable file. This is how it gets to
+        // excalidraw.com, or into a message, without Floe in the way.
+        id: 'draw.reveal',
+        title: 'Reveal drawing on disk',
+        group: 'Draw',
+        keys: 'o',
+        enabled: (c) => !!drawRow(c),
+        run: (c) => {
+          const rel = drawRow(c)?.dataset.drawing
+          const root = c.worktree?.path
+          if (rel && root) void window.floe.draw.reveal(root, rel).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

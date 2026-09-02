@@ -22,7 +22,7 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, RAIL, PanelBody, needsProject, type PanelKind } from './panels'
+import { KINDS, RAIL, PanelBody, needsProject, panelForFile, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { installPluginCommands, runCommand, type CommandContext } from './commands'
@@ -865,8 +865,12 @@ export default function App() {
   // Every row a panel offers the cursor, in document order. The cursor is an
   // index into THIS list, so it stays meaningful when movement is scoped to one
   // nav-group inside the panel.
+  //
+  // A panel that owns the raw keyboard has none: the drawing canvas is thirty
+  // toolbar buttons, and counting them as rows would make the focus effect land
+  // on "rectangle" instead of on the drawing.
   const rowsOf = (panel: HTMLElement | null | undefined): HTMLElement[] =>
-    panel
+    panel && !panel.querySelector('[data-raw-keys]')
       ? [...panel.querySelectorAll<HTMLElement>('.panel-body button, .panel-body [data-nav]')]
       : []
 
@@ -1311,6 +1315,14 @@ export default function App() {
         )
         return
       }
+      case 'open_drawing': {
+        // Same shape as open_plan, onto the canvas instead of the reader: the
+        // agent has just drawn something and this is it putting it on screen.
+        setLane((l) =>
+          open(l, mkPanel('drawing', command.relPath, undefined, undefined, undefined, command.worktreePath))
+        )
+        return
+      }
       case 'start_merge': {
         // The guided merge starts from a Worktree row of the OPEN project
         // (useMerge keys flows by projects.current). On the right project with
@@ -1351,12 +1363,35 @@ export default function App() {
   }, [worktrees.rows, worktrees.repo])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
+    const onKey = (e: KeyboardEvent, capturing = false) => {
+      // Resolved already, in the capture pass below. Both listeners are on
+      // window and see the same press, and the lane has not re-rendered in
+      // between — so without this the command would run twice.
+      const marked = e as KeyboardEvent & { __floeHandled?: true }
+      if (marked.__floeHandled) return
       const active = document.activeElement as HTMLElement | null
       const typing =
         active?.tagName === 'TEXTAREA' ||
         active?.tagName === 'INPUT' ||
         active?.isContentEditable === true
+      // A panel that owns the raw keyboard — the drawing canvas, which has its
+      // own full keymap. Marked in the DOM rather than by panel kind so the
+      // panel itself decides, and so focus LEAVING it (into the composer beside
+      // it) turns the state off without anything having to notice. Under `raw`
+      // only chords with a modifier resolve — see shared/keymap.ts.
+      const raw = !!active?.closest('[data-raw-keys]')
+
+      // Floe goes FIRST only for a raw panel. Excalidraw's own key handler
+      // stops propagation on some of the chords it claims — ⌃H among them —
+      // so a window listener that only ran on the way back up would never see
+      // the press, and ⌃H is half of how you leave the canvas. Everywhere else
+      // the capture pass stands down and the bubble one below does the work, so
+      // components that handle their own keys keep seeing them first.
+      //
+      // Safe to go first here because `raw` already narrows resolution to
+      // chords holding a modifier: a letter, or text being typed into the
+      // canvas, resolves to nothing and falls through untouched.
+      if (capturing !== raw) return
 
       // The DOM spells its modifiers metaKey/ctrlKey; keys.ts is DOM-free and
       // spells them meta/ctrl. Adapt here, at the one seam between them.
@@ -1373,6 +1408,7 @@ export default function App() {
       const action =
         resolveKey(input, {
           typing,
+          raw,
           chord: chord.current,
           kind: lane.panels[lane.focus]?.kind,
           selecting: !!lane.panels[lane.focus]?.selection,
@@ -1389,6 +1425,7 @@ export default function App() {
         return
       }
       e.preventDefault()
+      marked.__floeHandled = true
 
       const res = runCommand(REGISTRY, ctxRef.current, action.id, action.arg)
       // Said out loud, not only to the console: the whole point is that the user
@@ -1396,8 +1433,13 @@ export default function App() {
       if (!res.ok) say(res.error)
     }
 
+    const onKeyCapture = (e: KeyboardEvent): void => onKey(e, true)
+    window.addEventListener('keydown', onKeyCapture, true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('keydown', onKeyCapture, true)
+      window.removeEventListener('keydown', onKey)
+    }
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
@@ -1702,8 +1744,14 @@ export default function App() {
                     {sub && (
                       <span className="panel-sub" title={sub}>
                         {/* A terminal's sub is an absolute path — too wide for a header,
-                            and the last segment is the part you read anyway. */}
-                        {panel.kind === 'terminal' ? sub.split('/').pop() : sub}
+                            and the last segment is the part you read anyway. A drawing's
+                            is a relPath whose extension the icon already says; both keep
+                            the whole thing in the tooltip. */}
+                        {panel.kind === 'terminal'
+                          ? sub.split('/').pop()
+                          : panel.kind === 'drawing'
+                            ? sub.split('/').pop()?.replace(/\.excalidraw$/, '')
+                            : sub}
                       </span>
                     )}
                     {/* The chat is where you watch an agent work, so it is
@@ -1774,6 +1822,7 @@ export default function App() {
                   <PanelBody
                     kind={kind}
                     sub={panel.sub}
+                    view={panel.view}
                     projects={projects}
                     movingProject={moving}
                     worktrees={worktrees}
@@ -2038,7 +2087,7 @@ export default function App() {
           onClose={() => setFileList(null)}
           onPick={(path) => {
             setFileList(null)
-            setLane((l) => open(l, panelOf('file', path)))
+            setLane((l) => open(l, panelOf(panelForFile(path), path)))
           }}
         />
       )}

@@ -149,43 +149,6 @@ exit 0
 `
   },
   {
-    filename: 'floe-block-native-agents.sh',
-    matcher: 'Task|Agent',
-    statusMessage: 'Checking subagent policy…',
-    script: `#!/usr/bin/env bash
-# Floe: block the native subagent (Task) tool inside a Floe-launched
-# session and steer to the floe MCP, so subagents become real Floe
-# sessions instead of opaque detached Tasks. Managed by the Floe app
-# (src/main/hooks.ts) — edits here are overwritten on next boot.
-set -u
-
-input=$(cat)
-tool=$(printf '%s' "$input" | jq -r '.tool_name // empty' 2>/dev/null)
-case "$tool" in
-  Task|Agent) ;;
-  *) exit 0 ;;
-esac
-
-# Only enforce inside a Floe-launched session.
-${DETECT_FLOE}
-
-read -r -d '' MSG <<'EOF'
-Não use o subagente nativo (Task/Agent) dentro de uma sessão do Floe — ele roda detached e fica invisível na tela.
-
-Em vez disso, abra uma sessão do Floe como "lane" e coordene por lá:
-1. mcp__floe__create_session — cria uma sessão (aparece na barra lateral) com o deliverable daquela lane; passe o contexto no prompt.
-2. mcp__floe__send_message com wait=true — bloqueia até a lane terminar o turno e retorna o resumo final dela.
-3. mcp__floe__read_session_output / list_sessions — monitore e colha resultados.
-
-Assim cada subagente é uma sessão visível que o Floe controla de ponta a ponta.
-EOF
-
-jq -n --arg reason "$MSG" \\
-  '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
-exit 0
-`
-  },
-  {
     filename: 'floe-block-sleep-wait.sh',
     matcher: 'Bash',
     statusMessage: 'Checking wait policy…',

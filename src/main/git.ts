@@ -854,16 +854,33 @@ export async function changedFiles(worktreePath: string): Promise<ChangedFile[]>
 // The unified diff for a single file, relative to the review base. Untracked
 // files have no diff against base, so they're diffed against /dev/null instead
 // (rendering as all-additions, like GitHub shows a brand-new file).
-export async function fileDiff(worktreePath: string, relPath: string): Promise<string> {
+//
+// `context` is git's -U: how many unchanged lines surround each hunk. The code
+// view wants git's default three; the prose view asks for a number larger than
+// any file so the patch comes back as ONE hunk spanning the whole document —
+// prose cut into three-line neighbourhoods reads as fragments, not as a file.
+export async function fileDiff(
+  worktreePath: string,
+  relPath: string,
+  context?: number
+): Promise<string> {
   const base = await reviewBase(worktreePath)
+  const width = context === undefined ? [] : [`-U${Math.max(0, Math.trunc(context))}`]
   try {
-    const out = await git(worktreePath, ['diff', base, '--', relPath])
+    const out = await git(worktreePath, ['diff', ...width, base, '--', relPath])
     if (out.trim()) return out
   } catch {
     /* fall through to the untracked path */
   }
   try {
-    return await gitAllowFail(worktreePath, ['diff', '--no-index', '--', '/dev/null', relPath])
+    return await gitAllowFail(worktreePath, [
+      'diff',
+      '--no-index',
+      ...width,
+      '--',
+      '/dev/null',
+      relPath
+    ])
   } catch {
     return ''
   }

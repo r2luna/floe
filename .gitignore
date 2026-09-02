@@ -5,3 +5,10 @@ dist
 .DS_Store
 .env
 .env.local
+
+# Copied from @excalidraw/excalidraw on postinstall — 13MB of woff2 that
+# belong to the dependency, not to the repo. See scripts/copy-excalidraw-assets.mjs.
+src/renderer/public/excalidraw/
+
+# Scratch drawings. The versioned ones live in specs/<branch>/ — see docs/draw.md.
+.floe/draw/

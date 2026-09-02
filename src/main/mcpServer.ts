@@ -31,6 +31,10 @@ import {
 import { worktreeStatus } from './gitStatus'
 import { provisionWorktree } from './provision'
 import { listPlans, readPlan } from './plans'
+// `./draw/index`, not `./draw`: the MCP test loads this graph under a plain
+// `node --test`, whose loader hook resolves a file specifier, not a directory.
+import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, summarize } from './draw/index'
+import { eraseElements, expandSkeletons, moveElements } from './draw/skeleton'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion } from './claudeSessions'
 // Circular with codex (it emits through agent, which imports this file) — safe:
 // every side only calls the others' functions at runtime, never at module top.
@@ -105,7 +109,8 @@ function getWindow(): BrowserWindow | undefined {
   return getWindowRef?.()
 }
 
-// Forward a UI command (select_session / open_plan / run_command / list_commands)
+// Forward a UI command (select_session / open_plan / open_drawing / run_command /
+// list_commands)
 // to the renderer, which runs its existing lane/registry flows.
 function pushCommand(command: McpCommand): void {
   const win = getWindow()
@@ -789,6 +794,245 @@ function registerTools(server: McpServer, token: string): void {
     async ({ worktree, path }) => {
       try {
         pushCommand({ kind: 'open_plan', callerKey: token, worktreePath: worktree, relPath: path })
+        return textResult({ ok: true })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  // --- Drawings -------------------------------------------------------------
+  //
+  // Every one of these writes THROUGH applyDelta, which merges by element
+  // version — so a tool call and the user's open canvas can both be writing the
+  // same file without either erasing the other. See src/main/draw/index.ts.
+
+  const DRAW_TYPES = ['rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'text', 'frame'] as const
+
+  /**
+   * Drawings already on screen, as `<worktree>|<relPath>`.
+   *
+   * Drawing is meant to be WATCHED — the panel follows the file, so the user
+   * sees each shape land. Waiting for the agent to remember `open_drawing`
+   * would make that a coin flip, so the first write to a drawing opens it
+   * itself. Only the first: `open` re-focuses a panel that is already there,
+   * and stealing focus on every stroke would make the chat unusable while a
+   * diagram is being drawn.
+   *
+   * Per app run, not persisted. Closing the panel and having the next write
+   * bring it back is the behaviour you want anyway.
+   */
+  const shown = new Set<string>()
+
+  const reveal = (worktree: string, relPath: string): void => {
+    const key = `${worktree}|${relPath}`
+    if (shown.has(key)) return
+    shown.add(key)
+    pushCommand({ kind: 'open_drawing', callerKey: token, worktreePath: worktree, relPath })
+  }
+
+  const SKELETON = z.object({
+    id: z.string().optional().describe('Stable id. Reuse it to edit this element later; omitted means a new one.'),
+    type: z.enum(DRAW_TYPES),
+    x: z.number().optional().describe('Left edge, in scene coordinates.'),
+    y: z.number().optional().describe('Top edge, in scene coordinates.'),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    label: z.string().optional().describe('Caption drawn inside the shape (or on the arrow); a frame\'s title.'),
+    text: z.string().optional().describe('The content of a `text` element.'),
+    start: z.string().optional().describe('For an arrow/line: the id of the shape it leaves. Must already exist.'),
+    end: z.string().optional().describe('For an arrow/line: the id of the shape it points at. Must already exist.'),
+    strokeColor: z.string().optional().describe('Hex, e.g. "#1971c2".'),
+    backgroundColor: z.string().optional().describe('Hex fill, e.g. "#a5d8ff". Default: transparent.')
+  })
+
+  server.tool(
+    'list_drawings',
+    'List the Excalidraw drawings in a worktree (.floe/draw/ drafts and the branch\'s specs/ scenes).',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      branch: z.string().optional().describe('Optional branch, to pick the matching specs/ folder.')
+    },
+    async ({ worktree, branch }) => {
+      try {
+        return textResult(listDrawings(worktree, branch))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'read_drawing',
+    'Read a drawing as a semantic summary — one line per element, with positions, labels and what points at what. Use this to see what is already on the canvas before adding to it.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree (from list_drawings).'),
+      raw: z.boolean().optional().describe('Return the raw .excalidraw JSON instead. Large — only when you need a field the summary omits.')
+    },
+    async ({ worktree, path, raw }) => {
+      try {
+        const scene = readDrawing(worktree, path)
+        return textResult(raw ? scene : summarize(scene))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'create_drawing',
+    [
+      'Create an empty drawing and open it on screen. It lands in the branch\'s specs/ folder by default,',
+      'where it is committed alongside the spec it illustrates; pass scope=draft for a scribble that should',
+      'not reach a commit, in the gitignored .floe/draw/.',
+      'Start here whenever the user asks for a diagram, a flow, an architecture sketch or a whiteboard —',
+      'draw it on the canvas, not as ASCII art or a Mermaid block.'
+    ].join(' '),
+    {
+      worktree: z.string().describe('The worktree path.'),
+      name: z.string().describe('File name, with or without the .excalidraw extension.'),
+      scope: z.enum(['draft', 'spec']).optional().describe('Default: spec.'),
+      branch: z
+        .string()
+        .optional()
+        .describe('Which specs/ folder to write into. Omitted, the worktree\'s own branch decides.')
+    },
+    async ({ worktree, name, scope, branch }) => {
+      try {
+        const file = createDrawing(worktree, name, scope, branch)
+        // Straight onto the screen: the user asked to be shown a diagram, and
+        // the empty canvas is where they watch it get drawn.
+        reveal(worktree, file.relPath)
+        return textResult(file)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'draw_elements',
+    [
+      'Add or replace elements in a drawing. Give only what carries meaning — position, size, label, colour —',
+      'and Floe fills in the rest of the Excalidraw model.',
+      'An arrow takes `start`/`end` as the ids of the shapes it connects and is really bound to them, so',
+      'moving a shape moves the arrow with it; both shapes must already exist, or be created in this same call.',
+      'Reusing an id edits that element instead of adding a second one.',
+      'The panel is live and opens itself on the first write, so prefer SEVERAL calls — one per part of',
+      'the diagram — over one big one: the user watches it take shape, and can say "no, not like that"',
+      'before you have drawn all of it.'
+    ].join(' '),
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree.'),
+      elements: z.array(SKELETON).min(1).describe('The elements to draw.')
+    },
+    async ({ worktree, path, elements }) => {
+      try {
+        const scene = readDrawing(worktree, path)
+        const upserts = expandSkeletons(elements, scene.elements)
+        const merged = applyDelta(worktree, path, { upserts })
+        // The summary back, not just an ok: the agent's next call almost always
+        // needs the ids and boxes it just made.
+        // A drawing being written to is a drawing worth looking at.
+        reveal(worktree, path)
+        return textResult({ wrote: upserts.length, drawing: summarize(merged) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'erase_elements',
+    'Remove elements from a drawing by id. Ids that are not there (or already gone) are skipped, not refused.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree.'),
+      ids: z.array(z.string()).min(1).describe('Element ids, from read_drawing.')
+    },
+    async ({ worktree, path, ids }) => {
+      try {
+        const scene = readDrawing(worktree, path)
+        const upserts = eraseElements(scene.elements, ids)
+        const merged = applyDelta(worktree, path, { upserts })
+        // A drawing being written to is a drawing worth looking at.
+        reveal(worktree, path)
+        return textResult({ erased: upserts.length, drawing: summarize(merged) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'move_elements',
+    'Reposition (and optionally resize) elements by id, keeping everything else about them. Use this to lay a diagram out; redrawing an element would throw away edits the user made to it.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree.'),
+      moves: z
+        .array(
+          z.object({
+            id: z.string(),
+            x: z.number(),
+            y: z.number(),
+            width: z.number().optional(),
+            height: z.number().optional()
+          })
+        )
+        .min(1)
+    },
+    async ({ worktree, path, moves }) => {
+      try {
+        const scene = readDrawing(worktree, path)
+        const upserts = moveElements(scene.elements, moves)
+        const merged = applyDelta(worktree, path, { upserts })
+        // A drawing being written to is a drawing worth looking at.
+        reveal(worktree, path)
+        return textResult({ moved: upserts.length, drawing: summarize(merged) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'promote_drawing',
+    'Move a draft out of the gitignored .floe/draw/ and into the branch\'s specs/ folder, so the drawing is committed with the work. A drawing already there is left alone.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree.'),
+      branch: z.string().optional().describe('Which specs/ folder. Omitted, the worktree\'s own branch decides.')
+    },
+    async ({ worktree, path, branch }) => {
+      try {
+        const file = promoteDrawing(worktree, path, branch)
+        // The canvas was showing the old path, which no longer exists — send it
+        // after the drawing rather than leaving it on a missing file.
+        shown.delete(`${worktree}|${path}`)
+        reveal(worktree, file.relPath)
+        return textResult(file)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'open_drawing',
+    'Open a drawing on the canvas in Floe so the user sees it. The panel follows the file, so anything you draw after this appears live.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      path: z.string().describe('The drawing path relative to the worktree.')
+    },
+    async ({ worktree, path }) => {
+      try {
+        // Unconditional, unlike `reveal`: asking for it explicitly is also how
+        // you bring back a panel the user closed, or move focus onto it.
+        shown.add(`${worktree}|${path}`)
+        pushCommand({ kind: 'open_drawing', callerKey: token, worktreePath: worktree, relPath: path })
         return textResult({ ok: true })
       } catch (e) {
         return textResult({ error: (e as Error).message })

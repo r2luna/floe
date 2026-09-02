@@ -231,6 +231,9 @@ export type McpCommand =
     }
   // Open a plan file in the reader panel, rooted at its worktree.
   | { kind: 'open_plan'; callerKey: string; worktreePath: string; relPath: string }
+  // Open an .excalidraw scene in the drawing panel, rooted at its worktree —
+  // how an agent puts the diagram it just drew on screen.
+  | { kind: 'open_drawing'; callerKey: string; worktreePath: string; relPath: string }
   // Start the guided merge for a worktree: navigate to its project if needed,
   // then bring the checklist panel up (useMerge.start). Answered once the flow
   // starts — or with the refusal reason (main worktree, blocked, no project).
@@ -466,6 +469,91 @@ export interface PlanFile {
   // pipeline's docs read as a group. Absent for plain `.floe/plans/` plans.
   group?: string
 }
+
+// --- Draw (Excalidraw scenes under .floe/draw/ and specs/<branch>/) --------
+
+// One `.excalidraw` scene file in a worktree, as the draw panel lists it. Like a
+// PlanFile, `relPath` is POSIX and relative to the worktree root. `group` is set
+// for scenes coming from a spec folder (`specs/<branch>/`), so the list headers
+// them the way the plans list does.
+export interface DrawFile {
+  name: string
+  relPath: string
+  mtime: number // epoch ms — newest-first ordering and the "time ago" label
+  elements: number // live (not isDeleted) element count, for the row's subtitle
+  group?: string
+}
+
+/**
+ * One Excalidraw element, as it sits in the file.
+ *
+ * Structurally typed rather than imported from `@excalidraw/excalidraw`: this
+ * type is read by the MAIN process, which must never pull a React package into
+ * its graph. The four fields named here are the ones Floe itself reasons about —
+ * `id` to match, `version`/`versionNonce` to reconcile (see mergeElements), and
+ * `isDeleted` because a removal is an upsert like any other. Everything else is
+ * the Excalidraw model, carried through untouched.
+ */
+export interface DrawElement {
+  id: string
+  type: string
+  version: number
+  versionNonce: number
+  /** Epoch ms of the last change — what the isDeleted purge ages out. */
+  updated: number
+  isDeleted?: boolean
+  [key: string]: unknown
+}
+
+// A whole scene, in the on-disk `.excalidraw` shape (schema v2) so a file Floe
+// wrote opens in excalidraw.com and in any other tool that reads the format.
+export interface DrawScene {
+  type: 'excalidraw'
+  version: 2
+  source: string
+  elements: DrawElement[]
+  appState: Record<string, unknown>
+  files: Record<string, unknown>
+}
+
+/**
+ * The only thing anyone is allowed to write: a set of complete elements to merge.
+ *
+ * There is deliberately no `deletedIds`. Erasing is `isDeleted: true` with a
+ * bumped `version`, which is an upsert like any other — a list of bare ids would
+ * carry no version, so the main process would have to invent one and a stale
+ * removal could beat a newer edit. One field, one rule. See mergeElements.
+ */
+export interface DrawDelta {
+  /** Created, changed or deleted elements. Complete, with version/versionNonce. */
+  upserts: DrawElement[]
+}
+
+// What an agent writes through `draw_elements`: only the parts that carry
+// meaning. src/main/draw/skeleton.ts expands one of these into a complete,
+// valid Excalidraw element — defaults, seeds, bound label, arrow bindings.
+export interface DrawSkeleton {
+  id?: string
+  type: 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'line' | 'text' | 'frame'
+  x?: number
+  y?: number
+  width?: number
+  height?: number
+  /** A caption bound inside a shape (or on an arrow) — becomes a text element. */
+  label?: string
+  /** The content of a standalone `text` element. */
+  text?: string
+  /** For an arrow/line: the id of the shape it starts at. */
+  start?: string
+  /** For an arrow/line: the id of the shape it ends at. */
+  end?: string
+  strokeColor?: string
+  backgroundColor?: string
+}
+
+// Where a new scene is created. `draft` is the gitignored .floe/draw/; `spec`
+// is specs/<branch>/, versioned alongside the spec it illustrates.
+export type DrawScope = 'draft' | 'spec'
 
 // One implementation phase parsed from a spec pipeline's `specs/<branch>/tasks.md`
 // — a `## Phase N: …` heading and the tally of its `- [ ]` / `- [x]` task

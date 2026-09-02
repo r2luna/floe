@@ -147,3 +147,31 @@ test('a ctrl-prefixed chord forgives ctrl, not cmd', () => {
   assert.deepEqual(resolveIn(map, { key: 's', ctrl: true }, { chord: true }), { id: 'session.new' })
   assert.equal(resolveIn(map, { key: 's', meta: true }, { chord: true }), null)
 })
+
+test('a panel that owns the raw keyboard keeps every bare key', () => {
+  // The drawing canvas has its own `r` (rectangle), `d` (diamond), `v`
+  // (selection). Floe eating them would leave half the tool unusable.
+  const map = compileKeymap([
+    { key: 'j', command: 'cursor.down' },
+    { key: 'ctrl+l', command: 'panel.right' },
+    { key: 'super+k d', command: 'panel.goto', arg: 'draw' }
+  ])
+  assert.equal(resolveIn(map, { key: 'j' }, { raw: true }), null)
+  assert.deepEqual(resolveIn(map, { key: 'j' }, {}), { id: 'cursor.down' }, 'and only under raw')
+  // The way back out is a chord, so it survives — as does the sequence's tail.
+  assert.deepEqual(resolveIn(map, { key: 'l', ctrl: true }, { raw: true }), { id: 'panel.right' })
+  assert.deepEqual(resolveIn(map, { key: 'd', meta: true }, { raw: true, chord: true }), {
+    id: 'panel.goto',
+    arg: 'draw'
+  })
+})
+
+test('raw suppresses Escape even while typing, which is the whole reason it is positional', () => {
+  // `composer.leave` names `typing`, so it escapes the implicit `not typing` —
+  // and would escape a `not raw` written the same way. Editing text inside the
+  // canvas makes typing AND raw true at once, and blurring mid-word is exactly
+  // what must not happen: Escape there belongs to the canvas.
+  const map = compileKeymap([{ key: 'escape', command: 'composer.leave', when: 'typing' }])
+  assert.equal(resolveIn(map, { key: 'escape' }, { raw: true, typing: true }), null)
+  assert.deepEqual(resolveIn(map, { key: 'escape' }, { typing: true }), { id: 'composer.leave' })
+})
