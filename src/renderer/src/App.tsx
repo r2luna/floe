@@ -44,6 +44,7 @@ import { useAppearance } from './appearance'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
+import { reason } from './ipcError'
 import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -968,6 +969,11 @@ export default function App() {
     if (!handoff) return
     pendingAdd = null
     projects.select(handoff.path)
+    // The saved-project restore must not pull the selection back once the list
+    // arrives: landing on what was just added IS this mount's restore, and both
+    // machines can hold a project at the same path.
+    landedProject.current = true
+    pending.current = pending.current ? { ...pending.current, project: undefined } : null
     if (handoff.created) setup.start(handoff.path)
   }, [])
 
@@ -2177,21 +2183,34 @@ export default function App() {
           }
           onAdd={(backend, path, group) => {
             setAdding(false)
-            void projects.addByPath(path, group, backend).then((res) => {
-              if (res.error) return say(res.error)
-              // Only the machine that holds the project lists it, so an add
-              // somewhere else takes the window with it and hands that instance
-              // the landing.
-              if (backend !== window.floe.backends.current()) {
-                pendingAdd = res.path ? { path: res.path, created: res.created } : null
-                switchBackend(backend)
-                // Refused — the machine went away between the add and now. Drop
-                // the handoff rather than leave it for an unrelated switch.
-                if (window.floe.backends.current() !== backend) pendingAdd = null
-                return
-              }
-              afterAdd(res)
-            })
+            // Where the window was when the dialog was answered. Read now rather
+            // than when the add resolves: whether this is a move is the user's
+            // choice in the dialog, not wherever the pointer drifted meanwhile.
+            const from = window.floe.backends.current()
+            void projects
+              .addByPath(path, group, backend)
+              .then((res) => {
+                if (res.error) return say(res.error)
+                // Only the machine that holds the project lists it, so an add
+                // somewhere else takes the window with it and hands that
+                // instance the landing.
+                if (backend !== from) {
+                  pendingAdd = res.path ? { path: res.path, created: res.created } : null
+                  switchBackend(backend)
+                  if (window.floe.backends.current() === backend) return
+                  // Refused — the machine went away between the add and now. The
+                  // project is on it either way, so say so and drop the handoff
+                  // rather than leave it for an unrelated switch to pick up.
+                  pendingAdd = null
+                  const label = window.floe.backends.list().find((b) => b.id === backend)?.label
+                  return say(`Added on ${label ?? backend}, which is no longer attached.`)
+                }
+                afterAdd(res)
+              })
+              // A remote add fails over a socket, not just in a handler: the
+              // machine dropped, a bad token, a channel it doesn't know. The
+              // dialog is already closed, so this is the only place left to say it.
+              .catch((e) => say(reason(e)))
           }}
           onClose={() => setAdding(false)}
         />

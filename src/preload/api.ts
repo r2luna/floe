@@ -108,8 +108,8 @@ export interface BackendsCtl {
    * path has to be read on that machine before the window has any reason to
    * move. Rejects when the id names no backend — rerouting to this machine
    * would check a remote path against local disk, which is the bug it exists to
-   * fix. Workspace channels only; a PINNED one sent through it would run on the
-   * wrong machine.
+   * fix. A PINNED channel stays local whatever id it is given: naming a machine
+   * asks where the WORK runs, not where this window's own state lives.
    */
   invokeOn: (id: string, channel: string, ...args: unknown[]) => Promise<unknown>
 }

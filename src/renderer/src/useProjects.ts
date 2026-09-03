@@ -100,8 +100,16 @@ export function useProjects(): Projects {
   )
 
   const addByPath = useCallback(
-    async (path: string, group?: string, backend?: string) =>
-      landOn(await window.floe.projects.addByPath(path, group, backend)),
+    async (path: string, group?: string, backend?: string) => {
+      const res = await window.floe.projects.addByPath(path, group, backend)
+      // A project added on ANOTHER machine is not in this list, and making it
+      // the selection here would leave the rail pointing at something it cannot
+      // show. The caller moves the window there and lands it on the far side.
+      if (backend && backend !== window.floe.backends.current()) {
+        return { error: res.error, path: res.project?.path, created: res.created }
+      }
+      return landOn(res)
+    },
     [landOn]
   )
 

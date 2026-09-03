@@ -109,7 +109,10 @@ const host: FloeHost = {
     },
     state: (id) => remotes.get(id)?.ipc.state() ?? (id === 'local' ? 'open' : 'closed'),
     invokeOn: (id, channel, ...args) => {
-      if (id === 'local') return ipcRenderer.invoke(channel, ...args)
+      // A pinned channel is this window's own — the theme, the local config, the
+      // plugin host — and naming a machine does not change that. Same rule as
+      // the router, enforced here so the escape hatch cannot route around it.
+      if (id === 'local' || PINNED_CHANNELS.has(channel)) return ipcRenderer.invoke(channel, ...args)
       const remote = remotes.get(id)
       // Unpaired mid-dialog: refuse rather than fall back to this machine, which
       // would read the remote path off local disk and answer "does not exist".
