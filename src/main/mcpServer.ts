@@ -919,6 +919,11 @@ function registerTools(server: McpServer, token: string): void {
       'An arrow takes `start`/`end` as the ids of the shapes it connects and is really bound to them, so',
       'moving a shape moves the arrow with it; both shapes must already exist, or be created in this same call.',
       'Reusing an id edits that element instead of adding a second one.',
+      'A `label` is drawn INSIDE the shape and is wrapped to fit it: text is ~13px per character at the',
+      'default 20px font, so a box needs `width` >= 13 x the longest line, and it grows taller by 25px per',
+      'wrapped line. A diamond only gets HALF its width for the caption and an ellipse about 70% of it, so',
+      'size those wider. A box left too narrow comes out as several cramped lines, and a word too long for',
+      'the line is broken mid-word.',
       'The panel is live and opens itself on the first write, so prefer SEVERAL calls — one per part of',
       'the diagram — over one big one: the user watches it take shape, and can say "no, not like that"',
       'before you have drawn all of it.'

@@ -156,3 +156,69 @@ test("a shape's label still stays inside the shape", () => {
   const label = byId(els, 'a-label')
   assert.ok(Number(label.width) <= 104, `capped by the container, got ${label.width}`)
 })
+
+test("a label too wide for its box is wrapped, not clipped", () => {
+  // What the drawing looked like before: one line, drawn past both edges of the
+  // box and clipped there, so the caption opened missing its first and last word.
+  const caption = 'spawnSession(projectPath, harness, argv)'
+  const els = expandSkeletons([{ id: 'a', type: 'rectangle', x: 0, y: 0, width: 240, height: 80, label: caption }], [])
+  const label = byId(els, 'a-label')
+  const lines = String(label.text).split('\n')
+  assert.ok(lines.length > 1, `expected a wrap, got ${JSON.stringify(label.text)}`)
+  for (const line of lines) {
+    assert.ok(line.length * 13.6 <= 230, `"${line}" is wider than the box`)
+  }
+  // The caption as written survives — it is what Excalidraw re-wraps from.
+  assert.equal(label.originalText, caption)
+})
+
+test('a wrapped label grows the box down, never sideways', () => {
+  const els = expandSkeletons(
+    [{ id: 'a', type: 'rectangle', x: 0, y: 0, width: 200, height: 40, label: 'six calls sites across the main process' }],
+    []
+  )
+  const rect = byId(els, 'a')
+  const label = byId(els, 'a-label')
+  assert.equal(Number(rect.width), 200, 'the width the skeleton asked for is kept')
+  assert.ok(Number(rect.height) >= Number(label.height) + 10, `the box fits its lines, got ${rect.height}`)
+  // Still centred vertically after the growth.
+  assert.equal(Number(label.y) + Number(label.height) / 2, Number(rect.y) + Number(rect.height) / 2)
+})
+
+test('a word too long for the box is broken rather than left hanging out', () => {
+  const els = expandSkeletons([{ id: 'a', type: 'rectangle', width: 100, height: 60, label: 'claudeInfo.ts:50/230' }], [])
+  const label = byId(els, 'a-label')
+  const lines = String(label.text).split('\n')
+  assert.ok(lines.length > 1, 'the word is broken')
+  assert.equal(lines.join(''), 'claudeInfo.ts:50/230')
+})
+
+test("an arrow's label is never wrapped", () => {
+  // An arrow's width is the span between two boxes, not room for its caption.
+  const els = expandSkeletons(
+    [
+      { id: 'a', type: 'rectangle', x: 0, y: 0, width: 100, height: 100 },
+      { id: 'b', type: 'rectangle', x: 0, y: 300, width: 100, height: 100 },
+      { id: 'e1', type: 'arrow', start: 'a', end: 'b', label: 'enqueue the job' }
+    ],
+    []
+  )
+  const label = byId(els, 'e1-label')
+  assert.equal(label.text, 'enqueue the job')
+})
+
+test('a diamond wraps into the half-width its slanted sides leave', () => {
+  // Excalidraw gives a diamond's caption half the box; wrapping to the whole box
+  // draws the first and last line outside the shape.
+  const els = expandSkeletons(
+    [{ id: 'd', type: 'diamond', x: 0, y: 0, width: 260, height: 120, label: 'jail habilitado neste projeto?' }],
+    []
+  )
+  const diamond = byId(els, 'd')
+  const label = byId(els, 'd-label')
+  for (const line of String(label.text).split('\n')) {
+    assert.ok(line.length * 13.6 <= 130, `"${line}" is wider than the diamond has room for`)
+  }
+  // And the box that fits those lines is twice as tall as the text.
+  assert.ok(Number(diamond.height) >= 2 * Number(label.height), `got ${diamond.height} for ${label.height} of text`)
+})

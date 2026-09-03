@@ -348,7 +348,9 @@ export function summarize(scene: DrawScene): string {
     for (const b of bound) {
       if (b.type !== 'text') continue
       const text = byId.get(b.id)
-      if (text) return String(text.text ?? '')
+      // `originalText` is the caption as it was written; `text` carries the
+      // wrap Floe applied to fit the box, whose newlines would break this row.
+      if (text) return String(text.originalText ?? text.text ?? '').replace(/\n/g, ' ')
     }
     return ''
   }
@@ -373,7 +375,7 @@ export function summarize(scene: DrawScene): string {
     const kind = SHORT[el.type] ?? el.type
     const size = el.type === 'text' ? '' : ` ${num(el.width)}×${num(el.height)}`
     const where = `(${num(el.x)},${num(el.y)}${size})`
-    const caption = el.type === 'text' ? String(el.text ?? '') : captionOf(el)
+    const caption = el.type === 'text' ? String(el.text ?? '').replace(/\n/g, ' ') : captionOf(el)
     const links = (outgoing.get(el.id) ?? [])
       .map((a) => {
         const to = (a.endBinding as { elementId: string } | null)?.elementId

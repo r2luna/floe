@@ -84,6 +84,36 @@ that the drawing is a file anything can read.
 An arrow naming a shape that is not in the scene is an **error**, not a loose
 arrow: the agent is told which id was wrong and rewrites the call.
 
+### Captions are wrapped before they are written
+
+A caption bound in a shape is clipped to that shape when it is drawn, so a line
+wider than its box opens missing its first and last words — the failure you see
+before anything else. Excalidraw wraps for itself, but only inside `restore()`,
+which is exactly the patching a file Floe wrote must not need. So `skeleton.ts`
+wraps: `text` lands already broken into lines that fit the box minus a 14px
+margin on each side, `originalText` keeps the caption as the agent wrote it, and
+the canvas re-wraps from that on the first edit.
+
+That margin is wider than Excalidraw's own `BOUND_TEXT_PADDING` of 5, which is
+what the canvas re-wraps to once a caption is edited there. Deliberately: a line
+ending three pixels short of the border reads as crowded. Wrapping tighter than
+the canvas would is the safe direction — the canvas only ever finds more room
+than Floe assumed, never less.
+
+The box then grows **down** to fit the lines. Growing it sideways would widen
+one column of a layout the agent computed, and leaving it short would clip the
+last line — the same eaten text, one axis over. A word too long for the line is
+broken mid-word, which is what the canvas does with it too.
+
+A diamond only gets half its box for a caption and an ellipse `1/√2` of it —
+Excalidraw's own `getBoundTextMaxWidth` — so the wrap and the growth both go
+through `usable(type)`. Wrapping a diamond to its full width draws the top and
+bottom lines outside the slanted sides, which is what the first pass did.
+
+An arrow's caption is never wrapped: an arrow's `width` is the span between two
+boxes, and wrapping to it turns "enqueue" into a column of letters on any arrow
+that runs mostly vertically.
+
 ## Keyboard
 
 Everything around the canvas is the `PlansList` pattern: `⌘K D` opens the list,

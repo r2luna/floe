@@ -38,6 +38,13 @@ const LINE_HEIGHT = 1.25
 const FONT_FAMILY = 5
 // How far a bound arrow stops short of the shape it points at.
 const ARROW_GAP = 4
+// The gap kept between a caption and its container's edge, on every side.
+// Excalidraw's own BOUND_TEXT_PADDING is 5, which is what it re-wraps to once
+// the caption is edited on the canvas; Floe wraps to a wider margin because a
+// line that ends a couple of pixels short of the border reads as crowded.
+// Wrapping tighter than the canvas would is safe — the canvas only ever has
+// more room than we assumed.
+const PADDING = 14
 
 /**
  * Roughly how wide `text` renders at `fontSize`.
@@ -54,6 +61,79 @@ function textWidth(text: string, fontSize = FONT_SIZE): number {
 
 function textHeight(text: string, fontSize = FONT_SIZE): number {
   return Math.round(text.split('\n').length * fontSize * LINE_HEIGHT)
+}
+
+/**
+ * Break `text` into lines that fit `maxWidth`.
+ *
+ * A caption bound inside a shape is CLIPPED to the shape when it is drawn, so a
+ * line wider than its container loses its first and last words — the "eaten
+ * letters" you see the moment a drawing opens. Excalidraw wraps for itself, but
+ * only after `restore()` has rewritten the element, and a `.excalidraw` Floe
+ * wrote has to be right on disk (see the header). So the wrap happens here, and
+ * what lands in `text` is already wrapped — `originalText` keeps the caption the
+ * agent actually wrote, which is what Excalidraw re-wraps from on the first edit.
+ *
+ * A word too long for the line is broken mid-word rather than allowed to hang
+ * out of the box: that is what the canvas does with the same word, and a broken
+ * word can still be read.
+ */
+function wrapText(text: string, maxWidth: number, fontSize = FONT_SIZE): string {
+  const perChar = fontSize * 0.68
+  const fits = (s: string): boolean => textWidth(s, fontSize) <= maxWidth
+  const chunk = (word: string): string[] => {
+    const size = Math.max(1, Math.floor(maxWidth / perChar))
+    const parts: string[] = []
+    for (let i = 0; i < word.length; i += size) parts.push(word.slice(i, i + size))
+    return parts
+  }
+
+  const lines: string[] = []
+  // Paragraph by paragraph: a newline the agent wrote is a break it meant.
+  for (const paragraph of text.split('\n')) {
+    let line = ''
+    for (const word of paragraph.split(' ')) {
+      const candidate = line ? `${line} ${word}` : word
+      if (fits(candidate)) {
+        line = candidate
+        continue
+      }
+      if (line) lines.push(line)
+      if (fits(word)) {
+        line = word
+        continue
+      }
+      const parts = chunk(word)
+      lines.push(...parts.slice(0, -1))
+      line = parts[parts.length - 1] ?? ''
+    }
+    lines.push(line)
+  }
+  return lines.join('\n')
+}
+
+/**
+ * The fraction of a container's box that its caption may use.
+ *
+ * Excalidraw's own `getBoundTextMaxWidth`: a rectangle gives its caption the
+ * whole box, but a diamond only half of it and an ellipse `1/√2` of it — the
+ * width still available where the shape has narrowed. Wrapping to the full box
+ * puts the first and last line outside a diamond's slanted sides.
+ */
+function usable(type: string): number {
+  if (type === 'diamond') return 0.5
+  if (type === 'ellipse') return 1 / Math.SQRT2
+  return 1
+}
+
+/** How wide a caption inside `container` may be drawn. */
+function innerWidth(container: DrawElement): number {
+  return Math.max(FONT_SIZE, Number(container.width) * usable(container.type) - 2 * PADDING)
+}
+
+/** The box height a caption of `height` needs inside a `type` container. */
+function fitHeight(type: string, height: number): number {
+  return Math.round((height + 2 * PADDING) / usable(type))
 }
 
 /** The fields every element type shares, defaulted. */
@@ -246,13 +326,25 @@ export function expandSkeletons(
       // Rounded corners are the Excalidraw default for a rectangle-ish shape.
       Object.assign(el, { roundness: { type: 3 } })
     }
-    put(el)
-
     // A label on a shape is a text element bound INSIDE it — same as typing into
     // the shape on the canvas, so it moves and resizes with its container.
-    if (!isText && s.type !== 'frame' && s.label) {
-      put(labelFor(s.label, el, now))
-      bind(id, { id: labelIdOf(el), type: 'text' })
+    const label = !isText && s.type !== 'frame' && s.label ? labelFor(s.label, el, now) : undefined
+    if (label) {
+      // The caption wrapped to the width the skeleton asked for; the box grows
+      // DOWN to fit however many lines that took. Growing sideways instead would
+      // break the columns the agent laid out, and leaving it short would clip the
+      // last line — same eaten text, one axis over. Excalidraw's own container
+      // does exactly this when you type past the bottom of a shape.
+      const needed = fitHeight(el.type, Number(label.height))
+      if (needed > Number(el.height)) {
+        el.height = needed
+        label.y = Number(el.y) + (needed - Number(label.height)) / 2
+      }
+      put(el)
+      put(label)
+      bind(id, { id: label.id, type: 'text' })
+    } else {
+      put(el)
     }
   }
 
@@ -324,8 +416,10 @@ function labelFor(text: string, container: DrawElement, now: number): DrawElemen
   // A shape wraps its caption, so the caption is capped by the shape. An arrow
   // does not: its `width` is the span between two boxes and clamping to it
   // turns "enqueue" into "que" on any arrow that runs mostly vertically.
-  const width = linear ? textWidth(text) : Math.min(textWidth(text), Math.max(20, Number(container.width) - 16))
-  const height = textHeight(text)
+  const inner = innerWidth(container)
+  const drawn = linear ? text : wrapText(text, inner)
+  const width = linear ? textWidth(drawn) : Math.min(textWidth(drawn), inner)
+  const height = textHeight(drawn)
   const box = boxOf(container)
   // An arrow's own box is not its extent — x/y is where it STARTS and its
   // points go from there, possibly leftwards or upwards. The midpoint has to
@@ -339,7 +433,7 @@ function labelFor(text: string, container: DrawElement, now: number): DrawElemen
     y: cy - height / 2,
     width,
     height,
-    text,
+    text: drawn,
     originalText: text,
     fontSize: FONT_SIZE,
     fontFamily: FONT_FAMILY,
