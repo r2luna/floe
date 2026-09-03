@@ -613,6 +613,10 @@ export default function App() {
   useEffect(() => {
     if (landedProject.current || projects.loading) return
     landedProject.current = true
+    // A landing is waiting: this instance was brought up to be somewhere, and
+    // the saved project can live on the machine we just left — selecting it
+    // would point the window straight back and throw the landing away.
+    if (peekLanding()) return
     const want = restored.current?.project
     if (want && projects.all.some((p) => p.path === want)) projects.select(want)
     else if (pending.current) pending.current = { ...pending.current, project: undefined }
