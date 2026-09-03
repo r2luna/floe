@@ -593,6 +593,13 @@ export function sendToAgent(
     conn.lastActivityAt = Date.now()
     log('turn-steer', { key, promptLen: prompt.length, images: images.length, files: files.length })
     pushTranscript(conn, `user: ${prompt}`)
+    // Into the replay, not onto the wire: the panel that typed it is already
+    // showing it, and every other viewer of this session gets it when the CLI
+    // absorbs it into the JSONL. That write only happens at the end of the tool
+    // call in flight, so until then the replay is the only place a panel
+    // mounting mid-turn can read what was said.
+    const replay = replays.get(key)
+    if (replay?.running) replay.events.push({ kind: 'steer', text: options.shown ?? prompt, at: Date.now() })
     write(conn, { type: 'user', message: { role: 'user', content: buildContent(prompt, images, files) } })
     return
   }

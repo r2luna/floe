@@ -60,10 +60,22 @@ const spent = new Map<string, number>()
  */
 const epochs = new Map<string, number>()
 
+/**
+ * Chats whose next answer is already being watched, and by whom.
+ *
+ * Two watchers on one turn would hand the same line over twice. `backWaiting`
+ * is the relay holding the answer to a turn it started itself; `addressed` is
+ * armAddress on an ordinary turn. The relay's wins: it knows the hop it is on.
+ */
+const backWaiting = new Set<string>()
+const addressed = new Set<string>()
+
 /** Stop the relay for this chat: what `stop` means when a harness is answering. */
 export function cancelRelay(key: string): void {
   epochs.set(key, (epochs.get(key) ?? 0) + 1)
   spent.delete(key)
+  backWaiting.delete(key)
+  addressed.delete(key)
 }
 
 /**
@@ -98,11 +110,17 @@ export function armRelay(
       // prevent.
       if (!live() || busy(key)) return
       log('relay', { key, from: harness, to: back.provider ?? 'claude', hops })
+      // Marked before the turn starts, because starting it is what arms
+      // armAddress — which must stand down for this one: the waiter below is
+      // the same job, and it is the one that knows the hop.
+      backWaiting.add(key)
       startTurn(win, key, worktreePath, relayPrompt(harness, hops), back)
 
-      // And what the model says back. Only the line it OPENS with routes, so an
-      // answer that merely mentions `@codex` stays in the chat where it was said.
+      // And what the model says back. Only a handle that OPENS a line routes,
+      // so an answer that merely mentions `@codex` mid-sentence stays in the
+      // chat where it was said.
       onceTurnDone(key, (reply) => {
+        backWaiting.delete(key)
         const route = live() ? relayBack(reply, HARNESSES, hops + 1) : null
         if (!route) return
         later(() => {
@@ -119,6 +137,59 @@ export function armRelay(
             { ...optionsForRoute(route, key), shown: relayMark(back.provider ?? 'claude') }
           )
         })
+      })
+    })
+  })
+}
+
+/**
+ * A handle in the session's OWN answer, actually delivered.
+ *
+ * armRelay above only ever watched turns the relay itself started, so the two
+ * harnesses could talk once YOU opened the thread with `@codex …`. Everything
+ * else Claude wrote went nowhere: ask it a question, watch it decide the right
+ * move is to check with codex, watch it write `@codex revisa isso` — and
+ * nothing was sent. The handle read as a handle and was one, in a chat where
+ * nobody was listening for it.
+ *
+ * So every turn a session answers in its own voice is watched too. The rule is
+ * the same one everywhere else in the app (shared/relay.ts): a handle at the
+ * start of a line addresses that harness, mid-sentence it is only a name. What
+ * comes back is relayed to the session's own model exactly as if you had
+ * addressed it yourself, and the hop cap is the same cap — the two cannot talk
+ * forever just because it was the model, not you, that started them off.
+ */
+export function armAddress(
+  win: BrowserWindow,
+  key: string,
+  worktreePath: string,
+  own: AgentRunOptions
+): void {
+  if (backWaiting.has(key) || addressed.has(key)) return
+  addressed.add(key)
+  const mine = own.provider ?? 'claude'
+  const epoch = epochs.get(key) ?? 0
+  const live = (): boolean => (epochs.get(key) ?? 0) === epoch
+
+  onceTurnDone(key, (reply) => {
+    addressed.delete(key)
+    if (!live()) return
+    const hops = spent.get(key) ?? 0
+    const route = relayBack(reply, HARNESSES, hops + 1)
+    // A session naming the harness that is already answering it is the model
+    // saying its own name, not handing anything over.
+    if (!route || route.harness === mine) return
+    later(() => {
+      if (!live() || busy(key)) return
+      log('address', { key, from: mine, to: route.harness, hops })
+      // Carried, so the answer comes back on the next hop and not on the first:
+      // by the time the harness replies, one exchange has already happened.
+      spent.set(key, hops + 1)
+      startTurn(win, key, worktreePath, route.prompt, {
+        ...optionsForRoute(route, key),
+        // Shown as nothing: the line is already in the chat above, under the
+        // model's own name, with the handle drawn as the handle it is.
+        shown: relayMark(mine)
       })
     })
   })

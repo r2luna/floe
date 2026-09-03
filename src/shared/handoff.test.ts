@@ -81,3 +81,21 @@ test('history already carrying a packet is not re-shipped inside a new one', () 
   // One packet in, one packet out — the nesting is what doubles a history.
   assert.equal(second.split(PACKET_OPEN).length - 1, 1)
 })
+
+test('the message being handed over arrives whole, not at a thousand characters', () => {
+  // The shape from the chat: codex writes a five-finding review and the relay
+  // hands it to Claude. Cut at the old per-entry limit, findings three, four and
+  // five never arrived — and neither model could see that anything was missing,
+  // so each concluded the other was not answering.
+  const review = Array.from({ length: 5 }, (_, i) => `finding ${i + 1}: ${'x'.repeat(400)}`).join('\n')
+  const packet = buildPacket([bot(review, undefined, 'codex')], { to: 'claude' })!
+  assert.ok(packet.includes('finding 5:'), 'the last finding has to survive the handoff')
+  assert.ok(!packet.includes('… [cut]'))
+})
+
+test('background entries keep the short allowance — only the newest one is the payload', () => {
+  const old = 'y'.repeat(5000)
+  const packet = buildPacket([bot(old), user('e agora?')], { to: 'codex' })!
+  assert.ok(packet.includes('… [cut]'), 'the older entry is background, and is cut')
+  assert.ok(packet.includes('e agora?'))
+})

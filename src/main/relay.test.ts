@@ -57,7 +57,7 @@ declare global {
   var __active: string[]
 }
 
-const { armRelay, cancelRelay } = await import('./relay.ts')
+const { armAddress, armRelay, cancelRelay } = await import('./relay.ts')
 const { MAX_HOPS, relayMark } = await import('../shared/relay.ts')
 
 const WIN = {} as never
@@ -91,6 +91,19 @@ function ends(t: TestContext, key: string, text: string): void {
 /** What turn.ts does for a routed turn — arm, then let the turn end. */
 function routed(t: TestContext, key: string, harness: string, answer: string): void {
   armRelay(WIN, key, '/wt', harness, CLAUDE)
+  ends(t, key, answer)
+}
+
+/**
+ * The other half of what turn.ts does: a turn the session answers in its own
+ * voice is watched too, so a handle the model writes is delivered.
+ *
+ * The stub `startTurn` does not arm anything (the real one does), so a test
+ * that follows a relay into the model's own turn arms this by hand, exactly
+ * where turn.ts would.
+ */
+function speaks(t: TestContext, key: string, answer: string): void {
+  armAddress(WIN, key, '/wt', CLAUDE)
   ends(t, key, answer)
 }
 
@@ -176,5 +189,67 @@ test('a message you typed while it worked takes the boundary, and the relay stan
   // handoff packet under your message.
   globalThis.__active = ['s8']
   settle(t)
+  assert.equal(globalThis.__turns.length, 0)
+})
+
+test('a handle the model writes on its own reaches the harness it names', (t) => {
+  fresh(t, 's9')
+  // Nobody addressed codex — you asked the model something, and IT decided the
+  // next move was to check with codex. This is the case that did nothing at all
+  // before: the handle was drawn, and no message was ever sent.
+  speaks(t, 's9', 'Faz sentido, mas quero uma segunda opinião.\n\n@codex revisa o diff de relay.ts')
+  assert.equal(globalThis.__turns.length, 1)
+  const [turn] = globalThis.__turns
+  assert.equal(turn.prompt, 'revisa o diff de relay.ts')
+  assert.equal(turn.options.provider, 'codex')
+  // Shown as nothing: the line is already in the chat under the model's name.
+  assert.equal(turn.options.shown, relayMark('claude'))
+})
+
+test('the harness that answers here is not something to hand anything to', (t) => {
+  fresh(t, 's10')
+  speaks(t, 's10', '@claude vou continuar daqui')
+  assert.equal(globalThis.__turns.length, 0)
+})
+
+test('an ordinary answer with no handle in it starts nothing', (t) => {
+  fresh(t, 's11')
+  speaks(t, 's11', 'pronto, arrumei o parser e os testes passam')
+  assert.equal(globalThis.__turns.length, 0)
+})
+
+test('one turn is watched once, however many messages went into it', (t) => {
+  fresh(t, 's12')
+  // Steering: a second message joins the turn already running, and turn.ts arms
+  // again for it. Two watchers would hand the same line over twice.
+  armAddress(WIN, 's12', '/wt', CLAUDE)
+  armAddress(WIN, 's12', '/wt', CLAUDE)
+  ends(t, 's12', '@codex revisa isso')
+  assert.equal(globalThis.__turns.length, 1)
+})
+
+test('the relay keeps the turn it started — armAddress stands down for it', (t) => {
+  fresh(t, 's13')
+  routed(t, 's13', 'codex', 'errado na linha 30')
+  // turn.ts arms armAddress for the relay turn too (it runs on the session's
+  // own model). The relay's own waiter is the one that knows the hop.
+  speaks(t, 's13', '@codex e o teste que passa hoje?')
+  assert.equal(globalThis.__turns.filter((x) => x.options.provider === 'codex').length, 1)
+})
+
+test('a model that starts the thread pays for the exchange it opened', (t) => {
+  fresh(t, 's14')
+  speaks(t, 's14', '@codex primeira')
+  // The harness has not answered yet, so this reads as the second exchange —
+  // not as the first, which would give the two an extra hop for free.
+  routed(t, 's14', 'codex', 'resposta')
+  assert.match(globalThis.__turns[1].prompt, /answered what you asked it/)
+})
+
+test('stop stops a handle the model wrote, too', (t) => {
+  fresh(t, 's15')
+  armAddress(WIN, 's15', '/wt', CLAUDE)
+  cancelRelay('s15')
+  ends(t, 's15', '@codex revisa isso')
   assert.equal(globalThis.__turns.length, 0)
 })
