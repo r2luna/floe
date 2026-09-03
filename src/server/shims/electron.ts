@@ -139,7 +139,14 @@ export const Menu = {
   setApplicationMenu: (): void => {}
 }
 
-export const clipboard = { writeText: (): void => {} }
+export const clipboard = { writeText: (): void => {}, writeImage: (): void => {} }
+
+// A daemon has no pasteboard, so the only honest answer to "decode this data
+// URL" is an empty image: `media:copyImage` checks isEmpty first and reports
+// the copy as failed instead of throwing at the caller.
+export const nativeImage = {
+  createFromDataURL: (): { isEmpty: () => boolean } => ({ isEmpty: () => true })
+}
 
 export const shell = {
   openExternal: (): Promise<void> => Promise.resolve(),
@@ -161,4 +168,4 @@ export const protocol = {
 // Type-only names (IpcMainInvokeEvent, WebContents, MenuItemConstructorOptions)
 // erase at compile time and need no runtime value.
 
-export default { app, BrowserWindow, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, shell, safeStorage, protocol }
+export default { app, BrowserWindow, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, nativeImage, shell, safeStorage, protocol }
