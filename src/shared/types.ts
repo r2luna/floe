@@ -375,7 +375,20 @@ export type FileContent =
   | { kind: 'text'; text: string }
   | { kind: 'image'; dataUrl: string }
   | { kind: 'pdf'; dataUrl: string }
+  // A deck read as words rather than as slides — see main/office.ts. The panel
+  // shows this immediately and swaps in the rendered PDF if LibreOffice turns
+  // out to be installed (files:renderDoc).
+  | { kind: 'slides'; slides: Slide[] }
   | { kind: 'binary' }
+
+// One slide of a .pptx, as text: its title placeholder, its other paragraphs,
+// and the speaker notes attached to it.
+export interface Slide {
+  n: number
+  title?: string
+  lines: string[]
+  notes?: string
+}
 
 // A video the chat found named in a message and can play: the file is there,
 // and `url` is the `floe-media://` address that streams it (see main/media.ts).

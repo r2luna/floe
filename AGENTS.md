@@ -38,6 +38,7 @@ Ask: "could an agent do this without the UI?" If not, it's not finished. Details
 
 ```bash
 pnpm dev          # electron-vite dev
+pnpm build:web    # the browser build → out/web (docs/web.md)
 pnpm typecheck    # node + web
 pnpm test         # node --test on src/**/*.test.ts
 ```
@@ -54,3 +55,4 @@ Buttons use the **outline-chip pattern** (never solid fills) and every tinted el
 - [docs/message-queue.md](docs/message-queue.md) — type-while-busy queue semantics.
 - [docs/http-client.md](docs/http-client.md) — embedded `.http` client.
 - [docs/draw.md](docs/draw.md) — the Excalidraw panel; read before touching `src/main/draw/` (two writers share one file).
+- [docs/web.md](docs/web.md) — the browser build (`floe.pinguim.io`): `src/web` + `src/main/webServer.ts`.

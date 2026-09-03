@@ -14,6 +14,7 @@ import { execFile } from 'node:child_process'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import type { FileContent, FileNode, FileOp } from '../shared/types'
+import { convertToPdf, pdfDataUrl, pptxSlides } from './office.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -131,6 +132,20 @@ export function readFileContent(worktreePath: string, relPath: string): FileCont
     }
   }
 
+  // A deck's words, now. The slides themselves are a conversion away and are
+  // asked for separately (renderDocument), because that one takes seconds and
+  // may not be possible at all — the reader must not wait on it to show text.
+  if (ext === 'pptx') {
+    if (size > MAX_PDF_BYTES) return { kind: 'binary' }
+    try {
+      const slides = pptxSlides(readFileSync(abs))
+      if (slides.length) return { kind: 'slides', slides }
+    } catch {
+      /* fall through: an unreadable zip is a binary as far as the panel cares */
+    }
+    return { kind: 'binary' }
+  }
+
   if (size > MAX_READ_BYTES) return { kind: 'binary' }
   try {
     const buf = readFileSync(abs)
@@ -141,6 +156,28 @@ export function readFileContent(worktreePath: string, relPath: string): FileCont
   } catch {
     return { kind: 'binary' }
   }
+}
+
+// Formats LibreOffice is asked to draw for us when it is installed. `.ppt` and
+// the other legacy binaries have no second path — for them this is the preview
+// or there is none.
+const CONVERTIBLE = new Set(['pptx', 'ppt', 'pptm', 'odp'])
+
+/**
+ * The document as PowerPoint would draw it: converted to a PDF, or null.
+ *
+ * Null is the ordinary answer — most machines have no LibreOffice — and the
+ * panel already has the text preview up when it arrives, so nothing is lost.
+ */
+export async function renderDocument(worktreePath: string, relPath: string): Promise<FileContent | null> {
+  const abs = safeResolve(worktreePath, relPath)
+  const ext = (relPath.split('.').pop() ?? '').toLowerCase()
+  if (!CONVERTIBLE.has(ext)) return null
+
+  const pdf = await convertToPdf(abs)
+  if (!pdf) return null
+  const dataUrl = pdfDataUrl(pdf, MAX_PDF_BYTES)
+  return dataUrl ? { kind: 'pdf', dataUrl } : null
 }
 
 // --- Applying staged file operations (mini.files synchronize) ---------------

@@ -1,0 +1,201 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Files panel — rooting at a folder</title>
+<style>
+@font-face { font-family:"CommitMonoPinguim"; font-weight:400; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2"); }
+@font-face { font-family:"CommitMonoPinguim"; font-weight:700; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2"); }
+
+:root{
+  --mono:"CommitMonoPinguim",ui-monospace,Menlo,monospace;
+  --bg:#0d0e11; --panel:#141519; --panel-focused:#16181c; --line:#23252b; --line-soft:#1c1e23;
+  --text:#c9ccd2; --text-strong:#e8eaee; --dim:#6d7280; --faint:#575d6a;
+  --edge:#343a45; --well:#1b1d23; --accent:#d3956d; --live:#6ea86e;
+  --radius:5px; --head-h:31px;
+  --wash-1:#ffffff08; --wash-3:#ffffff0d;
+}
+:root[data-theme='light']{
+  --bg:#eceef2; --panel:#f8f9fb; --panel-focused:#ffffff; --line:#d7dae1; --line-soft:#e4e7ec;
+  --text:#3d434e; --text-strong:#1b1e25; --dim:#767c88; --faint:#939aa6;
+  --edge:#c3c8d1; --well:#eef0f4; --accent:#a9631f; --live:#2f7d52;
+  --wash-1:#00000008; --wash-3:#0000000d;
+}
+
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:26px 30px 70px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 2px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:760px; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 9px; max-width:330px; }
+.grid{ display:flex; flex-wrap:wrap; gap:26px 22px; align-items:flex-start; }
+.opt{ width:330px; }
+
+/* --- panel chrome, same as index.css ------------------------------------- */
+.panel{ display:flex; flex-direction:column; background:var(--panel-focused);
+  border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.panel-head{ display:flex; align-items:center; gap:7px; height:var(--head-h);
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.panel-icon{ color:var(--dim); flex:none; display:grid; place-items:center; }
+.panel-name{ color:var(--text-strong); flex:none; }
+.panel-sub{ color:var(--dim); flex:1; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.panel-act{ margin-left:auto; display:grid; place-items:center; flex:none; padding:3px;
+  border-radius:var(--radius); color:var(--dim); }
+.panel-act + .panel-act{ margin-left:0; }
+.panel-body{ padding:8px; }
+
+/* --- rows ----------------------------------------------------------------- */
+.row{ display:flex; align-items:center; gap:8px; width:100%; padding:4px 8px;
+  border-radius:var(--radius); text-align:left; }
+.row[data-cursor]{ background:var(--wash-3); color:var(--text-strong); }
+.row-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.file-mark{ flex:none; width:13px; color:var(--dim); display:grid; place-items:center; }
+.dir > .row-name{ color:var(--text); }
+
+/* --- pieces the options introduce ---------------------------------------- */
+.crumbs{ display:flex; align-items:center; gap:2px; min-width:0; overflow:hidden;
+  color:var(--dim); }
+.crumbs b{ font-weight:400; color:var(--text-strong); }
+.crumbs .sep{ color:var(--faint); padding-inline:1px; }
+.crumb-bar{ display:flex; align-items:center; gap:6px; height:26px; padding-inline:11px;
+  border-bottom:1px solid var(--line-soft); background:var(--wash-1); font-size:12px; }
+.chip{ display:inline-flex; align-items:center; gap:5px; flex:none; padding:0 6px;
+  border:1px solid var(--line); border-radius:var(--radius); color:var(--dim); font-size:11px; }
+.chip .x{ color:var(--faint); }
+.up{ color:var(--dim); }
+.root-row{ display:flex; align-items:center; gap:8px; padding:4px 8px; margin:-8px -8px 6px;
+  border-bottom:1px solid var(--line-soft); background:var(--wash-1); color:var(--text-strong); }
+.root-row .esc{ margin-left:auto; color:var(--faint); font-size:11px; }
+.trail{ color:var(--faint); }
+.kbd{ border:1px solid var(--line); border-radius:3px; padding:0 4px; color:var(--dim);
+  font-size:11px; }
+svg{ display:block; }
+</style>
+</head>
+<body>
+
+<h1>Files panel — rooting at a folder inside the worktree</h1>
+<p class="sub">Five ways to show “this tree is pointed at src/renderer/src, not at the worktree”, and the way back out. Same rows in each, cursor on <code>Composer.tsx</code>.</p>
+
+<div class="grid">
+
+  <!-- O1 -->
+  <div class="opt">
+    <h2>O1 — Header breadcrumb</h2>
+    <p class="note">No new chrome: the header sub becomes the path, each segment clickable to climb. Costs nothing in vertical space; the path competes with the panel name when narrow.</p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span>
+        <span class="panel-name">files</span>
+        <span class="panel-sub crumbs">floe<span class="sep">/</span>src<span class="sep">/</span>renderer<span class="sep">/</span><b>src</b></span>
+        <span class="panel-act"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+      </div>
+      <div class="panel-body">
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">assets</span></div>
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">lib</span></div>
+        <div class="row" data-cursor><span class="file-mark"></span><span class="row-name">Composer.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">panels.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">index.css</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- O2 -->
+  <div class="opt">
+    <h2>O2 — Breadcrumb bar</h2>
+    <p class="note">A row of its own under the header, only there while scoped. The path gets full width and never fights the title; costs 26px and adds a second header-ish stripe.</p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span>
+        <span class="panel-name">files</span>
+        <span class="panel-sub">floe</span>
+        <span class="panel-act"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+      </div>
+      <div class="crumb-bar">
+        <span class="up"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 6-6 6 6 6"/></svg></span>
+        <span class="crumbs">src<span class="sep">/</span>renderer<span class="sep">/</span><b>src</b></span>
+        <span class="chip" style="margin-left:auto">esc</span>
+      </div>
+      <div class="panel-body">
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">assets</span></div>
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">lib</span></div>
+        <div class="row" data-cursor><span class="file-mark"></span><span class="row-name">Composer.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">panels.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">index.css</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- O3 -->
+  <div class="opt">
+    <h2>O3 — <code>..</code> row</h2>
+    <p class="note">The way out is a row, so <kbd class="kbd">j</kbd>/<kbd class="kbd">k</kbd> reach it like anything else and no key has to be invented. Familiar from every file manager; one row of the list is spent on navigation.</p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span>
+        <span class="panel-name">files</span>
+        <span class="panel-sub">src/renderer/src</span>
+        <span class="panel-act"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+      </div>
+      <div class="panel-body">
+        <div class="row"><span class="file-mark up"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 6-6 6 6 6"/></svg></span><span class="row-name up">..&nbsp; renderer</span></div>
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">assets</span></div>
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">lib</span></div>
+        <div class="row" data-cursor><span class="file-mark"></span><span class="row-name">Composer.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">panels.tsx</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- O4 -->
+  <div class="opt">
+    <h2>O4 — Pinned root row</h2>
+    <p class="note">The folder itself stays drawn as row zero, open, with the way out on it. The tree reads as a subtree rather than as a different tree; closest to what the rows already do.</p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span>
+        <span class="panel-name">files</span>
+        <span class="panel-sub">floe</span>
+        <span class="panel-act"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+      </div>
+      <div class="panel-body">
+        <div class="root-row">
+          <span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6"/></svg></span>
+          <span class="row-name"><span class="trail">src/renderer/</span>src</span>
+          <span class="esc">esc</span>
+        </div>
+        <div class="row dir" style="padding-left:20px"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">assets</span></div>
+        <div class="row dir" style="padding-left:20px"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">lib</span></div>
+        <div class="row" data-cursor style="padding-left:20px"><span class="file-mark"></span><span class="row-name">Composer.tsx</span></div>
+        <div class="row" style="padding-left:20px"><span class="file-mark"></span><span class="row-name">panels.tsx</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- O5 -->
+  <div class="opt">
+    <h2>O5 — Scope chip</h2>
+    <p class="note">The header keeps saying which worktree; the scope is a chip you dismiss, like a filter. Smallest change, but a long path truncates to nothing and the chip never says where you are in full.</p>
+    <div class="panel">
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg></span>
+        <span class="panel-name">files</span>
+        <span class="panel-sub">floe</span>
+        <span class="chip">renderer/src <span class="x">×</span></span>
+        <span class="panel-act"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M18 6 6 18M6 6l12 12"/></svg></span>
+      </div>
+      <div class="panel-body">
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">assets</span></div>
+        <div class="row dir"><span class="file-mark"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m9 6 6 6-6 6"/></svg></span><span class="row-name">lib</span></div>
+        <div class="row" data-cursor><span class="file-mark"></span><span class="row-name">Composer.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">panels.tsx</span></div>
+        <div class="row"><span class="file-mark"></span><span class="row-name">index.css</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

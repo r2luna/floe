@@ -102,15 +102,20 @@ function countElements(absPath: string): number {
 }
 
 /**
- * Where a drawing may live, absolute. Anything outside is refused, the way
+ * Where a drawing may live, absolute: anywhere inside the worktree.
+ *
+ * `.floe/draw/` and `specs/` are what listDrawings CURATES, not where a scene
+ * is allowed to exist — the files tree opens whatever `.excalidraw` it points
+ * at, and in a notes vault that is a diagram sitting next to the note it
+ * illustrates. What is refused is a path that escapes the worktree, the way
  * readPlan refuses a crafted path — the relPath reaches here from the renderer
- * and from an MCP tool, so neither can be trusted to stay inside the worktree.
+ * and from an MCP tool, so neither can be trusted to stay inside.
  */
 function resolveDrawing(worktreePath: string, relPath: string): string {
-  const target = resolve(worktreePath, relPath)
-  const allowed = [resolve(worktreePath, DRAW_DIR), resolve(worktreePath, SPECS_DIR)]
-  if (!allowed.some((dir) => target.startsWith(dir + sep))) {
-    throw new Error('refusing to touch a drawing outside .floe/draw/ or specs/')
+  const root = resolve(worktreePath)
+  const target = resolve(root, relPath)
+  if (!target.startsWith(root + sep)) {
+    throw new Error('refusing to touch a drawing outside the worktree')
   }
   if (!target.endsWith(EXT)) throw new Error(`not a drawing: ${relPath} (expected a ${EXT} file)`)
   return target

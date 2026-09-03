@@ -372,6 +372,50 @@ button {
   white-space: nowrap;
 }
 
+/* The file tree's path, in its header: the same dim line every other panel gets,
+   except each directory in it is a button that roots the tree there.
+
+   Ancestors shrink and ellipsise, the folder you are IN never does — a header
+   that truncated the last segment would drop the one thing the path is there to
+   say. */
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.crumb {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+/* The worktree's name goes first: it is the segment the rest of the app repeats
+   most, so it is the one to lose when the panel is narrow. */
+.crumb:first-child {
+  flex-shrink: 100;
+}
+
+.crumb:hover,
+.crumb:focus-visible {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+
+/* Where you are. Not a button — pressing it would do nothing. */
+.crumb-here {
+  flex: none;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.crumb-sep {
+  flex: none;
+  color: var(--faint);
+}
+
 /* Changed-file badge in the chat header. Outline chip, neutral border: it
    reports a fact, it does not ask to be pressed. The +/- keep the changes
    list's own colours so the same number reads the same in both places. */
@@ -3083,6 +3127,48 @@ button {
 
 .file-image {
   max-width: 100%;
+}
+
+/* Chromium's PDF viewer, filling the panel. It scrolls itself, so the height is
+   the panel's and not the document's. */
+.file-pdf {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 70vh;
+  border: 0;
+  background: var(--bg);
+}
+
+/* A deck read as text: the slide's title heads its bullets, and the speaker
+   notes sit under them, dimmed — they are not on the slide. */
+
+/* A bullet is a sentence, not a line of code: it wraps rather than running off
+   the right edge, which is what the diff rows this reuses do. */
+.slides .diff-code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.slides .slide-head .diff-code {
+  font-weight: 600;
+}
+
+.slides .slide-head {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.slides .slide-head:first-child {
+  margin-top: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.slides .slide-note .diff-code {
+  color: var(--dim);
+  font-style: italic;
 }
 
 /* An attached or read image, inline in the transcript. A thumbnail, not a view:

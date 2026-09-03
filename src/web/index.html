@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
+    <meta name="theme-color" content="#23262d" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <title>Floe</title>
+    <!-- First paint follows the OS, before floe.toml has been read. `system` is
+         the default theme, so guessing it here is right almost always; when the
+         config pins dark or light, applyConfig() overwrites this attribute
+         before React mounts. Without it a light-mode machine flashes dark. -->
+    <script>
+      document.documentElement.dataset.theme = matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark'
+      // Same as the desktop page, but rooted: the web build serves deep links
+      // (/some/session/id), so a relative asset path would resolve against the
+      // route instead of the bundle.
+      window.EXCALIDRAW_ASSET_PATH = '/excalidraw/'
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -39,6 +39,8 @@ export const COMMAND_IDS: string[] = [
   'files.delete',
   'editor.open',
   'files.collapse',
+  'files.root',
+  'files.unroot',
   'scroll.down',
   'scroll.up',
   // Chat

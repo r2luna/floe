@@ -105,12 +105,19 @@ test('a corrupt scene is an error, never an empty one', () => {
   })
 })
 
-test('a path outside the drawing directories is refused', () => {
-  withWorktree({ '.floe/draw/ok.excalidraw': JSON.stringify(sceneOf([])) }, (root) => {
-    assert.throws(() => readDrawing(root, '../../etc/passwd.excalidraw'), /outside/)
-    assert.throws(() => readDrawing(root, '.floe/plans/plan.md'), /outside/)
-    assert.throws(() => readDrawing(root, '.floe/draw/notes.md'), /not a drawing/)
-  })
+test('a path outside the worktree is refused, one merely outside the curated dirs is not', () => {
+  withWorktree(
+    {
+      '.floe/draw/ok.excalidraw': JSON.stringify(sceneOf([])),
+      'brain/notes/fluxo.excalidraw': JSON.stringify(sceneOf([el('a', 1)]))
+    },
+    (root) => {
+      assert.throws(() => readDrawing(root, '../../etc/passwd.excalidraw'), /outside the worktree/)
+      assert.throws(() => readDrawing(root, '.floe/draw/notes.md'), /not a drawing/)
+      // A drawing next to the note it illustrates opens like any other.
+      assert.equal(readDrawing(root, 'brain/notes/fluxo.excalidraw').elements.length, 1)
+    }
+  )
 })
 
 test('applyDelta merges into the file and hands back what it wrote', () => {

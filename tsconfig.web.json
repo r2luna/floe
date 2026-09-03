@@ -18,5 +18,5 @@
       "@/*": ["src/renderer/src/*"]
     }
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/preload/index.d.ts"]
+  "include": ["src/renderer/src/**/*", "src/web/**/*", "src/shared/**/*", "src/preload/api.ts", "src/preload/socketIpc.ts", "src/preload/index.d.ts"]
 }

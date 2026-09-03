@@ -111,6 +111,14 @@ never a key that does nothing.
 These come before the cursor keys because \`h\` and \`l\` mean something else in
 the project and worktree lists, and first match wins.
 
+\`.\` and \`-\` move the ROOT rather than the cursor: \`.\` points the whole tree at
+the directory under the cursor, so it lists that folder and nothing else, and
+\`-\` steps the root back out one level until it is the worktree again. \`-\` is
+what netrw and vinegar have always used for "up a directory"; the pair is not
+\`⇧L\`/\`⇧H\` because no default may take a capital (see Find, below). The header
+prints the path the tree is rooted at, and clicking a segment of it roots there
+too.
+
 \`r\` renames the row under the cursor, \`m\` moves it to another directory and
 \`d\` deletes it — the same three letters the project list uses, on the same
 principle: the row the cursor is on is the thing they act on. \`r\` and \`m\` open
@@ -118,6 +126,8 @@ on the current name and directory, so editing one character is one keystroke.
 Directories count too, and \`d\` asks first, because this one really does remove
 from disk.`,
     binds: [
+      { key: '.', command: 'files.root', when: 'panel == "files"' },
+      { key: '-', command: 'files.unroot', when: 'panel == "files"' },
       { key: 'l', command: 'files.expand', when: 'panel == "files"' },
       { key: 'h', command: 'files.collapse', when: 'panel == "files"' },
       { key: 'r', command: 'files.rename', when: 'panel == "files"' },

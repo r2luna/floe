@@ -701,6 +701,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       all: (worktreePath: string): Promise<string[]> => ipcRenderer.invoke('files:all', worktreePath),
       read: (worktreePath: string, relPath: string): Promise<FileContent> =>
         ipcRenderer.invoke('files:read', worktreePath, relPath),
+      /** A document as LibreOffice draws it (a PDF), or null when it can't. */
+      renderDoc: (worktreePath: string, relPath: string): Promise<FileContent | null> =>
+        ipcRenderer.invoke('files:renderDoc', worktreePath, relPath),
       resolveLink: (worktreePath: string, fromRelPath: string, target: string): Promise<string | null> =>
         ipcRenderer.invoke('files:resolveLink', worktreePath, fromRelPath, target),
       apply: (worktreePath: string, ops: FileOp[]): Promise<string[]> =>

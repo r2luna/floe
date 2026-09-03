@@ -135,6 +135,7 @@ import {
 } from '../../shared/types'
 import { previewSound } from './sounds'
 import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -650,7 +651,8 @@ export function PanelBody({
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'setup') return <SetupPanel flow={setup.flow} onCommand={(id) => onCommand?.(id)} />
-  if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} find={find} />
+  if (kind === 'files')
+    return <FilesTree root={cwd} scope={sub} onOpen={onOpen} onCommand={onCommand} find={find} />
   if (kind === 'plans')
     return (
       <PlansList
@@ -2785,14 +2787,91 @@ function flattenTree(
 }
 
 /**
+ * Which directories were open, keyed by worktree, kept for as long as the app
+ * runs. Closing the files panel unmounts the tree, and without this every
+ * directory you had opened would come back collapsed — the panel is closed and
+ * reopened all the time, so that is a tree you re-navigate rather than one you
+ * left as it was. Module-level rather than lane memory because it is a view
+ * detail, not part of what the lane restores.
+ */
+const openDirsByRoot = new Map<string, Set<string>>()
+
+/**
+ * The path the tree is rooted at, in the panel header: "project/branch" and then
+ * a segment per directory you went into.
+ *
+ * The way back out lives here rather than in a row of its own, because this is
+ * already where the panel says where it is pointed — reading the path and
+ * leaving it are one gesture. Clicking a segment roots there; clicking the
+ * worktree goes all the way back. The last segment is where you ARE, so it is
+ * not a button.
+ */
+export function FileCrumbs({
+  where,
+  scope,
+  onPick
+}: {
+  /** "project/branch" — what the header showed before any of this. */
+  where: string
+  /** The scoped directory, worktree-relative. Absent is the worktree itself. */
+  scope?: string
+  onPick: (scope?: string) => void
+}): ReactNode {
+  const parts = scope ? scope.split('/') : []
+
+  return (
+    <span className="panel-sub crumbs" title={[where, scope].filter(Boolean).join('/')}>
+      {parts.length === 0 ? (
+        where
+      ) : (
+        <button className="crumb" onClick={() => onPick(undefined)}>
+          {where}
+        </button>
+      )}
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          <span className="crumb-sep">/</span>
+          {i === parts.length - 1 ? (
+            <span className="crumb-here">{part}</span>
+          ) : (
+            <button className="crumb" onClick={() => onPick(parts.slice(0, i + 1).join('/'))}>
+              {part}
+            </button>
+          )}
+        </Fragment>
+      ))}
+    </span>
+  )
+}
+
+/**
  * The worktree's directory tree, read one directory at a time.
  *
  * Nothing is hidden — `.env` and everything else gitignore covers is listed,
  * because a file tree is where you go to find exactly those. That is affordable
  * precisely because it is lazy: `node_modules` and `vendor` are rows like any
  * other and cost nothing until you open them.
+ *
+ * `scope` points the tree at a directory inside the worktree instead of at the
+ * worktree itself — `.` on a row, a click on the header's breadcrumb, `-` to
+ * come back out. It is the panel's `sub`, so it lives in the lane like every
+ * other "what is this panel pointed at" and comes back with the session.
  */
-function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find?: string }) {
+function FilesTree({
+  root,
+  scope,
+  onOpen,
+  onCommand,
+  find
+}: {
+  root?: string
+  /** The directory the tree is rooted at, worktree-relative. Empty is the worktree. */
+  scope?: string
+  onOpen: OpenFn
+  /** Dispatch a command id — what the right-click menu runs. See commands.ts. */
+  onCommand?: (id: string) => void
+  find?: string
+}) {
   // Directory contents, keyed by worktree-relative path ('' is the root). Also
   // the cache: reopening a directory you have already been in is instant, and a
   // collapse never throws away what was read.
@@ -2803,6 +2882,26 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
   // search actually starts — walking the whole tree to draw a collapsed list
   // nobody is filtering would be work for nothing.
   const [all, setAll] = useState<string[] | null>(null)
+  // Where the right-click menu is, and the row that opened it — closing hands
+  // focus back so the list continues where it was rather than nowhere.
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    row: HTMLElement
+    items: MenuAction[]
+  } | null>(null)
+
+  // The directory the tree draws from. '' is the worktree, which is what every
+  // read below already calls the root — scoping only changes which level that
+  // word points at.
+  const base = scope ?? ''
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
 
   // One reader for every level, the root included — the root is just the
   // directory named ''.
@@ -2821,11 +2920,17 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
   )
 
   useEffect(() => {
+    const remembered = openDirsByRoot.get(root ?? '') ?? new Set<string>()
     setLoaded(new Map())
-    setExpanded(new Set())
+    setExpanded(remembered)
     setAll(null)
-    read('')
-  }, [root, read])
+    read(base)
+    // Every remembered directory is read again: its contents went away with the
+    // panel, and an open directory drawn with nothing under it is a lie. Only
+    // the ones under the current base — the rest are not on screen to be wrong.
+    const under = base ? `${base}/` : ''
+    for (const dir of remembered) if (dir !== base && dir.startsWith(under)) read(dir)
+  }, [root, base, read])
 
   // Which directories are on screen, for the watcher below. A ref, not the state
   // itself: re-reading a directory must not tear down and re-arm the listener,
@@ -2868,8 +2973,8 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
   }, [root, query, all])
 
   const rows = useMemo(
-    () => flattenTree(loaded.get('') ?? [], expanded, loaded),
-    [loaded, expanded]
+    () => flattenTree(loaded.get(base) ?? [], expanded, loaded),
+    [loaded, expanded, base]
   )
 
   /**
@@ -2878,10 +2983,16 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
    * A filter over the visible rows would only ever find what you had already
    * opened — which is the one case where you did not need to search. So a query
    * switches the panel to a flat list of every matching path in the project.
+   *
+   * Scoped, it searches the scope: a tree pointed at one directory that answers
+   * with hits from everywhere else would be scoped in name only.
    */
   const hits = useMemo(() => {
     if (!query || !all) return []
-    return all.filter((path) => path.toLowerCase().includes(query)).slice(0, 500)
+    const under = base ? `${base}/` : ''
+    return all
+      .filter((path) => path.startsWith(under) && path.toLowerCase().includes(query))
+      .slice(0, 500)
   }, [all, query])
 
   if (!root) return <p className="empty">No project open.</p>
@@ -2917,7 +3028,7 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
     )
   }
 
-  if (!loaded.has('')) return <p className="empty">Loading…</p>
+  if (!loaded.has(base)) return <p className="empty">Loading…</p>
   if (!rows.length) return <p className="empty">No files.</p>
 
   const toggle = (node: FileNode): void => {
@@ -2927,9 +3038,24 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
     setExpanded((prev) => {
       const next = new Set(prev)
       if (!next.delete(node.relPath)) next.add(node.relPath)
+      if (root) openDirsByRoot.set(root, next)
       return next
     })
   }
+
+  // Everything the menu offers is a command with a key, so the two routes stay
+  // one behaviour — the rule at the top of commands.ts. The row it was opened on
+  // is focused first, which is how each command knows what to act on.
+  const menuFor = (node: FileNode): MenuAction[] => [
+    ...(node.type === 'dir'
+      ? [{ label: 'Open folder here', keys: '.', run: () => onCommand?.('files.root') }]
+      : [{ label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('editor.open') }]),
+    // Only while there is somewhere to come back out to.
+    ...(base ? [{ label: 'Leave folder', keys: '-', run: () => onCommand?.('files.unroot') }] : []),
+    { label: 'Rename…', keys: 'r', run: () => onCommand?.('files.rename') },
+    { label: 'Move…', keys: 'm', run: () => onCommand?.('files.move') },
+    { label: 'Delete…', keys: 'd', run: () => onCommand?.('files.delete') }
+  ]
 
   return (
     <>
@@ -2955,6 +3081,12 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
             onClick={() =>
               node.type === 'file' ? onOpen({ kind: panelForFile(node.relPath), sub: node.relPath }) : toggle(node)
             }
+            onContextMenu={(e) => {
+              e.preventDefault()
+              const row = e.currentTarget as HTMLElement
+              row.focus()
+              setMenu({ x: e.clientX, y: e.clientY, row, items: menuFor(node) })
+            }}
           >
             {node.type === 'dir' ? (
               open ? (
@@ -2969,6 +3101,7 @@ function FilesTree({ root, onOpen, find }: { root?: string; onOpen: OpenFn; find
           </button>
         )
       })}
+      {menu && <RowMenu at={menu} items={menu.items} onClose={closeMenu} />}
     </>
   )
 }
@@ -3113,6 +3246,104 @@ function indentOf(line: MdLine): CSSProperties | undefined {
   return { paddingLeft: `calc(8px + ${marker + width}ch)`, textIndent: `-${width}ch` }
 }
 
+/**
+ * A PDF, in Chromium's own viewer.
+ *
+ * Through a blob, not the data URL it arrived as: Chrome refuses to hand a
+ * `data:application/pdf` to the plugin — it downloads it instead — while a blob
+ * of the same bytes opens normally, in the tab as well as in the window.
+ */
+function PdfView({ dataUrl, path }: { dataUrl: string; path: string }) {
+  const [url, setUrl] = useState<string>()
+
+  useEffect(() => {
+    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+    const blob = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+    setUrl(blob)
+    return () => URL.revokeObjectURL(blob)
+  }, [dataUrl])
+
+  if (!url) return <p className="empty">Loading…</p>
+  return <iframe className="file-pdf" src={url} title={path} />
+}
+
+/**
+ * A deck.
+ *
+ * Two previews of the same file, and the better one arrives late. The words are
+ * read straight out of the .pptx (main/office.ts) and are on screen at once;
+ * meanwhile LibreOffice is asked to draw the actual slides, which it can only
+ * do when it is installed. When that comes back the panel becomes the PDF —
+ * that is the deck as its author made it, and there is nothing the text view
+ * shows that it doesn't.
+ *
+ * A `.ppt` has no text half at all: the legacy format is not a zip. It shows
+ * the empty state until (and unless) the conversion answers.
+ */
+function SlidesView({
+  root,
+  path,
+  content,
+  find
+}: {
+  root?: string
+  path: string
+  content: FileContent
+  find?: string
+}) {
+  const [pdf, setPdf] = useState<string>()
+
+  useEffect(() => {
+    setPdf(undefined)
+    if (!root || !isConvertible(path)) return
+    let live = true
+    void window.floe.files
+      .renderDoc(root, path)
+      .then((doc) => {
+        if (live && doc?.kind === 'pdf') setPdf(doc.dataUrl)
+      })
+      .catch(() => {
+        /* no LibreOffice, or it refused the file — the text preview stands */
+      })
+    return () => {
+      live = false
+    }
+  }, [root, path])
+
+  if (pdf) return <PdfView dataUrl={pdf} path={path} />
+
+  const slides = content.kind === 'slides' ? content.slides : []
+  if (!slides.length) return <p className="empty">No preview for this file.</p>
+
+  return (
+    <div className="diff slides">
+      {slides.map((slide) => (
+        <Fragment key={slide.n}>
+          {/* The slide's number is its line number: the row is what the cursor
+              lands on, so a deck walks with j/k like a file does. */}
+          <div className="diff-row file-line slide-head" data-nav tabIndex={-1}>
+            <span className="diff-no">{slide.n}</span>
+            <span className="diff-code">{markCode(null, slide.title ?? '', find)}</span>
+          </div>
+          {slide.lines.map((line, i) => (
+            <div className="diff-row file-line" key={i} data-nav tabIndex={-1}>
+              <span className="diff-no" />
+              <span className="diff-code">{markCode(null, line, find)}</span>
+            </div>
+          ))}
+          {slide.notes?.split('\n').map((line, i) => (
+            <div className="diff-row file-line slide-note" key={`n${i}`} data-nav tabIndex={-1}>
+              <span className="diff-no" />
+              <span className="diff-code">{markCode(null, line, find)}</span>
+            </div>
+          ))}
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
 /** One file as it is on disk, highlighted once Shiki has the grammar. */
 function FileView({ root, path, find }: { root?: string; path: string; find?: string }) {
   const [content, setContent] = useState<FileContent | null>(null)
@@ -3157,10 +3388,18 @@ function FileView({ root, path, find }: { root?: string; path: string; find?: st
 
   if (error) return <p className="empty error">{error}</p>
   if (!content) return <p className="empty">Loading…</p>
-  if (content.kind === 'image') return <img className="file-image" src={content.dataUrl} alt={path} />
-  if (content.kind !== 'text') return <p className="empty">No preview for this file.</p>
+
+  // Which view draws this file is one table, in previewKind.ts.
+  const kind = previewKind(path, content)
+  if (kind === 'image' && content.kind === 'image')
+    return <img className="file-image" src={content.dataUrl} alt={path} />
+  if (kind === 'pdf' && content.kind === 'pdf')
+    return <PdfView dataUrl={content.dataUrl} path={path} />
+  if (kind === 'slides') return <SlidesView root={root} path={path} content={content} find={find} />
+  if (kind === 'none' || content.kind !== 'text')
+    return <p className="empty">No preview for this file.</p>
   // Prose is read as prose — but still as lines, with their numbers.
-  if (/\.(md|markdown|mdx)$/i.test(path)) return <MarkdownLines text={content.text} />
+  if (kind === 'markdown') return <MarkdownLines text={content.text} />
 
   return (
     <div className="diff">

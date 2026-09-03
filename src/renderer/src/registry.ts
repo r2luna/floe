@@ -781,6 +781,44 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'files.root',
+        title: 'Open folder here',
+        group: 'Files',
+        keys: '.',
+        enabled: (c) =>
+          c.lane.panels[c.lane.focus]?.kind === 'files' && fileRow(c)?.dataset.dir !== undefined,
+        unavailable: () => 'put the cursor on a directory first',
+        // The scope is the panel's `sub` — what every panel already uses for
+        // "where this one is pointed", so the lane remembers it with the rest
+        // of the session and the header can draw the path without being told.
+        run: (c) => {
+          const dir = fileRow(c)?.dataset.dir
+          if (dir === undefined) return
+          c.setLane((l) => patchPanel(l, l.focus, { sub: dir, cursor: 0 }))
+        }
+      },
+      {
+        id: 'files.unroot',
+        title: 'Leave folder',
+        group: 'Files',
+        keys: '-',
+        enabled: (c) => {
+          const panel = c.lane.panels[c.lane.focus]
+          return panel?.kind === 'files' && !!panel.sub
+        },
+        unavailable: () => 'the tree is already at the worktree',
+        // One level out per press, so the way back mirrors the way in: `L` three
+        // times deep is `H` three times back, and the last one lands on the
+        // worktree rather than skipping the levels between.
+        run: (c) => {
+          const sub = c.lane.panels[c.lane.focus]?.sub ?? ''
+          const cut = sub.lastIndexOf('/')
+          c.setLane((l) =>
+            patchPanel(l, l.focus, { sub: cut === -1 ? undefined : sub.slice(0, cut), cursor: 0 })
+          )
+        }
+      },
+      {
         id: 'files.collapse',
         title: 'Close directory',
         group: 'Cursor',

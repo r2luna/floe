@@ -22,7 +22,7 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, RAIL, PanelBody, needsProject, panelForFile, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, type PanelKind } from './panels'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { installPluginCommands, runCommand, type CommandContext } from './commands'
@@ -1834,21 +1834,20 @@ export default function App() {
             // that shows one worktree's contents looks the same whichever
             // worktree it is. Read from the live selection, never from a sub
             // captured when the panel opened, which goes stale on the next
-            // switch.
+            // switch. The file tree is the exception: its path is clickable, so
+            // it draws its own (FileCrumbs) rather than handing over a string.
             const sub =
               kind === 'worktrees'
                 ? projects.current?.name
                 : kind === 'chat'
                   ? whereOf(panel.session?.worktreePath, panel.sub)
-                  : kind === 'files'
-                    ? whereOf(here)
-                    : kind === 'edit'
-                      ? editTarget(panel.sub).path
-                      // A cmdlog's sub is the runner key — machine text. The
-                      // header says which command it is, and the command it runs.
-                      : kind === 'cmdlog'
-                        ? commandTitle(panel.sub)
-                        : panel.sub
+                  : kind === 'edit'
+                    ? editTarget(panel.sub).path
+                    // A cmdlog's sub is the runner key — machine text. The
+                    // header says which command it is, and the command it runs.
+                    : kind === 'cmdlog'
+                      ? commandTitle(panel.sub)
+                      : panel.sub
             return (
               <section
                 key={panel.id}
@@ -1895,7 +1894,17 @@ export default function App() {
                   <header className="panel-head">
                     <Icon size={14} stroke={1.6} className="panel-icon" />
                     <span className="panel-name">{panel.title}</span>
-                    {sub && (
+                    {/* The tree can be pointed at a directory inside the worktree
+                        (`.` on a row), and the header is where that is said and
+                        undone — clicking a segment roots there. */}
+                    {kind === 'files' && (
+                      <FileCrumbs
+                        where={whereOf(here)}
+                        scope={panel.sub}
+                        onPick={(next) => setLane((l) => patchPanel(l, i, { sub: next, cursor: 0 }))}
+                      />
+                    )}
+                    {kind !== 'files' && sub && (
                       <span className="panel-sub" title={sub}>
                         {/* A terminal's sub is an absolute path — too wide for a header,
                             and the last segment is the part you read anyway. A drawing's
