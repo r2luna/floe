@@ -157,7 +157,15 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       current: (): string => host.backendsCtl?.current() ?? 'local',
       use: (id: string): boolean => host.backendsCtl?.use(id) ?? id === 'local',
       state: (id: string): 'connecting' | 'open' | 'closed' =>
-        host.backendsCtl?.state(id) ?? (id === 'local' ? 'open' : 'closed')
+        host.backendsCtl?.state(id) ?? (id === 'local' ? 'open' : 'closed'),
+      // One call on a named machine, pointer untouched — what the projects union
+      // is built from (renderer/src/backends.ts fans it out over every id).
+      // Untyped by nature: it is the one seam where a channel name is a string,
+      // so it stays wrapped in typed helpers rather than called from panels.
+      invokeOn: (id: string, channel: string, ...args: unknown[]): Promise<unknown> =>
+        host.backendsCtl
+          ? host.backendsCtl.invokeOn(id, channel, ...args)
+          : ipcRenderer.invoke(channel, ...args)
     },
     // Runtime plugins (main/plugins/host.ts): the palette merges `commands`
     // into the registry as `plugin:<name>:<id>` rows whose run dispatches back

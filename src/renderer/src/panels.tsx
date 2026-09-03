@@ -47,6 +47,7 @@ import {
   type ReactNode
 } from 'react'
 import { Composer } from './Composer'
+import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
@@ -3965,7 +3966,9 @@ function ProjectsList({
           {group.projects.map((p) => (
             <button
               className="row"
-              key={p.path}
+              // Two machines can hold a project at the same path, so the row's
+              // identity is the pair — a bare path would collide in the list.
+              key={`${backendOf(p)}:${p.path}`}
               title={p.path}
               // Which project a row is, for the commands that act on the row the
               // cursor is on — `d` and `m` read this rather than counting rows.
@@ -3975,7 +3978,10 @@ function ProjectsList({
               data-moving={(moving?.path === p.path) || undefined}
               // The project you are in, which is also where the cursor lands
               // when this panel is focused with nothing remembered.
-              data-active={p.path === projects.current?.path || undefined}
+              data-active={
+                (p.path === projects.current?.path && backendOf(p) === backendOf(projects.current)) ||
+                undefined
+              }
               onClick={() => {
                 // Entering opens the worktree list itself, and then the branch
                 // and chat this project was last on.
@@ -3988,7 +3994,9 @@ function ProjectsList({
               <span className="row-name">{markAll(p.name, find)}</span>
               {/* Local is the default and gets no badge — naming this machine on
                   every row answers nothing. */}
-              {p.backend && p.backend !== 'local' && <span className="badge">{p.backend}</span>}
+              {p.backend && p.backend !== LOCAL && (
+                <span className="badge">{backendLabel(p.backend)}</span>
+              )}
             </button>
           ))}
         </div>

@@ -45,6 +45,7 @@ import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
 import { reason } from './ipcError'
+import { attach, backendLabel, dropLanding, handOff, peekLanding } from './backends'
 import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -298,17 +299,6 @@ function Splitter({
     />
   )
 }
-
-/**
- * The landing an add on ANOTHER machine has to hand over.
- *
- * Adding there points the window there, and that remounts <App> by key (see
- * main.tsx) — so selecting the new project and starting its setup cannot be
- * done by the instance that made the call, only by the one that comes up on
- * that machine. Module scope is what survives the remount; component state is
- * exactly what does not.
- */
-let pendingAdd: { path: string; created?: boolean } | null = null
 
 export default function App() {
   // The lane the app was last left in. A first run (or a lane that no longer
@@ -961,21 +951,25 @@ export default function App() {
     if (res.created && res.path) setup.start(res.path)
   }
 
-  // Pick up the landing left by an add that moved the window here. Runs once per
-  // mount and clears it first, so the handoff is consumed by the instance the
-  // switch brought up and by no other.
+  // Pick up the landing left by whatever moved the window here — opening a
+  // project on another machine, or adding one there. Claimed as it is applied,
+  // so the instance the move brought up is the only one that lands it.
   useEffect(() => {
-    const handoff = pendingAdd
-    if (!handoff) return
-    pendingAdd = null
-    projects.select(handoff.path)
+    const handoff = peekLanding()
+    // Not before the union has loaded: entering a project reads its row for the
+    // panel's name, and an empty list would open a nameless one.
+    if (!handoff || projects.loading) return
+    dropLanding()
+    // The same entry a project on this machine gets — select it, bring its
+    // worktrees, let the branch and chat follow. Crossing a machine to get here
+    // is the only difference, and it is not one the landing should show.
+    enterProject(handoff.path)
     // The saved-project restore must not pull the selection back once the list
-    // arrives: landing on what was just added IS this mount's restore, and both
-    // machines can hold a project at the same path.
+    // arrives: landing on what we came here for IS this mount's restore, and
+    // both machines can hold a project at the same path.
     landedProject.current = true
-    pending.current = pending.current ? { ...pending.current, project: undefined } : null
     if (handoff.created) setup.start(handoff.path)
-  }, [])
+  }, [projects.loading])
 
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
@@ -1702,8 +1696,7 @@ export default function App() {
    */
   const switchBackend = (id?: string): void => {
     const doUse = (target: string): void => {
-      if (!window.floe.backends.use(target)) return
-      window.dispatchEvent(new Event('floe:backend-switched'))
+      attach(target)
     }
     if (id) return doUse(id)
     const currentId = window.floe.backends.current()
@@ -2195,15 +2188,13 @@ export default function App() {
                 // somewhere else takes the window with it and hands that
                 // instance the landing.
                 if (backend !== from) {
-                  pendingAdd = res.path ? { path: res.path, created: res.created } : null
-                  switchBackend(backend)
-                  if (window.floe.backends.current() === backend) return
+                  if (res.path) handOff({ path: res.path, created: res.created })
+                  if (attach(backend)) return
                   // Refused — the machine went away between the add and now. The
                   // project is on it either way, so say so and drop the handoff
                   // rather than leave it for an unrelated switch to pick up.
-                  pendingAdd = null
-                  const label = window.floe.backends.list().find((b) => b.id === backend)?.label
-                  return say(`Added on ${label ?? backend}, which is no longer attached.`)
+                  dropLanding()
+                  return say(`Added on ${backendLabel(backend)}, which is no longer attached.`)
                 }
                 afterAdd(res)
               })

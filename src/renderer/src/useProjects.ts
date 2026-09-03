@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import { DEFAULT_GROUP, type Project } from '../../shared/types'
+import {
+  addGroupOn,
+  attach,
+  backendIds,
+  backendOf,
+  currentBackend,
+  deleteGroupOn,
+  dropLanding,
+  handOff,
+  loadProjectUnion,
+  mergeProjects,
+  removeOn,
+  setGroupOn
+} from './backends'
 
 /**
  * The real project list from the main process.
@@ -60,27 +74,28 @@ export function useProjects(): Projects {
   const [error, setError] = useState<string>()
   const [currentPath, setCurrentPath] = useState<string>()
 
+  const [groupNames, setGroupNames] = useState<string[]>([])
+
+  // Every attached machine's projects at once, each row tagged with the machine
+  // it came from — one panel you can read across, instead of a list that empties
+  // and refills whenever the window moves. A machine that is down drops out of
+  // the union rather than failing the load (see fanOut).
   const reload = useCallback(() => {
-    window.floe.projects
-      .list()
-      .then((list) => {
-        setAll(list)
+    loadProjectUnion()
+      .then(({ projects, groups }) => {
+        setAll(projects)
+        setGroupNames(groups)
         setError(undefined)
         // Nothing selected yet: start on the first real project rather than on
-        // nothing, so the app has somewhere to be on a cold boot.
-        setCurrentPath((p) => p ?? list.find((x) => !x.home)?.path ?? list[0]?.path)
+        // nothing, so the app has somewhere to be on a cold boot. Backend order
+        // is local-first, so that is a project on this machine.
+        setCurrentPath((p) => p ?? projects.find((x) => !x.home)?.path ?? projects[0]?.path)
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(reload, [reload])
-
-  const [groupNames, setGroupNames] = useState<string[]>([])
-
-  useEffect(() => {
-    void window.floe.projects.groups().then(setGroupNames).catch(() => {})
-  }, [])
 
   const landOn = useCallback(
     (res: { project?: { path: string }; created?: boolean; error?: string }): AddResult => {
@@ -105,7 +120,7 @@ export function useProjects(): Projects {
       // A project added on ANOTHER machine is not in this list, and making it
       // the selection here would leave the rail pointing at something it cannot
       // show. The caller moves the window there and lands it on the far side.
-      if (backend && backend !== window.floe.backends.current()) {
+      if (backend && backend !== currentBackend()) {
         return { error: res.error, path: res.project?.path, created: res.created }
       }
       return landOn(res)
@@ -118,30 +133,81 @@ export function useProjects(): Projects {
     [landOn]
   )
 
+  /** The machine a row belongs to — where any edit to it has to run. */
+  const backendFor = useCallback(
+    (path: string) => backendOf(all.find((p) => p.path === path)),
+    [all]
+  )
+
   // Group edits all resolve the same way: main is the record, so take what it
-  // returns rather than patching the local copy and hoping the two agree.
+  // returns rather than patching the local copy and hoping the two agree. They
+  // run on EVERY machine: a group is one name across the union, so a group that
+  // was only half-created would show up as two groups on the next load.
   const addGroup = useCallback(async (name: string) => {
-    setGroupNames(await window.floe.projects.addGroup(name))
+    const names = new Set<string>()
+    for (const id of backendIds()) {
+      for (const g of await addGroupOn(id, name)) names.add(g)
+    }
+    setGroupNames([...names])
   }, [])
 
   const deleteGroup = useCallback(async (name: string) => {
-    const { groups: g, projects: list } = await window.floe.projects.deleteGroup(name)
-    setGroupNames(g)
-    setAll(list)
+    const names = new Set<string>()
+    for (const id of backendIds()) {
+      const { groups: g, projects: list } = await deleteGroupOn(id, name)
+      g.forEach((n) => names.add(n))
+      setAll((prev) => mergeProjects(prev, list, id))
+    }
+    setGroupNames([...names])
   }, [])
 
-  const setGroup = useCallback(async (path: string, group: string) => {
-    setAll(await window.floe.projects.setGroup(path, group))
-    setGroupNames(await window.floe.projects.groups())
-  }, [])
+  const setGroup = useCallback(
+    async (path: string, group: string) => {
+      const backend = backendFor(path)
+      const list = await setGroupOn(backend, path, group)
+      setAll((prev) => mergeProjects(prev, list, backend))
+      // A group the user just typed exists now even if no machine listed it before.
+      setGroupNames((names) => (names.includes(group) ? names : [...names, group]))
+    },
+    [backendFor]
+  )
 
-  const remove = useCallback(async (path: string) => {
-    const list = await window.floe.projects.remove(path)
-    setAll(list)
-    // The removed one cannot stay current: land on whatever is left, or on
-    // nothing when it was the last project.
-    setCurrentPath((p) => (p === path ? list.find((x) => !x.home)?.path ?? list[0]?.path : p))
-  }, [])
+  const remove = useCallback(
+    async (path: string) => {
+      const backend = backendFor(path)
+      const list = await removeOn(backend, path)
+      setAll((prev) => mergeProjects(prev, list, backend))
+      // The removed one cannot stay current: land on whatever is left of the
+      // machine it was on — being current means we are attached there — or on
+      // nothing when it was the last project.
+      setCurrentPath((p) => (p === path ? list.find((x) => !x.home)?.path ?? list[0]?.path : p))
+    },
+    [backendFor]
+  )
+
+  /**
+   * Open a project, wherever it lives.
+   *
+   * A project on another machine moves the window there — the pointer follows
+   * the project, so every panel that opens next reads that machine's disk — and
+   * the landing is handed to the instance the move mounts, since this one is
+   * about to be replaced.
+   */
+  const select = useCallback(
+    (path: string) => {
+      // A path the union does not know is NOT local — the machine it belongs to
+      // may still be loading, or down. Treating "not found" as this machine
+      // would bounce the window home the moment it arrived somewhere else.
+      const known = all.some((p) => p.path === path)
+      const backend = known ? backendFor(path) : currentBackend()
+      if (backend === currentBackend()) return setCurrentPath(path)
+      handOff({ path })
+      // Refused: the machine went away since the list was built. Stay put rather
+      // than select a project this machine cannot show.
+      if (!attach(backend)) dropLanding()
+    },
+    [all, backendFor]
+  )
 
   // Grouped in first-seen order rather than alphabetically: the order in
   // projects.json is the user's own, and re-sorting it would move things they
@@ -162,7 +228,7 @@ export function useProjects(): Projects {
     loading,
     error,
     current: all.find((p) => p.path === currentPath),
-    select: setCurrentPath,
+    select,
     // Groups that exist on disk, plus any a project sits in — the dialog must
     // offer every group you could pick, not only the ones main persisted.
     groupNames: [...new Set([...groupNames, ...all.map((p) => p.group).filter(Boolean)])],
