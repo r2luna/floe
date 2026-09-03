@@ -401,3 +401,56 @@ test('a failed Task closes its row without putting the error in the agent\'s mou
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// A message typed while the turn was running. The CLI queues it, folds it into
+// the turn in flight, and records what it absorbed as one `attachment` line —
+// there is no user message for it anywhere else in the file.
+test('a steer reloads as the line you typed, where you typed it', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-steer'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-02T21:36:17.000Z', message: { content: 'roda os quatro comandos' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-02T21:36:21.000Z',
+      message: { content: [{ type: 'tool_use', id: 'toolu_a1', name: 'Bash', input: { command: 'sleep 10; date' } }] }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-02T21:36:31.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_a1', content: 'Wed Sep 2' }] }
+    },
+    // What the CLI writes for the steer: the enqueue mark, then the message.
+    { type: 'queue-operation', operation: 'enqueue', timestamp: '2026-09-02T21:36:25.000Z', content: 'lembra do 42' },
+    {
+      type: 'attachment',
+      timestamp: '2026-09-02T21:36:25.000Z',
+      attachment: { type: 'queued_command', prompt: 'lembra do 42', commandMode: 'prompt' }
+    },
+    { type: 'queue-operation', operation: 'remove', reason: 'absorbed_mid_turn', timestamp: '2026-09-02T21:36:31.000Z', content: 'lembra do 42' },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-02T21:36:36.000Z',
+      message: { content: [{ type: 'text', text: '1/4 pronta, 42 anotado.' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.text ?? i.name]),
+      [
+        ['user', 'roda os quatro comandos'],
+        ['tool', 'Bash'],
+        ['user', 'lembra do 42'],
+        ['assistant', '1/4 pronta, 42 anotado.']
+      ],
+      'the queue bookkeeping is not a message; the steer is'
+    )
+    assert.equal(items[2].at, Date.parse('2026-09-02T21:36:25.000Z'), 'stamped when it was typed')
+    // The steer must not restart the turn clock it joined.
+    assert.equal(items[3].ms, 19_000, 'the answer is still timed from the turn you started')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

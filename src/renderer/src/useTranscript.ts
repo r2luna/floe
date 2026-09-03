@@ -298,6 +298,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       if (!wasRunning.current) {
         startedRef.current = Date.now()
         setStartedAt(startedRef.current)
+        // From here on the stream is the record for this turn. The CLI keeps
+        // writing it to the JSONL as it goes, and a read that lands after the
+        // turn started would put a second copy of it above the live one.
+        dispatch({ type: 'live-since', at: startedRef.current })
       }
       wasRunning.current = true
       setRunning(true)
@@ -309,6 +313,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         type: 'push',
         item: { role: 'tool', name: event.name, summary: event.summary, at: Date.now() }
       })
+    } else if (event.kind === 'steer') {
+      // A message typed into this turn while it ran, replayed to a panel that
+      // mounted after it was said. It is a line of yours like any other; the
+      // reducer drops the JSONL copy if the CLI has already written one.
+      dispatch({ type: 'push', item: { role: 'user', text: event.text, at: event.at } })
     } else if (event.kind === 'peer') {
       // Another session's message, spoken into this channel under its own nick.
       // Pushed like any settled line: it arrives mid-turn, so it lands where it
@@ -452,6 +461,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           // and codex's answer appears under Claude's name.
           if (replay.choice)
             setAnsweringChoice({ ...replay.choice, model: replay.model ?? replay.choice.model })
+          // The events below are this turn from its start, and the CLI has
+          // already written part of it to the JSONL — a panel that opens
+          // mid-turn reads that part and then replays it again. The snapshot's
+          // mark is what tells the two apart.
+          dispatch({ type: 'live-since', at: replay.startedAt ?? Date.now() })
           for (const event of replay.events) apply(event)
           setRunning(true)
           // The turn started before this panel existed: time it from main's
@@ -548,6 +562,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       if (!running) {
         startedRef.current = Date.now()
         setStartedAt(startedRef.current)
+        // Same mark as the replay's: a transcript read still in flight when you
+        // send would otherwise land with this turn already in it.
+        dispatch({ type: 'live-since', at: startedRef.current })
       }
       // Mark the turn as started HERE, not when a render observes `running`.
       // A turn that fails before it ever paints — the CLI refusing, the process

@@ -219,3 +219,122 @@ test('a launch that streamed before the disk read lands is not loaded twice', ()
   assert.deepEqual(shown(s).map((i) => i.role), ['user', 'subagent'])
 })
 
+
+// --- the turn in flight is on disk too --------------------------------------
+// The CLI keeps writing the running turn to the JSONL, so the read a panel does
+// on open already holds part of what the replay is about to stream. Without a
+// mark saying where the live copy starts, both were shown: the same answer
+// twice, the second one still growing.
+
+const turn = (at: number): TranscriptItem[] => [
+  { role: 'user', text: 'testa a jail', at: at - 10 },
+  { role: 'assistant', text: 'CLAUDE_CODE_OAUTH_TOKEN confirmado', at: at + 1000 },
+  { role: 'tool', name: 'Bash', summary: 'security find-generic-password', at: at + 2000 }
+]
+
+test('the disk copy of the turn in flight is dropped when the replay lands after it', () => {
+  const s = run(
+    { type: 'load', items: turn(5000) },
+    { type: 'live-since', at: 5000 },
+    { type: 'text', item: { role: 'assistant', text: 'CLAUDE_CODE_OAUTH_TOKEN confirmado' } }
+  )
+  assert.deepEqual(shown(s).map((i) => i.role), ['user'], 'only what you said stays on disk')
+  assert.equal(s.tail?.text, 'CLAUDE_CODE_OAUTH_TOKEN confirmado')
+})
+
+test('the disk copy is dropped when the read lands after the replay', () => {
+  const s = run(
+    { type: 'live-since', at: 5000 },
+    { type: 'text', item: { role: 'assistant', text: 'CLAUDE_CODE_OAUTH_TOKEN confirmado' } },
+    { type: 'settle' },
+    { type: 'load', items: turn(5000) }
+  )
+  assert.deepEqual(shown(s).map((i) => i.role), ['user', 'assistant'])
+  assert.equal(shown(s).filter((i) => i.role === 'assistant').length, 1, 'said once')
+})
+
+test('everything said before the turn began is still read off disk', () => {
+  const s = run(
+    {
+      type: 'load',
+      items: [
+        { role: 'user', text: 'e antes?', at: 1000 },
+        { role: 'assistant', text: 'antes disso', at: 2000 },
+        ...turn(5000)
+      ]
+    },
+    { type: 'live-since', at: 5000 }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['e antes?', 'antes disso', 'testa a jail'])
+})
+
+test('what you put into the running turn survives the cut', () => {
+  const s = run(
+    {
+      type: 'load',
+      items: [
+        { role: 'user', text: 'olha isso', at: 6000 },
+        { role: 'image', mediaType: 'image/png', data: 'x', at: 6000 },
+        { role: 'tool', name: 'deploy', summary: '/deploy', by: 'user', at: 6000 },
+        { role: 'user', from: 'pinguim', text: 'peer line', at: 6000 },
+        { role: 'assistant', text: 'já respondi isso', at: 6500 }
+      ]
+    },
+    { type: 'live-since', at: 5000 }
+  )
+  assert.deepEqual(shown(s).map((i) => i.role), ['user', 'image', 'tool'])
+})
+
+test('a load with no turn in flight is left alone', () => {
+  const s = run({ type: 'load', items: turn(5000) })
+  assert.equal(shown(s).length, 3)
+})
+
+// --- a message typed into the running turn (a steer) -------------------------
+// The CLI does not echo it as a user line: it queues it, folds it into the turn,
+// and writes what it absorbed as an `attachment` line — whenever the tool call
+// in flight ends. Until then the replay carries it, so both copies can reach a
+// panel and only one may be shown.
+
+test('the steer replayed into a panel that already read its disk copy is said once', () => {
+  const s = run(
+    { type: 'load', items: [{ role: 'user', text: 'e o token?', at: 6000 }] },
+    { type: 'live-since', at: 5000 },
+    { type: 'push', item: { role: 'user', text: 'e o token?', at: 5500 } }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['e o token?'])
+})
+
+test('the disk copy landing after the replay is dropped too', () => {
+  const s = run(
+    { type: 'live-since', at: 5000 },
+    { type: 'push', item: { role: 'user', text: 'e o token?', at: 5500 } },
+    { type: 'load', items: [{ role: 'user', text: 'e o token?', at: 6000 }] }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['e o token?'])
+})
+
+test('the same line typed twice into one turn is two lines', () => {
+  const s = run(
+    {
+      type: 'load',
+      items: [
+        { role: 'user', text: 'anda', at: 6000 },
+        { role: 'user', text: 'anda', at: 6500 }
+      ]
+    },
+    { type: 'live-since', at: 5000 },
+    { type: 'push', item: { role: 'user', text: 'anda', at: 5500 } },
+    { type: 'push', item: { role: 'user', text: 'anda', at: 5900 } }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['anda', 'anda'])
+})
+
+test('a line said before the turn is never taken for a steer', () => {
+  const s = run(
+    { type: 'load', items: [{ role: 'user', text: 'anda', at: 1000 }] },
+    { type: 'live-since', at: 5000 },
+    { type: 'push', item: { role: 'user', text: 'anda', at: 5500 } }
+  )
+  assert.deepEqual(shown(s).map((i) => [i.text, i.at]), [['anda', 1000], ['anda', 5500]])
+})

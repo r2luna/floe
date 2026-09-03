@@ -808,6 +808,12 @@ export type AgentEvent =
   // turn). `from` is its nick — the transcript heads the line with it rather
   // than with the user's, because the user did not say this.
   | { kind: 'peer'; from: string; text: string }
+  // A message typed into the turn while it ran (a steer). NOT broadcast — the
+  // panel that sent it has already shown it — but kept in the replay: the CLI
+  // only writes a steer to the JSONL when it absorbs it, which can be a whole
+  // tool call later, and until then this is the only copy a panel mounting
+  // mid-turn can get.
+  | { kind: 'steer'; text: string; at: number }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
