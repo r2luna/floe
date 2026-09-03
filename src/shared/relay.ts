@@ -8,8 +8,9 @@
 // So a routed turn is followed by a turn on the session's own model, handed the
 // answer that just landed (the words themselves ride in the handoff packet —
 // see main/handoff.ts) and told to act on it. And it can answer BACK: a reply
-// that opens with `@codex` is routed exactly as the composer would route it, so
-// the two hold a real conversation instead of taking turns at you.
+// with `@codex` at the start of one of its lines is routed exactly as the
+// composer would route it, so the two hold a real conversation instead of
+// taking turns at you.
 //
 // This file is the policy — what is said, and how long it may go on. The wiring
 // that starts the turns is main/relay.ts.
@@ -61,7 +62,7 @@ export function relayPrompt(harness: string, hops = 0): string {
     '',
     last
       ? `This is the last exchange with ${harness} on this thread, so close it out here rather than asking it something else.`
-      : `To ask ${harness} something back, START your reply with \`@${harness} \` and the rest of that first line is handed to it — its answer comes back here and you get it. Anything else you write is just your answer in the chat.`,
+      : `To ask ${harness} something back, put \`@${harness} \` at the START of a line — that line and everything you write after it is handed to it, so say what you have to say first and address it last. Its answer comes back here and you get it.`,
     CLOSE
   ].join('\n')
 }
@@ -72,14 +73,48 @@ export const relayMark = (from: string): string => `${OPEN} from="${from}"/>`
 /**
  * The harness a relayed reply hands the conversation back to, if it does.
  *
- * The same rule as the composer's, and deliberately the same function: `@codex`
- * at the start of the line addresses it, anywhere else it is only a name. A
- * handle with nothing after it is not a question, and does not spend a hop.
+ * The same rule as the composer's — a handle at the start of a LINE addresses
+ * it, mid-sentence it is only a name — but read over the whole reply rather
+ * than its first character.
+ *
+ * That is the difference between the relay working and not. What arrives here
+ * is everything the model said this turn, joined (see agent.ts's
+ * `lastAssistantText`): the sentence it opened with, the note between two tool
+ * calls, and then the line addressing codex. Requiring the handle at offset 0
+ * meant a model that said one word before addressing it was never heard, which
+ * is nearly every turn — the handle showed up in the chat and nothing was sent.
+ *
+ * The LAST such line wins, because a model writes its thinking first and its
+ * question last, and everything from there to the end goes over: a question
+ * worth relaying rarely fits on one line.
  */
 export function relayBack(reply: string, harnesses: readonly string[], hops: number): Route | null {
   if (hops >= MAX_HOPS) return null
-  const route = routeAt(reply, harnesses)
-  return route?.prompt.trim() ? route : null
+  const lines = reply.split('\n')
+  // A handle inside code is a quote of one — the model showing how to address
+  // codex, in an answer explaining that it can. Both spellings of a code block
+  // count, because the model picks whichever suits the answer: a fence, and the
+  // four-space indent that means the same thing in Markdown. Missing the second
+  // was not theoretical — an answer that WROTE OUT the example addressed it.
+  let fenced = false
+  let found: { route: Route; at: number } | null = null
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    // Indented code. Checked first and outside a fence only, so that a fence
+    // marker sitting in an indented block is code rather than a delimiter.
+    if (!fenced && /^(?: {4}|\t)/.test(line)) continue
+    // Up to three spaces is still a fence; the fourth made it code, above.
+    if (/^ {0,3}(```|~~~)/.test(line)) {
+      fenced = !fenced
+      continue
+    }
+    if (fenced) continue
+    const route = routeAt(line, harnesses)
+    if (route) found = { route, at: i }
+  }
+  if (!found) return null
+  const rest = [found.route.prompt, ...lines.slice(found.at + 1)].join('\n').trim()
+  return rest ? { ...found.route, prompt: rest } : null
 }
 
 /** True when this text is one of our envelopes rather than something said. */

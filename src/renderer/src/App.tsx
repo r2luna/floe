@@ -51,6 +51,7 @@ import { useChanges } from './useChanges'
 import { useCommands } from './useCommands'
 import { useMerge } from './useMerge'
 import { useRemove } from './useRemove'
+import { useProjectSetup } from './useProjectSetup'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
@@ -359,6 +360,10 @@ export default function App() {
   // project gets added — hands over to its worktrees, or adding a project would
   // leave you sitting on the launcher wondering where it went.
   const wasStranded = useRef<boolean | null>(null)
+  // Whether a setup checklist is running, for the handover below. A ref because
+  // the handover is about `stranded` changing and must not re-run when a step
+  // of the setup does.
+  const setupRunning = useRef(false)
   useEffect(() => {
     const before = wasStranded.current
     wasStranded.current = stranded
@@ -367,7 +372,14 @@ export default function App() {
       return
     }
     if (before === stranded) return
-    setLane(() => laneOf(panelOf(stranded ? 'branch' : 'worktrees')))
+    setLane(() => {
+      const handover = laneOf(panelOf(stranded ? 'branch' : 'worktrees'))
+      // Adding the FIRST project crosses back here and starts that project's
+      // setup in the same breath — so the handover would replace the checklist
+      // it just opened, on the one add that most needs it. The worktrees panel
+      // still leads; the setup keeps its place beside it.
+      return !stranded && setupRunning.current ? open(handover, panelOf('setup')) : handover
+    })
   }, [stranded])
   const current = worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)
   /**
@@ -888,6 +900,44 @@ export default function App() {
     show: () => setLane((l) => open(l, panelOf('remove')))
   })
 
+  /**
+   * The project setup, one flow per project.
+   *
+   * The session it opens is deliberately NOT put on screen (D1): the panel is
+   * what you watch, and the chat only matters at the one step where the agent
+   * asks — which is why `openChat` is a seam of its own rather than something
+   * the flow does on its way past.
+   */
+  const setup = useProjectSetup({
+    root: projects.current?.path,
+    show: () => setLane((l) => open(l, panelOf('setup'))),
+    // The checklist comes with you. Going to the chat is one step of the setup,
+    // not the end of it: you answer the agent's question and then watch the
+    // last step close. It survives the session switch on its own (see
+    // PROJECT_PANELS in laneStore); opening it here as well is for the case
+    // where it was closed — the command puts back what it is talking about.
+    // The chat opens LAST, which is what leaves the focus in the composer.
+    openChat: (session) =>
+      setLane((l) =>
+        open(open(l, panelOf('setup')), mkPanel('chat', 'set up commands', session))
+      )
+  })
+
+  /**
+   * What happens after an add: report the refusal, or set the project up.
+   *
+   * Only for a project Floe has never seen (D6). A re-add lands you on a
+   * project that has been in the list for months, and opening a checklist over
+   * it would answer a question nobody asked — `setup.start` in the palette is
+   * the way to run it deliberately.
+   */
+  setupRunning.current = !!setup.flow
+
+  const afterAdd = (res: { error?: string; path?: string; created?: boolean }): void => {
+    if (res.error) return say(res.error)
+    if (res.created && res.path) setup.start(res.path)
+  }
+
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
     const p = alternate.current
@@ -1264,6 +1314,22 @@ export default function App() {
       force: remove.force,
       retry: remove.retry,
       cancel: remove.cancel
+    },
+    // The checklist's state, flattened the way the merge's and the removal's
+    // are: the commands ask what the setup is waiting for, never what step it
+    // is on.
+    setup: {
+      active: !!setup.flow,
+      failed: !!setup.flow?.steps.some((s) => s.status === 'error'),
+      awaitingChoice: !!setup.flow?.steps.some((s) => s.status === 'blocked'),
+      canStart: !!projects.current,
+      start: () => {
+        const why = setup.start()
+        if (why) say(why)
+      },
+      retry: setup.retry,
+      cancel: setup.cancel,
+      openChat: setup.openChat
     },
     deleteSession,
     cycleSession,
@@ -1879,6 +1945,7 @@ export default function App() {
                     commands={commands}
                     merge={merge}
                     remove={remove}
+                    setup={setup}
                     // Picking a project or a branch is never just a selection:
                     // it restores everything that place was left showing.
                     onEnterProject={enterProject}
@@ -2071,12 +2138,12 @@ export default function App() {
               ? null
               : (group) => {
                   setAdding(false)
-                  void projects.add(group).then((err) => err && console.warn('[add]', err))
+                  void projects.add(group).then(afterAdd)
                 }
           }
           onAdd={(_backend, path, group) => {
             setAdding(false)
-            void projects.addByPath(path, group).then((err) => err && console.warn('[add]', err))
+            void projects.addByPath(path, group).then(afterAdd)
           }}
           onClose={() => setAdding(false)}
         />

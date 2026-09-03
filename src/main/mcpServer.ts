@@ -15,7 +15,6 @@ import type {
   Worktree
 } from '../shared/types'
 import { COMMAND_IDS } from '../shared/commandIds'
-import { expandSkills } from '../shared/skills'
 import { parseArtifactSpec } from '../shared/artifact'
 import { listProjects } from './projects'
 import {
@@ -46,7 +45,7 @@ import {
   setCreatedSessionSpawnedBy,
   type CreatedSession
 } from './sessionStore'
-import { readSessionBuffer, sendToAgent, sessionRuntime, stopAgent, waitForTurn } from './agent'
+import { readSessionBuffer, sessionRuntime, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
 import { optionsForRoute, routeOf, startTurn } from './turn'
@@ -56,7 +55,6 @@ import {
   createSkill,
   deleteSkill,
   listSkills,
-  readSkill,
   readSkillFile,
   renameSkill,
   updateSkill
@@ -245,12 +243,6 @@ function sendOptions(
   }
 }
 
-// Skills expand on the MCP path exactly like agent:start's — `/deploy` has to
-// mean the same thing whichever door the prompt came in through.
-function expandPrompt(worktreePath: string, prompt: string): string {
-  return expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined))
-}
-
 // --- Followups: delegate a delayed send_message to Floe ---------------------
 // An agent that would otherwise `sleep 3m` then poll another session (or itself)
 // registers a followup instead; Floe's own timer fires the send_message so the
@@ -271,7 +263,12 @@ function deliverFollowup(sessionId: string, message: string): void {
   const target = findSessionAny(sessionId)
   const win = getWindow()
   if (!target || !win) return
-  sendToAgent(win, connKeyFor(target), target.worktreePath, expandPrompt(target.worktreePath, message), runOptionsFor(target))
+  // create_followup says what it is: a send_message on a timer. So it goes out
+  // as one — handle read, harness picked, relay armed — rather than straight at
+  // Claude, which made `@codex …` mean one thing when sent and another when
+  // scheduled.
+  const sent = sendOptions(target, message, {})
+  startTurn(win, connKeyFor(target), target.worktreePath, sent.prompt, sent.options)
 }
 
 function scheduleFollowup(fromToken: string, sessionId: string, delayMinutes: number, message: string): string {
@@ -551,8 +548,21 @@ function registerTools(server: McpServer, token: string): void {
         if (prompt) {
           const win = getWindow()
           if (!win) return textResult({ error: 'No window available to run the session.' })
-          const options: AgentRunOptions = { permissionMode: (mode as PermissionMode) ?? 'skip', model }
-          sendToAgent(win, id, worktree, expandPrompt(worktree, prompt), options)
+          // Through the same door as send_message, not straight at Claude. This
+          // prompt is a prompt like any other: it can open with `@codex`, and
+          // before it went through here that handle was read by nobody — the
+          // session opened, Claude answered a message addressed to codex, and
+          // codex never heard of it. See turn.ts: both doors, one behaviour.
+          const stored = findSessionAny(id)
+          // `model` here is a CLAUDE alias for the session to run on, which is
+          // not a thing to hand another harness as its own slug — `opus` means
+          // nothing to codex. A prompt that opens with a handle names its model
+          // in the handle, or takes that harness's default.
+          const named = routeOf(prompt) ? { mode: mode as PermissionMode } : { model, mode: mode as PermissionMode }
+          const sent = stored
+            ? sendOptions(stored, prompt, named)
+            : { prompt, options: { permissionMode: (mode as PermissionMode) ?? 'skip', model } }
+          startTurn(win, id, worktree, sent.prompt, sent.options)
         }
         if (select === true) {
           pushCommand({

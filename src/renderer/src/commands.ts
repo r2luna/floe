@@ -141,6 +141,26 @@ export interface CommandContext {
     retry: () => void
     cancel: () => void
   }
+  /**
+   * The project setup, as the registry sees it. Same flattening as `merge` and
+   * `remove`, for the same reason: the panel's chips and the keys over it run
+   * the same commands, or "⏎ open chat" is a lie.
+   */
+  setup: {
+    /** A flow exists for the open project. */
+    active: boolean
+    /** It stopped on a failed step, so ⏎ means retry. */
+    failed: boolean
+    /** The agent asked and is waiting, so ⏎ means open the chat. */
+    awaitingChoice: boolean
+    /** There is a project to set up at all. */
+    canStart: boolean
+    /** Set up the open project, or show the flow already running. */
+    start: () => void
+    retry: () => void
+    cancel: () => void
+    openChat: () => void
+  }
   /** Show the new-worktree flow. */
   newWorktree: () => void
   /**

@@ -195,3 +195,15 @@ test('no default is a bare shift+letter', () => {
     )
   }
 })
+
+// The setup checklist's three keys, and the fact that they are scoped to it:
+// `⏎` is the only way to the chat of a session that runs with no chat open
+// (D1), so a binding that leaked into another panel — or was never reachable —
+// is the difference between a flow you can finish and one you cannot.
+test('the setup checklist answers ⏎, r and escape, and only in its own panel', () => {
+  assert.deepEqual(r({ key: 'Enter' }, { kind: 'setup' }), { id: 'setup.chat' })
+  assert.deepEqual(r({ key: 'r' }, { kind: 'setup' }), { id: 'setup.retry' })
+  assert.deepEqual(r({ key: 'Escape' }, { kind: 'setup' }), { id: 'setup.cancel' })
+  assert.notDeepEqual(r({ key: 'Enter' }, { kind: 'chat' }), { id: 'setup.chat' })
+  assert.notDeepEqual(r({ key: 'r' }, { kind: 'merge' }), { id: 'setup.retry' })
+})

@@ -286,6 +286,28 @@ invitation, and this is not one.`,
     ]
   },
   {
+    title: 'Project setup',
+    doc: `Adding a project Floe has never seen starts the command setup: a
+checklist that asks whether the project already has commands and, when it does
+not, opens a background session running the \`setup-commands\` skill to work
+them out.
+
+The session is deliberately not on screen. The panel is what you watch, and the
+one moment it needs you is the \`choose\` step — the agent has asked which
+processes to register and is waiting. \`⏎\` there opens that chat; \`r\`
+retries a step that failed, and escape drops the checklist without stopping the
+session it opened.
+
+No rail icon, for the removal's reason: an icon you can click at any time is an
+invitation, and this one only means something while a setup is running.
+\`setup.start\` in the palette runs it again for a project added before.`,
+    binds: [
+      { key: 'enter', command: 'setup.chat', when: 'panel == "setup"' },
+      { key: 'r', command: 'setup.retry', when: 'panel == "setup"' },
+      { key: 'escape', command: 'setup.cancel', when: 'panel == "setup"' }
+    ]
+  },
+  {
     title: 'Cursor & Scrolling',
     doc: `The vim set, and it means the same thing in a file, a diff and a list,
 because all of these move the CURSOR. \`⌃D\` and \`⌃U\` take half a screen and

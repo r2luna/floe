@@ -1124,3 +1124,22 @@ export interface DropDatabaseResult {
   detail?: string
   message?: string // why ok is false
 }
+
+// --- Guided project setup (register a new project's commands) ---------------
+// The checklist that runs when a project is added: does it already have
+// commands, open a background session, watch the agent read the repo, wait for
+// the user's pick, confirm what landed in commands.toml. Same shape and the
+// same status vocabulary as the removal above — it is the same kind of thing,
+// a chain of steps you watch — and the session it drives is the `setup-commands`
+// built-in skill (config/builtinSkills.ts).
+
+export type SetupStepId = 'preflight' | 'session' | 'discover' | 'choose' | 'register'
+
+export type SetupStepStatus = MergeStepStatus
+
+export interface SetupStep {
+  id: SetupStepId
+  title: string
+  status: SetupStepStatus
+  detail?: string // command count, the failure message, …
+}

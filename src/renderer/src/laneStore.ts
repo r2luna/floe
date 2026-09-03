@@ -32,6 +32,23 @@ const VERSION = 1
 // are remembered per session — see KINDS.order, where the session sits at 30.
 const SESSION_ORDER = 30
 
+/**
+ * The checklists that belong to the PROJECT, not to a session.
+ *
+ * They sit right of the session by `order` — beside `changes`, which is where
+ * you read them — but a session switch must not take them away: each is keyed
+ * by project root precisely so the work carries on while you are elsewhere, and
+ * a flow you cannot see is a flow you cannot answer. The setup checklist makes
+ * this unmissable: its one human step is "open the chat", so filing it under
+ * the session would close it on the very click that goes to answer it.
+ */
+const PROJECT_PANELS = new Set(['merge', 'remove', 'setup'])
+
+/** Whether a panel is one the session opened, and so travels with it. */
+function sessionOwns(panel: Panel): boolean {
+  return (panel.order ?? 0) > SESSION_ORDER && !PROJECT_PANELS.has(panel.kind)
+}
+
 // ponytail: newest 30 sessions. Unbounded, this grows a panel list per session
 // forever; a real cap belongs here rather than in a cleanup task nobody runs.
 const MAX_SESSIONS = 30
@@ -69,9 +86,10 @@ export function sessionKeyOf(lane: Lane): string | null {
   return lane.panels.find((p) => p.session)?.session?.id ?? null
 }
 
-/** The panels the session opened: everything to the right of the session slot. */
+/** The panels the session opened: everything to the right of the session slot,
+ *  minus the project's own checklists — see PROJECT_PANELS. */
 export function scopedOf(lane: Lane): Panel[] {
-  return lane.panels.filter((p) => (p.order ?? 0) > SESSION_ORDER)
+  return lane.panels.filter(sessionOwns)
 }
 
 /**
@@ -82,9 +100,22 @@ export function scopedOf(lane: Lane): Panel[] {
  * than the one it replaced must not leave the focus pointing past the end.
  */
 export function withScoped(lane: Lane, scoped: Panel[]): Lane {
-  const kept = lane.panels.filter((p) => (p.order ?? 0) <= SESSION_ORDER)
+  const kept = lane.panels.filter((p) => !sessionOwns(p))
   const focused = lane.panels[lane.focus]
-  const panels = [...kept, ...scoped]
+  // Deduped by id: a set remembered before a panel became project-owned still
+  // names it, and appending it beside the copy already kept would put the same
+  // panel in the lane twice.
+  const keptIds = new Set(kept.map((p) => p.id))
+  // Sorted by `order`, not merely concatenated. Concatenation was right while
+  // "kept" meant strictly left-of-the-session: now a project checklist (41) is
+  // kept too, and appending the restored set behind it would put `changes` (40)
+  // to the RIGHT of it. Every other path into the lane keeps it ordered — see
+  // open() — and a lane that is sorted everywhere except here is a lane whose
+  // panels move when you switch session. Sort is stable, so panels sharing an
+  // order keep the sides they were on.
+  const panels = [...kept, ...scoped.filter((p) => !keptIds.has(p.id))].sort(
+    (a, b) => (a.order ?? 0) - (b.order ?? 0)
+  )
   // Stay on the same panel if it survived; otherwise fall back to the session,
   // which is the one panel a session switch is always about.
   const at = focused ? panels.findIndex((p) => p.id === focused.id) : -1
@@ -101,7 +132,13 @@ export function withScoped(lane: Lane, scoped: Panel[]): Lane {
  * and base64 images have no business in localStorage anyway.
  */
 export function persistable(panels: Panel[]): Panel[] {
-  return panels.map(({ firstPrompt: _p, firstChoice: _c, firstAttached: _a, ...rest }) => rest)
+  return panels
+    // A checklist outlives neither the app nor its flow: the flows live in the
+    // hooks, so a restored `setup` (or merge, or remove) panel comes back with
+    // nothing in it and greets the next launch with an empty state taking up a
+    // column. What is worth remembering is the work, and there is none.
+    .filter((p) => !PROJECT_PANELS.has(p.kind))
+    .map(({ firstPrompt: _p, firstChoice: _c, firstAttached: _a, ...rest }) => rest)
 }
 
 /**
@@ -190,7 +227,12 @@ export function load(): LaneMemory | null {
 
 export function save(memory: Omit<LaneMemory, 'version'>): void {
   try {
-    const lane = { ...memory.lane, panels: persistable(memory.lane.panels) }
+    const panels = persistable(memory.lane.panels)
+    // Clamped, because persisting drops panels: a focus that pointed at the
+    // checklist — or past it — would come back on the next launch aimed at
+    // nothing, and the first arrow key would jump somewhere arbitrary.
+    const focus = Math.min(memory.lane.focus, Math.max(0, panels.length - 1))
+    const lane = { ...memory.lane, panels, focus }
     localStorage.setItem(KEY, JSON.stringify({ version: VERSION, ...memory, lane }))
   } catch {
     /* private mode, or quota — the lane is a convenience, never a requirement */

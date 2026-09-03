@@ -1,6 +1,7 @@
 import {
   IconCaretRightFilled,
   IconCheck,
+  IconChecklist,
   IconChevronDown,
   IconChevronRight,
   IconCopy,
@@ -94,6 +95,7 @@ import type { FloeConfig } from '../../main/config/floe'
 import { HARNESSES } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
 import { handleRows, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
+import { nickColor } from './nickColor'
 // Whose header a line prints under. The rules live next to their test, not in
 // the panel that draws them — see speakers.ts.
 import {
@@ -115,10 +117,12 @@ import { RunInTerminal } from './runInTerminal'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
+import { SetupPanel } from './SetupPanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
 import type { Remove } from './useRemove'
+import type { ProjectSetup } from './useProjectSetup'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
   NOTIFY_SOUNDS,
@@ -222,6 +226,12 @@ export const KINDS = {
   // click any time is an invitation, and nothing about removing a worktree
   // should be one. It arrives only when ⌘K X starts a removal.
   remove: { icon: IconTrash, title: 'remove', width: 340, min: 260, order: 41, needsProject: true },
+  // The project setup's checklist — the commands a freshly added project gets.
+  // Same shape and width as the merge and the removal, and NOT on the rail for
+  // the removal's reason turned around: an icon you can click any time is an
+  // invitation, and this one only means something while a setup is running. It
+  // arrives on its own when a project is added, or through ⌘K (D3).
+  setup: { icon: IconChecklist, title: 'setup', width: 340, min: 260, order: 41, needsProject: true },
   // The worktree's tree. Same shape as `changes`: a narrow list whose rows open
   // something wider beside it, so it spends as little width as it can.
   files: { icon: IconFolder, title: 'files', width: 300, min: 220, order: 42, needsProject: true },
@@ -419,7 +429,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -483,6 +493,7 @@ export function PanelBody({
   changes,
   merge,
   remove,
+  setup,
   onEnterProject,
   onEnterWorktree,
   newWorktree,
@@ -518,6 +529,8 @@ export function PanelBody({
   merge: Merge
   /** The guided removal in flight, for the remove panel. See useRemove. */
   remove: Remove
+  /** The project setup in flight, for the setup panel. See useProjectSetup. */
+  setup: ProjectSetup
   /**
    * Go to a project, or to a worktree, restoring what it was left showing —
    * App.enterProject / App.enterWorktree. A plain `select` would move the
@@ -635,6 +648,7 @@ export function PanelBody({
   // everything it offers — the chips and the keys are the same commands.
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
+  if (kind === 'setup') return <SetupPanel flow={setup.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files') return <FilesTree root={cwd} onOpen={onOpen} find={find} />
   if (kind === 'plans')
     return (
@@ -1015,35 +1029,6 @@ function Subagents({ subs }: { subs: Sub[] }) {
 }
 
 /* --- transcript ----------------------------------------------------------- */
-
-// mIRC assigned every nick a colour by hashing it, so you learned to recognise
-// people by colour before reading the name. Same trick — but the voices you most
-// need to tell apart are a KNOWN set, so they are not left to a hash that can
-// collide. It did: `you` and `codex` came out the same pink, in a chat whose
-// whole point was seeing which of them answered.
-//
-// So the seven that are always in the channel — you, and each harness — get a
-// colour each by name, and everyone else (subagents, other sessions) hashes over
-// what is left. The fourteen are one ring of evenly spaced hues: the reserved
-// seven take every other slot, which puts each of them a clear step from the
-// next (ΔE 34 at the closest) rather than wherever a hash happened to land.
-//
-// The values live in the CSS, one variable per slot with a light-theme override
-// — a mid-tone that reads on the dark background is nearly invisible on the
-// light one. See `--nick-*` in index.css.
-const NICK_HASH_SLOTS = 7
-
-/** The voices that are always here. The user's nick is whatever floe.toml or the
-    machine says, so it is matched at call time rather than listed. */
-const RESERVED_NICKS = ['claude', 'codex', 'gemini', 'opencode', 'lmstudio', 'ollama']
-
-const nickColor = (nick: string): string => {
-  if (nick === userNick()) return 'var(--nick-you)'
-  if (RESERVED_NICKS.includes(nick)) return `var(--nick-${nick})`
-  let h = 0
-  for (const ch of nick) h = (h * 31 + ch.charCodeAt(0)) >>> 0
-  return `var(--nick-${h % NICK_HASH_SLOTS})`
-}
 
 const clock = (at?: number): string => (at ? new Date(at).toTimeString().slice(0, 5) : '')
 
