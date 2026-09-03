@@ -107,7 +107,15 @@ const host: FloeHost = {
       current = id
       return true
     },
-    state: (id) => remotes.get(id)?.ipc.state() ?? (id === 'local' ? 'open' : 'closed')
+    state: (id) => remotes.get(id)?.ipc.state() ?? (id === 'local' ? 'open' : 'closed'),
+    invokeOn: (id, channel, ...args) => {
+      if (id === 'local') return ipcRenderer.invoke(channel, ...args)
+      const remote = remotes.get(id)
+      // Unpaired mid-dialog: refuse rather than fall back to this machine, which
+      // would read the remote path off local disk and answer "does not exist".
+      if (!remote) return Promise.reject(new Error(`No such backend: ${id}`))
+      return remote.ipc.invoke(channel, ...args)
+    }
   }
 }
 

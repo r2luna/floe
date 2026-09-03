@@ -36,6 +36,7 @@ import {
   save as saveLane,
   scopedOf,
   sessionKeyOf,
+  withoutProject,
   withScoped
 } from './laneStore'
 import { setKeymap } from './keys'
@@ -296,6 +297,17 @@ function Splitter({
     />
   )
 }
+
+/**
+ * The landing an add on ANOTHER machine has to hand over.
+ *
+ * Adding there points the window there, and that remounts <App> by key (see
+ * main.tsx) — so selecting the new project and starting its setup cannot be
+ * done by the instance that made the call, only by the one that comes up on
+ * that machine. Module scope is what survives the remount; component state is
+ * exactly what does not.
+ */
+let pendingAdd: { path: string; created?: boolean } | null = null
 
 export default function App() {
   // The lane the app was last left in. A first run (or a lane that no longer
@@ -569,8 +581,12 @@ export default function App() {
     // switch the two disagree, and that render would file a session under the
     // wrong branch.
     const chat = lane.panels.find((p) => p.session)?.session
+    // A chat names its own branch, so it is always safe to file. Without one,
+    // the selection is only trustworthy while the lists agree: a project switch
+    // closes the chat a render before the worktree selection catches up, and
+    // filing then would tell the branch you just left that it holds no chat.
     const worktree = chat?.worktreePath ?? worktrees.currentPath
-    if (worktree)
+    if (worktree && (chat || project))
       byWorktree.current = rememberSession(byWorktree.current, worktree, chat?.id ?? null)
     saveLane({
       lane,
@@ -761,13 +777,19 @@ export default function App() {
 
   /** Go to a project, then on to the branch it was left on — see enterWorktree. */
   const enterProject = (path: string): void => {
+    // Another project means another repo, so what is on screen stops applying:
+    // the panels the old project opened close and the new one's chat brings its
+    // own back (withoutProject). Re-entering the project you are already in is
+    // not a switch and takes nothing away.
+    const leaving = !!projects.current && projects.current.path !== path
     projects.select(path)
     // Its worktrees are a fetch away, so the rest of the restore happens when
     // they arrive.
     pending.current = { project: path, boot: false }
     // Switching project is only ever a step towards a worktree, so the list
     // comes with you rather than leaving you on whatever was on screen.
-    setLane((l) => open(l, panelOf('worktrees', projects.all.find((p) => p.path === path)?.name)))
+    const name = projects.all.find((p) => p.path === path)?.name
+    setLane((l) => open(leaving ? withoutProject(l) : l, panelOf('worktrees', name)))
   }
 
   // The wait `pending` describes, resolved: the worktrees are here, so land on
@@ -937,6 +959,17 @@ export default function App() {
     if (res.error) return say(res.error)
     if (res.created && res.path) setup.start(res.path)
   }
+
+  // Pick up the landing left by an add that moved the window here. Runs once per
+  // mount and clears it first, so the handoff is consumed by the instance the
+  // switch brought up and by no other.
+  useEffect(() => {
+    const handoff = pendingAdd
+    if (!handoff) return
+    pendingAdd = null
+    projects.select(handoff.path)
+    if (handoff.created) setup.start(handoff.path)
+  }, [])
 
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
@@ -2128,6 +2161,7 @@ export default function App() {
       {adding && (
         <AddProject
           backends={window.floe.backends?.list() ?? []}
+          current={window.floe.backends?.current() ?? 'local'}
           groups={projects.groupNames}
           group={projects.current?.group}
           // No native picker in the web build: the headless backend's dialog is
@@ -2141,9 +2175,23 @@ export default function App() {
                   void projects.add(group).then(afterAdd)
                 }
           }
-          onAdd={(_backend, path, group) => {
+          onAdd={(backend, path, group) => {
             setAdding(false)
-            void projects.addByPath(path, group).then(afterAdd)
+            void projects.addByPath(path, group, backend).then((res) => {
+              if (res.error) return say(res.error)
+              // Only the machine that holds the project lists it, so an add
+              // somewhere else takes the window with it and hands that instance
+              // the landing.
+              if (backend !== window.floe.backends.current()) {
+                pendingAdd = res.path ? { path: res.path, created: res.created } : null
+                switchBackend(backend)
+                // Refused — the machine went away between the add and now. Drop
+                // the handoff rather than leave it for an unrelated switch.
+                if (window.floe.backends.current() !== backend) pendingAdd = null
+                return
+              }
+              afterAdd(res)
+            })
           }}
           onClose={() => setAdding(false)}
         />

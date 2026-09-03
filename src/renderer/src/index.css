@@ -5820,8 +5820,16 @@ kbd {
   color: var(--text-strong);
 }
 
-/* "Run all" in the count line. Same outline chip as the row actions — it is
-   the same kind of thing, one step up. */
+/* The count line's chips. Both can show at once when some commands run and
+   others do not, so the pair is right-aligned as a group. */
+.cmd-headacts {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* "Run all" / "Stop all" in the count line. Same outline chip as the row
+   actions — it is the same kind of thing, one step up. */
 .cmd-runall {
   margin-left: auto;
   padding: 0 6px;

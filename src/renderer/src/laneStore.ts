@@ -124,6 +124,22 @@ export function withScoped(lane: Lane, scoped: Panel[]): Lane {
 }
 
 /**
+ * The lane stripped back to the window's own panels — what a PROJECT switch
+ * leaves standing.
+ *
+ * Everything from the session slot rightwards describes the project you are
+ * leaving: its chat, its changes, its commands, its checklists. Carrying them
+ * into another project shows you the wrong repo's work (a commands panel still
+ * listing the branch you left is the plainest case), so they go. The projects
+ * list and the worktree list stay — they are how you got here, and the switch
+ * is a step towards a branch in the new project.
+ */
+export function withoutProject(lane: Lane): Lane {
+  const panels = lane.panels.filter((p) => (p.order ?? 0) < SESSION_ORDER)
+  return { panels, focus: Math.min(lane.focus, Math.max(0, panels.length - 1)) }
+}
+
+/**
  * What is safe to write down.
  *
  * `firstPrompt` is the one field that must never survive a reload: it is the

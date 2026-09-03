@@ -9,6 +9,7 @@ import {
   save,
   scopedOf,
   sessionKeyOf,
+  withoutProject,
   withScoped
 } from './laneStore.ts'
 import type { Lane, Panel } from './lane.ts'
@@ -195,6 +196,21 @@ test('a checklist is not persisted', () => {
     persistable(panels).map((p) => p.kind),
     ['worktrees', 'changes']
   )
+})
+
+// Another project is another repo: its chat, its diffs and its commands stop
+// applying the moment you leave, so the switch takes them with it.
+test('a project switch leaves only the window panels', () => {
+  const lane = laneWith('s1', panel('changes', 40), panel('setup', 41), panel('commands', 43))
+  assert.deepEqual(
+    withoutProject(lane).panels.map((p) => p.kind),
+    ['projects', 'worktrees']
+  )
+})
+
+test('the focus never points past what the switch left standing', () => {
+  const lane = { ...laneWith('s1', panel('commands', 43)), focus: 3 }
+  assert.equal(withoutProject(lane).focus, 1)
 })
 
 test('the saved focus never points past what was saved', () => {

@@ -12,6 +12,7 @@ import { DEFAULT_GROUP } from '../../shared/types'
  */
 export function AddProject({
   backends,
+  current,
   groups,
   group,
   onBrowse,
@@ -19,6 +20,8 @@ export function AddProject({
   onClose
 }: {
   backends: BackendInfo[]
+  /** The machine the window is attached to — where the dialog starts. */
+  current: string
   groups: string[]
   /** The group to preselect — the one you were looking at. */
   group?: string
@@ -27,7 +30,11 @@ export function AddProject({
   onAdd: (backend: string, path: string, group: string) => void
   onClose: () => void
 }) {
-  const [backend, setBackend] = useState(backends[0]?.id ?? 'local')
+  // Where you already are, not the first row: attached to another machine,
+  // "Add project" means one there far more often than one back home.
+  const [backend, setBackend] = useState(
+    backends.some((b) => b.id === current) ? current : (backends[0]?.id ?? 'local')
+  )
   const [path, setPath] = useState('')
   const [picked, setPicked] = useState(group || groups[0] || DEFAULT_GROUP)
   // Naming a new group is a second question, so it only appears once you ask for

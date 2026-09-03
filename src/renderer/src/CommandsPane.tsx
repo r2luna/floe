@@ -86,20 +86,36 @@ export function CommandsPane({
         <span>
           {running}/{list.length} running
         </span>
-        {running < list.length && (
-          <span
-            className="cmd-runall"
-            role="button"
-            tabIndex={-1}
-            title="Run every stopped command"
-            onMouseDown={(e) => {
-              e.preventDefault() // keep the focus (and the cursor) where it is
-              onCommand?.('command.runAll')
-            }}
-          >
-            Run all
-          </span>
-        )}
+        <span className="cmd-headacts">
+          {running > 0 && (
+            <span
+              className="cmd-runall"
+              role="button"
+              tabIndex={-1}
+              title="Stop every running command"
+              onMouseDown={(e) => {
+                e.preventDefault() // keep the focus (and the cursor) where it is
+                onCommand?.('command.stopAll')
+              }}
+            >
+              Stop all
+            </span>
+          )}
+          {running < list.length && (
+            <span
+              className="cmd-runall"
+              role="button"
+              tabIndex={-1}
+              title="Run every stopped command"
+              onMouseDown={(e) => {
+                e.preventDefault() // keep the focus (and the cursor) where it is
+                onCommand?.('command.runAll')
+              }}
+            >
+              Run all
+            </span>
+          )}
+        </span>
       </div>
       {list.map((c) => {
         const run = runOf(c.id)

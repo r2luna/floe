@@ -21,8 +21,12 @@ export interface Projects {
   groupNames: string[]
   /** Native folder picker (desktop) — resolves to the added project or an error. */
   add: (group?: string) => Promise<AddResult>
-  /** Add by an explicit path, which is the only way on a remote machine. */
-  addByPath: (path: string, group?: string) => Promise<AddResult>
+  /**
+   * Add by an explicit path, which is the only way on a remote machine.
+   * `backend` names the machine that reads it; omitted, it is the one the
+   * window is pointed at.
+   */
+  addByPath: (path: string, group?: string, backend?: string) => Promise<AddResult>
   /** Create an empty group. A name that already exists is a no-op. */
   addGroup: (name: string) => Promise<void>
   /** Remove a group; its projects fall back to the default. */
@@ -96,8 +100,8 @@ export function useProjects(): Projects {
   )
 
   const addByPath = useCallback(
-    async (path: string, group?: string) =>
-      landOn(await window.floe.projects.addByPath(path, group)),
+    async (path: string, group?: string, backend?: string) =>
+      landOn(await window.floe.projects.addByPath(path, group, backend)),
     [landOn]
   )
 

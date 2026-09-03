@@ -7,6 +7,7 @@ import {
   nativeTheme,
   Menu,
   clipboard,
+  nativeImage,
   protocol
 } from 'electron'
 import { join, basename } from 'path'
@@ -648,6 +649,14 @@ function registerIpc(): void {
   // never come back through IPC — only the `floe-media://` URL that streams
   // them (see media.ts).
   handle('media:probe', (_event, path: string, cwd?: string) => probeMedia(path, cwd))
+  // The lightbox's `c`: the same clipboard write the right-click menu does, but
+  // driven from the keyboard, where the pointer's coordinates don't exist.
+  handle('media:copyImage', (_event, dataUrl: string) => {
+    const image = nativeImage.createFromDataURL(dataUrl)
+    if (image.isEmpty()) return false
+    clipboard.writeImage(image)
+    return true
+  })
   handle(
     'files:resolveLink',
     (_event, worktreePath: string, fromRelPath: string, target: string) =>
@@ -1231,6 +1240,15 @@ function createWindow(): void {
     const items: Electron.MenuItemConstructorOptions[] = []
     if (params.linkURL) {
       items.push({ label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) })
+    }
+    // A screenshot in the transcript (or blown up in the lightbox) is a data
+    // URL, so there is nothing to save a link to: copyImageAt lifts the decoded
+    // bitmap straight off the page and onto the clipboard.
+    if (params.mediaType === 'image') {
+      items.push({
+        label: 'Copy Image',
+        click: () => mainWindow.webContents.copyImageAt(params.x, params.y)
+      })
     }
     if (params.selectionText) items.push({ role: 'copy' })
     if (params.isEditable) {

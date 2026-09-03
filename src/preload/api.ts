@@ -102,6 +102,16 @@ export interface BackendsCtl {
   /** Point workspace calls at this backend. False when the id names none. */
   use: (id: string) => boolean
   state: (id: string) => 'connecting' | 'open' | 'closed'
+  /**
+   * Run ONE workspace call on the backend `id` names, leaving the pointer where
+   * it is. The add-project dialog needs it: you pick the machine there, and the
+   * path has to be read on that machine before the window has any reason to
+   * move. Rejects when the id names no backend — rerouting to this machine
+   * would check a remote path against local disk, which is the bug it exists to
+   * fix. Workspace channels only; a PINNED one sent through it would run on the
+   * wrong machine.
+   */
+  invokeOn: (id: string, channel: string, ...args: unknown[]) => Promise<unknown>
 }
 
 // A machine this window can run work on. Single-entry today (this one) — the
@@ -264,11 +274,22 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       add: (group?: string): Promise<{ project?: Project; created?: boolean; error?: string }> =>
         ipcRenderer.invoke('projects:add', group),
       // Web/headless has no native folder picker — add by an explicit server-side path.
+      // `backend` names the machine that reads the path (the dialog's Machine
+      // row). Without it the call follows the pointer, which is right for every
+      // other caller — the CLI and the browse flow are already on the machine
+      // they mean.
       addByPath: (
         path: string,
-        group?: string
+        group?: string,
+        backend?: string
       ): Promise<{ project?: Project; created?: boolean; error?: string }> =>
-        ipcRenderer.invoke('projects:addByPath', path, group),
+        backend && host.backendsCtl
+          ? (host.backendsCtl.invokeOn(backend, 'projects:addByPath', path, group) as Promise<{
+              project?: Project
+              created?: boolean
+              error?: string
+            }>)
+          : ipcRenderer.invoke('projects:addByPath', path, group),
       // Set (or clear, with null) a project's containerized-env config.
       setEnv: (path: string, env: ProjectEnvConfig | null): Promise<Project[]> =>
         ipcRenderer.invoke('projects:setEnv', path, env),
@@ -655,7 +676,14 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
        * mention of a deleted recording from drawing a dead player.
        */
       probe: (path: string, cwd?: string): Promise<MediaFile | null> =>
-        ipcRenderer.invoke('media:probe', path, cwd)
+        ipcRenderer.invoke('media:probe', path, cwd),
+      /**
+       * Put a picture on the system clipboard from its data URL — the keyboard
+       * half of the right-click "Copy Image". False when the URL decoded to
+       * nothing (so the caller can say it failed instead of lying).
+       */
+      copyImage: (dataUrl: string): Promise<boolean> =>
+        ipcRenderer.invoke('media:copyImage', dataUrl)
     },
     files: {
       /** One directory's entries — omit `relPath` for the worktree root. */

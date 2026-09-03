@@ -28,6 +28,7 @@ export function Lightbox({
 }): React.ReactPortal {
   const box = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState(start)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     const from = document.activeElement as HTMLElement | null
@@ -42,6 +43,17 @@ export function Lightbox({
   // Wrapping, not stopping: the gallery is a ring, so holding one arrow always
   // gets you to the picture you half-remember without changing hands.
   const step = (d: number): void => setAt((i) => (i + d + images.length) % images.length)
+
+  // Right-click → Copy Image is the mouse way (the native menu in main); this is
+  // the same write from the keyboard, so a screenshot can go straight into
+  // another chat without ever touching the pointer.
+  const copy = (src: string): void => {
+    void window.floe.media.copyImage(src).then((ok) => {
+      if (!ok) return
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }
 
   if (!now) return createPortal(null, document.body)
 
@@ -61,6 +73,11 @@ export function Lightbox({
         if (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           onClose()
+          return
+        }
+        if (e.key === 'c' || ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c')) {
+          e.preventDefault()
+          copy(now.src)
           return
         }
         // Arrows and the vi pair, so the hand that walks the transcript with
@@ -117,7 +134,8 @@ export function Lightbox({
             {' · ← → to browse · '}
           </>
         )}
-        esc to close
+        {copied ? <b className="lightbox-count">copied</b> : 'c to copy'}
+        {' · esc to close'}
       </span>
     </div>,
     document.body
