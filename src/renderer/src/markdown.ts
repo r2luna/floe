@@ -46,7 +46,7 @@ function refs(text: string, out: Token[], isRef: (token: string) => boolean): vo
 }
 
 /** The token an attached image writes into the message — see attachments.ts. */
-const ATTACH = /\[Image #\d+\]/g
+const ATTACH = /\[[Ii]mage #?\d+\]|\bimage \d\d+\b/g
 
 function inline(text: string, out: Token[], isRef?: (token: string) => boolean): void {
   const rest = (slice: string): void => {

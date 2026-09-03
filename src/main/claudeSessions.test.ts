@@ -156,7 +156,7 @@ test('an attached image reloads under the message it came with', () => {
       message: {
         content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } },
-          { type: 'text', text: 'olha esse bug [Image #1]' }
+          { type: 'text', text: 'olha esse bug image 01' }
         ]
       }
     }
@@ -166,7 +166,7 @@ test('an attached image reloads under the message it came with', () => {
     assert.deepEqual(
       items.map((i) => [i.role, i.text ?? i.data]),
       [
-        ['user', 'olha esse bug [Image #1]'],
+        ['user', 'olha esse bug image 01'],
         ['image', 'AAAA']
       ]
     )

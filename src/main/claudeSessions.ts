@@ -135,7 +135,7 @@ function cleanTitle(raw: string): string {
     .replace(/<command-args>[\s\S]*?<\/command-args>/gi, '')
     .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/gi, '')
     .replace(/<\/?[a-z][^>]*>/gi, ' ') // any other angle-bracket tags
-    .replace(/\[Image #\d+\]/gi, '') // pasted-image placeholders
+    .replace(/\[image #?\d+\]|\bimage \d\d+\b/gi, '') // pasted-image placeholders
     .replace(/^[#>\s-]+/, '') // leading markdown heading/quote/bullet
     .replace(/\s+/g, ' ')
     .trim()
@@ -859,7 +859,7 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         if (reply && spoke) items.push(agentReply(row, reply))
       } else if (block.type === 'image' && role === 'user') {
         // An image you attached, echoed back into the JSONL by the CLI. Without
-        // this it reloads as a bare "[Image #1]" pointing at nothing.
+        // this it reloads as a bare "image 01" pointing at nothing.
         const src = block.source as { type?: string; media_type?: string; data?: string } | undefined
         if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
           attached.push({ role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })

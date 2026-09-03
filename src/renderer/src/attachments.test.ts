@@ -40,25 +40,33 @@ test('extension matching ignores case', () => {
 
 test('the reference lands at the caret, spaced off the words around it', () => {
   const out = insertImageRef('crop this', 4, 1)
-  assert.equal(out.text, 'crop [Image #1] this')
+  assert.equal(out.text, 'crop image 01 this')
   // Caret sits after the token, ready for the rest of the sentence.
-  assert.equal(out.text.slice(0, out.caret), 'crop [Image #1]')
+  assert.equal(out.text.slice(0, out.caret), 'crop image 01')
 })
 
 test('a reference at the end of the text needs no trailing space', () => {
-  assert.equal(insertImageRef('crop', 4, 2).text, 'crop [Image #2]')
+  assert.equal(insertImageRef('crop', 4, 2).text, 'crop image 02')
 })
 
 test('an empty composer takes the reference bare', () => {
-  assert.equal(insertImageRef('', 0, 1).text, '[Image #1]')
+  assert.equal(insertImageRef('', 0, 1).text, 'image 01')
 })
 
 test('removing an image drops its reference and renumbers the rest', () => {
-  assert.equal(renumberImageRefs('a [Image #1] b [Image #2] c', 1), 'a b [Image #1] c')
+  assert.equal(renumberImageRefs('a image 01 b image 02 c', 1), 'a b image 01 c')
 })
 
 test('removing the last image leaves the ones before it alone', () => {
-  assert.equal(renumberImageRefs('a [Image #1] b [Image #2]', 2), 'a [Image #1] b')
+  assert.equal(renumberImageRefs('a image 01 b image 02', 2), 'a image 01 b')
+
+  // Tokens written in the older bracketed spelling still name their image.
+  assert.equal(renumberImageRefs('a [Image #1] b [Image #2]', 1), 'a b image 01')
+})
+
+test('prose that merely says "image" is not a reference', () => {
+  assert.equal(renumberImageRefs('see image 2 above', 1), 'see image 2 above')
+  assert.equal(renumberImageRefs('reimage 01 it', 1), 'reimage 01 it')
 })
 
 test('text with no reference to the removed image is untouched', () => {

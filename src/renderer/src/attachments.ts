@@ -83,10 +83,21 @@ export const previewUrl = (a: ImageAttachment): string =>
   `data:${a.mediaType};base64,${a.data}`
 
 // The text side of an image attachment: a chip shows it above the input, and
-// this token is how you point at it mid-sentence ("crop [Image #1]"). The
-// number IS the position among the attached images — an agent reading the
-// message sees them in that order.
-export const IMAGE_REF = /( ?)\[Image #(\d+)\]( ?)/g
+// this token is how you point at it mid-sentence ("crop image 01"). The number
+// IS the position among the attached images — an agent reading the message
+// sees them in that order.
+//
+// No brackets, so the token reads as words rather than syntax. What keeps it
+// from swallowing prose is the padding: a bare `image 2` is left alone, only
+// the two-digit form this file writes is a reference. The older `[Image #1]`
+// spelling still matches, because sessions already written contain it.
+export const IMAGE_REF = /( ?)(?:\[[Ii]mage #?(\d+)\]|\bimage (\d\d+)\b)( ?)/g
+
+/** How an image's position is written, two digits so a list of them lines up. */
+export const imageNum = (n: number): string => String(n).padStart(2, '0')
+
+/** The token the nth attached image writes into the message. */
+export const imageRef = (n: number): string => `image ${imageNum(n)}`
 
 /** Where the token goes when an image lands: at the caret, spaced off the text
     around it, and never welded to the word you were in the middle of. */
@@ -99,21 +110,21 @@ export function insertImageRef(
   const after = text.slice(at)
   const token =
     (before && !/\s$/.test(before) ? ' ' : '') +
-    `[Image #${n}]` +
+    imageRef(n) +
     (after && !/^\s/.test(after) ? ' ' : '')
   return { text: before + token + after, caret: at + token.length }
 }
 
 /**
  * Drop the token for a removed image and close the gap it leaves in the
- * numbering, so `[Image #2]` always names the second image still attached.
+ * numbering, so `image 02` always names the second image still attached.
  * Renumbering rather than leaving holes is what keeps the text honest: the
  * agent is handed the images in order and has no idea one was taken away.
  */
 export function renumberImageRefs(text: string, removed: number): string {
-  return text.replace(IMAGE_REF, (m, lead: string, digits: string, trail: string) => {
-    const n = Number(digits)
+  return text.replace(IMAGE_REF, (m, lead: string, old: string, bare: string, trail: string) => {
+    const n = Number(old ?? bare)
     if (n === removed) return lead && trail ? ' ' : ''
-    return n > removed ? `${lead}[Image #${n - 1}]${trail}` : m
+    return n > removed ? `${lead}${imageRef(n - 1)}${trail}` : m
   })
 }

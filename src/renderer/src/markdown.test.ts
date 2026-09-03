@@ -285,11 +285,18 @@ test('a table becomes cells, and every row of the block shares one layout', () =
 })
 
 test('an image reference is a chip of its own', () => {
-  const out = tokenizeMarkdown('crop [Image #1] please')
+  const out = tokenizeMarkdown('crop image 01 please')
   assert.deepEqual(
     out.filter((t) => t.cls === 'md-attach').map((t) => t.text),
-    ['[Image #1]']
+    ['image 01']
   )
   // The invariant every tokenizer test here rests on: nothing is lost.
-  assert.equal(out.map((t) => t.text).join(''), 'crop [Image #1] please')
+  assert.equal(out.map((t) => t.text).join(''), 'crop image 01 please')
+
+  // The older `[Image #1]` spelling is still drawn as a chip.
+  const old = tokenizeMarkdown('crop [Image #1] please')
+  assert.deepEqual(
+    old.filter((t) => t.cls === 'md-attach').map((t) => t.text),
+    ['[Image #1]']
+  )
 })

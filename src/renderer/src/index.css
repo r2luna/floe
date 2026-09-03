@@ -911,7 +911,7 @@ button {
   object-fit: cover;
 }
 
-/* The image's number, matching the [Image #n] token in the text. Bottom-left so
+/* The image's number, matching the [image nn] token in the text. Bottom-left so
    it never sits under the remove button in the opposite corner. */
 .chip-num {
   position: absolute;
@@ -1107,25 +1107,28 @@ button {
    green text, because a picture came with the message rather than an
    instruction going out with it.
 
-   Two departures, both forced by the mirror, which must stay glyph for glyph
-   over the textarea. The side padding is `1ch`, not 5px, because it stands in
-   for the two brackets the chip no longer draws. And the hairline is an
-   `outline`, not a `border`: an outline is paint and takes no width. */
+   The token is bare words now, so there is nothing to trade for padding. Like
+   .md-ref, the breathing room and the hairline are both painted outside the box
+   by `box-shadow`, which takes no width — the mirror has to stay glyph for
+   glyph over the textarea or the caret lands in the wrong place. */
 .md-attach {
-  padding: 0 1ch;
-  border-radius: var(--radius);
-  outline: 1px solid var(--line);
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 3px var(--panel),
+    0 0 0 4px var(--line);
   background: var(--panel);
   color: #a8dcbc;
-  /* Lowercase like every other label in the app. Paint, not text: the token on
-     the wire stays `[Image #1]`, which is what attachments.ts renumbers and
-     what sessions already written contain. Safe over the textarea because the
-     face is monospace — `I` and `i` take the same width. */
+  /* Lowercase like every other label in the app, so the older `[Image #1]`
+     spelling still in written sessions paints the same as what is written
+     today. Safe over the textarea because the face is monospace — `I` and `i`
+     take the same width. */
   text-transform: lowercase;
 }
 
 :root[data-theme='light'] .md-attach {
-  outline-color: var(--edge);
+  box-shadow:
+    0 0 0 3px var(--well),
+    0 0 0 4px var(--edge);
   background: var(--well);
   color: #2f7350;
 }

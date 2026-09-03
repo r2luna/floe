@@ -16,7 +16,13 @@ import {
   type ReactNode
 } from 'react'
 import type { Attached, FileAttachment, ImageAttachment } from '../../shared/types'
-import { insertImageRef, previewUrl, readAttachment, renumberImageRefs } from './attachments'
+import {
+  imageNum,
+  insertImageRef,
+  previewUrl,
+  readAttachment,
+  renumberImageRefs
+} from './attachments'
 import { isFileRef } from './fileRefs'
 import { continueList, tokenizeMarkdown } from './markdown'
 import { applyTrigger, refBefore, triggerAt, type Trigger } from './trigger'
@@ -730,7 +736,7 @@ export function Composer({
       if (read.kind === 'image') {
         setImages((prev) => [...prev, read.image])
         // Every image gets its token in the message, so it can be pointed at
-        // while you type — "crop [Image #1]" — instead of being an unnamed
+        // while you type — "crop image 01" — instead of being an unnamed
         // thing hanging above the input.
         const put = insertImageRef(text, caretAt, ++n)
         text = put.text
@@ -810,13 +816,13 @@ export function Composer({
             <button
               key={a.id}
               className="chip chip-image"
-              title={`Remove Image #${i + 1}`}
+              title={`Remove image ${imageNum(i + 1)}`}
               onClick={() => dropImage(a.id)}
             >
               <img src={previewUrl(a)} alt="" />
               {/* The same number the token in the text carries — the chip and
                   the words have to agree on which image is which. */}
-              <span className="chip-num">#{i + 1}</span>
+              <span className="chip-num">{imageNum(i + 1)}</span>
               <IconX size={11} stroke={2} className="chip-x" />
             </button>
           ))}
@@ -1228,13 +1234,12 @@ function clipRect(el: HTMLElement): { top: number; bottom: number } {
 }
 
 /**
- * `[Image #1]` in the mirror, drawn as the chip it stands for.
+ * `image 01` in the mirror, drawn as the chip it stands for.
  *
- * The brackets are dropped, not hidden: the chip is already the fence. What
- * pays for them is the chip's `1ch` side padding — this text lies character for
- * character over the textarea, so the two glyphs have to come back as exactly
- * their own width or the rest of the line slides off its caret.
+ * Printed exactly as written, including the brackets of the older `[Image #1]`
+ * spelling: this text lies character for character over the textarea, so a
+ * glyph dropped here slides the rest of the line off its caret.
  */
 function AttachChip({ token }: { token: string }): React.JSX.Element {
-  return <span className="md-attach">{token.slice(1, -1)}</span>
+  return <span className="md-attach">{token}</span>
 }
