@@ -45,7 +45,7 @@ import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
 import { reason } from './ipcError'
-import { attach, backendLabel, dropLanding, handOff, peekLanding } from './backends'
+import { attach, backendLabel, backendOf, dropLanding, handOff, LOCAL, peekLanding } from './backends'
 import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -347,7 +347,10 @@ export default function App() {
       return withScoped(next, after ? (by[after] ?? []) : [])
     })
   }, [])
-  const projects = useProjects()
+  // This mount's identity, for the landing handoff: a remount makes a new one,
+  // which is exactly the difference the handoff has to tell apart.
+  const self = useRef({}).current
+  const projects = useProjects(self)
   // The worktrees of whichever project is current — switching project reloads
   // them, so the panel never shows a list belonging to somewhere else.
   const worktrees = useWorktrees(projects.current?.path)
@@ -616,7 +619,7 @@ export default function App() {
     // A landing is waiting: this instance was brought up to be somewhere, and
     // the saved project can live on the machine we just left — selecting it
     // would point the window straight back and throw the landing away.
-    if (peekLanding()) return
+    if (peekLanding(self)) return
     const want = restored.current?.project
     if (want && projects.all.some((p) => p.path === want)) projects.select(want)
     else if (pending.current) pending.current = { ...pending.current, project: undefined }
@@ -959,7 +962,7 @@ export default function App() {
   // project on another machine, or adding one there. Claimed as it is applied,
   // so the instance the move brought up is the only one that lands it.
   useEffect(() => {
-    const handoff = peekLanding()
+    const handoff = peekLanding(self)
     // Not before the union has loaded: entering a project reads its row for the
     // panel's name, and an empty list would open a nameless one.
     if (!handoff || projects.loading) return
@@ -1905,6 +1908,14 @@ export default function App() {
                             : sub}
                       </span>
                     )}
+                    {/* Which machine's tree this is. The projects panel badges
+                        the row you picked; without this the list you land on
+                        reads exactly like a local one, and every branch here
+                        belongs to another disk. Local gets none — naming this
+                        machine on its own worktrees answers nothing. */}
+                    {kind === 'worktrees' && backendOf(projects.current) !== LOCAL && (
+                      <span className="badge">{backendLabel(backendOf(projects.current))}</span>
+                    )}
                     {/* The chat is where you watch an agent work, so it is
                         where "the tree moved" has to show up — otherwise you
                         only learn there are edits by opening the changes panel
@@ -2192,7 +2203,7 @@ export default function App() {
                 // somewhere else takes the window with it and hands that
                 // instance the landing.
                 if (backend !== from) {
-                  if (res.path) handOff({ path: res.path, created: res.created })
+                  if (res.path) handOff({ path: res.path, created: res.created }, self)
                   if (attach(backend)) return
                   // Refused — the machine went away between the add and now. The
                   // project is on it either way, so say so and drop the handoff

@@ -31,7 +31,12 @@ export async function load(url, context, next) {
 `
 register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.url)
 
-const { containerizeViteCommand, containerizeCommand } = await import('./commands.ts')
+// projectStore's config dir is XDG-aware, so a temp one gives the real module
+// graph somewhere real to write — the ghost this guards against was a directory.
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'floe-cfg-'))
+
+const { containerizeViteCommand, containerizeCommand, listCommands } = await import('./commands.ts')
+const projectStore = await import('./config/projectStore.ts')
 
 // A worktree that looks containerized: it has the generated vite wrapper, and its
 // project's `dev` script is plain vite.
@@ -175,4 +180,25 @@ test('a worktree-scoped command keeps the worktree it names', () => {
   const dir = project()
   defineCommand(dir, { name: 'Tunnel', command: 'ngrok http 8000', worktree: '/code/app-feat' })
   assert.equal(projectCommands(dir)[0].worktree, '/code/app-feat')
+})
+
+// Listing the commands of a project that lives on ANOTHER machine reached this
+// machine's store and filed an entry for a path it does not have — a row on the
+// projects panel that nobody added, pointing at a directory that isn't there.
+test('a project path this machine does not have is never filed', () => {
+  const missing = join(tmpdir(), 'floe-not-here-' + Date.now())
+  assert.deepEqual(listCommands(missing, missing), [])
+  assert.equal(
+    projectStore.scanProjects().projects.some((p) => p.path === missing),
+    false
+  )
+})
+
+test('a project path that IS here is filed as before', () => {
+  const dir = worktree()
+  listCommands(dir, dir)
+  assert.equal(
+    projectStore.scanProjects().projects.some((p) => p.path === dir),
+    true
+  )
 })

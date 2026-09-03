@@ -44,9 +44,16 @@ export interface Landing {
 // Module scope is what survives the remount — component state is exactly what
 // does not, and the instance that asked for the move is thrown away by it.
 let landing: Landing | null = null
+// Who handed it off. The move is dispatched from inside an effect, so the
+// instance that asked for it still finishes its own commit — including the
+// effect that applies landings. Without an owner it would land on ITSELF and
+// leave nothing for the instance that comes up, which is the one that is
+// actually on the other machine.
+let owner: object | null = null
 
-export const handOff = (next: Landing): void => {
+export const handOff = (next: Landing, from: object): void => {
   landing = next
+  owner = from
 }
 
 /**
@@ -57,10 +64,11 @@ export const handOff = (next: Landing): void => {
  * the render before that (and again on StrictMode's second mount). Whoever
  * applies it calls `dropLanding`.
  */
-export const peekLanding = (): Landing | null => landing
+export const peekLanding = (self: object): Landing | null => (owner === self ? null : landing)
 
 export const dropLanding = (): void => {
   landing = null
+  owner = null
 }
 
 // --- the union ---------------------------------------------------------------

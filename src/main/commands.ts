@@ -71,6 +71,12 @@ function laravelDefaults(projectPath: string): Array<{ name: string; command: st
 function seedDefaults(projectPath: string): void {
   const project = projectScan().projects.find((p) => p.path === projectPath)
   if (project?.seeded) return
+  // A path this machine does not have is not a project to file here. Listing the
+  // commands of a project that lives on ANOTHER machine used to create an entry
+  // on this one, pointing at a directory that isn't there — a ghost row on the
+  // panel that no one added. There is nothing to seed either: the stack sniff
+  // below reads the repo, and there is no repo.
+  if (!existsSync(projectPath)) return
   if (!project) createProject(projectPath)
   setProjectValue(projectPath, 'seeded', true)
   if (readCommands(projectPath).commands.length > 0) return

@@ -68,7 +68,12 @@ export interface AddResult {
   created?: boolean
 }
 
-export function useProjects(): Projects {
+/**
+ * `self` identifies the App instance that owns this hook — a landing it hands
+ * off is for the instance that comes up on the other machine, never for the one
+ * that asked for the move (see handOff).
+ */
+export function useProjects(self: object): Projects {
   const [all, setAll] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
@@ -201,12 +206,12 @@ export function useProjects(): Projects {
       const known = all.some((p) => p.path === path)
       const backend = known ? backendFor(path) : currentBackend()
       if (backend === currentBackend()) return setCurrentPath(path)
-      handOff({ path })
+      handOff({ path }, self)
       // Refused: the machine went away since the list was built. Stay put rather
       // than select a project this machine cannot show.
       if (!attach(backend)) dropLanding()
     },
-    [all, backendFor]
+    [all, backendFor, self]
   )
 
   // Grouped in first-seen order rather than alphabetically: the order in
