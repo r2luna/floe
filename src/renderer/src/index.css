@@ -92,9 +92,10 @@
   --wash-5: #ffffff14;
 
   /* Every corner in the app comes from here. One knob: turn it and panels,
-     popovers, rows, chips, buttons and inputs all follow together, because
-     nothing sets a radius of its own. The only exceptions are the round dot
-     (50%) and the diff row (square, so lines stack flush). */
+     popovers, chips, buttons and inputs all follow together, because nothing
+     sets a radius of its own. Three exceptions: the round dot (50%), and — both
+     square, so rows stack flush — the diff row and every list row's highlight
+     (see "rows"). */
   --radius: 5px;
   /* Hairline bars — meters, pipeline segments, the cursor tick. They are 3–5px
      tall, so the box radius would round them into pills. Derived, not typed,
@@ -439,10 +440,54 @@ button {
   border-color: var(--edge);
 }
 
+/* The one destructive control in any panel header: how many sessions are ticked
+   in the worktrees list, and the button that deletes them. Same box as
+   .head-changes — it sits in the same slot and answers the same kind of
+   question ("how many, and show me") — in the danger tone, because this one
+   does not open a list, it throws one away.
+
+   An outline chip, not a filled red button: the tone marks it out without
+   turning the header into a warning banner. See docs/ui-conventions.md. */
+.head-danger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  margin-left: auto;
+  padding: 2px 7px;
+  border: 1px solid #352829;
+  border-radius: 1px;
+  background: #221b1c;
+  color: #c49495;
+  font-size: 11px;
+}
+
+.head-danger:hover,
+.head-danger:focus-visible {
+  border-color: #4c3739;
+  color: #d9abac;
+}
+
+/* The dark tint is a heavy block on the pale surface, so light flips to colored
+   text over a faint wash — the same swap every tinted control makes. */
+:root[data-theme='light'] .head-danger {
+  border-color: #e3bdbf;
+  background: #f9eef0;
+  color: #b1454a;
+}
+
+:root[data-theme='light'] .head-danger:hover,
+:root[data-theme='light'] .head-danger:focus-visible {
+  border-color: #cf9ba0;
+  color: #99373c;
+}
+
 /* The badge already took the free space; a second auto margin would split what
    is left and open a gap. Same reason as the .ctx-wrap + .panel-act rule. */
 .head-changes + .ctx-wrap,
-.head-changes + .panel-act {
+.head-changes + .panel-act,
+.head-danger + .ctx-wrap,
+.head-danger + .panel-act {
   margin-left: 0;
 }
 
@@ -687,13 +732,19 @@ button {
   letter-spacing: 0.08em;
 }
 
+/* Square, like the diff row and for the same reason: a list row's highlight is
+   a band across the panel, not a card sitting in it. Rounded, a run of ticked
+   or selected rows breaks into separate lozenges with a sliver of panel showing
+   between each pair — which reads as a gap in the selection rather than as one
+   block. Every list in every panel uses this row, so flat here is flat
+   everywhere. */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   padding: 4px 8px;
-  border-radius: var(--radius);
+  border-radius: 0;
   text-align: left;
 }
 
@@ -1418,10 +1469,13 @@ button {
   gap: 2px;
 }
 
+/* Flat like the rest of the lists. The border is the outline that marks the
+   value in force (see [data-on] below), so it goes square with the row — which
+   is also what the chip pattern asks for. */
 .model-option {
   padding: 5px 9px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: 0;
   color: var(--dim);
   font-size: 11px;
   text-align: left;
@@ -3090,10 +3144,13 @@ button {
   white-space: pre;
 }
 
+/* Square, like the .diff-row it heads: it sits in that stack, and it is a
+   cursor row itself — rounded, it would change shape the moment you landed on
+   it, since the cursor's own highlight is flat. */
 .diff-hunk {
   margin: 10px 0 2px;
   padding: 2px 8px;
-  border-radius: var(--radius);
+  border-radius: 0;
   background: var(--wash-1);
   color: #7f86d8;
   overflow-x: auto;
@@ -3946,7 +4003,9 @@ button {
 [data-cursor] {
   position: relative;
   background: #ffffff05;
-  border-radius: var(--radius);
+  /* Square, like .row — the cursor lands on rows in every panel, and a rounded
+     wash under a square row would round only the highlight. */
+  border-radius: 0;
 }
 
 /* A white wash on a white panel is no wash at all: light washes with black, the
@@ -3961,7 +4020,7 @@ button {
   inset-block: 2px;
   left: 0;
   width: 2px;
-  border-radius: var(--radius-sm);
+  border-radius: 0;
   background: #333b49;
 }
 
@@ -4010,6 +4069,44 @@ button {
   background: #eef2f9;
 }
 
+/* Ruled off from the list above: the machines still to answer are not projects,
+   and a row of them under the last group read as one more project. */
+.remote-notes {
+  margin-top: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+/* A machine the projects panel is still waiting on. Sits under the list rather
+   than in it: it is not a project, and it must never be somewhere the cursor
+   can land — the list above stays fully usable while this reads "connecting…".
+   Indented to the row text so the labels line up with the projects. */
+.remote-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.remote-note .row-name {
+  color: var(--dim);
+}
+
+/* The stopped twin of the spinner: same slot, same size, no motion — a machine
+   that is not being tried right now. */
+.remote-off {
+  flex: none;
+  width: 1ch;
+  text-align: center;
+}
+
+.remote-why {
+  flex: none;
+  font-size: 11px;
+}
+
 /* What the keys do while something is held — the move has no buttons, so the
    panel says it. */
 .panel-hint {
@@ -4022,6 +4119,45 @@ button {
 .panel-hint kbd {
   font-family: inherit;
   color: var(--text-strong);
+}
+
+/* --- ticked sessions ------------------------------------------------------ */
+
+/* Ticked for deletion. The danger tone rather than the selection blue: this is
+   not "the lines I am quoting", it is "the chats `d` is about to forget", and
+   the header's red button is the same colour saying the same thing.
+
+   After the cursor rules on purpose. A ticked row you are standing on has to
+   keep reading as ticked — the cursor's left bar still draws on top, so which
+   row you are on is never in doubt. */
+.row-session[data-picked] {
+  background: #c4949526;
+}
+
+.panel[data-focused] .row-session[data-picked] {
+  background: #c4949538;
+}
+
+/* Both, because the cursor rules brighten `.row-name` to --text-strong at three
+   classes deep: without the focused variant a ticked row would lose its tint
+   the moment you stood on it, and only in dark — where that rule wins on
+   specificity — which is the sort of split nobody finds on purpose. */
+.row-session[data-picked] .row-name,
+.panel[data-focused] .row-session[data-picked] .row-name {
+  color: #c49495;
+}
+
+:root[data-theme='light'] .row-session[data-picked] {
+  background: #b1454a1f;
+}
+
+:root[data-theme='light'] .panel[data-focused] .row-session[data-picked] {
+  background: #b1454a33;
+}
+
+:root[data-theme='light'] .row-session[data-picked] .row-name,
+:root[data-theme='light'] .panel[data-focused] .row-session[data-picked] .row-name {
+  color: #b1454a;
 }
 
 /* --- line selection ------------------------------------------------------- */
@@ -4113,25 +4249,61 @@ button {
   /* A fixed offset rather than a percentage: the list grows downward from
      there, so the box never moves as it fills. */
   padding-top: 56px;
-  background: #05060899;
+  /* Light enough that the lane behind stays readable: the palette is a thing
+     you do TO what is on screen, and a 60% black veil hid the project list you
+     were switching away from. */
+  background: #0506084d;
 }
 
+/* The scrim needs a light theme of its own like every tinted surface: black at
+   any alpha over flat white reads as a grey slab, not as the app stepped back. */
+:root[data-theme='light'] .palette-scrim {
+  background: #3d434e1f;
+}
+
+/* Panel chrome, deliberately: same fill, same border, same radius as any panel
+   in the lane. The palette stopped being a surface of its own the day the
+   dialog joined it — see AddProject, which is built from these same parts. */
 .palette {
   width: min(580px, calc(100vw - 32px));
-  /* A ceiling, not a height — the box ends where the list ends. */
-  max-height: 52vh;
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--well);
+  background: var(--panel-focused);
   overflow: hidden;
 }
 
-.palette-input {
-  padding: 13px 15px;
-  border: none;
+/* With a preview pane there are two columns to fit, so the box widens to the
+   chat panel's measure. Without one it stays at the list's width. */
+.palette[data-wide] {
+  width: min(760px, calc(100vw - 32px));
+}
+
+/* The head is a panel head that happens to hold a caret: same height, same
+   hairline under it, so the box reads as a panel from the first glance. */
+.palette-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: var(--head-h);
+  padding-inline: 11px;
   border-bottom: 1px solid var(--line-soft);
+}
+
+/* What this palette is asking about, in one glyph: ◆ a project, ▤ a file,
+   ⌘ a command, ＋ something being added. */
+.palette-sigil {
+  flex: none;
+  color: var(--dim);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
   background: none;
   color: var(--text-strong);
   font: inherit;
@@ -4142,38 +4314,199 @@ button {
   color: var(--dim);
 }
 
+/* How many rows are under the query. Tabular so the number does not jitter the
+   head as it counts down with each keystroke. */
+.palette-count {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The body. One row of two columns; with no preview the list is the only child
+   and takes the whole width. */
+.palette-split {
+  display: flex;
+  min-height: 0;
+}
+
 .palette-list {
+  flex: 1;
+  min-width: 0;
+  /* A ceiling, not a height — the box ends where the list ends. */
+  max-height: 52vh;
   overflow-y: auto;
   padding: 5px;
 }
 
+.palette[data-wide] .palette-list {
+  flex: 0 0 300px;
+  border-right: 1px solid var(--line-soft);
+}
+
+/* The row under the cursor, explained. Scrolls with its own content so a long
+   file head cannot push the box past the list beside it. */
+.palette-side {
+  flex: 1;
+  min-width: 0;
+  max-height: 52vh;
+  overflow: hidden;
+  padding: 10px 12px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
+.palette-pane-title {
+  margin: 0 0 8px;
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.palette-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* A fact is a label and a value on one line, the labels sharing a column so the
+   values line up and can be read down rather than hunted for. */
+.palette-fact {
+  display: flex;
+  gap: 8px;
+}
+
+.palette-fact b {
+  flex: 0 0 68px;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.palette-fact span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+/* Settled, and about to change: the same two tones the flows use for a step
+   that ran and a step that is going to. */
+.palette-fact span[data-tone='ok'] {
+  color: var(--live);
+}
+
+.palette-fact span[data-tone='warn'] {
+  color: var(--accent);
+}
+
+/* The head of a file, as it is on disk. Never wraps: a wrapped line of code
+   reads as a different line of code. */
+.palette-code {
+  margin: 0;
+  color: var(--dim);
+  font: inherit;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.palette-pane-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+}
+
+/* A section of the list, when the rows answer different questions — the add
+   dialog's machine and group. Sticky, so the question stays overhead while you
+   walk its answers. */
+.palette-group {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 7px 10px 3px;
+  background: var(--panel-focused);
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+/* Square, like every other list row in the app. The card around it keeps its
+   corners — it floats — but the highlight inside is the same band that lands on
+   a panel row, and a palette whose rows rounded while the panels' did not would
+   make ⌘K feel like a different app. */
 .palette-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
   width: 100%;
   padding: 6px 10px;
-  border-radius: var(--radius);
+  border-radius: 0;
   color: var(--text);
   text-align: left;
+}
+
+/* A row that is an ANSWER rather than a destination: the value in force carries
+   the same filled dot the session rows use for "this is the one". */
+.palette-mark {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border: 1px solid #4a4f59;
+  border-radius: 50%;
+}
+
+.palette-mark[data-on] {
+  background: var(--live);
+  border-color: var(--live);
+}
+
+:root[data-theme='light'] .palette-mark {
+  border-color: var(--edge);
 }
 
 .palette-row[data-at] {
   background: var(--wash-4);
 }
 
+/* The dim half of a row — the directory of a path, the group of a project.
+   It shrinks and ellipsises so the name beside it is never what gets cut.
+
+   rtl so the ellipsis eats the HEAD of the path: `…/challenges/web-apps/` says
+   which file this is, while `brain/coding/c…` throws away the only part that
+   does. The text inside is wrapped in a <bdi> — without it the trailing slash
+   is a neutral character and rtl reorders it to the front. */
+.palette-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--faint);
+  /* No gap between the two halves: they are one string, split by weight. */
+  margin-right: -10px;
+}
+
 .palette-title {
   flex: none;
 }
 
-/* The characters you typed, so a row explains why it is in the list. */
+.palette-row[data-at] .palette-title {
+  color: var(--text-strong);
+}
+
 .palette-hit {
   color: #9db8e4;
   font-weight: 700;
 }
 
+/* The same match, on white. The dark blue washes out on a pale row, and a
+   highlight you cannot see is the one thing this class exists to prevent. */
 :root[data-theme='light'] .palette-hit {
-  color: #3a64a8;
+  color: #2f5ea8;
 }
 
 .palette-keys {
@@ -4191,47 +4524,25 @@ button {
   color: var(--text);
 }
 
-/* The actions available on the highlighted row, named with the key that
-   performs them: the palette teaches its own shortcuts instead of hiding
-   them behind a menu you have to find first. */
+/* Every palette ends in the same hint strip the panels use — the keys that act
+   on the row you are on, named. */
 .palette-foot {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 16px;
-  padding: 8px 12px;
+  flex: none;
+  padding: 7px 11px;
   border-top: 1px solid var(--line-soft);
-  background: #00000026;
+  color: var(--faint);
+  font-size: 10px;
 }
 
-.palette-action {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--dim);
-  font-size: 11px;
-}
-
-.palette-action-live {
+/* Recording: the foot is the prompt now, so it comes up to the accent the
+   input's placeholder is wearing. */
+.palette-live {
   color: var(--accent);
-}
-
-.palette-action kbd {
-  padding: 1px 5px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  color: var(--text);
-  font: inherit;
-  font-size: 10.5px;
 }
 
 /* Recording: the input is a prompt, not a field, so it stops looking typeable. */
 .palette-input[data-recording]::placeholder {
   color: var(--accent);
-}
-
-:root[data-theme='light'] .palette-foot {
-  background: #0000000a;
 }
 
 .palette-detail {
@@ -4494,13 +4805,15 @@ kbd {
   text-transform: uppercase;
 }
 
+/* The same row as .palette-row, and flat for the same reason: `/` and `@` open
+   a list you pick from, not a set of cards. */
 .composer-menu-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
   width: 100%;
   padding: 6px 10px;
-  border-radius: var(--radius);
+  border-radius: 0;
   color: var(--text);
   text-align: left;
 }
@@ -5707,13 +6020,16 @@ kbd {
   outline: none;
 }
 
+/* The card keeps its corners — it floats over the app — but the highlight
+   inside it is a list highlight like any other, and it names the same commands
+   the panel rows do. */
 .row-menu-item {
   display: flex;
   align-items: baseline;
   gap: 16px;
   width: 100%;
   padding: 5px 9px;
-  border-radius: var(--radius);
+  border-radius: 0;
   color: var(--text);
   text-align: left;
 }

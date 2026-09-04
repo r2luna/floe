@@ -1,9 +1,32 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { PaletteItem } from './fuzzy'
-import type { Trigger } from './trigger'
-import { shorten } from './fileRefs'
-import type { Worktrees } from './useWorktrees'
-import type { Skill } from '../../main/config/skills'
+import type { PaletteItem } from './fuzzy.ts'
+import type { Trigger } from './trigger.ts'
+import type { WorktreeRow, Worktrees } from './useWorktrees.ts'
+import type { Skill } from '../../main/config/skills.ts'
+
+/**
+ * Every session in the project, named the way the menu shows them — one row per
+ * mention, not per session.
+ *
+ * Sessions of the same name write the same mention, so the second row offers
+ * nothing new to pick, and the menu keys its rows by that mention: duplicates
+ * reconcile onto each other and leave rows from the previous query on screen.
+ */
+export function sessionMentions(rows: WorktreeRow[]): PaletteItem[] {
+  const seen = new Set<string>()
+  const out: PaletteItem[] = []
+  for (const row of rows) {
+    for (const s of row.sessions) {
+      // The id is what gets inserted into the message, so it reads as
+      // something a person would write, not as a UUID.
+      const id = `#${s.title.replace(/\s+/g, '-')}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      out.push({ id, title: s.title, detail: row.worktree.branch, group: 'sessions' })
+    }
+  }
+  return out
+}
 
 /**
  * What `/` and `#` offer in the composer.
@@ -54,33 +77,19 @@ export function useMenuItems(
     }
   }, [worktreePath])
 
-  // Every session in the project, named the way the menu shows them.
-  const mentions = useMemo(
-    () =>
-      worktrees.rows.flatMap((row) =>
-        row.sessions.map((s) => ({
-          // The id is what gets inserted into the message, so it reads as
-          // something a person would write, not as a UUID.
-          id: `#${s.title.replace(/\s+/g, '-')}`,
-          title: s.title,
-          detail: row.worktree.branch,
-          group: 'sessions'
-        }))
-      ),
-    [worktrees.rows]
-  )
+  const mentions = useMemo(() => sessionMentions(worktrees.rows), [worktrees.rows])
 
   // Sessions first: there are a handful of them and hundreds of files, and the
   // fuzzy filter keeps the order it is given.
   //
   // The row is searched by its whole path — `#comp` should find
-  // `src/renderer/Composer.tsx` — but what lands in the box is the short token,
-  // registered on the way in so the message still leaves with the full path.
+  // `src/renderer/Composer.tsx` — and the whole path is what lands in the box:
+  // which of four `index.ts` you picked is part of what you just said, and a
+  // reference you cannot read is one you cannot check before sending.
   const paths = useMemo(
     () =>
       files.map((relPath) => ({
         id: `#${relPath}`,
-        insert: () => `#${shorten(relPath)}`,
         title: relPath,
         detail: 'file',
         group: 'files'

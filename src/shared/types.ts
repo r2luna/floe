@@ -101,6 +101,34 @@ export interface Project {
   env?: ProjectEnvConfig
 }
 
+/**
+ * What Floe can say about a path BEFORE it is added — the add-project dialog's
+ * preview pane, answered while you type.
+ *
+ * Deliberately the same checks addProjectByPath runs, in the same order: a pane
+ * that said "repo ✓" for a path the add then refuses would be worse than no
+ * pane at all. No `~` expansion here for exactly that reason — the add does not
+ * expand it either.
+ */
+export interface PathProbe {
+  /** The path as asked about, so a stale answer can be dropped. */
+  path: string
+  exists: boolean
+  isRepo: boolean
+  /** The repo root, when the path points inside a repo rather than at its top. */
+  root?: string
+  /** What the project would be called — the root's basename. */
+  name?: string
+  /** The branch the main worktree is on. */
+  branch?: string
+  /** How many worktrees come with it: they are added along with the project. */
+  worktrees?: number
+  /** Already a Floe project — adding it again only re-opens the one you have. */
+  added?: boolean
+  /** The group it already sits in, when it is already added. */
+  group?: string
+}
+
 // Per-project containerized environment. Only the fields you can't reliably infer
 // live here — PHP version above all (the reason to containerize); package manager
 // and DB engine carry sane defaults inferred elsewhere but can be pinned.
@@ -1101,7 +1129,7 @@ export interface MergeStep {
 // yes/no checkpoints — force-remove a dirty tree, then optionally delete the
 // branch. Reuses the merge step status vocabulary.
 
-export type RemoveStepId = 'preflight' | 'database' | 'worktree' | 'branch'
+export type RemoveStepId = 'preflight' | 'database' | 'site' | 'worktree' | 'branch'
 
 export type RemoveStepStatus = MergeStepStatus
 
@@ -1120,6 +1148,15 @@ export interface RemovePreflight {
   changes: string[] // porcelain lines (e.g. " M src/app.ts"), for display
   hasBranch: boolean // a real branch exists → we can offer to delete it
   merged: boolean // branch already merged into base → safe `-d` vs force `-D`
+  message?: string // why ok is false
+}
+
+// Result of unlinking the worktree's Herd site. `unlinked` is false when the
+// step was a safe no-op — no Herd, no Laravel, or nothing linked to begin with.
+export interface UnlinkSiteResult {
+  ok: boolean
+  unlinked: boolean
+  detail?: string
   message?: string // why ok is false
 }
 

@@ -196,6 +196,29 @@ test('no default is a bare shift+letter', () => {
   }
 })
 
+// Ticking sessions is scoped to the worktrees panel, and `x` and `d` are both
+// bound elsewhere — `x` runs a shell command in the chat, `d` deletes in five
+// other lists. A leak either way is a key that deletes the wrong thing.
+test('x and d tick and delete sessions, and only in the worktrees list', () => {
+  assert.deepEqual(r({ key: 'x' }, { kind: 'worktrees' }), { id: 'session.mark' })
+  assert.deepEqual(r({ key: 'd' }, { kind: 'worktrees' }), { id: 'session.deleteMarked' })
+  assert.deepEqual(r({ key: 'x' }, { kind: 'chat' }), { id: 'bash.run' })
+  assert.deepEqual(r({ key: 'd' }, { kind: 'files' }), { id: 'files.delete' })
+  assert.equal(r({ key: 'x' }, { kind: 'files' }), null)
+})
+
+// Escape unticks, but only with something ticked and only on the list that
+// shows the ticks — loose, it would swallow the key that leaves the composer.
+test('escape clears the ticks only when there are ticks to clear', () => {
+  assert.deepEqual(r({ key: 'Escape' }, { kind: 'worktrees', marked: true }), {
+    id: 'session.markClear'
+  })
+  assert.notDeepEqual(r({ key: 'Escape' }, { kind: 'worktrees' }), { id: 'session.markClear' })
+  assert.notDeepEqual(r({ key: 'Escape' }, { kind: 'chat', marked: true }), {
+    id: 'session.markClear'
+  })
+})
+
 // The setup checklist's three keys, and the fact that they are scoped to it:
 // `⏎` is the only way to the chat of a session that runs with no chat open
 // (D1), so a binding that leaked into another panel — or was never reachable —

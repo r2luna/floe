@@ -16,6 +16,7 @@ import {
   IconGitMerge,
   IconMessage,
   IconNotes,
+  IconPackage,
   IconPalette,
   IconPencil,
   IconPlug,
@@ -63,7 +64,7 @@ import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
-import { describeRef, expand, splitRefs } from './fileRefs'
+import { describeRef, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
 import { splitSkills } from '../../shared/skills'
 import { renderMarkdown, type MdLine } from './markdown'
@@ -118,11 +119,13 @@ import { RunInTerminal } from './runInTerminal'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
+import { ProvisionPanel } from './ProvisionPanel'
 import { SetupPanel } from './SetupPanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
 import type { Remove } from './useRemove'
+import type { Provision } from './useProvision'
 import type { ProjectSetup } from './useProjectSetup'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
@@ -228,6 +231,12 @@ export const KINDS = {
   // click any time is an invitation, and nothing about removing a worktree
   // should be one. It arrives only when ⌘K X starts a removal.
   remove: { icon: IconTrash, title: 'remove', width: 340, min: 260, order: 41, needsProject: true },
+  // The worktree's ENVIRONMENT: .env, dependencies, site, database. Distinct
+  // from `setup` below, which is the project's commands — this one is per
+  // worktree and runs on create. Off the rail for the same reason as that one:
+  // it is not a place you go, it is something that happens to a worktree you
+  // just made and that you watch until it is ready.
+  provision: { icon: IconPackage, title: 'provision', width: 340, min: 260, order: 41, needsProject: true },
   // The project setup's checklist — the commands a freshly added project gets.
   // Same shape and width as the merge and the removal, and NOT on the rail for
   // the removal's reason turned around: an icon you can click any time is an
@@ -431,7 +440,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup', 'provision']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -470,6 +479,12 @@ export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED
 export type OpenFn = (child: {
   kind: PanelKind
   sub?: string
+  /**
+   * Whether the new panel takes focus. False is a preview: the list that opened
+   * it keeps the cursor, so moving down the list changes what is shown beside
+   * it without you having to walk back for the next row.
+   */
+  focus?: boolean
   /** Read `sub` relative to this instead of the worktree. See Panel.root. */
   root?: string
   /** For a chat: which session it shows. */
@@ -506,9 +521,12 @@ export function PanelBody({
   projects,
   movingProject,
   worktrees,
+  marks,
+  onMark,
   changes,
   merge,
   remove,
+  provision,
   setup,
   onEnterProject,
   onEnterWorktree,
@@ -540,11 +558,17 @@ export function PanelBody({
   /** The project being moved between groups, while `m` has a move running. */
   movingProject?: { path: string; group: string } | null
   worktrees: Worktrees
+  /** The sessions ticked in the worktrees list, by Floe's own session id. */
+  marks?: ReadonlySet<string>
+  /** Tick one, or tick up to it from the last one — see App.markSession. */
+  onMark?: (target: { id: string; worktreePath: string }, mode: 'toggle' | 'range') => void
   changes: Changes
   /** The guided merge in flight, for the merge panel. See useMerge. */
   merge: Merge
   /** The guided removal in flight, for the remove panel. See useRemove. */
   remove: Remove
+  /** The worktree's setup in flight, for the setup panel. See useProvision. */
+  provision: Provision
   /** The project setup in flight, for the setup panel. See useProjectSetup. */
   setup: ProjectSetup
   /**
@@ -630,6 +654,9 @@ export function PanelBody({
         creating={newWorktree}
         onOpen={onOpen}
         openSession={openSession}
+        marks={marks}
+        onMark={onMark}
+        onCommand={onCommand}
         find={find}
       />
     )
@@ -664,6 +691,8 @@ export function PanelBody({
   // everything it offers — the chips and the keys are the same commands.
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
+  if (kind === 'provision')
+    return <ProvisionPanel flow={provision.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'setup') return <SetupPanel flow={setup.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files')
     return <FilesTree root={cwd} scope={sub} onOpen={onOpen} onCommand={onCommand} find={find} />
@@ -889,16 +918,11 @@ function Launcher({
   // rather than when the launcher opened, so an abandoned launcher leaves
   // nothing behind.
   const start = (choice: ModelChoice, attached?: Attached) => {
-    // Two forms of the same message: what was typed names files the short way,
-    // what is sent names them the way the agent can open. The title stays the
-    // typed one — a session called `/Users/…/skills/example.md:7-23` reads as
-    // nothing at all in the sidebar.
     const typed = text.trim()
-    const prompt = expand(typed)
     if (!typed) return
     const id = crypto.randomUUID()
     void window.floe.claude
-      .createSession({ id, worktreePath: cwd, title: prompt.slice(0, 60) })
+      .createSession({ id, worktreePath: cwd, title: typed.slice(0, 60) })
       .then(() => {
         // The prompt now lives in the session; leaving it in the launcher would
         // greet you with your last message the next time you land on the branch.
@@ -908,7 +932,7 @@ function Launcher({
           kind: 'chat',
           sub: typed.slice(0, 40),
           session: { id, worktreePath: cwd },
-          firstPrompt: prompt,
+          firstPrompt: typed,
           firstChoice: choice,
           firstAttached: attached
         })
@@ -942,6 +966,7 @@ function Launcher({
       <Composer
         value={text}
         onChange={setText}
+        draftKey={`branch:${cwd}`}
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
@@ -1558,6 +1583,7 @@ function ChatPanel({
       <Composer
         value={text}
         onChange={setText}
+        draftKey={session?.id}
         onSend={(choice, attached) => {
           repin()
           // A line that OPENS with `@codex` is addressed to codex: that one
@@ -1572,10 +1598,8 @@ function ChatPanel({
           // whether that starts a turn now or waits for the current one to end.
           const going = route ? routeChoice(route, choice) : choice
           if (route)
-            send(expand(route.prompt), going, attached?.images, attached?.files, linking, {
-              shown: expand(text)
-            })
-          else send(expand(text), going, attached?.images, attached?.files, linking)
+            send(route.prompt, going, attached?.images, attached?.files, linking, { shown: text })
+          else send(text, going, attached?.images, attached?.files, linking)
           setText('')
           setLinking(false)
         }}
@@ -2561,9 +2585,10 @@ function BashRow({ command }: { command: string }) {
 const LETTER = { added: 'A', modified: 'M', deleted: 'D', untracked: '?' } as const
 
 /**
- * Everything the worktree changed against its review base. Picking a file opens
- * its diff beside this list, and the two stay on screen together — you pick the
- * next file from the same list, without scrolling back to find it.
+ * Everything the worktree changed against its review base. The diff follows the
+ * cursor: landing on a row opens that file beside the list, and the two stay on
+ * screen together — you read the branch by walking the list, one press per file.
+ * Enter (or a click) hands the cursor to the diff, to scroll and select in it.
  */
 function ChangesList({
   changes,
@@ -2599,6 +2624,10 @@ function ChangesList({
           key={f.relPath}
           title={f.relPath}
           onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
+          // The cursor IS the DOM focus here — j/k focus the row — so focusing
+          // is the only signal that the selected file changed. The preview must
+          // not take the focus back, or the next j would move inside the diff.
+          onFocus={() => onOpen({ kind: 'diff', sub: f.relPath, focus: false })}
         >
           <span className="change-status" data-status={LETTER[f.status]}>
             {LETTER[f.status]}
@@ -4185,9 +4214,12 @@ function ProjectsList({
   onOpen: OpenFn
   find?: string
 }) {
-  if (projects.loading) return <p className="empty">Loading…</p>
+  // Only this machine's own list holds the panel back: a remote that is slow or
+  // unreachable is reported under the list instead, so the local projects are
+  // there to work in while the network is not.
+  if (projects.loading && !projects.all.length) return <p className="empty">Loading…</p>
   if (projects.error) return <p className="empty error">{projects.error}</p>
-  if (!projects.all.length)
+  if (!projects.all.length && !projects.remotes.length)
     return (
       <p className="empty">
         No projects yet — <kbd>⌘/</kbd> to add one.
@@ -4254,6 +4286,25 @@ function ProjectsList({
           ))}
         </div>
       ))}
+      {/* The machines still to answer. Named rather than counted: with one
+          remote down the question is which one, and "retry" is the whole
+          recovery — the list above is already usable. */}
+      {projects.remotes.length > 0 && (
+        <div className="remote-notes">
+          {projects.remotes.map((b) => (
+            <div className="remote-note" key={b.id}>
+              {b.state === 'loading' ? <Spinner /> : <span className="remote-off">○</span>}
+              <span className="row-name">{b.label}</span>
+              <span className="remote-why">{b.state === 'loading' ? 'connecting…' : 'offline'}</span>
+              {b.state === 'offline' && (
+                <button className="chip" onClick={() => projects.reload()}>
+                  retry
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {moving && (
         <p className="panel-hint">
           <kbd>j</kbd>/<kbd>k</kbd> pick a group · <kbd>↵</kbd> move · <kbd>Esc</kbd> cancel
@@ -4326,6 +4377,9 @@ function WorktreesList({
   creating,
   onOpen,
   openSession,
+  marks,
+  onMark,
+  onCommand,
   find
 }: {
   worktrees: Worktrees
@@ -4336,6 +4390,12 @@ function WorktreesList({
   onOpen: OpenFn
   /** The session the lane is showing, so the list can say which one that is. */
   openSession?: string | null
+  /** The sessions ticked for deletion, by Floe's own session id. */
+  marks?: ReadonlySet<string>
+  /** Tick one, or tick up to it from the last one — see App.markSession. */
+  onMark?: (target: { id: string; worktreePath: string }, mode: 'toggle' | 'range') => void
+  /** Run a command by id — what the right-click menu dispatches. */
+  onCommand?: (id: string) => void
   /** The find bar's query — the run of text it matched is tinted in the row. */
   find?: string
 }) {
@@ -4355,6 +4415,48 @@ function WorktreesList({
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
   const { busy, waiting, unread } = useSessionActivity(openKeys)
+
+  // Where the right-click menu is, and the row that opened it — closing hands
+  // focus back so the list continues where it was rather than nowhere.
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  // What the right-click menu offers. Every item runs a command id rather than
+  // acting, so the menu and the keys cannot drift — which is also why each one
+  // prints its key. See the rule at the top of commands.ts.
+  //
+  // The commands read the row the CURSOR is on, and opening the menu already
+  // focused that row, so nothing has to be threaded through: right-clicking a
+  // session and pressing `x` on it are the same two steps in the same order.
+  const picks = marks?.size ?? 0
+  const rowItems: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    {
+      label: menu && marks?.has(menu.row.dataset.session ?? '') ? 'Unselect' : 'Select',
+      keys: 'x',
+      run: () => onCommand?.('session.mark')
+    },
+    {
+      label: 'Unselect all',
+      keys: 'Esc',
+      disabled: picks === 0,
+      run: () => onCommand?.('session.markClear')
+    },
+    {
+      // Says how many, because with a selection open `d` is not about the row
+      // you right-clicked — and a menu reading "Delete session…" over four
+      // ticked sessions would be describing the wrong thing.
+      label: picks > 1 ? `Delete ${picks} selected sessions…` : 'Delete session…',
+      keys: 'd',
+      run: () => onCommand?.('session.deleteMarked')
+    }
+  ]
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -4448,11 +4550,25 @@ function WorktreesList({
             // the mark that says the answer is waiting. `busy` is corrected
             // against the main process every few seconds (see reconcileLive).
             const working = marked(busy)
+            // Ticked for deletion. Floe's own id, never the claudeId: the tick
+            // is a row in THIS list, and the two ids would let one session be
+            // ticked twice.
+            const picked = !!marks?.has(s.id)
             return (
             <button
               className="row row-session"
               key={s.id}
               title={s.title}
+              // Which session a row is, for the commands that act on the row the
+              // cursor is on — `x` and `d` read these rather than counting rows,
+              // which a folded branch would throw off.
+              data-session={s.id}
+              data-worktree={worktree.path}
+              // Ticked for deletion, which is a different question from every
+              // other state this row carries: unread is about the conversation,
+              // active is about what you are looking at, and this is about what
+              // `d` is going to throw away.
+              data-picked={picked || undefined}
               // An answer arrived while you were elsewhere. Cleared by opening
               // it, which is the only way to read it.
               data-unread={marked(unread) || undefined}
@@ -4460,7 +4576,14 @@ function WorktreesList({
               // cursor shows where you last MOVED; this shows what you are
               // actually looking at, and they are different questions.
               data-active={(!!openSession && names.includes(openSession)) || undefined}
-              onClick={() => {
+              onClick={(e) => {
+                // ⌘ ticks one, ⇧ ticks up to it — the gestures every list uses,
+                // and neither of them opens the chat: a selection you had to
+                // navigate away from to make would not be a selection.
+                if (e.metaKey || e.ctrlKey)
+                  return onMark?.({ id: s.id, worktreePath: worktree.path }, 'toggle')
+                if (e.shiftKey)
+                  return onMark?.({ id: s.id, worktreePath: worktree.path }, 'range')
                 worktrees.select(worktree.path)
                 // `claudeId` names the transcript file on disk; Floe's own id
                 // does not. Sending the wrong one reads an empty conversation.
@@ -4469,6 +4592,15 @@ function WorktreesList({
                   sub: s.title,
                   session: { id: s.claudeId ?? s.id, worktreePath: worktree.path }
                 })
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                const row = e.currentTarget as HTMLElement
+                // Focus first: the menu's items run the same commands the keys
+                // do, and those read the row the CURSOR is on — which focusing
+                // is what moves (see App's onFocusCapture).
+                row.focus()
+                setMenu({ x: e.clientX, y: e.clientY, row })
               }}
             >
               <SessionMark
@@ -4483,6 +4615,7 @@ function WorktreesList({
           })}
         </div>
       ))}
+      {menu && <RowMenu at={menu} items={rowItems} onClose={closeMenu} />}
     </>
   )
 }

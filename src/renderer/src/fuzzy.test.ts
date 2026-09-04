@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { capGroups, filterItems, subsequence, type PaletteItem } from './fuzzy.ts'
+import { capGroups, filterItems, splitTitle, subsequence, type PaletteItem } from './fuzzy.ts'
 
 const item = (title: string, detail?: string): PaletteItem => ({ id: title, title, detail })
 
@@ -87,4 +87,23 @@ test('capGroups keeps at most n rows of each group', () => {
     ['a', 'b', 'd', 'e'],
     'the files survive the long list of sessions above them'
   )
+})
+
+test('splitTitle keeps the highlight on both halves of a path', () => {
+  // "srcweb" matches across the split: three characters in the directory, three
+  // in the file name.
+  const hits = subsequence('src/main/webServer.ts', 'srcweb')
+  assert.ok(hits, 'the path matches')
+  const { dir, name, dirHits, nameHits } = splitTitle('src/main/webServer.ts', hits)
+  assert.equal(dir, 'src/main/')
+  assert.equal(name, 'webServer.ts')
+  assert.deepEqual(dirHits, [0, 1, 2], 'the directory keeps its own indices')
+  assert.deepEqual(nameHits, [0, 1, 2], 'the name is re-based, so "web" lights up in it')
+})
+
+test('splitTitle leaves a title with no directory alone', () => {
+  const { dir, name, nameHits } = splitTitle('git: merge worktree', [0, 1, 2])
+  assert.equal(dir, '', 'a command has no context half')
+  assert.equal(name, 'git: merge worktree')
+  assert.deepEqual(nameHits, [0, 1, 2])
 })

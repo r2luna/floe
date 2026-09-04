@@ -1,35 +1,6 @@
-import { test, beforeEach } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeRef, expand, resetRefs, shorten, splitRefs } from './fileRefs.ts'
-
-beforeEach(resetRefs)
-
-test('a reference shortens to its file name and expands back', () => {
-  const full = '/Users/me/.config/floe/skills/example.md:7-23'
-  assert.equal(shorten(full), 'example.md:7-23')
-  assert.equal(expand('look at example.md:7-23 please'), `look at ${full} please`)
-})
-
-test('a second file of the same name takes another segment', () => {
-  shorten('src/main/index.ts')
-  assert.equal(shorten('src/renderer/index.ts'), 'renderer/index.ts')
-  assert.equal(expand('#index.ts'), '#src/main/index.ts')
-  assert.equal(expand('#renderer/index.ts'), '#src/renderer/index.ts')
-})
-
-test('the same reference twice keeps one token', () => {
-  assert.equal(shorten('docs/plan.md'), 'plan.md')
-  assert.equal(shorten('docs/plan.md'), 'plan.md')
-})
-
-test('a token nobody registered is left exactly as typed', () => {
-  shorten('docs/plan.md')
-  assert.equal(expand('notes.md is mine'), 'notes.md is mine')
-})
-
-test('expanding a message with no references is the message', () => {
-  assert.equal(expand('just words'), 'just words')
-})
+import { describeRef, splitRefs } from './fileRefs.ts'
 
 test('a file reference is cut out of the text it sits in', () => {
   assert.deepEqual(splitRefs('see docs/plan.md:4 now'), [

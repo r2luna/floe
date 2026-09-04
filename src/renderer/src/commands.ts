@@ -67,6 +67,8 @@ export interface CommandContext {
   say: (text: string) => void
   /** Name a new project group. */
   createGroup: () => void
+  /** Re-read every machine's project list — the way back from a remote that was down. */
+  reloadProjects: () => void
   /**
    * Open a skill's Markdown in your editor, rooted at the skill's own
    * directory. Lives in App because launching the editor is the same two-step
@@ -142,6 +144,21 @@ export interface CommandContext {
     cancel: () => void
   }
   /**
+   * The worktree's environment setup, as the registry sees it. Same shape as
+   * the two above for the same reason — the panel's chips and the keys over it
+   * have to be one set of commands.
+   */
+  provision: {
+    /** A checklist exists for the worktree the app is in. */
+    active: boolean
+    /** It exists and has stopped, so ⏎ can re-run it. */
+    idle: boolean
+    /** Run (or re-run) the recipe for the worktree the app is in. */
+    start: () => void
+    retry: () => void
+    dismiss: () => void
+  }
+  /**
    * The project setup, as the registry sees it. Same flattening as `merge` and
    * `remove`, for the same reason: the panel's chips and the keys over it run
    * the same commands, or "⏎ open chat" is a lie.
@@ -169,8 +186,32 @@ export interface CommandContext {
    * remounts the tree, and the registry must not learn how.
    */
   useBackend: (id?: string) => void
-  /** Forget sessions, after asking: the open one, the rest of the worktree's, or all of them. */
-  deleteSession: (scope?: 'one' | 'others' | 'all') => void
+  /**
+   * Forget sessions, after asking: the open one, the rest of the worktree's,
+   * all of them, the stale ones, or the ones ticked in the worktrees list.
+   */
+  deleteSession: (scope?: 'one' | 'others' | 'all' | 'idle' | 'marked') => void
+  /**
+   * The sessions ticked in the worktrees list, by Floe's own session id.
+   *
+   * A list rather than a count: the header's red button needs the number, and
+   * `session.deleteMarked` needs the ids, and deriving one from the other would
+   * put the same set in two places.
+   */
+  markedSessions: string[]
+  /**
+   * Tick or untick a session. `range` ticks everything between the last one you
+   * touched and this one, which is what ⇧-click means everywhere else.
+   *
+   * Lives in App because only it holds the list the range is measured against —
+   * the registry must not learn where sessions come from.
+   */
+  markSession: (
+    target: { id: string; worktreePath: string },
+    mode: 'toggle' | 'range'
+  ) => void
+  /** Drop every tick. */
+  clearMarkedSessions: () => void
   /**
    * Open the session `delta` steps from the open one, in this branch's list.
    * Lives in App because only it holds that list — the registry must not learn

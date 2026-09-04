@@ -658,6 +658,28 @@ function agentReply(row: TranscriptItem, text: string): TranscriptItem {
   return { role: 'assistant', from: agentNick(row.agentType, row.toolUseId, row.harness), text }
 }
 
+// A notification closes the row of the agent it names and, when it carries a
+// <result>, lets that agent speak — the report exists nowhere else. Two agents
+// can finish into one message; each closes its own row, in delivery order.
+// Returns whether any row here was ours: a notification for an agent this
+// transcript never opened is plumbing, and must not print.
+function closeAgentRows(
+  items: TranscriptItem[],
+  agentRows: Map<string, number>,
+  notices: Array<{ toolUseId: string; result?: string }>,
+  at: number | undefined
+): boolean {
+  const mine = notices.filter((n) => agentRows.has(n.toolUseId))
+  for (const notice of mine) {
+    const row = items[agentRows.get(notice.toolUseId) as number]
+    row.running = false
+    if (at && row.at && at >= row.at) row.ms = at - row.at
+    agentRows.delete(notice.toolUseId)
+    if (notice.result) items.push(agentReply(row, notice.result))
+  }
+  return mine.length > 0
+}
+
 export function loadClaudeTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
   const file = join(projectsDir(), encode(worktreePath), `${sessionId}.jsonl`)
   if (!existsSync(file)) return []
@@ -700,7 +722,16 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
         // turn got round to it. It also must not move `turnStartedAt`: a steer
         // joins the turn in flight rather than starting one.
         const at = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || undefined : undefined
-        items.push({ role: 'user', text: a.prompt.trim(), at })
+        const prompt = a.prompt.trim()
+        // A task that finishes while the turn is running is QUEUED, and the
+        // queued copy is the ONLY one the transcript keeps — no `user` line
+        // ever follows it. Reloading it verbatim pasted the notification into
+        // the chat under your nick; it still has to close the row it belongs to.
+        if (isTaskNotification(prompt)) {
+          closeAgentRows(items, agentRows, parseTaskNotifications(prompt), at)
+          continue
+        }
+        items.push({ role: 'user', text: prompt, at })
       }
       continue
     }
@@ -753,17 +784,8 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
       // which drops it).
       const notices =
         role === 'user' && isTaskNotification(content) ? parseTaskNotifications(content) : []
-      const mine = notices.filter((n) => agentRows.has(n.toolUseId))
-      if (mine.length) {
-        // Two agents can finish into one message; each closes its own row and
-        // speaks for itself, in the order they were delivered.
-        for (const notice of mine) {
-          const row = items[agentRows.get(notice.toolUseId) as number]
-          row.running = false
-          if (at && row.at && at >= row.at) row.ms = at - row.at
-          agentRows.delete(notice.toolUseId)
-          if (notice.result) items.push(agentReply(row, notice.result))
-        }
+      if (closeAgentRows(items, agentRows, notices, at)) {
+        // Handled: the rows spoke for themselves.
       } else if (role === 'user') items.push(...expandUserText(content))
       else if (content.trim()) items.push({ role, text: content })
       for (let i = before; i < items.length; i++) {

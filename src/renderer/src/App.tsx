@@ -2,6 +2,7 @@ import {
   IconGitCompare,
   IconLayoutColumns,
   IconLayoutRows,
+  IconTrash,
   IconX
 } from '@tabler/icons-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -51,17 +52,28 @@ import { attach, backendLabel, backendOf, dropLanding, handOff, LOCAL, peekLandi
 import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
-import { useWorktrees } from './useWorktrees'
+import { useWorktrees, type WorktreeRow } from './useWorktrees'
 import { useChanges } from './useChanges'
 import { useCommands } from './useCommands'
 import { useMerge } from './useMerge'
 import { useRemove } from './useRemove'
+import { useProvision } from './useProvision'
 import { useProjectSetup } from './useProjectSetup'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
+import { CommandPreview, FilePreview, ProjectPreview } from './palettePreview'
 import { DEFAULT_GROUP, type ContextUsage, type McpCommand, type Project } from '../../shared/types'
 
+
+/**
+ * How long a session must sit untouched to count as stale — one hour, matching
+ * what the command promises in the palette.
+ */
+const IDLE_MS = 60 * 60_000
+
+/** A session the bulk delete is about to forget, and the worktree it lives in. */
+type Target = { s: WorktreeRow['sessions'][number]; path: string }
 
 /**
  * The rows a query matches, by index.
@@ -514,6 +526,20 @@ export default function App() {
   // The panel draws the preview from this and nothing is written until Enter, so
   // Escape really does put the project back where it was.
   const [moving, setMoving] = useState<{ path: string; group: string } | null>(null)
+
+  /**
+   * The sessions ticked in the worktrees list, by Floe's own session id.
+   *
+   * Component state rather than panel state, unlike the cursor and the line
+   * selection: those are indexes into a panel and have to survive leaving it,
+   * while a tick is a list of things you are ABOUT to delete. The lane is
+   * written to localStorage on every change, so putting the ticks there would
+   * restore them after a relaunch — a red "delete 4" button waiting for you on
+   * a list you ticked yesterday.
+   */
+  const [marks, setMarks] = useState<ReadonlySet<string>>(() => new Set())
+  // Where a ⇧-click measures from: the last row you ticked by hand.
+  const markAnchor = useRef<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
@@ -655,10 +681,148 @@ export default function App() {
       ? `${kind} — open a project first`
       : `${kind} is not available right now`
 
-  const deleteSession = (scope: 'one' | 'others' | 'all' = 'one') => {
+  /**
+   * Every session in the project, in the order the list draws them.
+   *
+   * What a ⇧-click measures a range against. Branch rows are not in it: a range
+   * is a run of sessions, and a fold in the middle of one must not tick the
+   * branch heading it crossed.
+   */
+  const sessionOrder = (): Target[] =>
+    worktrees.rows.flatMap((r) => r.sessions.map((s) => ({ s, path: r.worktree.path })))
+
+  const markSession = (
+    target: { id: string; worktreePath: string },
+    mode: 'toggle' | 'range'
+  ): void => {
+    const all = sessionOrder()
+    const to = all.findIndex((t) => t.s.id === target.id)
+    if (to === -1) return
+    // ⇧-click with nothing ticked yet has no span to draw, so it behaves as the
+    // first tick — which is also what it does in every file list there is.
+    const from = mode === 'range' ? all.findIndex((t) => t.s.id === markAnchor.current) : -1
+    markAnchor.current = target.id
+    setMarks((now) => {
+      const next = new Set(now)
+      if (from === -1) {
+        if (!next.delete(target.id)) next.add(target.id)
+        return next
+      }
+      // A range only ADDS. Dragging back over rows you already ticked to untick
+      // them is the gesture nobody means, and it silently undoes the first half
+      // of a selection.
+      const [lo, hi] = from < to ? [from, to] : [to, from]
+      for (let i = lo; i <= hi; i++) next.add(all[i].s.id)
+      return next
+    })
+  }
+
+  const clearMarks = (): void => {
+    markAnchor.current = null
+    setMarks((now) => (now.size ? new Set() : now))
+  }
+
+  // Ticks name sessions, so a session that stopped existing — deleted here,
+  // deleted from another window, or on a branch that was just removed — has to
+  // let go of its tick. Otherwise the header keeps offering to delete four
+  // things when only three are left, and `d` would ask about a phantom.
+  const liveIds = worktrees.rows.flatMap((r) => r.sessions.map((s) => s.id)).join('\n')
+  useEffect(() => {
+    const live = new Set(liveIds ? liveIds.split('\n') : [])
+    setMarks((now) => {
+      if (!now.size) return now
+      const next = new Set([...now].filter((id) => live.has(id)))
+      return next.size === now.size ? now : next
+    })
+  }, [liveIds])
+
+  // Switching project empties the list the ticks point into, the same way it
+  // invalidates the worktree selection (see useWorktrees).
+  useEffect(clearMarks, [projects.current?.path])
+
+  const deleteSession = (scope: 'one' | 'others' | 'all' | 'idle' | 'marked' = 'one') => {
     const at = lane.panels.findIndex((p) => p.session)
     const panel = lane.panels[at]
     const openId = panel?.session?.id
+
+    // Forget a batch of sessions, then close whatever panel was showing one.
+    // Each target carries its own worktree because the idle sweep crosses them;
+    // the other bulk scopes just pass the same path for every session.
+    //
+    // Returns whether it went ahead, so a caller with its own state to tidy —
+    // the ticks — can tell "deleted" from "you said no" and leave a cancelled
+    // selection exactly as it was.
+    const forget = (targets: Target[], question: string): boolean => {
+      if (!window.confirm(question)) return false
+      const gone = new Set(
+        targets.flatMap(({ s }) => [s.id, s.claudeId].filter(Boolean) as string[])
+      )
+      void Promise.all(
+        targets.map(({ s, path }) =>
+          window.floe.claude.closeSession({ id: s.id, worktreePath: path, claudeId: s.claudeId })
+        )
+      ).then(() => {
+        // Close every panel showing one of them — indices shift as we go, so
+        // resolve the next victim against the lane we just produced.
+        setLane((l) => {
+          let next = l
+          for (;;) {
+            const i = next.panels.findIndex((p) => p.session && gone.has(p.session.id))
+            if (i === -1) return next
+            next = closePanel(next, i, () => panelOf('branch'))
+          }
+        })
+        worktrees.reload()
+      })
+      return true
+    }
+
+    // What you ticked in the worktrees list, wherever it sits — the ticks cross
+    // branches, so this scope does too. With nothing ticked the row the cursor
+    // is on IS the selection of one, which is what keeps `d` from being a dead
+    // key on a list you have not ticked anything in yet.
+    if (scope === 'marked') {
+      const all = sessionOrder()
+      const targets = marks.size
+        ? all.filter((t) => marks.has(t.s.id))
+        : all.filter((t) => t.s.id === cursorSession()?.id)
+      if (!targets.length) return say('no session selected')
+      const what =
+        targets.length === 1
+          ? `"${targets[0].s.title}"`
+          : `${targets.length} selected sessions`
+      const went = forget(
+        targets,
+        `Delete ${what}? Floe forgets ${targets.length === 1 ? 'it' : 'them'} — the Claude ${
+          targets.length === 1 ? 'transcript stays' : 'transcripts stay'
+        } on disk.`
+      )
+      // Only once it actually deleted. Answering "no" and finding the selection
+      // gone would make the cancel cost as much as the delete.
+      if (went) clearMarks()
+      return
+    }
+
+    // The housekeeping sweep: every session in the project that has not been
+    // touched for an hour, across worktrees — a chat goes stale wherever it
+    // sits, and clearing one branch at a time is not a clear-out. A turn in
+    // flight keeps writing its transcript, so `mtime` already excludes it;
+    // `running` is only the second lock on that door.
+    if (scope === 'idle') {
+      const cutoff = Date.now() - IDLE_MS
+      const targets = worktrees.rows.flatMap((r) =>
+        r.sessions
+          .filter((s) => !s.running && s.mtime < cutoff)
+          .map((s) => ({ s, path: r.worktree.path }))
+      )
+      if (!targets.length) return say('no session has been idle for an hour')
+      forget(
+        targets,
+        `Delete ${targets.length} session${targets.length > 1 ? 's' : ''} idle for over an hour? Floe forgets them — the Claude transcripts stay on disk.`
+      )
+      return
+    }
+
     // The branch the open chat belongs to, else the selected one — same rule
     // cycleSession uses, so "this worktree" means the same thing everywhere.
     const path = panel?.session?.worktreePath ?? worktrees.currentPath
@@ -687,36 +851,16 @@ export default function App() {
       return
     }
 
-    const targets = scope === 'others' ? sessions.filter((s) => !isOpen(s)) : sessions
-    if (!targets.length) return
+    const picked = scope === 'others' ? sessions.filter((s) => !isOpen(s)) : sessions
+    if (!picked.length) return
     const what =
       scope === 'others'
-        ? `the other ${targets.length} session${targets.length > 1 ? 's' : ''}`
-        : `all ${targets.length} session${targets.length > 1 ? 's' : ''}`
-    if (
-      !window.confirm(
-        `Delete ${what} on this worktree? Floe forgets them — the Claude transcripts stay on disk.`
-      )
+        ? `the other ${picked.length} session${picked.length > 1 ? 's' : ''}`
+        : `all ${picked.length} session${picked.length > 1 ? 's' : ''}`
+    forget(
+      picked.map((s) => ({ s, path })),
+      `Delete ${what} on this worktree? Floe forgets them — the Claude transcripts stay on disk.`
     )
-      return
-    const gone = new Set(targets.flatMap((s) => [s.id, s.claudeId].filter(Boolean) as string[]))
-    void Promise.all(
-      targets.map((s) =>
-        window.floe.claude.closeSession({ id: s.id, worktreePath: path, claudeId: s.claudeId })
-      )
-    ).then(() => {
-      // Close every panel showing one of them — indices shift as we go, so
-      // resolve the next victim against the lane we just produced.
-      setLane((l) => {
-        let next = l
-        for (;;) {
-          const i = next.panels.findIndex((p) => p.session && gone.has(p.session.id))
-          if (i === -1) return next
-          next = closePanel(next, i, () => panelOf('branch'))
-        }
-      })
-      worktrees.reload()
-    })
   }
 
   // A terminal opens where you are: the worktree of the session you have open,
@@ -930,6 +1074,25 @@ export default function App() {
   })
 
   /**
+   * The worktree's environment, one checklist per worktree.
+   *
+   * Runs on create — the whole reason it is wired here rather than left to the
+   * MCP path: a worktree handed over without its `.env`, its dependencies, its
+   * site and its own database is one you test against the WRONG branch, and
+   * nothing on screen says so.
+   */
+  const provision = useProvision({
+    here,
+    show: () => setLane((l) => open(l, panelOf('provision'))),
+    // The recipe writes the worktree's `.env` and can register commands, so
+    // what reads those has to look again.
+    onDone: (worktreePath) => {
+      if (worktreePath === here) commands.reload()
+      worktrees.reload()
+    }
+  })
+
+  /**
    * The project setup, one flow per project.
    *
    * The session it opens is deliberately NOT put on screen (D1): the panel is
@@ -1017,6 +1180,22 @@ export default function App() {
     const rows = rowsOf(panelAt(lane.focus))
     const path = rows[lane.panels[lane.focus]?.cursor ?? 0]?.dataset.project
     return path ? projects.all.find((p) => p.path === path) : undefined
+  }
+
+  /**
+   * The session the worktrees cursor is on, or undefined when it is on a branch.
+   *
+   * Off the row's own `data-session`, for the same reason `projectAtCursor`
+   * reads `data-project`: the list is grouped and foldable, so an index into
+   * "sessions, ignoring branches" would tick the wrong chat the first time
+   * somebody collapsed one.
+   */
+  const cursorSession = (): { id: string; worktreePath: string } | undefined => {
+    if (lane.panels[lane.focus]?.kind !== 'worktrees') return undefined
+    const row = rowsOf(panelAt(lane.focus))[lane.panels[lane.focus]?.cursor ?? -1]
+    const id = row?.dataset.session
+    const worktreePath = row?.dataset.worktree
+    return id && worktreePath ? { id, worktreePath } : undefined
   }
 
   /**
@@ -1289,6 +1468,7 @@ export default function App() {
     askText: (opts) => askText(opts),
     say,
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
+    reloadProjects: () => projects.reload(),
     deleteProject: () => {
       const project = projectAtCursor()
       if (!project) return
@@ -1395,6 +1575,22 @@ export default function App() {
       retry: remove.retry,
       cancel: remove.cancel
     },
+    provision: {
+      active: !!provision.flow,
+      idle: !!provision.flow && !provision.flow.running,
+      start: () => {
+        const wt = worktrees.rows.find((r) => r.worktree.path === here)?.worktree
+        if (!wt || !projects.current) return say('no worktree to set up')
+        if (wt.isMain) return say('the main checkout is not provisioned — open a worktree')
+        provision.start({
+          root: projects.current.path,
+          worktreePath: wt.path,
+          branch: wt.branch
+        })
+      },
+      retry: provision.retry,
+      dismiss: provision.dismiss
+    },
     // The checklist's state, flattened the way the merge's and the removal's
     // are: the commands ask what the setup is waiting for, never what step it
     // is on.
@@ -1412,6 +1608,9 @@ export default function App() {
       openChat: setup.openChat
     },
     deleteSession,
+    markedSessions: [...marks],
+    markSession,
+    clearMarkedSessions: clearMarks,
     cycleSession,
     // Undefined until there IS one, which is also how the command knows to dim
     // itself: on the first chat of a session there is nowhere to go back to.
@@ -1608,6 +1807,7 @@ export default function App() {
           kind: lane.panels[lane.focus]?.kind,
           selecting: !!lane.panels[lane.focus]?.selection,
           moving: moving !== null,
+          marked: marks.size > 0,
           palette: blocked,
           ...stackNeighbours(columns, lane.focus)
         })
@@ -1704,6 +1904,16 @@ export default function App() {
                 const made = list.find((wt) => wt.branch === branch)
                 if (made) worktrees.select(made.path)
                 setLane((l) => open(l, panelOf('branch', branch)))
+                // The environment, right after the tree: `.env`, dependencies,
+                // the site and this branch's own database. Without it the
+                // worktree is a checkout you cannot run, and the site you open
+                // is still serving the main checkout.
+                if (made)
+                  provision.start({
+                    root: projects.current!.path,
+                    worktreePath: made.path,
+                    branch: made.branch
+                  })
               })
               .catch((e: Error) => console.warn('[worktree.new]', e.message))
           }
@@ -2064,6 +2274,29 @@ export default function App() {
                         {changeStat.del > 0 && <span className="stat-del">−{changeStat.del}</span>}
                       </button>
                     )}
+                    {/* What `d` is about to throw away, on screen the whole
+                        time there is something to throw away. The worktrees
+                        list can be taller than the window and the ticks are
+                        scattered down it, so the count is the only place the
+                        SIZE of the selection is visible at all — and a delete
+                        you can't see the scope of is one you press once and
+                        regret. Red because it is the one destructive thing in
+                        any panel header; it runs the same command `d` does, so
+                        this adds no mouse-only path. */}
+                    {kind === 'worktrees' && marks.size > 0 && (
+                      <button
+                        className="head-danger"
+                        title={`Delete ${marks.size} selected session${
+                          marks.size === 1 ? '' : 's'
+                        } (d) · Esc to unselect`}
+                        onClick={() =>
+                          runCommand(REGISTRY, ctxRef.current, 'session.deleteMarked')
+                        }
+                      >
+                        <IconTrash size={12} stroke={1.8} />
+                        {marks.size}
+                      </button>
+                    )}
                     {usage[panel.id]?.used > 0 && <ContextMeter usage={usage[panel.id]} />}
                     {'action' in spec && spec.action && (
                       <button
@@ -2111,10 +2344,13 @@ export default function App() {
                     projects={projects}
                     movingProject={moving}
                     worktrees={worktrees}
+                    marks={marks}
+                    onMark={markSession}
                     changes={changes}
                     commands={commands}
                     merge={merge}
                     remove={remove}
+                    provision={provision}
                     setup={setup}
                     // Picking a project or a branch is never just a selection:
                     // it restores everything that place was left showing.
@@ -2163,8 +2399,8 @@ export default function App() {
                     // every panel has an order, so nothing needs to say "after
                     // me".
                     onOpen={(child) =>
-                      setLane((l) =>
-                        open(l, {
+                      setLane((l) => {
+                        const next = open(l, {
                           ...mkPanel(
                             child.kind,
                             child.sub,
@@ -2179,7 +2415,15 @@ export default function App() {
                           // past five arguments to skip it.
                           firstAttached: child.firstAttached
                         })
-                      )
+                        // A preview leaves the focus where it was — by id, not
+                        // by index: the panel that opened may have shifted right
+                        // to make room for the one it opened.
+                        if (child.focus === false) {
+                          const back = next.panels.findIndex((p) => p.id === panel.id)
+                          if (back !== -1) return { ...next, focus: back }
+                        }
+                        return next
+                      })
                     }
                   />
                 </div>
@@ -2366,6 +2610,8 @@ export default function App() {
           items={picker.items}
           value={picker.value}
           dynamic={picker.dynamic}
+          sigil="›"
+          hints="⏎ pick · ↑↓ move · esc cancel"
           onClose={() => {
             setPicker(null)
             backToLane()
@@ -2386,6 +2632,25 @@ export default function App() {
         <Palette
           placeholder="Execute a command…"
           items={commandItems(binds)}
+          sigil="⌘"
+          hints="⏎ run · ⌘⏎ rebind · ↑↓ move · esc close"
+          // The pane says what a dimmed row cannot: which condition is missing.
+          preview={(item) => {
+            const cmd = REGISTRY.get(item.id)
+            if (!cmd) return null
+            return (
+              <CommandPreview
+                title={cmd.title}
+                group={cmd.group}
+                keys={item.keys}
+                unavailable={
+                  cmd.enabled && !cmd.enabled(ctxRef.current)
+                    ? (cmd.unavailable?.(ctxRef.current) ?? 'not available here')
+                    : undefined
+                }
+              />
+            )
+          }}
           onClose={() => setCommandsOpen(false)}
           onPick={(id) => {
             setCommandsOpen(false)
@@ -2412,6 +2677,11 @@ export default function App() {
           // A repo has thousands of files and nobody reads past the fold of a
           // fuzzy list — they type another letter.
           limit={200}
+          sigil="▤"
+          hints="⏎ open · ↑↓ move · esc close"
+          // The head of the file, which is what tells you whether it is the one
+          // you meant — two files named index.ts differ by nothing else.
+          preview={(item) => here && <FilePreview root={here} path={item.id} />}
           onClose={() => setFileList(null)}
           onPick={(path) => {
             setFileList(null)
@@ -2424,6 +2694,24 @@ export default function App() {
         <Palette
           placeholder="Switch project…"
           items={paletteItems(projects)}
+          sigil="◆"
+          hints="⏎ open · ↑↓ move · esc close"
+          preview={(item) => {
+            const project = projects.all.find((p) => p.path === item.id)
+            if (!project) return null
+            return (
+              <ProjectPreview
+                project={project}
+                // Same rule as the row's badge: local is the default and says
+                // nothing, so the machine only appears where it answers something.
+                machine={
+                  project.backend && project.backend !== LOCAL
+                    ? backendLabel(project.backend)
+                    : undefined
+                }
+              />
+            )
+          }}
           onClose={() => setPaletteOpen(false)}
           onPick={(id) => {
             setPaletteOpen(false)
@@ -2476,6 +2764,10 @@ function paletteItems(projects: ReturnType<typeof useProjects>): PaletteItem[] {
       id: p.path,
       title: p.name,
       detail: p.home ? 'home' : p.group,
+      // The machine the project is on, same rule as the projects panel: local
+      // is the default and gets no badge, so the tag only appears where it
+      // answers something.
+      badge: p.backend && p.backend !== LOCAL ? backendLabel(p.backend) : undefined,
       group: p.group
     })),
     // Pinned: it must be there exactly when the search finds nothing, because

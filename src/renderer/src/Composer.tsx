@@ -15,7 +15,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import type { Attached, FileAttachment, ImageAttachment } from '../../shared/types'
+import type { Attached } from '../../shared/types'
 import {
   imageNum,
   insertImageRef,
@@ -38,6 +38,7 @@ import {
 import { DEFAULT_MODE, MODES, modesFor, nearestMode } from '../../shared/modes.ts'
 import { useLocalAgents } from './useLocalAgents'
 import { pushHistory, readHistory } from './history'
+import { usePending } from './drafts'
 import { useVimEnabled } from './appearance'
 import { blockAt, vimKey, vimStart, type VimState } from './vim'
 
@@ -95,7 +96,8 @@ export function Composer({
   pinPending,
   onDigit,
   onEmptyEnter,
-  modelLeft
+  modelLeft,
+  draftKey
 }: {
   value: string
   onChange: (next: string) => void
@@ -140,6 +142,10 @@ export function Composer({
   /** Put the model chip on the left, beside the tool buttons, instead of the
       far right — in a chat it then sits under the start of what you type. */
   modelLeft?: boolean
+  /** Where the unsent message is filed — the same key its text is under. What
+      was pasted in follows the text: without a key the chips only live as long
+      as this composer is mounted. */
+  draftKey?: string
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -493,8 +499,9 @@ export function Composer({
     setDrill([])
   }
 
-  const [images, setImages] = useState<ImageAttachment[]>([])
-  const [files, setFiles] = useState<FileAttachment[]>([])
+  // Kept beside the text under the same key, so leaving the panel with a
+  // pasted screenshot and coming back finds it still attached.
+  const { images, files, setImages, setFiles } = usePending(draftKey)
   const [rejected, setRejected] = useState<string[]>([])
   // Set while the file picker is (or just was) up: the attach button's hover
   // style is suppressed until the pointer proves it is still there.
@@ -1001,7 +1008,11 @@ export function Composer({
             </div>
           )}
           {matches.map(({ item, hits }, i) => (
-            <Fragment key={item.id}>
+            // Keyed by position as well as id: two rows CAN write the same
+            // token (a session titled like a file path), and a repeated key
+            // reconciles the rows onto each other, leaving the previous
+            // query's rows on screen under the new query's highlights.
+            <Fragment key={`${i}:${item.id}`}>
               {item.group && item.group !== matches[i - 1]?.item.group && (
                 <div className="composer-menu-group">{item.group}</div>
               )}

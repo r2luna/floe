@@ -1,14 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEFAULT_GROUP, type Project } from '../../shared/types'
 import {
   addGroupOn,
   attach,
   backendIds,
+  backendLabel,
   backendOf,
+  backendState,
   currentBackend,
   deleteGroupOn,
   dropLanding,
   handOff,
+  isRemote,
   loadProjectUnion,
   mergeProjects,
   removeOn,
@@ -26,8 +29,15 @@ export interface Projects {
   all: Project[]
   /** Grouped for display, in the order groups first appear in the list. */
   groups: { name: string; projects: Project[] }[]
+  /**
+   * The machine this window is on has not answered yet — the only wait the panel
+   * blanks for. A remote that is slow or down is reported in `remotes` instead,
+   * because the local projects are usable without it.
+   */
   loading: boolean
   error?: string
+  /** Remote machines that are not on the list yet, for the panel to say so. */
+  remotes: RemoteStatus[]
   /** The one the app considers current. */
   current?: Project
   select: (path: string) => void
@@ -50,6 +60,14 @@ export interface Projects {
   /** Forget a project. Its folder on disk is untouched — Floe just stops listing it. */
   remove: (path: string) => Promise<void>
   reload: () => void
+}
+
+/** A remote machine the panel is still waiting on, or gave up on. */
+export interface RemoteStatus {
+  id: string
+  label: string
+  /** 'loading' is still trying; 'offline' answered with an error or not at all. */
+  state: 'loading' | 'offline'
 }
 
 /**
@@ -75,32 +93,78 @@ export interface AddResult {
  */
 export function useProjects(self: object): Projects {
   const [all, setAll] = useState<Project[]>([])
-  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
   const [currentPath, setCurrentPath] = useState<string>()
 
   const [groupNames, setGroupNames] = useState<string[]>([])
 
-  // Every attached machine's projects at once, each row tagged with the machine
-  // it came from — one panel you can read across, instead of a list that empties
-  // and refills whenever the window moves. A machine that is down drops out of
-  // the union rather than failing the load (see fanOut).
+  const [pending, setPending] = useState<string[]>(backendIds)
+  const [offline, setOffline] = useState<string[]>([])
+
+  // Every attached machine's projects, each row tagged with the machine it came
+  // from — one panel you can read across, instead of a list that empties and
+  // refills whenever the window moves.
+  //
+  // Merged slice by slice as they land rather than as one union, because a
+  // machine that is down does not fail fast: its socket sits there until the OS
+  // gives up, and waiting for it left the panel on "Loading…" with the local
+  // projects already in hand. Local paints first now and the remotes fill in
+  // behind it; one that never answers is named in `remotes`, not waited for.
+  // The load whose slices are still worth taking. A machine that answers late —
+  // after a retry has already started a newer load — must not write its rows
+  // back over the ones that load is collecting.
+  const gen = useRef(0)
+
   const reload = useCallback(() => {
-    loadProjectUnion()
-      .then(({ projects, groups }) => {
-        setAll(projects)
-        setGroupNames(groups)
-        setError(undefined)
-        // Nothing selected yet: start on the first real project rather than on
-        // nothing, so the app has somewhere to be on a cold boot. Backend order
-        // is local-first, so that is a project on this machine.
-        setCurrentPath((p) => p ?? projects.find((x) => !x.home)?.path ?? projects[0]?.path)
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+    const ids = backendIds()
+    setPending(ids)
+    setOffline([])
+    // Rebuilt per load rather than accumulated: a group deleted on the last
+    // machine to answer must not survive in the list because an earlier slice
+    // still had it.
+    const names = new Set<string>()
+    void loadProjectUnion((slice) => {
+      if (slice.gen < gen.current) return
+      gen.current = slice.gen
+      setPending((p) => p.filter((id) => id !== slice.backend))
+      if (slice.error) {
+        // The rows that machine last gave us stay on screen — stale, marked, and
+        // better than a panel that loses half its projects when a tunnel drops.
+        setOffline((o) => (o.includes(slice.backend) ? o : [...o, slice.backend]))
+        // Only THIS machine failing is a panel-wide error. A remote that is down
+        // is a normal state of the world, reported per machine.
+        if (slice.backend === currentBackend()) setError(slice.error)
+        return
+      }
+      if (slice.backend === currentBackend()) setError(undefined)
+      // A machine that answered after its eight seconds were up is not offline,
+      // it was slow — take the rows and drop the mark.
+      setOffline((o) => (o.includes(slice.backend) ? o.filter((id) => id !== slice.backend) : o))
+      setAll((prev) => mergeProjects(prev, slice.projects, slice.backend, ids))
+      slice.groups.forEach((g) => names.add(g))
+      setGroupNames([...names])
+      // Nothing selected yet: start on the first real project rather than on
+      // nothing, so the app has somewhere to be on a cold boot. Local answers
+      // first, so that is a project on this machine.
+      setCurrentPath((p) => p ?? slice.projects.find((x) => !x.home)?.path ?? slice.projects[0]?.path)
+    })
   }, [])
 
   useEffect(reload, [reload])
+
+  // A machine that was down comes back on its own: its socket reconnects with
+  // backoff behind us, so watch for one to open and pull its projects in
+  // without the user having to ask for them. A poll rather than a new event
+  // across the preload seam, and one that only runs while something is
+  // actually offline.
+  useEffect(() => {
+    const down = offline.filter(isRemote)
+    if (!down.length) return
+    const timer = setInterval(() => {
+      if (down.some((id) => backendState(id) === 'open')) reload()
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [offline, reload])
 
   const landOn = useCallback(
     (res: { project?: { path: string }; created?: boolean; error?: string }): AddResult => {
@@ -230,8 +294,14 @@ export function useProjects(self: object): Projects {
   return {
     all,
     groups,
-    loading,
+    // Only this machine's slice blanks the panel. Waiting on a remote is
+    // something the list says next to itself while you keep working.
+    loading: pending.includes(currentBackend()),
     error,
+    remotes: [
+      ...pending.filter(isRemote).map((id) => ({ id, label: backendLabel(id), state: 'loading' as const })),
+      ...offline.filter(isRemote).map((id) => ({ id, label: backendLabel(id), state: 'offline' as const }))
+    ],
     current: all.find((p) => p.path === currentPath),
     select,
     // Groups that exist on disk, plus any a project sits in — the dialog must

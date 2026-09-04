@@ -61,8 +61,8 @@ test('applying keeps whatever followed the caret', () => {
 
 /* --- erasing a reference -------------------------------------------------- */
 
-// The composer's own answer, standing in for the sessions and shortened paths
-// the real one knows about.
+// The composer's own answer, standing in for the sessions and file paths the
+// real one knows about.
 const isRef = (token: string): boolean =>
   ['#Composer.tsx', '#docs/notes.md:12-30', '#a-session', 'src/main/index.ts'].includes(token)
 

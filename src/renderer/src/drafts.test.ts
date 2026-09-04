@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { put } from './drafts.ts'
+import { keep, put, type Pending } from './drafts.ts'
+import type { ImageAttachment } from '../../shared/types.ts'
+
+const img = (id: string): ImageAttachment => ({ id, mediaType: 'image/png', data: 'x' })
 
 test('a draft is kept under its own key', () => {
   assert.deepEqual(put({}, 's1', 'meio escrito'), { s1: 'meio escrito' })
@@ -20,4 +23,25 @@ test('old drafts fall off the end', () => {
   assert.equal(Object.keys(d).length, 50)
   assert.equal('s0' in d, false)
   assert.equal('s54' in d, true)
+})
+
+test('a pasted image is kept under the draft it was pasted into', () => {
+  const store = new Map<string, Pending>()
+  keep(store, 's1', { images: [img('a1')], files: [] })
+  assert.deepEqual(store.get('s1')?.images.map((i) => i.id), ['a1'])
+})
+
+test('sending clears the chips instead of leaving an empty entry', () => {
+  const store = new Map<string, Pending>()
+  keep(store, 's1', { images: [img('a1')], files: [] })
+  keep(store, 's1', { images: [], files: [] })
+  assert.equal(store.has('s1'), false)
+})
+
+test('old attachments fall off the end', () => {
+  const store = new Map<string, Pending>()
+  for (let i = 0; i < 15; i++) keep(store, `s${i}`, { images: [img(`a${i}`)], files: [] })
+  assert.equal(store.size, 10)
+  assert.equal(store.has('s0'), false)
+  assert.equal(store.has('s14'), true)
 })

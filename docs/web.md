@@ -223,10 +223,17 @@ Consequência aceita: o Mac aparece na web enquanto o Floe estiver aberto. Quem
 precisa ser sempre-no-ar é uma máquina sem desktop — o `link`.
 
 > A mensagem "daemon not responding — likely macOS privacy (Full Disk Access)"
-> é uma **string fixa** que o plugin lança sempre que o ping de 10s falha
-> (`daemon.ts`), não um diagnóstico. Na tentativa registrada aqui o
-> `daemon.log` não recebeu linha nenhuma, então a causa real segue desconhecida
-> — não gaste tempo mexendo em Privacy & Security por causa dela.
+> é uma string fixa que o plugin lança em qualquer falha do ping de 10s
+> (`daemon.ts`) — mas **neste Mac ela acerta**. `~/.config` é symlink para
+> `~/Documents/Dev/config/`, e `~/Documents` é área protegida por TCC: um
+> processo que o launchd sobe trava na primeira leitura do `config.json` do
+> plugin, antes de escrever qualquer linha no log. É por isso que o
+> `daemon.log` fica vazio na tentativa — não é ausência de erro, é o travamento
+> acontecendo cedo demais para logar.
+>
+> Conceder Full Disk Access provavelmente faria o daemon subir. Não faça: a
+> razão para não usar daemon aqui é a de cima (dois backends se matam no boot),
+> e ela não depende de permissão nenhuma.
 
 ## O que fica de fora
 

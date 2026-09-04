@@ -1,0 +1,366 @@
+<!doctype html>
+<html data-theme="dark" id="root-html">
+<head>
+<meta charset="utf-8" />
+<title>Modals — 6 layouts</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. Every proposal below reuses the app's own tokens and
+   existing classes — no new colours, no solid fills, no shadows. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:78ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 10px; max-width:78ch; }
+.opt{ margin:0 0 34px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* --- the stage: a miniature of the running app, so each modal is judged
+       against the surface it actually lands on ------------------------------ */
+.stage{ position:relative; height:372px; max-width:1000px; overflow:hidden;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius); }
+.stage-lane{ position:absolute; inset:0; display:flex; gap:8px; padding:8px; }
+.mini-rail{ display:flex; flex-direction:column; gap:2px; width:26px; flex:none;
+  align-items:center; padding-top:2px; color:var(--dim); font-size:12px; }
+.mini-rail i{ font-style:normal; line-height:22px; }
+.mini-panel{ display:flex; flex-direction:column; min-height:0; background:var(--panel);
+  border:1px solid var(--line-soft); border-radius:var(--radius); }
+.mini-panel[data-focused]{ background:var(--panel-focused); border-color:var(--line); }
+.mini-head{ display:flex; align-items:center; gap:7px; height:var(--head-h); flex:none;
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.mini-body{ flex:1; min-height:0; overflow:hidden; padding:8px; }
+.mini-side{ flex:0 0 190px; }
+.mini-chat{ flex:1; min-width:0; }
+.mini-row{ display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:var(--radius); }
+.mini-row[data-on]{ background:var(--wash-3); color:var(--text-strong); }
+.mini-msg{ color:var(--dim); margin-bottom:8px; }
+.mini-msg b{ color:var(--nick-claude); font-weight:400; }
+.mini-composer{ margin:8px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:var(--radius); color:var(--faint); flex:none; }
+
+/* Where the overlay sits inside the stage. */
+.stage-scrim{ position:absolute; inset:0; display:flex; justify-content:center;
+  align-items:flex-start; padding-top:34px; }
+
+/* Shared bits reused by more than one proposal. */
+.k{ color:var(--text-strong); }
+.fld-label{ color:var(--dim); font-size:11px; }
+
+/* --- O1: panel dialog ----------------------------------------------------- */
+.o1-scrim{ background:#0506084d; }
+:root[data-theme='light'] .o1-scrim{ background:#3d434e1f; }
+.o2-scrim{ background:#05060899; }
+:root[data-theme='light'] .o2-scrim{ background:#3d434e26; }
+.o1{ width:420px; display:flex; flex-direction:column;
+  background:var(--panel-focused); border:1px solid var(--line); border-radius:var(--radius); }
+.o1-head{ display:flex; align-items:center; gap:7px; height:var(--head-h); flex:none;
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.o1-body{ display:flex; flex-direction:column; gap:10px; padding:10px 11px 4px; }
+.o1-foot{ padding:7px 11px; border-top:1px solid var(--line-soft);
+  color:var(--faint); font-size:10px; }
+.o1 .dialog-input,.o1 .dialog-select{ width:100%; padding:6px 10px; font-size:12px; }
+
+/* --- O2: palette-shaped --------------------------------------------------- */
+.o2{ width:520px; }
+.o2 .palette-row{ padding:7px 10px; }
+.o2 .palette-value{ margin-left:auto; color:var(--text-strong); }
+.o2 .palette-value[data-empty]{ color:var(--faint); }
+
+/* --- O3: lane panel (no overlay) ------------------------------------------ */
+.o3{ flex:0 0 300px; }
+
+/* --- O4: inline, in place ------------------------------------------------- */
+.o4-form{ display:flex; flex-direction:column; gap:6px; margin:2px 0 8px;
+  padding:2px 2px 10px; border-bottom:1px solid var(--line-soft); }
+.o4-form .dialog-input,.o4-form .dialog-select{ width:100%; padding:6px 10px; font-size:12px; }
+
+/* --- O5: ledger ----------------------------------------------------------- */
+.o5{ width:400px; background:var(--panel-focused); border:1px solid var(--line);
+  border-radius:var(--radius); }
+.o5-head{ padding:9px 12px 8px; color:var(--dim); font-size:11px;
+  border-bottom:1px solid var(--line-soft); }
+.o5-head b{ color:var(--text-strong); font-weight:400; }
+.o5-rows{ padding:4px 0; }
+.o5-row{ display:flex; align-items:center; gap:10px; padding:5px 12px; }
+.o5-row[data-at]{ background:var(--wash-3); }
+.o5-key{ flex:0 0 68px; text-align:right; color:var(--dim); font-size:11px; }
+.o5-val{ flex:1; min-width:0; color:var(--text-strong); }
+.o5-val[data-empty]{ color:var(--faint); }
+.o5-val .caret{ border-left:1px solid var(--accent); margin-left:1px; }
+.o5-foot{ padding:7px 12px; border-top:1px solid var(--line-soft);
+  color:var(--faint); font-size:10px; }
+
+/* --- O6: rail form -------------------------------------------------------- */
+.o6{ width:440px; background:var(--panel-focused); border:1px solid var(--line);
+  border-radius:var(--radius); }
+.o6-body{ padding:12px 14px 4px; }
+.o6 .merge-node{ font-size:12px; color:var(--text); padding-bottom:12px; }
+.o6 .merge-node .fld-label{ display:block; margin-bottom:4px; }
+.o6 .dialog-input,.o6 .dialog-select{ width:100%; padding:6px 10px; font-size:12px; }
+.o6-foot{ padding:7px 14px; border-top:1px solid var(--line-soft);
+  color:var(--faint); font-size:10px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Modals — 6 layouts</h1>
+<p class="lede">
+  Same content in all six: the <span class="k">Add project</span> dialog (machine, group, path).
+  Each is drawn over a miniature of the running app so the fit is judged against
+  the surface it lands on. Reference at the top is what ships today.
+</p>
+
+<!-- ============================ current ================================== -->
+<div class="opt">
+  <h2>Current — 620px box on a dark scrim</h2>
+  <p class="note">
+    F1 it is the only surface in the app with its own head style (12/16px padding,
+    no 34px head bar). F2 the scrim at 60% black hides the app you are adding to.
+    F3 it ends in a Cancel/Add button pair, while every other flow ends in a key
+    hint strip. F4 620px is wider than the sidebar it is about. F5 the scrim has
+    no light-theme override, so on the white theme it lands as a grey slab.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body">
+          <div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div>
+          <div class="mini-row"><i class="dot"></i>pinguim</div>
+        </div></div>
+      <div class="mini-panel mini-chat" data-focused><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span><span style="color:var(--dim)">— claude</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div>
+          <div class="mini-msg">ok, ship it</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+    <div class="stage-scrim" style="background:#05060899; padding-top:28px">
+      <div class="dialog" style="width:620px">
+        <div class="dialog-head">Add project</div>
+        <div class="dialog-body">
+          <div class="chips"><div class="chips-label">Machine</div>
+            <div class="chips-row"><label class="chip" data-on>this mac</label><label class="chip">link</label></div></div>
+          <div class="dialog-field"><label class="chips-label">Group</label>
+            <div class="dialog-row"><select class="dialog-select"><option>work</option></select></div></div>
+          <div class="dialog-row">
+            <input class="dialog-input" placeholder="Path to a git repo on this mac…" />
+            <button class="btn">Browse…</button></div>
+          <div class="dialog-actions"><span class="dialog-hint">Type a path, or browse for the folder</span>
+            <button class="btn">Cancel</button><button class="btn btn-primary">Add</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O1 ===================================== -->
+<div class="opt">
+  <h2>O1 — Panel dialog</h2>
+  <p class="note">
+    The modal wears panel chrome: a 34px head with icon + name, panel-focused
+    background, and a key hint strip instead of buttons. Narrower (420px) so it
+    reads as one more panel that happens to float. Smallest change, best fit.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+    <div class="stage-scrim o1-scrim">
+      <div class="o1">
+        <div class="o1-head"><span style="color:var(--dim)">＋</span><span style="color:var(--text-strong)">add project</span><span class="panel-sub" style="flex:1">this mac</span></div>
+        <div class="o1-body">
+          <div><div class="chips-label">Machine</div>
+            <div class="chips-row"><label class="chip" data-on>this mac</label><label class="chip">link</label></div></div>
+          <div><div class="chips-label">Group</div><select class="dialog-select"><option>work</option><option>New group…</option></select></div>
+          <div><div class="chips-label">Path</div><input class="dialog-input" placeholder="~/code/…" /></div>
+        </div>
+        <div class="o1-foot">⏎ add · ⌘O browse · esc cancel</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O2 ===================================== -->
+<div class="opt">
+  <h2>O2 — Palette-shaped</h2>
+  <p class="note">
+    Reuses the palette box exactly — same width, same top offset, same well,
+    same footer of kbd actions. The fields are palette rows: ⏎ opens the row,
+    ↑↓ moves. A dialog stops being a second kind of overlay and becomes the
+    palette answering more than one question.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+    <div class="stage-scrim o2-scrim">
+      <div class="palette o2">
+        <input class="palette-input" placeholder="~/code/floe" value="~/code/floe" />
+        <div class="palette-list">
+          <div class="palette-row" data-at><span class="palette-title">Machine</span><span class="palette-value">this mac</span></div>
+          <div class="palette-row"><span class="palette-title">Group</span><span class="palette-value">work</span></div>
+          <div class="palette-row"><span class="palette-title">Path</span><span class="palette-value" data-empty>browse…</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action"><kbd>⏎</kbd>add</span>
+          <span class="palette-action"><kbd>↑↓</kbd>field</span>
+          <span class="palette-action"><kbd>esc</kbd>cancel</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O3 ===================================== -->
+<div class="opt">
+  <h2>O3 — Lane panel, no overlay</h2>
+  <p class="note">
+    No modal at all: the question opens as a column in the lane, exactly like
+    the merge, remove and setup flows already do. Nothing is dimmed, the chat
+    keeps running beside it, and esc closes the panel like any other.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row"><i class="dot dot-unread"></i>rookery</div></div></div>
+      <div class="mini-panel o3" data-focused>
+        <div class="mini-head"><span style="color:var(--dim)">＋</span><span style="color:var(--text-strong)">add project</span></div>
+        <div class="mini-body" style="display:flex;flex-direction:column;gap:10px">
+          <div><div class="chips-label">Machine</div>
+            <div class="chips-row"><label class="chip" data-on>this mac</label><label class="chip">link</label></div></div>
+          <div><div class="chips-label">Group</div><select class="dialog-select" style="width:100%;padding:6px 10px;font-size:12px"><option>work</option></select></div>
+          <div><div class="chips-label">Path</div><input class="dialog-input" style="width:100%;padding:6px 10px;font-size:12px" placeholder="~/code/…" /></div>
+          <div class="merge-foot" style="margin-top:auto">⏎ add · esc cancel</div>
+        </div>
+      </div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O4 ===================================== -->
+<div class="opt">
+  <h2>O4 — Inline, in place</h2>
+  <p class="note">
+    The form grows at the top of the list it edits, the way the new-worktree
+    form already does. Zero new surface: the answer appears where the result
+    will appear. Cheapest visually, tightest space — long paths get a narrow box.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side" style="flex:0 0 250px" data-focused>
+        <div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body">
+          <div class="o4-form">
+            <div class="chips-label">Add project</div>
+            <div class="chips-row"><label class="chip" data-on>this mac</label><label class="chip">link</label></div>
+            <input class="dialog-input" placeholder="~/code/…" />
+            <select class="dialog-select"><option>work</option><option>New group…</option></select>
+            <div class="merge-foot" style="margin-top:2px;padding-top:6px">⏎ add · esc cancel</div>
+          </div>
+          <div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row"><i class="dot dot-unread"></i>rookery</div>
+        </div>
+      </div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O5 ===================================== -->
+<div class="opt">
+  <h2>O5 — Ledger</h2>
+  <p class="note">
+    No input boxes. A right-aligned label column and the value as plain text,
+    edited on the row the cursor is on — the same read as a list of rows
+    elsewhere in the app. 400px, sized to the content, quietest of the six.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+    <div class="stage-scrim o1-scrim">
+      <div class="o5">
+        <div class="o5-head">add <b>project</b></div>
+        <div class="o5-rows">
+          <div class="o5-row"><span class="o5-key">machine</span><span class="o5-val">this mac</span></div>
+          <div class="o5-row"><span class="o5-key">group</span><span class="o5-val">work</span></div>
+          <div class="o5-row" data-at><span class="o5-key">path</span><span class="o5-val">~/code/floe<span class="caret">&nbsp;</span></span></div>
+        </div>
+        <div class="o5-foot">⏎ add · ↑↓ field · ⌘O browse · esc cancel</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== O6 ===================================== -->
+<div class="opt">
+  <h2>O6 — Rail form</h2>
+  <p class="note">
+    Borrows the timeline the merge, remove and setup panels already use: one dot
+    per question, filled once answered, the open one carrying its field. Makes
+    a dialog look like the flows it sits next to. Heaviest of the six — the rail
+    earns its keep on 3+ fields, not on a single prompt.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel mini-side"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+        <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div>
+          <div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+      <div class="mini-panel mini-chat"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+    <div class="stage-scrim o1-scrim">
+      <div class="o6">
+        <div class="o6-body">
+          <div class="merge-head"><span class="merge-branch">add project</span><span class="merge-count">2/3</span></div>
+          <ul class="merge-track">
+            <li class="merge-node merge-ok"><i class="merge-dot"></i>
+              <div class="merge-row"><span class="merge-name">machine</span><span class="merge-aside">this mac</span></div></li>
+            <li class="merge-node merge-ok"><i class="merge-dot"></i>
+              <div class="merge-row"><span class="merge-name">group</span><span class="merge-aside">work</span></div></li>
+            <li class="merge-node merge-run"><i class="merge-dot"></i>
+              <span class="fld-label">path</span>
+              <input class="dialog-input" placeholder="~/code/…" /></li>
+          </ul>
+        </div>
+        <div class="o6-foot">⏎ add · esc cancel</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
