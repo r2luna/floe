@@ -53,11 +53,14 @@ export function splitRefs(text: string): TextPart[] {
 }
 
 /**
- * Split a reference into what a chip shows: the file name, its lines, and the
- * whole thing for the tooltip.
+ * Split a reference into what a chip shows: the path, its lines, and the whole
+ * thing for the tooltip.
+ *
+ * The path is shown whole — `src/renderer/src/panels.tsx`, not `panels.tsx`.
+ * Which of four `index.ts` the message names is the part you check, and the
+ * chip is what you check it in.
  */
-export function describeRef(ref: string): { name: string; lines?: string; full: string } {
+export function describeRef(ref: string): { path: string; lines?: string; full: string } {
   const [, path = ref, lines] = REF.exec(ref) ?? []
-  const name = path.split('/').filter(Boolean).pop() ?? path
-  return { name, lines: lines?.slice(1), full: ref }
+  return { path, lines: lines?.slice(1), full: ref }
 }

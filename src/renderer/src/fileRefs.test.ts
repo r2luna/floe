@@ -18,14 +18,14 @@ test('a bare file name in prose stays prose', () => {
   assert.deepEqual(splitRefs('read the notes.md file'), [{ text: 'read the notes.md file' }])
 })
 
-test('a chip shows the name and the lines, and keeps the path', () => {
+test('a chip shows the whole path and the lines, not just the file name', () => {
   assert.deepEqual(describeRef('/a/b/example.md:7-23'), {
-    name: 'example.md',
+    path: '/a/b/example.md',
     lines: '7-23',
     full: '/a/b/example.md:7-23'
   })
   assert.deepEqual(describeRef('src/a.ts'), {
-    name: 'a.ts',
+    path: 'src/a.ts',
     lines: undefined,
     full: 'src/a.ts'
   })

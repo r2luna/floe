@@ -1785,10 +1785,10 @@ const isMessage = (item: TranscriptItem): boolean =>
 /**
  * Your own words, with file references drawn as chips.
  *
- * The message on the wire carries the full path — that is the point of it — but
- * a line of `/Users/…/.config/floe/skills/example.md:7-23` in the log is a wall
- * you have to read to find the two things you care about: which file, which
- * lines. The chip says exactly those, and the tooltip still has the path.
+ * The message on the wire carries the full path — that is the point of it — and
+ * the chip carries it too: `src/renderer/src/panels.tsx`, not `panels.tsx`,
+ * because which of four files of that name you meant is the part worth
+ * reading. The chip only sets it apart from the sentence around it.
  *
  * Everything else is left alone: this is what the user typed, and rendering it
  * as markdown would reformat their own sentence back at them.
@@ -1927,11 +1927,11 @@ function MentionText({ text }: { text: string }) {
 }
 
 function FileChip({ ref_ }: { ref_: string }) {
-  const { name, lines, full } = describeRef(ref_)
+  const { path, lines, full } = describeRef(ref_)
   return (
     <span className="file-ref" title={full}>
       <IconFileText size={12} stroke={1.6} />
-      <span className="file-ref-name">{name}</span>
+      <span className="file-ref-name">{path}</span>
       {lines && <span className="file-ref-lines">{lines}</span>}
     </span>
   )
