@@ -24,7 +24,7 @@ PTY_VERSION="$(node -p "require('./package.json').dependencies['node-pty'].repla
 
 echo "── build ─────────────────────────────────"
 node scripts/build-server.mjs
-# The browser UI the daemon serves (src/main/webServer.ts, docs/web.md). Skipped
+# The browser UI the server plugin serves (docs/web.md). Skipped
 # with FLOE_SKIP_WEB=1 when only the backend changed — it is the slow half.
 [ -n "${FLOE_SKIP_WEB:-}" ] || pnpm exec vite build --config vite.config.web.ts
 
@@ -60,7 +60,10 @@ cd ~/$DIR
 # there forever.
 if [ -f /tmp/floe-web.tgz ]; then
   rm -rf out/web.new && mkdir -p out/web.new
-  tar xzf /tmp/floe-web.tgz -C out/web.new
+  # --warning=no-unknown-keyword: macOS's bsdtar writes LIBARCHIVE.xattr.* pax
+  # headers that GNU tar over here does not know, and would otherwise complain
+  # about once per file — 25 lines of noise on every deploy, about nothing.
+  tar --warning=no-unknown-keyword -xzf /tmp/floe-web.tgz -C out/web.new
   rm -rf out/web
   mv out/web.new/web out/web
   rm -rf out/web.new /tmp/floe-web.tgz

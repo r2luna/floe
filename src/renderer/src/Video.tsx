@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { IconMovie } from '@tabler/icons-react'
 import { findVideoRefs } from '../../shared/videoRefs'
-import { mediaSrc } from './mediaSrc'
 import type { MediaFile } from '../../shared/types'
 
 /**
@@ -122,7 +121,7 @@ function VideoPlayer({ file }: { file: MediaFile }): React.ReactElement {
         <video
           ref={ref}
           className="irc-video-el"
-          src={mediaSrc(file.url)}
+          src={file.url}
           controls
           // Metadata only: a chat with five recordings in it must not pull five
           // files off disk to show five first frames.

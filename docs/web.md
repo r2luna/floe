@@ -22,15 +22,36 @@ Faltavam só duas: **servir a página** e **servir os vídeos**.
 
 ## As peças
 
+A metade **cliente** mora no core; a metade **servidora** é do plugin
+`server` (`floe-plugins/server`). O core constrói o bundle e nunca o serve —
+num desktop de outra pessoa nada disso liga, porque o que ligaria não está lá.
+
+**No core:**
+
 | Arquivo | O quê |
 |---|---|
-| `src/web/bridge.ts` | Monta `window.floe` sobre o socket. Resolve os `PINNED_CHANNELS`. |
+| `src/web/bridge.ts` | Monta `window.floe` sobre o socket. `PINNED_CHANNELS` e o roteador multi-backend. |
 | `src/web/main.ts` | Entry: instala a ponte e **depois** importa o entry do renderer. |
 | `src/web/index.html` | A página do desktop com os assets em caminho absoluto. |
-| `vite.config.web.ts` | Build do browser → `out/web`. |
-| `src/main/webServer.ts` | O HTTP: bundle estático, deep links, e `/media/…`. |
-| `src/main/webBoot.ts` | Quando servir, em que porta, e com que token. |
-| `src/renderer/src/mediaSrc.ts` | `floe-media://` → `/media/…` quando é browser. |
+| `src/web/backendUrl.ts` | A regra de esquema: página https ⇒ backend em `wss`. |
+| `src/web/mediaRewrite.ts` | `floe-media://` → `/media/…`, na volta do `media:probe`. |
+| `vite.config.web.ts` | Build do browser → `out/web` (`pnpm build:web`). |
+
+**No plugin `server`:**
+
+| Arquivo | O quê |
+|---|---|
+| `src/webServer.ts` | O HTTP: bundle estático, deep links, e `/media/…` com Range. |
+| `src/webBoot.ts` | Quando servir, em que porta, e com que token. |
+
+O plugin sobe e derruba o HTTP dentro do `startServing`/`stopServing` que já
+existia, então desligar server mode fecha as duas portas juntas.
+
+Duas coisas o plugin **não** reimplementa: a política de mídia (ele chama
+`ctx.invoke('media:probe', path)` e o core responde se aquilo é um vídeo e onde
+está) e a localização do `out/web` (derivada de `process.argv[1]`, o entry do
+daemon — o `__dirname` do plugin aponta para `~/.config/floe/plugins/server/dist`,
+que não fica perto de nada disso).
 
 ### `PINNED_CHANNELS` no browser
 
@@ -46,16 +67,22 @@ canal cai num de dois lados, e não há terceiro:
   API de browser quando existe uma. O daemon shima esses num no-op, e responder
   de lá seria mentira.
 
-`backends:get` responde `[]`: a página é servida por um daemon só, e a barra de
-máquinas não tem entre o que alternar.
+`backends:get` é a exceção que confirma a regra: ele descreve o workspace, então
+vai pelo socket — e é assim que a página enxerga as outras máquinas. Ver
+"Alcançar outras máquinas" no fim.
 
 ### Vídeo
 
 Uma gravação nunca é carregada pelo IPC — é **servida** (`src/main/media.ts`).
 No desktop, num scheme que o Chromium aprendeu no boot (`floe-media://`); numa
-aba, ninguém ensinou nada, então vem da rota `/media/…`, que reusa o mesmo
-`mediaResponse()` — inclusive os `206` que fazem a barra de seek funcionar antes
-do arquivo baixar. Imagens não precisam de nada: já são data URLs.
+aba, ninguém ensinou nada, então vem da rota `/media/…`, com os `206` que fazem
+a barra de seek funcionar antes do arquivo baixar. Imagens não precisam de nada:
+já são data URLs.
+
+A troca de endereço acontece **na volta do `media:probe`**, na ponte, não no
+componente. Assim o renderer nunca fica sabendo que existe um build web:
+`Video.tsx` renderiza `file.url` e está certo nos dois hosts, porque quando ele
+vê a url ela já é a certa.
 
 ## Autenticação
 
@@ -134,6 +161,72 @@ anterior para sempre.
 curl -s -o /dev/null -w "%{http_code}\n" https://floe.pinguim.io/          # 200
 curl -s https://floe.pinguim.io/ | grep -c __FLOE_BOOT__                   # 1
 ```
+
+## Alcançar outras máquinas a partir da web
+
+A página servida pelo `link` não fica presa nele. `backends:get` vai pelo socket
+até o daemon que serviu a página, e cada máquina que ele conhece vira um socket
+próprio — o mesmo roteador multi-backend do preload (`src/preload/index.ts`),
+com uma troca só: lá o "local" é o IPC do Electron, aqui é o socket do daemon.
+
+### A regra de URL (`src/web/backendUrl.ts`)
+
+O plugin monta a url de toda máquina como `ws://<host>` — ele foi escrito para o
+desktop, onde não existe origem de página. Numa aba isso é mixed content, e se
+passa ou não depende do browser, do endereço e da semana. Então **quem decide o
+esquema é a página**: página em `https` sobe todo backend para `wss`.
+
+Máquina pareada por **IP puro é recusada**, não rebaixada: não há certificado
+para um IP, e conectar assim seria exatamente a aposta que essa regra existe
+para eliminar. Pareie pelo nome DNS da tailnet.
+
+Consequência prática: cada máquina cuida do próprio TLS. O `link` faz isso com o
+Caddy; o Mac faz com `tailscale serve`.
+
+### O Mac (`cypher`) como backend
+
+```bash
+# no Mac: liga o gate (porta 41680) — Floe → comando "Server: toggle"
+# e põe TLS na frente dele:
+tailscale serve --bg --https=443 http://127.0.0.1:41680
+#   → https://cypher.leopon-sole.ts.net  (cert Let's Encrypt automático)
+
+# no link: pareia o Mac PELO NOME, com a porta 443
+#   plugins:run plugin:server:add-machine "cypher.leopon-sole.ts.net:443 <token> cypher"
+```
+
+O `host` é `cypher.leopon-sole.ts.net:443` de propósito: o plugin escreve
+`ws://` fixo, então a url sai `ws://cypher.leopon-sole.ts.net:443` e a página a
+sobe para `wss://cypher.leopon-sole.ts.net/`. O token sai do
+`plugin:server:copy-pair` no Mac.
+
+Um canal PINNED continua no daemon que serviu a página mesmo com o ponteiro no
+Mac — o tema, o `floe.toml`, os plugins são os *do link*, porque é dele a
+página. Só o trabalho segue o ponteiro.
+
+### Por que o gate do Mac roda dentro do app, e não como daemon
+
+`Server: toggle` tenta instalar um daemon launchd e cai para in-process se ele
+não responder em 10s. No Mac ele não responde, e **isso é para ficar assim.**
+
+Dois backends do Floe não podem coexistir numa máquina. Todo boot roda
+`reapOrphanCommands()`, e `reapPersisted()` (`src/main/commandRunner.ts`) dá
+`SIGKILL` em todo grupo de comando persistido cujo PID ainda bate — depois zera
+a lista. O segundo processo a subir mata os dev servers do primeiro e apaga a
+contabilidade dele. Num laptop onde o app fica aberto, o daemon é justamente o
+segundo processo.
+
+Atacar o app no próprio daemon (`127.0.0.1`) não contorna: isso muda só para
+onde a janela aponta; o backend do app já bootou e já reapou.
+
+Consequência aceita: o Mac aparece na web enquanto o Floe estiver aberto. Quem
+precisa ser sempre-no-ar é uma máquina sem desktop — o `link`.
+
+> A mensagem "daemon not responding — likely macOS privacy (Full Disk Access)"
+> é uma **string fixa** que o plugin lança sempre que o ping de 10s falha
+> (`daemon.ts`), não um diagnóstico. Na tentativa registrada aqui o
+> `daemon.log` não recebeu linha nenhuma, então a causa real segue desconhecida
+> — não gaste tempo mexendo em Privacy & Security por causa dela.
 
 ## O que fica de fora
 

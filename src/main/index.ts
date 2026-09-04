@@ -177,7 +177,6 @@ import {
 import { applyFileOps, listDir, readFileContent, renderDocument, resolveWikiLink, searchableFiles } from './files'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
-import { serveWebUi } from './webBoot'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
@@ -1333,10 +1332,6 @@ void app.whenReady().then(async () => {
   // (backends:get runs at window load). A broken plugin logs and is skipped;
   // boot never dies for one.
   await loadPlugins(app.getVersion(), () => localWindow ?? BrowserWindow.getAllWindows()[0])
-  // Headless only: the same UI, served to a browser. After loadPlugins because
-  // the gate whose token the page carries is a plugin, and it has to have
-  // written that token before a page can be handed one. See docs/web.md.
-  await serveWebUi()
   createWindow()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
   // window getter so ordering vs. createWindow doesn't matter.
