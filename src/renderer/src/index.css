@@ -6058,3 +6058,206 @@ kbd {
 :root[data-theme='light'] .draw-count::after {
   color: var(--edge);
 }
+
+/* --- narrow: one panel per screen ----------------------------------------
+   A phone has no horizontal room to spend, and the lane's axis is horizontal:
+   at 390px a 380px column plus the 40px rail cannot both fit, so the desktop
+   lane always showed a panel cut down the middle. Below the breakpoint a
+   column IS the screen and the lane snaps to it; at or above it nothing here
+   applies and the desktop lane runs untouched — which is what an unfolded fold
+   in landscape gets, two panels beside the rail.
+
+   `data-narrow` is written by useNarrow. The number lives there and only
+   there; a media query here would be a second copy that drifts. */
+
+:root[data-narrow] .lane {
+  scroll-snap-type: x mandatory;
+}
+
+/* The kind's width, and the width you dragged to, both describe a lane with
+   room to divide. Here there is exactly one screen, so neither applies — but
+   neither is thrown away either: the lane still holds them, and unfolding
+   hands them straight back. */
+:root[data-narrow] .lane-col,
+:root[data-narrow] .lane-col[data-sized],
+:root[data-narrow] .lane-col[data-grow] {
+  flex: 0 0 100%;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+/* Sticky is how the chat stays put while what it opened scrolls past it. At
+   full width there is nothing to scroll past — it would simply sit on top of
+   every panel you swiped to. */
+:root[data-narrow] .lane-col[data-sticky] {
+  position: static;
+}
+
+/* Nothing left to drag: the column is the screen. The 9px strip would only
+   steal touches from the panel edge under it. */
+:root[data-narrow] .splitter[data-axis="x"] {
+  display: none;
+}
+
+/* --- the open panels, as tabs ---------------------------------------------
+   The lane's one weakness on a phone is that it is off-screen: swiping blind
+   through panels you cannot see is how you lose track of what is open. The
+   desktop answers this with the panels themselves — you can see them. Here the
+   heads are listed instead, in lane order, so the row IS the lane's map. */
+.lane-tabs {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lane-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* The outline-chip pattern, like every other button in the app. */
+.lane-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.lane-tab[data-on] {
+  border-color: var(--line);
+  background: var(--wash-2);
+  color: var(--text-strong);
+}
+
+/* Only the panel you are on offers its close. Thirteen ✕ under a thumb is
+   thirteen ways to shut the wrong thing. */
+.lane-tab-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: -4px;
+  border-radius: var(--radius-sm);
+  color: var(--faint);
+}
+
+.lane-tab-x:hover {
+  color: var(--text-strong);
+  background: var(--wash-3);
+}
+
+/* --- the rail, along the bottom ------------------------------------------
+   Same icons, same order, same grouping — a strip under the thumb instead of a
+   column against a pointer's edge. It scrolls rather than hiding half of
+   itself behind a "more", which would make those panels a second class. */
+:root[data-narrow] .workspace {
+  flex-direction: column;
+}
+
+:root[data-narrow] .rail {
+  flex-direction: row;
+  padding: 0 8px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+:root[data-narrow] .rail::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-narrow] .rail-group {
+  flex-direction: row;
+}
+
+/* The hairline turns with the strip: between blocks, not above them. */
+:root[data-narrow] .rail-group + .rail-group {
+  margin: 0 0 0 9px;
+  padding: 0 0 0 9px;
+  border-top: none;
+  border-left: 1px solid var(--line-soft);
+}
+
+/* 44px is what a thumb hits; 32px is sized for a pointer. */
+:root[data-narrow] .rail-btn {
+  flex: none;
+  width: 44px;
+  height: 40px;
+}
+
+/* A tooltip that opens on hover says nothing to a finger, and this one opens
+   to the LEFT of a button that is now at the bottom of the screen. */
+:root[data-narrow] .rail-tip {
+  display: none;
+}
+
+/* --- the key bar ----------------------------------------------------------
+   The keys the phone's own keyboard does not have, in a strip above it. Only
+   in narrow mode — a desktop has the keys.
+
+   It scrolls rather than wrapping: a second row would move the first one every
+   time the set changed, and the thumb is aiming at a fixed place. */
+.keybar {
+  display: flex;
+  gap: 5px;
+  flex: none;
+  padding: 7px 8px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.keybar::-webkit-scrollbar {
+  display: none;
+}
+
+/* The outline chip again, at a size a thumb hits: 34px tall against the rail's
+   40px, so the two strips read as one block without looking like two rails. */
+.key {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.key:hover,
+.key:focus-visible {
+  border-color: var(--dimmer);
+  background: var(--wash-2);
+  color: var(--text-strong);
+}
+
+/* Words need the room single characters don't. */
+.key[data-wide],
+.key-w {
+  min-width: 42px;
+}
+
+/* Armed ctrl — the one piece of state the bar holds, so it is the one thing
+   that gets the accent. Nothing else here is ever tinted. */
+.key[data-armed] {
+  border-color: var(--accent);
+  background: var(--wash-2);
+  color: var(--accent);
+}
+
+/* Light theme: the accent is legible on the lighter fill, but the wash is not
+   — white over white is not a state. See the wash rule at the top. */
+:root[data-theme='light'] .key[data-armed] {
+  background: #00000008;
+}

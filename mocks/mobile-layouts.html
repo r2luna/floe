@@ -1,0 +1,458 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe no celular — 5 layouts + barra de teclas</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. Tudo dentro do telefone reusa os tokens do app —
+   nenhuma cor nova, nenhum botão com preenchimento sólido, nenhuma sombra. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:24px 28px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.m-sub{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:80ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:46ch; }
+.note b{ color:var(--dim); font-weight:400; }
+.rowset{ display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start; }
+.opt{ width:390px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:9; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* --- o telefone -----------------------------------------------------------
+   390 x 780 CSS px = iPhone 14/15 em retrato. Só uma borda: o app separa por
+   linha, nunca por sombra. */
+.phone{ width:390px; height:780px; box-sizing:border-box; border:1px solid var(--edge);
+  border-radius:16px; overflow:hidden; background:var(--bg); display:flex; flex-direction:column;
+  position:relative; }
+.status{ flex:none; height:26px; display:flex; align-items:center; gap:8px; padding:0 14px;
+  color:var(--time-dim); font-size:10px; }
+.status .r{ margin-left:auto; }
+
+/* Cabeçalho do app: onde estou. Uma linha só — no celular a altura é o recurso escasso. */
+.appbar{ flex:none; display:flex; align-items:center; gap:7px; height:var(--head-h);
+  padding:0 10px; border-bottom:1px solid var(--line-soft); color:var(--dim); font-size:12px; }
+.appbar .proj{ color:var(--text-strong); }
+.appbar .sep{ color:var(--faint); }
+.appbar .r{ margin-left:auto; display:flex; gap:6px; }
+.icb{ background:transparent; border:1px solid transparent; border-radius:var(--radius);
+  color:var(--dim); font:inherit; font-size:13px; width:26px; height:26px; display:grid;
+  place-items:center; cursor:pointer; }
+.icb:hover{ border-color:var(--line); background:var(--wash-2); color:var(--text-strong); }
+
+/* Um painel, do jeito que o app desenha: card com header e corpo. */
+.panel-m{ display:flex; flex-direction:column; min-height:0; background:var(--panel);
+  border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden; }
+.panel-m[data-focused]{ background:var(--panel-focused); border-color:var(--line); }
+.ph{ flex:none; display:flex; align-items:center; gap:7px; height:var(--head-h); padding:0 9px;
+  border-bottom:1px solid var(--line-soft); font-size:12px; }
+.ph .nm{ color:var(--text-strong); }
+.ph .sb{ color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ph .r{ margin-left:auto; display:flex; gap:4px; }
+.pb{ flex:1; min-height:0; overflow:hidden; padding:8px; }
+
+/* Transcript IRC: quem falou numa coluna, o que falou na outra. */
+.say{ display:flex; gap:8px; padding:2px 0; align-items:baseline; }
+.say .nk{ flex:none; width:62px; text-align:right; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; }
+.n-you{ color:var(--nick-you); }
+.n-cl{ color:var(--nick-claude); }
+.say .tx{ min-width:0; color:var(--text); }
+.say .tx.dimmed{ color:var(--dim); }
+.m-tool{ margin:4px 0 4px 70px; border:1px solid var(--line-soft); border-radius:var(--radius);
+  padding:4px 8px; color:var(--dim); font-size:12px; background:var(--well); }
+.m-tool b{ color:var(--text-strong); font-weight:400; }
+.m-tool i{ color:var(--live); font-style:normal; }
+
+/* Composer, sempre colado no teclado. */
+.m-composer{ flex:none; border-top:1px solid var(--line-soft); padding:8px 10px;
+  display:flex; align-items:center; gap:8px; color:var(--faint); font-size:12px; }
+.m-composer .cap{ color:var(--accent); }
+.m-composer .r{ margin-left:auto; }
+
+/* Lista genérica (files, worktrees, sessions). */
+.lrow{ display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:var(--radius);
+  font-size:12px; }
+.lrow[data-cursor]{ background:var(--wash-3); }
+.lrow .nm{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--text); }
+.lrow[data-cursor] .nm{ color:var(--text-strong); }
+.lrow .mt{ color:var(--time-dim); font-size:11px; }
+.dotm{ flex:none; width:6px; height:6px; border:1px solid #4a4f59; border-radius:50%; }
+.dotm[data-live]{ background:var(--live); border-color:var(--live); }
+.dotm[data-unread]{ background:var(--accent); border-color:var(--accent); }
+
+/* Terminal falso: mesmo poço, mesma entrelinha. */
+.term{ background:var(--well); border-radius:var(--radius); padding:8px 9px; height:100%;
+  box-sizing:border-box; overflow:hidden; color:var(--dim); font-size:12px; line-height:1.25; }
+.term b{ color:var(--live); font-weight:400; }
+.term em{ color:var(--text-strong); font-style:normal; }
+.term .cur{ background:var(--text); color:var(--well); }
+
+/* ---- O1: lane com scroll-snap + rail virando barra inferior ------------- */
+.snaplane{ flex:1; min-height:0; display:flex; gap:8px; padding:8px; overflow:hidden; }
+.snaplane > .panel-m{ flex:0 0 calc(100% - 18px); }
+/* A lasca do próximo painel é a única coisa que ensina que a lane continua. */
+.peek{ flex:0 0 10px; border:1px solid var(--line-soft); border-right:none;
+  border-radius:var(--radius) 0 0 var(--radius); background:var(--panel); }
+.tabbar{ flex:none; display:flex; border-top:1px solid var(--line-soft); padding:6px 4px 10px; }
+.tab{ flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  background:transparent; border:1px solid transparent; border-radius:var(--radius);
+  color:var(--dim); font:inherit; font-size:10px; padding:5px 0 4px; cursor:pointer; }
+.tab .g{ font-size:14px; line-height:1; }
+.tab[data-on]{ color:var(--text-strong); border-color:var(--line); background:var(--wash-2); }
+.dots{ flex:none; display:flex; gap:5px; justify-content:center; padding:0 0 6px; }
+.dots i{ width:5px; height:5px; border-radius:50%; background:var(--wash-5); }
+.dots i[data-on]{ background:var(--dimmer); }
+
+/* ---- O2: painel cheio + gaveta ----------------------------------------- */
+.fab{ position:absolute; left:50%; bottom:16px; transform:translateX(-50%);
+  border:1px solid var(--edge); border-radius:999px; background:var(--panel-focused);
+  color:var(--dim); font:inherit; font-size:11px; padding:5px 14px; cursor:pointer; z-index:3; }
+.sheet{ position:absolute; left:0; right:0; bottom:0; background:var(--panel-focused);
+  border-top:1px solid var(--line); border-radius:12px 12px 0 0; padding:8px 10px 16px; z-index:4; }
+.grab{ width:34px; height:3px; border-radius:999px; background:var(--wash-5);
+  margin:2px auto 10px; }
+.grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+.gcell{ display:flex; flex-direction:column; align-items:center; gap:5px; padding:9px 0;
+  border:1px solid var(--line-soft); border-radius:var(--radius); background:transparent;
+  color:var(--dim); font:inherit; font-size:10px; cursor:pointer; }
+.gcell .g{ font-size:15px; line-height:1; }
+.gcell[data-on]{ color:var(--text-strong); border-color:var(--line); background:var(--wash-2); }
+.gsep{ grid-column:1 / -1; height:1px; background:var(--line-soft); margin:3px 0; }
+.scrim{ position:absolute; inset:0; background:#0009; z-index:2; }
+
+/* ---- O3: chat-first + folha modal -------------------------------------- */
+.modal{ position:absolute; left:0; right:0; bottom:0; top:56px; background:var(--panel-focused);
+  border:1px solid var(--line); border-bottom:none; border-radius:12px 12px 0 0;
+  display:flex; flex-direction:column; z-index:4; overflow:hidden; }
+
+/* ---- O4: colunas viram chips ------------------------------------------- */
+.chips{ flex:none; display:flex; gap:6px; padding:7px 8px; border-bottom:1px solid var(--line-soft);
+  overflow:hidden; }
+.m-chip{ display:flex; align-items:center; gap:6px; border:1px solid var(--line-soft);
+  border-radius:var(--radius); background:transparent; color:var(--dim); font:inherit;
+  font-size:11px; padding:3px 9px; cursor:pointer; white-space:nowrap; }
+.m-chip[data-on]{ color:var(--text-strong); border-color:var(--line); background:var(--wash-2); }
+.m-chip .x{ color:var(--faint); }
+.m-chip.add{ padding:3px 8px; color:var(--faint); }
+
+/* ---- O5: navegação em pilha -------------------------------------------- */
+.navbar{ flex:none; display:flex; align-items:center; gap:8px; height:40px; padding:0 10px;
+  border-bottom:1px solid var(--line-soft); font-size:13px; }
+.navbar .bk{ color:var(--dim); background:none; border:none; font:inherit; cursor:pointer;
+  padding:0; }
+.navbar .ti{ color:var(--text-strong); }
+.navbar .r{ margin-left:auto; display:flex; gap:6px; }
+.sec{ padding:9px 8px 3px; color:var(--faint); font-size:11px; letter-spacing:.08em; }
+
+/* --- a barra de teclas ---------------------------------------------------
+   Fica ACIMA do teclado virtual, colada nele. Chip de contorno, como todo
+   botão do app. */
+.keybar{ flex:none; display:flex; gap:5px; padding:7px 8px; border-top:1px solid var(--line-soft);
+  overflow:hidden; background:var(--panel); }
+.key{ flex:none; letter-spacing:0; border:1px solid var(--line); border-radius:var(--radius); background:transparent;
+  color:var(--dim); font:inherit; font-size:12px; min-width:30px; height:30px; padding:0 8px;
+  display:grid; place-items:center; cursor:pointer; }
+.key:hover{ color:var(--text-strong); border-color:var(--dimmer); background:var(--wash-2); }
+/* Ctrl é toggle, não hold: num teclado virtual não existe segurar. Armado, o
+   chip acende — é o único estado que a barra guarda. */
+.key[data-armed]{ color:var(--accent); border-color:var(--accent); background:var(--wash-2); }
+.key.w{ min-width:40px; }
+.kbd-fake{ flex:none; height:210px; border-top:1px solid var(--line);
+  background:var(--panel-focused); display:grid; place-items:center; color:var(--time-dim);
+  font-size:11px; }
+.legend{ display:flex; flex-wrap:wrap; gap:6px 18px; color:var(--faint); font-size:12px;
+  margin:10px 0 0; max-width:390px; }
+.legend code{ color:var(--dim); }
+</style>
+</head>
+<body>
+
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">theme</button>
+
+<h1>Floe no celular — 5 layouts</h1>
+<p class="m-sub">
+  Tudo a 390&times;780 (iPhone 14/15 em retrato), com os tokens do app. O problema real é um só:
+  a lane é um scroller <b>horizontal</b> de colunas de 380px (<code>index.css:301</code>) mais a rail de 32px —
+  não cabe em 390px, então você sempre vê um painel cortado. As cinco opções resolvem esse eixo de jeitos diferentes.
+</p>
+
+<div class="rowset">
+
+  <!-- ================= O1 ================= -->
+  <div class="opt">
+    <h2>O1 — Snap lane + rail embaixo</h2>
+    <p class="note">Um painel por tela, swipe horizontal troca. A rail vira barra inferior.
+      <b>Custo: só CSS</b> (<code>@media</code> + <code>scroll-snap-type: x mandatory</code>). Modelo mental idêntico ao desktop.</p>
+    <div class="phone">
+      <div class="status">9:41<span class="r">tailnet · floe.pinguim.io</span></div>
+      <div class="appbar">
+        <span class="proj">floe</span><span class="sep">/</span><span>mobile-layout</span>
+        <span class="r"><button class="icb">⌘</button><button class="icb">⋯</button></span>
+      </div>
+      <div class="snaplane">
+        <div class="panel-m" data-focused>
+          <div class="ph"><span class="nm">chat</span><span class="sb">claude · sonnet</span>
+            <span class="r"><button class="icb">⌕</button></span></div>
+          <div class="pb">
+            <div class="say"><span class="nk n-you">rafael</span><span class="tx">roda os testes do webServer</span></div>
+            <div class="say"><span class="nk n-cl">claude</span><span class="tx">rodando <span class="dimmed">pnpm test</span></span></div>
+            <div class="m-tool">▸ <b>Bash</b> pnpm test src/main/webServer.test.ts<br>&nbsp;&nbsp;<i>✓ 14 passed</i> <span>· 2.1s</span></div>
+            <div class="say"><span class="nk n-cl">claude</span><span class="tx">14 passaram, nenhum falhou. o caso do 206 cobre o seek do vídeo.</span></div>
+            <div class="say"><span class="nk n-you">rafael</span><span class="tx">e o typecheck?</span></div>
+            <div class="m-tool">▸ <b>Bash</b> pnpm typecheck<br>&nbsp;&nbsp;<i>✓ node + web limpos</i></div>
+            <div class="say"><span class="nk n-cl">claude</span><span class="tx">limpo nos dois alvos.</span></div>
+          </div>
+          <div class="m-composer"><span class="cap">›</span><span>faz o commit</span><span class="r">⏎</span></div>
+        </div>
+        <div class="peek"></div>
+      </div>
+      <div class="dots"><i data-on></i><i></i><i></i></div>
+      <div class="tabbar">
+        <button class="tab" data-on><span class="g">▤</span>chat</button>
+        <button class="tab"><span class="g">◫</span>files</button>
+        <button class="tab"><span class="g">±</span>diff</button>
+        <button class="tab"><span class="g">▸</span>term</button>
+        <button class="tab"><span class="g">⚙</span>mais</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= O2 ================= -->
+  <div class="opt">
+    <h2>O2 — Painel cheio + gaveta</h2>
+    <p class="note">Sem barra fixa: o painel ocupa a tela toda e a gaveta sobe com todos os painéis, agrupados como o <code>RAIL_GROUPS</code>.
+      <b>Máxima área útil</b>; custo: um bottom sheet novo.</p>
+    <div class="phone">
+      <div class="status">9:41<span class="r">tailnet · floe.pinguim.io</span></div>
+      <div class="appbar">
+        <span class="proj">floe</span><span class="sep">/</span><span>mobile-layout</span>
+        <span class="r"><button class="icb">⌘</button></span>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;padding:8px">
+        <div class="panel-m" data-focused style="flex:1">
+          <div class="ph"><span class="nm">terminal</span><span class="sb">~/floe</span></div>
+          <div class="pb">
+            <div class="term">
+              <b>~/floe</b> ❯ git status --short<br>
+              &nbsp;M src/renderer/src/index.css<br>
+              &nbsp;M src/renderer/src/panels.tsx<br>
+              ?? mocks/mobile-layouts.html<br><br>
+              <b>~/floe</b> ❯ pnpm build:web<br>
+              <em>vite v5.4</em> building for production...<br>
+              ✓ 412 modules transformed.<br>
+              out/web/index.html <em>0.94 kB</em><br>
+              out/web/assets/main-a91f.js <em>1.2 MB</em><br>
+              ✓ built in 8.31s<br><br>
+              <b>~/floe</b> ❯ <span class="cur">&nbsp;</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <div class="grid">
+          <button class="gcell"><span class="g">▤</span>projects</button>
+          <button class="gcell"><span class="g">⑂</span>worktrees</button>
+          <button class="gcell"><span class="g">◫</span>files</button>
+          <button class="gcell"><span class="g">±</span>changes</button>
+          <div class="gsep"></div>
+          <button class="gcell"><span class="g">⤳</span>merge</button>
+          <button class="gcell"><span class="g">☰</span>plans</button>
+          <button class="gcell"><span class="g">✎</span>draw</button>
+          <button class="gcell"><span class="g">✦</span>skills</button>
+          <div class="gsep"></div>
+          <button class="gcell"><span class="g">⌁</span>mcp</button>
+          <button class="gcell"><span class="g">▷</span>commands</button>
+          <button class="gcell" data-on><span class="g">▸</span>terminal</button>
+          <button class="gcell"><span class="g">⚙</span>settings</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= O3 ================= -->
+  <div class="opt">
+    <h2>O3 — Chat-first + folha modal</h2>
+    <p class="note">O transcript é a home permanente; terminal, files e diff sobem por cima e fecham voltando pro chat.
+      Otimiza o uso real no celular. <b>Custo: navegação divergente</b> do desktop.</p>
+    <div class="phone">
+      <div class="status">9:41<span class="r">tailnet · floe.pinguim.io</span></div>
+      <div class="appbar">
+        <span class="proj">floe</span><span class="sep">/</span><span>mobile-layout</span>
+        <span class="r"><button class="icb">◫</button><button class="icb">±</button><button class="icb">▸</button></span>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;flex-direction:column;padding:8px 10px">
+        <div style="flex:1;min-height:0;overflow:hidden">
+          <div class="say"><span class="nk n-you">rafael</span><span class="tx">sobe o server</span></div>
+          <div class="say"><span class="nk n-cl">claude</span><span class="tx">deploy indo pro link</span></div>
+          <div class="m-tool">▸ <b>Bash</b> ./scripts/deploy-server.sh<br>&nbsp;&nbsp;<i>✓ floe-server restarted</i></div>
+        </div>
+      </div>
+      <div class="modal">
+        <div class="ph"><span class="nm">terminal</span><span class="sb">~/floe</span>
+          <span class="r"><button class="icb">✕</button></span></div>
+        <div class="pb">
+          <div class="term">
+            <b>~/floe</b> ❯ systemctl --user status floe-server<br>
+            ● floe-server.service<br>
+            &nbsp;&nbsp;&nbsp;&nbsp; Active: <em>active (running)</em><br>
+            &nbsp;&nbsp;&nbsp;&nbsp; Memory: 148.2M<br><br>
+            <b>~/floe</b> ❯ <span class="cur">&nbsp;</span>
+          </div>
+        </div>
+        <div class="keybar">
+          <button class="key w">esc</button>
+          <button class="key w">tab</button>
+          <button class="key w" data-armed>ctrl</button>
+          <button class="key">↑</button>
+          <button class="key">↓</button>
+          <button class="key">←</button>
+          <button class="key">→</button>
+          <button class="key">|</button>
+          <button class="key">/</button>
+        </div>
+        <div class="kbd-fake">teclado do sistema</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= O4 ================= -->
+  <div class="opt">
+    <h2>O4 — Colunas viram chips</h2>
+    <p class="note">A lane vira uma fileira de chips: você <b>vê</b> o que está aberto em vez de swipar às cegas.
+      É o O1 com indicador explícito, e o único que deixa fechar painel no celular.</p>
+    <div class="phone">
+      <div class="status">9:41<span class="r">tailnet · floe.pinguim.io</span></div>
+      <div class="appbar">
+        <span class="proj">floe</span><span class="sep">/</span><span>mobile-layout</span>
+        <span class="r"><button class="icb">⌘</button></span>
+      </div>
+      <div class="chips">
+        <button class="m-chip" data-on>chat <span class="x">✕</span></button>
+        <button class="m-chip">files</button>
+        <button class="m-chip">diff</button>
+        <button class="m-chip">term</button>
+        <button class="m-chip add">+</button>
+      </div>
+      <div style="flex:1;min-height:0;display:flex;padding:8px">
+        <div class="panel-m" data-focused style="flex:1">
+          <div class="ph"><span class="nm">chat</span><span class="sb">claude · opus</span></div>
+          <div class="pb">
+            <div class="say"><span class="nk n-you">rafael</span><span class="tx">o que mudou no webServer?</span></div>
+            <div class="say"><span class="nk n-cl">claude</span><span class="tx">a rota /media ganhou 206 e o bundle passou a resolver do FLOE_WEB_ROOT.</span></div>
+            <div class="m-tool">▸ <b>Read</b> src/main/webServer.ts <span>· 240 linhas</span></div>
+            <div class="say"><span class="nk n-cl">claude</span><span class="tx">o resto é o deploy script trocando o out/web inteiro em vez de mesclar.</span></div>
+            <div class="say"><span class="nk n-you">rafael</span><span class="tx">beleza, abre o diff</span></div>
+          </div>
+          <div class="m-composer"><span class="cap">›</span><span>abre o diff</span><span class="r">⏎</span></div>
+        </div>
+      </div>
+      <div class="keybar">
+        <button class="key w">⇧⌘P</button>
+        <button class="key w">esc</button>
+        <button class="key w">tab</button>
+        <button class="key">↑</button>
+        <button class="key">@</button>
+        <button class="key">/</button>
+        <button class="key w">⇧⏎</button>
+      </div>
+      <div class="kbd-fake">teclado do sistema</div>
+    </div>
+  </div>
+
+  <!-- ================= O5 ================= -->
+  <div class="opt">
+    <h2>O5 — Shell mobile próprio</h2>
+    <p class="note">Navegação em pilha (lista → sessão → painel), com voltar. Melhor fidelidade mobile,
+      mas <b>duas UIs pra manter</b> — contra o que <code>docs/web.md</code> promete.</p>
+    <div class="phone">
+      <div class="status">9:41<span class="r">tailnet · floe.pinguim.io</span></div>
+      <div class="navbar">
+        <button class="bk">‹ worktrees</button>
+        <span class="ti" style="margin-left:6px">mobile-layout</span>
+        <span class="r"><button class="icb">⌘</button></span>
+      </div>
+      <div style="flex:1;min-height:0;overflow:hidden;padding:4px 6px">
+        <div class="sec">SESSÕES</div>
+        <div class="lrow" data-cursor><span class="dotm" data-live></span><span class="nm">layout do celular</span><span class="mt">agora</span></div>
+        <div class="lrow"><span class="dotm" data-unread></span><span class="nm">web server · 206</span><span class="mt">12m</span></div>
+        <div class="lrow"><span class="dotm"></span><span class="nm">deploy do link</span><span class="mt">1h</span></div>
+        <div class="sec">MUDANÇAS <span style="color:var(--time-dim)">· 12 arquivos</span></div>
+        <div class="lrow"><span class="nm">src/renderer/src/index.css</span><span class="mt" style="color:var(--live)">+38</span></div>
+        <div class="lrow"><span class="nm">src/renderer/src/panels.tsx</span><span class="mt" style="color:var(--live)">+26</span></div>
+        <div class="lrow"><span class="nm">src/main/webServer.ts</span><span class="mt" style="color:var(--live)">+14</span></div>
+        <div class="lrow"><span class="nm">scripts/deploy-server.sh</span><span class="mt" style="color:var(--live)">+5</span></div>
+        <div class="sec">FERRAMENTAS</div>
+        <div class="lrow"><span class="nm">terminal</span><span class="mt">›</span></div>
+        <div class="lrow"><span class="nm">commands</span><span class="mt">›</span></div>
+        <div class="lrow"><span class="nm">plans</span><span class="mt">›</span></div>
+      </div>
+      <div class="tabbar">
+        <button class="tab" data-on><span class="g">▤</span>sessões</button>
+        <button class="tab"><span class="g">±</span>mudanças</button>
+        <button class="tab"><span class="g">▸</span>terminal</button>
+        <button class="tab"><span class="g">⚙</span>ajustes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= barra de teclas ================= -->
+  <div class="opt">
+    <h2>A barra de teclas (vale pra qualquer opção)</h2>
+    <p class="note">Dois conjuntos, conforme o painel focado. Não precisa de backend:
+      <code>window.floe.terminal.write(termId, data)</code> (<code>Terminal.tsx:215</code>) aceita a sequência crua.</p>
+    <div class="phone" style="height:360px">
+      <div class="status">terminal · ctrl armado<span class="r">tap ctrl, depois a letra</span></div>
+      <div style="flex:1;min-height:0;padding:8px">
+        <div class="term">
+          <b>~/floe</b> ❯ pnpm dev<br>
+          <em>vite</em> dev server running<br>
+          <span style="color:var(--time-dim)">— ctrl armado: o próximo toque vira ^letra —</span><br>
+          <b>~/floe</b> ❯ <span class="cur">&nbsp;</span>
+        </div>
+      </div>
+      <div class="keybar">
+        <button class="key w">esc</button>
+        <button class="key w">tab</button>
+        <button class="key w" data-armed>ctrl</button>
+        <button class="key">↑</button>
+        <button class="key">↓</button>
+        <button class="key">←</button>
+        <button class="key">→</button>
+        <button class="key">|</button>
+        <button class="key">~</button>
+      </div>
+      <div class="keybar" style="border-top-color:var(--line-soft)">
+        <button class="key w">^C</button>
+        <button class="key w">^D</button>
+        <button class="key w">^R</button>
+        <button class="key w">^Z</button>
+        <button class="key">/</button>
+        <button class="key">-</button>
+        <button class="key w">⇧⌘P</button>
+      </div>
+      <div class="kbd-fake" style="height:120px">teclado do sistema</div>
+    </div>
+    <p class="legend">
+      <span><code>esc</code> \x1b</span>
+      <span><code>tab</code> \t</span>
+      <span><code>↑</code> \x1b[A</span>
+      <span><code>^C</code> \x03</span>
+      <span><code>^D</code> \x04</span>
+      <span><code>^R</code> \x12</span>
+      <span><code>^Z</code> \x1a</span>
+    </p>
+    <p class="note" style="margin-top:14px">
+      <b>⌘ não vai pro shell.</b> O PTY recebe bytes; Cmd é modificador de app do macOS e nunca chega no programa.
+      No celular a paleta vira um chip com a tecla que ela realmente tem (<code>⇧⌘P</code>) — está no conjunto de chat, não no de terminal.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

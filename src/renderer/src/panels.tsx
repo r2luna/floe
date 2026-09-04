@@ -484,6 +484,20 @@ export type OpenFn = (child: {
 
 const HOME = '~'
 
+/**
+ * The PTY a panel is attached to, or null when it hosts none.
+ *
+ * Two kinds host a shell — the terminal and the editor, which is a program in a
+ * terminal — and the key bar has to reach the SAME pty the body opened. One
+ * definition, here, or a tapped key would be written into a different shell
+ * than the one on screen the first time either string moved.
+ */
+export function termIdOf(kind: string, sub?: string, root?: string, cwd?: string): string | null {
+  if (kind === 'terminal') return `term:${sub ?? HOME}`
+  if (kind === 'edit') return `edit:${root ?? cwd ?? HOME}`
+  return null
+}
+
 // ponytail: static bodies so the lane's geometry is judgeable before any panel
 // is wired to window.floe. Each one gets replaced by its real component.
 export function PanelBody({
@@ -698,7 +712,7 @@ export function PanelBody({
     return (
       <Suspense fallback={null}>
         <TerminalPanel
-          termId={`edit:${base}`}
+          termId={termIdOf('edit', sub, base) as string}
           cwd={base}
           branch=""
           mode="editor"
@@ -730,7 +744,7 @@ export function PanelBody({
   if (kind === 'terminal')
     return (
       <Suspense fallback={null}>
-        <TerminalPanel termId={`term:${sub ?? '~'}`} cwd={sub ?? HOME} branch="" />
+        <TerminalPanel termId={termIdOf('terminal', sub) as string} cwd={sub ?? HOME} branch="" />
       </Suspense>
     )
   // Owns its own state: the account is global, so nothing above it needs to

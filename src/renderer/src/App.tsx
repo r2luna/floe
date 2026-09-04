@@ -22,9 +22,11 @@ import {
   toggleKind
 } from './lane'
 import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, type PanelKind } from './panels'
+import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
+import { useNarrow } from './useNarrow'
 import { installPluginCommands, runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
 import { Palette } from './Palette'
@@ -549,7 +551,14 @@ export default function App() {
     return isSearched(head) ? Math.max(base, SEARCH_WIDTH) : base
   }
 
+  // One panel per screen, or the desktop lane. Everything narrow mode changes
+  // is CSS keyed off <html data-narrow>; what the hook is read for here is the
+  // one thing CSS cannot do — listing the open panels, which only the lane
+  // knows.
+  const narrow = useNarrow()
+
   const laneRef = useRef<HTMLDivElement>(null)
+  const tabsRef = useRef<HTMLElement>(null)
   // Column elements, for the splitters: a drag writes the new width here
   // directly and only tells the lane about it when the mouse comes up.
   const colRefs = useRef(new Map<string, HTMLElement>())
@@ -1104,6 +1113,28 @@ export default function App() {
     return () => observer.disconnect()
   }, [finding, lane])
 
+  // The tab of the panel you are on follows it into view. With more panels open
+  // than fit the strip, swiping to the last one otherwise leaves the row parked
+  // where it was and the tab that matters off the end of it.
+  useEffect(() => {
+    if (!narrow) return
+    tabsRef.current
+      ?.querySelector('[data-on]')
+      ?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+  }, [lane.focus, narrow])
+
+  // Rotating the phone — or unfolding it — changes what one column is worth,
+  // and the lane keeps the scroll offset it had: it comes to rest between two
+  // panels. Snapping only governs the NEXT gesture, so the focused panel is put
+  // back by hand. Instant, not smooth: this is a correction, not a move.
+  useEffect(() => {
+    const settle = (): void => {
+      panelAt(lane.focus)?.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    }
+    window.addEventListener('resize', settle)
+    return () => window.removeEventListener('resize', settle)
+  }, [lane.focus])
+
   // The focused panel is always scrolled into view and always holds DOM focus.
   // A panel you can see but can't type into is worse than no panel at all.
   useEffect(() => {
@@ -1116,8 +1147,17 @@ export default function App() {
     // instead of behind it.
     const laneEl = laneRef.current
     if (laneEl) {
-      const pinned = laneEl.querySelector<HTMLElement>('[data-sticky]')
-      laneEl.style.scrollPaddingInlineStart = `${(pinned?.offsetWidth ?? 0) + 16}px`
+      // Narrow has no pinning — the chat is a screen wide, so it is scrolled
+      // past like everything else. Reserving its width here would reserve the
+      // whole viewport and park every panel one screen off the right edge.
+      // Narrow has no pinning — the chat is a screen wide, so it is scrolled
+      // past like everything else. Reserving its width would reserve the whole
+      // viewport; even the desktop's +16 is wrong here, since it lands the
+      // panel 8px short of the gutter and leaves a stripe of its neighbour
+      // showing. The lane's own padding is where a panel comes to rest.
+      const pinned = narrow ? null : laneEl.querySelector<HTMLElement>('[data-sticky]')
+      const reserve = narrow ? 8 : (pinned?.offsetWidth ?? 0) + 16
+      laneEl.style.scrollPaddingInlineStart = `${reserve}px`
     }
     // 'nearest' scrolls the minimum needed, which lands the focused panel at
     // the right edge — so the panel you opened it FROM stays visible beside it
@@ -1145,7 +1185,7 @@ export default function App() {
       // would start counting from nowhere instead of from where you are.
       if (at == null && idx != null) setLane((l) => setCursor(l, lane.focus, idx))
     }
-  }, [lane.focus, lane.panels.length])
+  }, [lane.focus, lane.panels.length, narrow])
 
   // Switching session with ⌃I/⌃O moves the sidebar's cursor with it. The list
   // already marks the open session (`data-active`); without this the cursor
@@ -1748,11 +1788,53 @@ export default function App() {
     if (!railKeys.has(b.arg)) railKeys.set(b.arg, formatChord(b.key))
   }
 
+  // What the key bar's command chip should be CALLED — the same first-match
+  // rule the palette's own chips use, so the two never disagree about which
+  // binding is the one that fires.
+  const chordLabels: Record<string, string> = {}
+  for (const b of binds) if (!(b.command in chordLabels)) chordLabels[b.command] = formatChord(b.key)
+
   // Summed once per render for the chat header's badge, not per panel.
   const changeStat = changes.files.reduce(
     (acc, f) => ({ add: acc.add + f.additions, del: acc.del + f.deletions }),
     { add: 0, del: 0 }
   )
+
+  // A tapped chip is the key arriving where the key would have arrived: the
+  // event goes to whatever holds focus, so the composer's own handler and the
+  // global keymap both see it exactly as they see a real press.
+  const runChord = (chord: AppKey): void => {
+    // A command chip runs the command, not an imitation of the key that would
+    // have run it. See APP_KEYS.
+    if (chord.command) {
+      const res = runCommand(REGISTRY, ctxRef.current, chord.command)
+      if (!res.ok) say(res.error)
+      return
+    }
+    const el = (document.activeElement as HTMLElement | null) ?? document.body
+    // Except this one. Shift+Enter in a textarea is a NEWLINE, and a synthetic
+    // event carries no default action to insert one — the character has to be
+    // written. Through the prototype's setter, or React never learns the value
+    // changed and the next render puts the old text back.
+    if (chord.key === 'Enter' && chord.shift && el instanceof HTMLTextAreaElement) {
+      const from = el.selectionStart ?? el.value.length
+      const to = el.selectionEnd ?? from
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+      setValue?.call(el, `${el.value.slice(0, from)}\n${el.value.slice(to)}`)
+      el.selectionStart = el.selectionEnd = from + 1
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      return
+    }
+    if (!chord.key) return
+    const init = {
+      key: chord.key,
+      bubbles: true,
+      cancelable: true,
+      shiftKey: !!chord.shift
+    }
+    el.dispatchEvent(new KeyboardEvent('keydown', init))
+    el.dispatchEvent(new KeyboardEvent('keyup', init))
+  }
 
   const openFromRail = (kind: PanelKind) => {
     if (!canOpen(kind)) return
@@ -1761,6 +1843,38 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* Narrow only: the lane is a screen wide, so everything open but the
+          panel you are on is off-screen. The heads are listed in lane order —
+          the row is the map of a lane you cannot see. Nothing new is reachable
+          from here: tapping a tab is ⌘[ / ⌘] arriving at that panel, and the
+          ✕ is the header's own close. */}
+      {narrow && columns.length > 0 && (
+        <nav className="lane-tabs" ref={tabsRef} aria-label="open panels">
+          {columns.map((column) => {
+            const [{ panel: head, index }] = column
+            const on = column.some((p) => p.index === lane.focus)
+            return (
+              <span key={head.id} className="lane-tab" data-on={on || undefined}>
+                <button
+                  className="lane-tab-go"
+                  onClick={() => setLane((l) => focusAt(l, index))}
+                >
+                  {head.title}
+                </button>
+                {on && index > 0 && (
+                  <button
+                    className="lane-tab-x"
+                    aria-label={`Close ${head.title}`}
+                    onClick={() => setLane((l) => closePanel(l, index, () => panelOf('branch')))}
+                  >
+                    <IconX size={11} stroke={1.8} />
+                  </button>
+                )}
+              </span>
+            )
+          })}
+        </nav>
+      )}
       <div className="workspace">
         <div className="lane" ref={laneRef}>
           {/* Columns, not panels: a docked panel shares its neighbour's column
@@ -2142,6 +2256,21 @@ export default function App() {
             )
           })}
         </div>
+        {/* Narrow only, and only because the hardware forces it: no on-screen
+            keyboard has Esc, Tab or Ctrl, which is most of how a shell is
+            driven. Above the rail so the keyboard pushes it up as one strip. */}
+        {narrow && (
+          <KeyBar
+            termId={termIdOf(
+              lane.panels[lane.focus]?.kind ?? '',
+              lane.panels[lane.focus]?.sub,
+              lane.panels[lane.focus]?.root,
+              cwd
+            )}
+            onChord={runChord}
+            chordLabels={chordLabels}
+          />
+        )}
         <nav className="rail">
           {RAIL.map((group) => (
             // Grouped so related panels read as one block — see RAIL in panels.
