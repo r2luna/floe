@@ -26,6 +26,7 @@ import {
   isHomePath,
   listGroups,
   listProjects,
+  probePath,
   removeProject,
   renameGroup,
   renameProject,
@@ -191,10 +192,9 @@ import {
 import { applyFileOps, listDir, readFileContent, renderDocument, resolveWikiLink, searchableFiles } from './files'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
-import { serveWebUi } from './webBoot'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
-import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
+import { provisionWorktree, dropWorktreeDatabase, unlinkWorktreeSite, ensureContainerUp, getAppUrl } from './provision'
 import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
@@ -271,6 +271,9 @@ function registerIpc(): void {
   handle('projects:addByPath', (_event, path: string, group?: string) =>
     addProjectByPath(path, group)
   )
+  // What the add dialog shows about the path while you type it — the same
+  // checks the add itself runs, so the pane never promises what Add refuses.
+  handle('projects:probe', (_event, path: string) => probePath(path))
   // Per-project containerized env (mode 'container' → Docker); null turns it off
   // (back to host-native provisioning). See provision.ts / compose.ts.
   handle('projects:setEnv', (_event, path: string, env: ProjectEnvConfig | null) =>
@@ -968,6 +971,17 @@ function registerIpc(): void {
   handle('remove:branch', (_event, root: string, branch: string, force: boolean) =>
     deleteBranch(root, branch, force)
   )
+  // Undo the `herd link` the Laravel recipe made. Runs while the directory is
+  // still there — `herd unlink` reads the site from the cwd it is called in.
+  handle('remove:unlinkSite', async (_event, target: string) => {
+    const lines: string[] = []
+    try {
+      const result = await unlinkWorktreeSite(target, (t) => lines.push(t))
+      return { ok: true, unlinked: result === 'unlinked', detail: lines[lines.length - 1] }
+    } catch (e) {
+      return { ok: false, unlinked: false, message: e instanceof Error ? e.message : String(e) }
+    }
+  })
   // Drop the worktree's per-branch database (MySQL/MariaDB/Postgres). Reads the
   // worktree's .env, so the renderer runs this step before the worktree is torn
   // down. Never touches the main checkout's database.
@@ -1435,10 +1449,6 @@ void app.whenReady().then(async () => {
   // (backends:get runs at window load). A broken plugin logs and is skipped;
   // boot never dies for one.
   await loadPlugins(app.getVersion(), () => localWindow ?? BrowserWindow.getAllWindows()[0])
-  // Headless only: the same UI, served to a browser. After loadPlugins because
-  // the gate whose token the page carries is a plugin, and it has to have
-  // written that token before a page can be handed one. See docs/web.md.
-  await serveWebUi()
   createWindow()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
   // window getter so ordering vs. createWindow doesn't matter.

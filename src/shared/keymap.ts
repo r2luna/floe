@@ -35,6 +35,14 @@ export interface KeyContext {
   selecting?: boolean
   /** A project is being moved between groups, so j/k carry it instead of the cursor. */
   moving?: boolean
+  /**
+   * Sessions are ticked in the worktrees list, which changes what Escape means.
+   *
+   * A separate flag from `selecting` rather than a reuse of it: that one is a
+   * contiguous run of LINES in a diff, this one is a scattered set of rows, and
+   * a key that had to guess which was open would be right half the time.
+   */
+  marked?: boolean
   /** The palette is open: it owns the keyboard until it closes. */
   palette?: boolean
   /** There is a panel to move to below the focused one. */
@@ -183,6 +191,7 @@ const FLAGS: Record<string, (ctx: KeyContext) => boolean> = {
   typing: (ctx) => ctx.typing === true,
   selecting: (ctx) => ctx.selecting === true,
   moving: (ctx) => ctx.moving === true,
+  marked: (ctx) => ctx.marked === true,
   'stack-below': (ctx) => ctx.stackDown === true,
   'stack-above': (ctx) => ctx.stackUp === true
 }

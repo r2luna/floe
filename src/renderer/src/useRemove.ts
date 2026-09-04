@@ -25,11 +25,12 @@ export interface RemoveFlow {
   cancelled: boolean
 }
 
-const STEP_IDS: RemoveStepId[] = ['preflight', 'database', 'worktree', 'branch']
+const STEP_IDS: RemoveStepId[] = ['preflight', 'database', 'site', 'worktree', 'branch']
 
 export const REMOVE_STEP_TITLES: Record<RemoveStepId, string> = {
   preflight: 'Inspect worktree',
   database: 'Drop database',
+  site: 'Unlink Herd site',
   worktree: 'Remove worktree',
   branch: 'Delete branch'
 }
@@ -132,17 +133,36 @@ export function useRemove(deps: {
           }
         : f
     )
-    void runDropDatabase(pf.dirty)
+    if (!pf.dirty) {
+      void runDropDatabase()
+      return
+    }
+    // The one human checkpoint, and it comes BEFORE any of the destructive
+    // steps — not after the database is already dropped. Cancelling here has to
+    // leave a worktree that still works, or "no" would be the answer that
+    // breaks it.
+    patchFlow((fl) =>
+      fl
+        ? {
+            ...fl,
+            awaiting: 'force',
+            steps: fl.steps.map((s) =>
+              s.id === 'database'
+                ? { ...s, status: 'blocked', detail: 'Uncommitted changes — confirm to force' }
+                : s
+            )
+          }
+        : fl
+    )
   }
 
   /**
-   * Drop the branch's own database before the worktree goes.
+   * Drop the branch's own database.
    *
-   * Order matters twice: the credentials live in the worktree's `.env`, which
-   * removal deletes, and running it before the force checkpoint means a
-   * database failure surfaces while nothing has been torn down yet.
+   * Order matters: the credentials live in the worktree's `.env`, which removal
+   * deletes, so this has to happen while the directory is still there.
    */
-  async function runDropDatabase(dirty: boolean): Promise<void> {
+  async function runDropDatabase(): Promise<void> {
     const f = running()
     if (!f) return
     step('database', { status: 'running', detail: undefined })
@@ -159,25 +179,34 @@ export function useRemove(deps: {
     }
     step('database', res.dropped ? { status: 'done', detail: res.detail } : { status: 'skipped', detail: res.detail })
     if (running()?.cancelled) return
-    if (!dirty) {
-      void runRemove(false)
+    await runUnlinkSite()
+  }
+
+  /**
+   * Undo the Herd site the provisioning linked.
+   *
+   * Also before the removal, and for the same reason as the database: `herd
+   * unlink` reads the site from the directory it runs in. A link left behind
+   * keeps serving a path that is about to stop existing.
+   */
+  async function runUnlinkSite(): Promise<void> {
+    const f = running()
+    if (!f) return
+    step('site', { status: 'running', detail: undefined })
+    let res: { ok: boolean; unlinked: boolean; detail?: string; message?: string }
+    try {
+      res = await window.floe.remove.unlinkSite(f.worktreePath)
+    } catch (e) {
+      step('site', { status: 'error', detail: e instanceof Error ? e.message : String(e) })
       return
     }
-    // The one human checkpoint: uncommitted work is about to be destroyed, and
-    // no amount of checklist makes that recoverable.
-    patchFlow((fl) =>
-      fl
-        ? {
-            ...fl,
-            awaiting: 'force',
-            steps: fl.steps.map((s) =>
-              s.id === 'worktree'
-                ? { ...s, status: 'blocked', detail: 'Uncommitted changes — confirm to force' }
-                : s
-            )
-          }
-        : fl
-    )
+    if (!res.ok) {
+      step('site', { status: 'error', detail: res.message })
+      return
+    }
+    step('site', res.unlinked ? { status: 'done', detail: res.detail } : { status: 'skipped', detail: res.detail })
+    if (running()?.cancelled) return
+    void runRemove(f.changes.length > 0)
   }
 
   async function runRemove(force: boolean): Promise<void> {
@@ -277,7 +306,7 @@ export function useRemove(deps: {
     runRoot.current = root
     if (running()?.awaiting !== 'force') return
     patchFlow((f) => (f ? { ...f, awaiting: null } : f))
-    void runRemove(true)
+    void runDropDatabase()
   }
 
   function retry(): void {
@@ -289,7 +318,8 @@ export function useRemove(deps: {
     if (!errored) return
     step(errored.id, { status: 'running', detail: undefined })
     if (errored.id === 'preflight') void runPreflight(f.root, f.worktreePath)
-    else if (errored.id === 'database') void runDropDatabase(f.changes.length > 0)
+    else if (errored.id === 'database') void runDropDatabase()
+    else if (errored.id === 'site') void runUnlinkSite()
     else if (errored.id === 'worktree') void runRemove(f.changes.length > 0)
     else if (errored.id === 'branch') void runDeleteBranch()
   }

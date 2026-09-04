@@ -1,0 +1,443 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Palette — 6 layouts</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. Everything below reuses the app's own tokens and its
+   existing palette classes — no new colours, no solid fills, no shadows. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:78ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 14px; max-width:78ch; }
+.opt{ margin:0 0 40px; }
+.k{ color:var(--text-strong); }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* The three uses, side by side. Each column holds one palette at its true
+   width, so a proposal is judged on all three at once — a row that works for
+   commands and breaks on paths is the whole problem. */
+.trio{ display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+.use{ }
+.use-name{ color:var(--faint); font-size:11px; margin:0 0 5px; }
+.pal{ width:340px; display:flex; flex-direction:column; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--well); overflow:hidden; }
+.pal .palette-input{ padding:11px 13px; }
+.pal .palette-list{ padding:5px; }
+
+/* Row internals used by more than one proposal. */
+.dir{ color:var(--faint); }
+.pal-name{ color:var(--text); }
+.pal-sub{ color:var(--faint); font-size:11px; }
+
+/* --- P1: two-line rows ---------------------------------------------------- */
+.p1-row{ display:block; padding:5px 10px; border-radius:var(--radius); }
+.p1-row[data-at]{ background:var(--wash-4); }
+.p1-l1{ display:flex; align-items:baseline; gap:8px; }
+.p1-l1 .n{ color:var(--text-strong); }
+.p1-l2{ color:var(--faint); font-size:11px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; direction:rtl; unicode-bidi:plaintext;
+  text-align:left; }
+.p1-keys{ margin-left:auto; color:var(--dim); font-size:11px; letter-spacing:.06em; }
+
+/* --- P2: path-split one line ---------------------------------------------- */
+.p2-row{ display:flex; align-items:baseline; gap:0; padding:6px 10px;
+  border-radius:var(--radius); }
+.p2-row[data-at]{ background:var(--wash-4); }
+.p2-dir{ color:var(--faint); flex:0 1 auto; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.p2-sig{ color:var(--faint); flex:none; margin-right:6px; }
+.p2-name{ color:var(--text-strong); flex:none; }
+.p2-tail{ margin-left:auto; padding-left:10px; flex:none; color:var(--dim); font-size:11px; }
+
+/* --- P3: grouped sections -------------------------------------------------- */
+.p3-group{ position:sticky; top:0; padding:6px 10px 3px; color:var(--faint);
+  font-size:10px; letter-spacing:.08em; background:var(--well); }
+
+/* --- P4: split preview ----------------------------------------------------- */
+.p4{ width:700px; }
+.p4-split{ display:flex; min-height:190px; }
+.p4-list{ flex:0 0 300px; padding:5px; border-right:1px solid var(--line-soft); overflow:hidden; }
+.p4-side{ flex:1; min-width:0; padding:10px 12px; color:var(--faint); font-size:11px; }
+.p4-side h4{ margin:0 0 6px; font-size:12px; font-weight:400; color:var(--text-strong); }
+.p4-side pre{ margin:0; font:inherit; color:var(--dim); white-space:pre; overflow:hidden; }
+.p4-meta{ margin-top:10px; padding-top:8px; border-top:1px solid var(--line-soft); }
+
+/* --- P5: anchored in the panel --------------------------------------------- */
+.stage{ position:relative; height:300px; max-width:1000px; overflow:hidden;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius); }
+.stage-lane{ position:absolute; inset:0; display:flex; gap:8px; padding:8px; }
+.mini-rail{ display:flex; flex-direction:column; gap:2px; width:26px; flex:none;
+  align-items:center; padding-top:2px; color:var(--dim); font-size:12px; }
+.mini-rail i{ font-style:normal; line-height:22px; }
+.mini-panel{ display:flex; flex-direction:column; min-height:0; background:var(--panel);
+  border:1px solid var(--line-soft); border-radius:var(--radius); position:relative; }
+.mini-panel[data-focused]{ background:var(--panel-focused); border-color:var(--line); }
+.mini-head{ display:flex; align-items:center; gap:7px; height:var(--head-h); flex:none;
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.mini-body{ flex:1; min-height:0; overflow:hidden; padding:8px; }
+.mini-row{ display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:var(--radius); }
+.mini-row[data-on]{ background:var(--wash-3); color:var(--text-strong); }
+.mini-msg{ color:var(--dim); margin-bottom:8px; }
+.mini-msg b{ color:var(--nick-claude); font-weight:400; }
+.mini-composer{ margin:8px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:var(--radius); color:var(--faint); flex:none; }
+.p5-find{ display:flex; align-items:center; gap:8px; padding:6px 10px; flex:none;
+  border-bottom:1px solid var(--line-soft); background:var(--well); color:var(--text-strong); }
+.p5-find .cnt{ margin-left:auto; color:var(--faint); font-size:11px; }
+
+/* --- P6: mode column + prefixes -------------------------------------------- */
+.p6-modes{ display:flex; gap:6px; padding:7px 10px; border-bottom:1px solid var(--line-soft); }
+.p6-mode{ border:1px solid var(--line); border-radius:1px; padding:2px 8px;
+  color:var(--dim); font-size:11px; }
+.p6-mode[data-on]{ color:var(--text-strong); border-color:#4a5568; background:var(--wash-3); }
+.p6-row{ display:flex; align-items:baseline; gap:9px; padding:6px 10px; border-radius:var(--radius); }
+.p6-row[data-at]{ background:var(--wash-4); }
+.p6-sig{ flex:none; width:12px; color:var(--faint); }
+.p6-tail{ margin-left:auto; color:var(--dim); font-size:11px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Palette — 6 layouts</h1>
+<p class="lede">
+  The same three uses in every proposal: <span class="k">switch project</span>,
+  <span class="k">find a file</span>, <span class="k">run a command</span>. Boxes
+  are drawn at 340px so the three fit side by side; the shipping palette is 580px
+  wide and every proposal scales with it.
+</p>
+
+<!-- ============================ current ================================== -->
+<div class="opt">
+  <h2>Current — one row shape for three very different lists</h2>
+  <p class="note">
+    F1 a file row is the whole path at full strength, so the basename — the only
+    part you are scanning for — has no weight, and <code>.palette-title</code> is
+    <code>flex:none</code>, so a long path runs off the right edge with no ellipsis.
+    F2 a project's group and machine sit at the far right, a screen away from the
+    name they describe. F3 commands read <code>group: title</code> as one lowercase
+    string. F4 only the command palette has a footer, so the same box teaches its
+    keys in one use and hides them in the other two.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">switch project</p>
+      <div class="pal">
+        <input class="palette-input" value="ro" placeholder="Switch project…" />
+        <div class="palette-list">
+          <div class="palette-row" data-at><span class="palette-title"><b class="palette-hit">ro</b>okery</span><span class="palette-detail">work</span></div>
+          <div class="palette-row"><span class="palette-title">pingium-site</span><span class="palette-detail">work</span><span class="badge">link</span></div>
+          <div class="palette-row"><span class="palette-title">Add project…</span><span class="palette-detail">new</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">find a file</p>
+      <div class="pal">
+        <input class="palette-input" value="websrv" placeholder="Find a file…" />
+        <div class="palette-list">
+          <div class="palette-row" data-at><span class="palette-title">src/main/<b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+          <div class="palette-row"><span class="palette-title">src/main/webServer.test.ts</span></div>
+          <div class="palette-row"><span class="palette-title">src/renderer/src/components/settings/backends.ts</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">run a command</p>
+      <div class="pal">
+        <input class="palette-input" value="merge" placeholder="Execute a command…" />
+        <div class="palette-list">
+          <div class="palette-row" data-at><span class="palette-title">git: <b class="palette-hit">merge</b> worktree</span><span class="palette-keys">⌘K M</span></div>
+          <div class="palette-row"><span class="palette-title">git: merge status</span><span class="palette-keys"></span></div>
+          <div class="palette-row"><span class="palette-title">session: new session</span><span class="palette-keys">⌘N</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action">Change Keybinding…<kbd>⌘⏎</kbd></span>
+          <span class="palette-action">Run<kbd>⏎</kbd></span>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+<!-- ============================== P1 ===================================== -->
+<div class="opt">
+  <h2>P1 — Two-line row</h2>
+  <p class="note">
+    Name on top at full strength, everything that qualifies it dim underneath:
+    the directory for a file, group + machine for a project, the command's group
+    and what it does. The second line ellipsises from the LEFT, so a deep path
+    keeps its tail. Costs half the visible rows.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">switch project</p>
+      <div class="pal">
+        <input class="palette-input" value="ro" />
+        <div class="palette-list">
+          <div class="p1-row" data-at><div class="p1-l1"><span class="n"><b class="palette-hit">ro</b>okery</span></div>
+            <div class="p1-l2">work · this mac</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">pinguim-site</span></div>
+            <div class="p1-l2">work · link</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">Add project…</span></div>
+            <div class="p1-l2">new</div></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">find a file</p>
+      <div class="pal">
+        <input class="palette-input" value="websrv" />
+        <div class="palette-list">
+          <div class="p1-row" data-at><div class="p1-l1"><span class="n"><b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+            <div class="p1-l2">src/main</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">webServer.test.ts</span></div>
+            <div class="p1-l2">src/main</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">backends.ts</span></div>
+            <div class="p1-l2">src/renderer/src/components/settings</div></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">run a command</p>
+      <div class="pal">
+        <input class="palette-input" value="merge" />
+        <div class="palette-list">
+          <div class="p1-row" data-at><div class="p1-l1"><span class="n"><b class="palette-hit">Merge</b> worktree</span><span class="p1-keys">⌘K M</span></div>
+            <div class="p1-l2">git · runs the guided merge</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">Merge status</span></div>
+            <div class="p1-l2">git · shows the running flow</div></div>
+          <div class="p1-row"><div class="p1-l1"><span class="n">New session</span><span class="p1-keys">⌘N</span></div>
+            <div class="p1-l2">session · starts a harness here</div></div>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+<!-- ============================== P2 ===================================== -->
+<div class="opt">
+  <h2>P2 — One line, split by weight</h2>
+  <p class="note">
+    Same density as today, but the row is two typographic zones: dim context on
+    the left, strong name where the eye lands, keys/badge right. The dim half
+    shrinks and ellipsises so the name is never the part that gets cut.
+    Smallest change of the six.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">switch project</p>
+      <div class="pal">
+        <input class="palette-input" value="ro" />
+        <div class="palette-list">
+          <div class="p2-row" data-at><span class="p2-dir">work/</span><span class="p2-name"><b class="palette-hit">ro</b>okery</span><span class="p2-tail">this mac</span></div>
+          <div class="p2-row"><span class="p2-dir">work/</span><span class="p2-name">pinguim-site</span><span class="p2-tail">link</span></div>
+          <div class="p2-row"><span class="p2-sig">＋</span><span class="p2-name">Add project…</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">find a file</p>
+      <div class="pal">
+        <input class="palette-input" value="websrv" />
+        <div class="palette-list">
+          <div class="p2-row" data-at><span class="p2-dir">src/main/</span><span class="p2-name"><b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+          <div class="p2-row"><span class="p2-dir">src/main/</span><span class="p2-name">webServer.test.ts</span></div>
+          <div class="p2-row"><span class="p2-dir">src/…/settings/</span><span class="p2-name">backends.ts</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">run a command</p>
+      <div class="pal">
+        <input class="palette-input" value="merge" />
+        <div class="palette-list">
+          <div class="p2-row" data-at><span class="p2-dir">git/</span><span class="p2-name"><b class="palette-hit">Merge</b> worktree</span><span class="p2-tail">⌘K M</span></div>
+          <div class="p2-row"><span class="p2-dir">git/</span><span class="p2-name">Merge status</span></div>
+          <div class="p2-row"><span class="p2-dir">session/</span><span class="p2-name">New session</span><span class="p2-tail">⌘N</span></div>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+<!-- ============================== P3 ===================================== -->
+<div class="opt">
+  <h2>P3 — Grouped sections</h2>
+  <p class="note">
+    With an empty query the list is grouped and sticky-headed — recents first,
+    then groups for projects, open panels for files, the command's own group for
+    commands. The headers drop the moment you type, because ranking beats
+    grouping once there is a query.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">switch project</p>
+      <div class="pal">
+        <input class="palette-input" value="" placeholder="Switch project…" />
+        <div class="palette-list">
+          <div class="p3-group">RECENT</div>
+          <div class="palette-row" data-at><span class="palette-title">rookery</span><span class="palette-detail">2m ago</span></div>
+          <div class="palette-row"><span class="palette-title">floe</span><span class="palette-detail">1h ago</span></div>
+          <div class="p3-group">WORK</div>
+          <div class="palette-row"><span class="palette-title">pinguim-site</span><span class="badge">link</span></div>
+          <div class="p3-group">PERSONAL</div>
+          <div class="palette-row"><span class="palette-title">ai-jail</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">find a file</p>
+      <div class="pal">
+        <input class="palette-input" value="" placeholder="Find a file…" />
+        <div class="palette-list">
+          <div class="p3-group">OPEN</div>
+          <div class="palette-row" data-at><span class="palette-title">webServer.ts</span><span class="palette-detail">src/main</span></div>
+          <div class="p3-group">CHANGED</div>
+          <div class="palette-row"><span class="palette-title">backends.ts</span><span class="palette-detail">…/settings</span></div>
+          <div class="palette-row"><span class="palette-title">bridge.ts</span><span class="palette-detail">src/web</span></div>
+          <div class="p3-group">ALL FILES</div>
+          <div class="palette-row"><span class="palette-title">App.tsx</span><span class="palette-detail">src/renderer/src</span></div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">run a command</p>
+      <div class="pal">
+        <input class="palette-input" value="" placeholder="Execute a command…" />
+        <div class="palette-list">
+          <div class="p3-group">GIT</div>
+          <div class="palette-row" data-at><span class="palette-title">Merge worktree</span><span class="palette-keys">⌘K M</span></div>
+          <div class="palette-row"><span class="palette-title">Remove worktree</span><span class="palette-keys">⌘K X</span></div>
+          <div class="p3-group">SESSION</div>
+          <div class="palette-row"><span class="palette-title">New session</span><span class="palette-keys">⌘N</span></div>
+          <div class="palette-row"><span class="palette-title">Stop session</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action">Change Keybinding…<kbd>⌘⏎</kbd></span>
+          <span class="palette-action">Run<kbd>⏎</kbd></span>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+<!-- ============================== P4 ===================================== -->
+<div class="opt">
+  <h2>P4 — Split preview</h2>
+  <p class="note">
+    List on the left, the highlighted row explained on the right: the head of the
+    file, what a command does and where it is bound, a project's worktrees and
+    live sessions. Turns ⌘K into something you can browse, not only fire. Costs
+    width (700px) and a second thing moving as you arrow. Composes with P1/P2 —
+    the left column can use either row shape.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">find a file</p>
+      <div class="pal p4">
+        <input class="palette-input" value="websrv" />
+        <div class="p4-split">
+          <div class="p4-list">
+            <div class="palette-row" data-at><span class="palette-title">src/main/<b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+            <div class="palette-row"><span class="palette-title">src/main/webServer.test.ts</span></div>
+            <div class="palette-row"><span class="palette-title">src/web/bridge.ts</span></div>
+          </div>
+          <div class="p4-side">
+            <h4>webServer.ts</h4>
+            <pre>import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+
+/** The browser build's host. Serves out/web
+    and bridges the renderer over ws. */
+export function startWebServer(</pre>
+            <div class="p4-meta">412 lines · modified 2h ago · staged</div>
+          </div>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">run a command</p>
+      <div class="pal p4">
+        <input class="palette-input" value="merge" />
+        <div class="p4-split">
+          <div class="p4-list">
+            <div class="palette-row" data-at><span class="palette-title">git: <b class="palette-hit">merge</b> worktree</span><span class="palette-keys">⌘K M</span></div>
+            <div class="palette-row"><span class="palette-title">git: merge status</span></div>
+            <div class="palette-row"><span class="palette-title">git: remove worktree</span><span class="palette-keys">⌘K X</span></div>
+          </div>
+          <div class="p4-side">
+            <h4>Merge worktree</h4>
+            <div>Runs the guided merge for the worktree this panel is on:
+              review, rebase, database, cleanup. Pauses before anything
+              destructive.</div>
+            <div class="p4-meta">group git · bound ⌘K M · ⌘⏎ rebinds</div>
+          </div>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+<!-- ============================== P5 ===================================== -->
+<div class="opt">
+  <h2>P5 — Anchored to the panel it filters</h2>
+  <p class="note">
+    No window-wide overlay for the list-shaped ones: the file search drops into
+    the files panel's own head and filters the tree in place, the project switch
+    filters the projects panel. Nothing is covered, and the result appears where
+    it already lived. The command palette stays centred — it belongs to the
+    window, not to a panel.
+  </p>
+  <div class="stage">
+    <div class="stage-lane">
+      <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+      <div class="mini-panel" style="flex:0 0 260px" data-focused>
+        <div class="p5-find"><span style="color:var(--dim)">▤</span><span>websrv</span><span class="cnt">3</span></div>
+        <div class="mini-body">
+          <div class="mini-row" data-on><span style="color:var(--faint)">src/main/</span><span style="color:var(--text-strong)">webServer.ts</span></div>
+          <div class="mini-row"><span style="color:var(--faint)">src/main/</span>webServer.test.ts</div>
+          <div class="mini-row"><span style="color:var(--faint)">src/web/</span>bridge.ts</div>
+        </div>
+        <div class="merge-foot" style="margin:0;padding:7px 10px">⏎ open · ⇥ split · esc cancel</div>
+      </div>
+      <div class="mini-panel" style="flex:1"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+        <div class="mini-body"><div class="mini-msg"><b>claude</b> ran the tests, all green.</div></div>
+        <div class="mini-composer">type a message…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== P6 ===================================== -->
+<div class="opt">
+  <h2>P6 — One palette, three modes</h2>
+  <p class="note">
+    A single box for all three, switched by a prefix — <span class="k">&gt;</span>
+    command, <span class="k">/</span> file, nothing for a project — with the mode
+    chips visible so the prefixes are learnable, and a sigil column so a mixed
+    result set stays readable. ⌘K, ⌘P and ⌘⇧P become three doors into one room.
+  </p>
+  <div class="trio">
+    <div class="use"><p class="use-name">no prefix — projects</p>
+      <div class="pal">
+        <div class="p6-modes"><span class="p6-mode" data-on>project</span><span class="p6-mode">/ file</span><span class="p6-mode">&gt; command</span></div>
+        <input class="palette-input" value="ro" />
+        <div class="palette-list">
+          <div class="p6-row" data-at><span class="p6-sig">◆</span><span><b class="palette-hit">ro</b>okery</span><span class="p6-tail">work</span></div>
+          <div class="p6-row"><span class="p6-sig">◆</span><span>pinguim-site</span><span class="p6-tail">work · link</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action">Open<kbd>⏎</kbd></span>
+          <span class="palette-action">Mode<kbd>⇥</kbd></span>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">/ — files</p>
+      <div class="pal">
+        <div class="p6-modes"><span class="p6-mode">project</span><span class="p6-mode" data-on>/ file</span><span class="p6-mode">&gt; command</span></div>
+        <input class="palette-input" value="/websrv" />
+        <div class="palette-list">
+          <div class="p6-row" data-at><span class="p6-sig">▤</span><span><b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span><span class="p6-tail">src/main</span></div>
+          <div class="p6-row"><span class="p6-sig">▤</span><span>webServer.test.ts</span><span class="p6-tail">src/main</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action">Open<kbd>⏎</kbd></span>
+          <span class="palette-action">Split<kbd>⇧⏎</kbd></span>
+        </div>
+      </div></div>
+    <div class="use"><p class="use-name">&gt; — commands</p>
+      <div class="pal">
+        <div class="p6-modes"><span class="p6-mode">project</span><span class="p6-mode">/ file</span><span class="p6-mode" data-on>&gt; command</span></div>
+        <input class="palette-input" value="&gt;merge" />
+        <div class="palette-list">
+          <div class="p6-row" data-at><span class="p6-sig">⌘</span><span><b class="palette-hit">Merge</b> worktree</span><span class="p6-tail">⌘K M</span></div>
+          <div class="p6-row"><span class="p6-sig">⌘</span><span>Merge status</span><span class="p6-tail">git</span></div>
+        </div>
+        <div class="palette-foot">
+          <span class="palette-action">Run<kbd>⏎</kbd></span>
+          <span class="palette-action">Rebind<kbd>⌘⏎</kbd></span>
+        </div>
+      </div></div>
+  </div>
+</div>
+
+</body>
+</html>

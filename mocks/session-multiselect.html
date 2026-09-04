@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>
+  body { margin: 0; display: flex; gap: 0; }
+  .half { flex: 1; padding: 24px; }
+  .half[data-t='light'] { background: #fff; }
+  .panel { width: 300px; border: 1px solid var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .panel-body { padding: 6px; }
+  .panel-name { font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="half" id="dark">
+  <div class="panel" data-focused data-kind="worktrees">
+    <header class="panel-head">
+      <span class="panel-name">Worktrees</span>
+      <button class="head-danger"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12h12l1-12M9 7V4h6v3"/></svg>3</button>
+      <button class="panel-act">▤</button>
+      <button class="panel-act">✕</button>
+    </header>
+    <div class="panel-body">
+      <div class="group">
+        <button class="row row-branch"><span class="row-name">main</span></button>
+        <button class="row row-session"><span class="dot"></span><span class="row-name">fix the login bug</span><span class="sub-note">2h</span></button>
+        <button class="row row-session" data-picked><span class="dot"></span><span class="row-name">refactor the api</span><span class="sub-note">5h</span></button>
+        <button class="row row-session" data-picked data-cursor><span class="dot"></span><span class="row-name">ticked, and under the cursor</span><span class="sub-note">1d</span></button>
+        <button class="row row-session" data-active data-unread><span class="dot dot-unread"></span><span class="row-name">open and unread</span><span class="sub-note">3m</span></button>
+        <button class="row row-session" data-picked><span class="dot"></span><span class="row-name">third ticked</span><span class="sub-note">2d</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

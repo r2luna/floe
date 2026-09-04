@@ -59,6 +59,7 @@ export const COMMAND_IDS: string[] = [
   'palette.commands',
   'palette.files',
   'project.add',
+  'project.reload',
   'project.move',
   'project.delete',
   'project.move.start',
@@ -101,6 +102,10 @@ export const COMMAND_IDS: string[] = [
   'session.delete',
   'session.deleteOthers',
   'session.deleteAll',
+  'session.deleteIdle',
+  'session.mark',
+  'session.markClear',
+  'session.deleteMarked',
   // Queries (a side conversation running beside the chat)
   'query.open',
   'query.focus',
@@ -118,6 +123,9 @@ export const COMMAND_IDS: string[] = [
   'worktree.remove',
   'remove.confirm',
   'remove.cancel',
+  'worktree.provision',
+  'provision.confirm',
+  'provision.cancel',
   // Project setup (the commands a project gets registered)
   'setup.start',
   'setup.retry',

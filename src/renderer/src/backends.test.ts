@@ -55,3 +55,15 @@ test('a detached backend drops out with the next merge', () => {
     ['/Users/me/a']
   )
 })
+
+// Slices now land in whatever order the machines answer in, and local is not
+// always first: a remote that was already warm can beat it. Merging must put
+// each machine's rows where the backend order says, not where they arrived.
+test('slices merge into backend order however they arrive', () => {
+  const remoteFirst = mergeProjects([], [p('/home/me/x')], 'link', order)
+  const both = mergeProjects(remoteFirst, [p('/Users/me/a')], 'local', order)
+  assert.deepEqual(
+    both.map((x) => x.path),
+    ['/Users/me/a', '/home/me/x']
+  )
+})

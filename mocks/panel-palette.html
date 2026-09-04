@@ -1,0 +1,347 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Panel dialog with a typing head — P3 vs P4</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. The box below is O1's panel dialog with its head turned
+   into the typing line, so the palette and the dialog stop being two surfaces:
+   you type in the head, the answers stack under it, the foot names the keys. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+h3{ font-size:12px; font-weight:400; color:var(--faint); margin:0 0 6px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:78ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 16px; max-width:78ch; }
+.opt{ margin:0 0 40px; }
+.k{ color:var(--text-strong); }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+button.theme:hover{ color:var(--text-strong); }
+.trio{ display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+
+/* --- the surface ----------------------------------------------------------
+   Panel chrome, exactly: --panel-focused fill, --line border, a 34px head with
+   a bottom hairline, and a hint strip for a foot. The only change from a real
+   panel is that the head holds a caret instead of a title. */
+.pp{ width:420px; display:flex; flex-direction:column; background:var(--panel-focused);
+  border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.pp-head{ display:flex; align-items:center; gap:8px; height:var(--head-h); flex:none;
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.pp-sig{ flex:none; color:var(--dim); }
+.pp-type{ flex:1; min-width:0; color:var(--text-strong); white-space:nowrap; overflow:hidden; }
+.pp-type[data-empty]{ color:var(--faint); }
+/* The caret: the head is an input, and nothing else in a panel head blinks. */
+.pp-caret{ display:inline-block; width:0; border-left:1px solid var(--accent); height:1em;
+  vertical-align:text-bottom; margin-left:1px; }
+.pp-count{ flex:none; color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums; }
+.pp-body{ padding:5px; max-height:260px; overflow:hidden; }
+.pp-foot{ padding:7px 11px; border-top:1px solid var(--line-soft);
+  color:var(--faint); font-size:10px; flex:none; }
+
+/* Section headers, from P3. Sticky, dropped the moment a query narrows things. */
+.pp-group{ position:sticky; top:0; padding:7px 10px 3px; color:var(--faint);
+  font-size:10px; letter-spacing:.08em; background:var(--panel-focused); }
+
+/* Rows, from P2: dim context, strong name, tail on the right. */
+.pp-row{ display:flex; align-items:baseline; gap:0; width:100%; padding:5px 10px;
+  border-radius:var(--radius); text-align:left; }
+.pp-row[data-at]{ background:var(--wash-4); }
+.pp-dir{ color:var(--faint); flex:0 1 auto; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.pp-name{ color:var(--text); flex:none; }
+.pp-row[data-at] .pp-name{ color:var(--text-strong); }
+.pp-tail{ margin-left:auto; padding-left:10px; flex:none; color:var(--dim); font-size:11px; }
+/* A row that is an ANSWER, not a destination: the value in force carries the
+   filled dot the session rows already use for "this is the one". */
+.pp-mark{ flex:none; width:6px; height:6px; margin-right:8px; border:1px solid #4a4f59;
+  border-radius:50%; align-self:center; }
+.pp-mark[data-on]{ background:var(--live); border-color:var(--live); }
+
+/* --- B: the preview side --------------------------------------------------- */
+.pp-wide{ width:700px; }
+.pp-split{ display:flex; min-height:210px; }
+.pp-list{ flex:0 0 300px; padding:5px; border-right:1px solid var(--line-soft); overflow:hidden; }
+.pp-side{ flex:1; min-width:0; padding:10px 12px; color:var(--faint); font-size:11px; }
+.pp-side h4{ margin:0 0 8px; font-size:12px; font-weight:400; color:var(--text-strong); }
+.pp-side pre{ margin:0; font:inherit; color:var(--dim); white-space:pre; overflow:hidden; }
+.pp-facts{ display:flex; flex-direction:column; gap:3px; }
+.pp-fact{ display:flex; gap:8px; }
+.pp-fact b{ font-weight:400; color:var(--faint); flex:0 0 70px; }
+.pp-fact span{ color:var(--dim); }
+.pp-fact span.ok{ color:var(--live); }
+.pp-fact span.warn{ color:var(--accent); }
+.pp-meta{ margin-top:10px; padding-top:8px; border-top:1px solid var(--line-soft); }
+
+/* --- stage, to check it on the running app --------------------------------- */
+.stage{ position:relative; height:340px; max-width:1000px; overflow:hidden;
+  background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius); }
+.stage-lane{ position:absolute; inset:0; display:flex; gap:8px; padding:8px; }
+.mini-rail{ display:flex; flex-direction:column; gap:2px; width:26px; flex:none;
+  align-items:center; padding-top:2px; color:var(--dim); font-size:12px; }
+.mini-rail i{ font-style:normal; line-height:22px; }
+.mini-panel{ display:flex; flex-direction:column; min-height:0; background:var(--panel);
+  border:1px solid var(--line-soft); border-radius:var(--radius); }
+.mini-head{ display:flex; align-items:center; gap:7px; height:var(--head-h); flex:none;
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.mini-body{ flex:1; min-height:0; overflow:hidden; padding:8px; }
+.mini-row{ display:flex; align-items:center; gap:8px; padding:4px 8px; border-radius:var(--radius); }
+.mini-row[data-on]{ background:var(--wash-3); color:var(--text-strong); }
+.mini-msg{ color:var(--dim); margin-bottom:8px; }
+.mini-msg b{ color:var(--nick-claude); font-weight:400; }
+.mini-composer{ margin:8px; padding:8px 10px; border:1px solid var(--line);
+  border-radius:var(--radius); color:var(--faint); flex:none; }
+.stage-scrim{ position:absolute; inset:0; display:flex; justify-content:center;
+  align-items:flex-start; padding-top:30px; background:#0506084d; }
+:root[data-theme='light'] .stage-scrim{ background:#3d434e1f; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Panel dialog, typing head — A with P3, B with P4</h1>
+<p class="lede">
+  One surface for both jobs: panel chrome from O1, the head is where you type,
+  the answers stack underneath, the foot names the keys. Switching a project and
+  adding one are then the same box in two states — ⌘K never changes shape under
+  you. <span class="k">A</span> fills the body with grouped sections (P3);
+  <span class="k">B</span> splits it and explains the highlighted row (P4).
+</p>
+
+<!-- ================================ A ==================================== -->
+<div class="opt">
+  <h2>A — typing head + grouped body (P3)</h2>
+  <p class="note">
+    The body is a grouped list: recents first, then the groups. Adding a project
+    is the SAME box with its sections turned into the two answers it still needs
+    — machine and group — while the head holds the path you are typing. Nothing
+    moves between the two states except what is under the head.
+  </p>
+  <div class="trio">
+    <div>
+      <h3>1. ⌘K — switch project</h3>
+      <div class="pp">
+        <div class="pp-head"><span class="pp-sig">◆</span><span class="pp-type">ro<i class="pp-caret"></i></span><span class="pp-count">2</span></div>
+        <div class="pp-body">
+          <div class="pp-group">RECENT</div>
+          <div class="pp-row" data-at><span class="pp-dir">work/</span><span class="pp-name"><b class="palette-hit">ro</b>okery</span><span class="pp-tail">2m ago</span></div>
+          <div class="pp-group">WORK</div>
+          <div class="pp-row"><span class="pp-dir">work/</span><span class="pp-name">pinguim-site</span><span class="pp-tail">link</span></div>
+          <div class="pp-group">NOT ADDED YET</div>
+          <div class="pp-row"><span class="pp-dir">＋&nbsp;</span><span class="pp-name">Add project…</span><span class="pp-tail">⌘N</span></div>
+        </div>
+        <div class="pp-foot">⏎ open · ⌘N add project · esc close</div>
+      </div>
+    </div>
+
+    <div>
+      <h3>2. ⌘N — add project, same box</h3>
+      <div class="pp">
+        <div class="pp-head"><span class="pp-sig">＋</span><span class="pp-type">~/code/floe<i class="pp-caret"></i></span><span class="pp-count">path</span></div>
+        <div class="pp-body">
+          <div class="pp-group">MACHINE</div>
+          <div class="pp-row"><i class="pp-mark" data-on></i><span class="pp-name">this mac</span><span class="pp-tail">local</span></div>
+          <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">link</span><span class="pp-tail">remote</span></div>
+          <div class="pp-group">GROUP</div>
+          <div class="pp-row" data-at><i class="pp-mark" data-on></i><span class="pp-name">work</span><span class="pp-tail">4 projects</span></div>
+          <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">personal</span><span class="pp-tail">2 projects</span></div>
+          <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">New group…</span></div>
+        </div>
+        <div class="pp-foot">⏎ add · ␣ pick · ⌘O browse · esc back</div>
+      </div>
+    </div>
+
+    <div>
+      <h3>3. the other two uses, unchanged</h3>
+      <div class="pp" style="margin-bottom:14px">
+        <div class="pp-head"><span class="pp-sig">▤</span><span class="pp-type">websrv<i class="pp-caret"></i></span><span class="pp-count">3</span></div>
+        <div class="pp-body">
+          <div class="pp-row" data-at><span class="pp-dir">src/main/</span><span class="pp-name"><b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+          <div class="pp-row"><span class="pp-dir">src/main/</span><span class="pp-name">webServer.test.ts</span></div>
+          <div class="pp-row"><span class="pp-dir">src/web/</span><span class="pp-name">bridge.ts</span></div>
+        </div>
+        <div class="pp-foot">⏎ open · ⇧⏎ split · esc close</div>
+      </div>
+      <div class="pp">
+        <div class="pp-head"><span class="pp-sig">⌘</span><span class="pp-type" data-empty>Execute a command…<i class="pp-caret"></i></span><span class="pp-count">38</span></div>
+        <div class="pp-body">
+          <div class="pp-group">GIT</div>
+          <div class="pp-row" data-at><span class="pp-name">Merge worktree</span><span class="pp-tail">⌘K M</span></div>
+          <div class="pp-row"><span class="pp-name">Remove worktree</span><span class="pp-tail">⌘K X</span></div>
+          <div class="pp-group">SESSION</div>
+          <div class="pp-row"><span class="pp-name">New session</span><span class="pp-tail">⌘N</span></div>
+        </div>
+        <div class="pp-foot">⏎ run · ⌘⏎ rebind · esc close</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ================================ B ==================================== -->
+<div class="opt">
+  <h2>B — typing head + split body (P4)</h2>
+  <p class="note">
+    Same head and foot, body split: the list keeps the left 300px, the right side
+    explains what is highlighted. On add project it becomes a check of the path
+    you are typing — is it a repo, on which branch, is it already added — which
+    the current dialog can only tell you after you press Add.
+  </p>
+  <div class="trio">
+    <div>
+      <h3>1. ⌘K — switch project</h3>
+      <div class="pp pp-wide">
+        <div class="pp-head"><span class="pp-sig">◆</span><span class="pp-type">ro<i class="pp-caret"></i></span><span class="pp-count">2</span></div>
+        <div class="pp-split">
+          <div class="pp-list">
+            <div class="pp-group">RECENT</div>
+            <div class="pp-row" data-at><span class="pp-dir">work/</span><span class="pp-name"><b class="palette-hit">ro</b>okery</span></div>
+            <div class="pp-group">WORK</div>
+            <div class="pp-row"><span class="pp-dir">work/</span><span class="pp-name">pinguim-site</span></div>
+            <div class="pp-row"><span class="pp-dir">＋&nbsp;</span><span class="pp-name">Add project…</span></div>
+          </div>
+          <div class="pp-side">
+            <h4>rookery</h4>
+            <div class="pp-facts">
+              <div class="pp-fact"><b>path</b><span>~/code/01.r2luna/rookery</span></div>
+              <div class="pp-fact"><b>machine</b><span>this mac</span></div>
+              <div class="pp-fact"><b>branch</b><span>master · 2 ahead</span></div>
+              <div class="pp-fact"><b>worktrees</b><span>3 · fix-auth, docs, master</span></div>
+              <div class="pp-fact"><b>sessions</b><span class="ok">1 running · claude</span></div>
+            </div>
+            <div class="pp-meta">last opened 2m ago</div>
+          </div>
+        </div>
+        <div class="pp-foot">⏎ open · ⌘N add project · esc close</div>
+      </div>
+    </div>
+
+    <div>
+      <h3>2. ⌘N — add project, the path checked as you type</h3>
+      <div class="pp pp-wide">
+        <div class="pp-head"><span class="pp-sig">＋</span><span class="pp-type">~/code/floe<i class="pp-caret"></i></span><span class="pp-count">path</span></div>
+        <div class="pp-split">
+          <div class="pp-list">
+            <div class="pp-group">MACHINE</div>
+            <div class="pp-row"><i class="pp-mark" data-on></i><span class="pp-name">this mac</span></div>
+            <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">link</span></div>
+            <div class="pp-group">GROUP</div>
+            <div class="pp-row" data-at><i class="pp-mark" data-on></i><span class="pp-name">work</span></div>
+            <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">personal</span></div>
+            <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">New group…</span></div>
+          </div>
+          <div class="pp-side">
+            <h4>~/code/floe</h4>
+            <div class="pp-facts">
+              <div class="pp-fact"><b>git</b><span class="ok">repo · 412 commits</span></div>
+              <div class="pp-fact"><b>branch</b><span>master</span></div>
+              <div class="pp-fact"><b>worktrees</b><span>2 found · they come with it</span></div>
+              <div class="pp-fact"><b>added</b><span class="warn">not yet — it will be new</span></div>
+              <div class="pp-fact"><b>goes to</b><span>work, on this mac</span></div>
+            </div>
+            <div class="pp-meta">⌘O opens the folder picker on this mac</div>
+          </div>
+        </div>
+        <div class="pp-foot">⏎ add · ␣ pick · ⌘O browse · esc back</div>
+      </div>
+    </div>
+
+    <div>
+      <h3>3. ⌘P — find a file</h3>
+      <div class="pp pp-wide">
+        <div class="pp-head"><span class="pp-sig">▤</span><span class="pp-type">websrv<i class="pp-caret"></i></span><span class="pp-count">3</span></div>
+        <div class="pp-split">
+          <div class="pp-list">
+            <div class="pp-row" data-at><span class="pp-dir">src/main/</span><span class="pp-name"><b class="palette-hit">web</b>Se<b class="palette-hit">rv</b>er.ts</span></div>
+            <div class="pp-row"><span class="pp-dir">src/main/</span><span class="pp-name">webServer.test.ts</span></div>
+            <div class="pp-row"><span class="pp-dir">src/web/</span><span class="pp-name">bridge.ts</span></div>
+          </div>
+          <div class="pp-side">
+            <h4>webServer.ts</h4>
+            <pre>import { createServer } from 'node:http'
+import { readFile } from 'node:fs/promises'
+
+/** The browser build's host. Serves out/web
+    and bridges the renderer over ws. */
+export function startWebServer(</pre>
+            <div class="pp-meta">412 lines · modified 2h ago · staged</div>
+          </div>
+        </div>
+        <div class="pp-foot">⏎ open · ⇧⏎ split · esc close</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== on the app ============================== -->
+<div class="opt">
+  <h2>On the running app — A (left) and B (right)</h2>
+  <p class="note">
+    Same scrim as O1, light enough that the lane behind stays readable. A sits at
+    the width of a sidebar; B is as wide as the chat panel it covers.
+  </p>
+  <div class="trio">
+    <div class="stage" style="max-width:490px; flex:0 0 490px">
+      <div class="stage-lane">
+        <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+        <div class="mini-panel" style="flex:0 0 150px"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+          <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div><div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+        <div class="mini-panel" style="flex:1"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+          <div class="mini-body"><div class="mini-msg"><b>claude</b> tests green.</div></div>
+          <div class="mini-composer">type a message…</div></div>
+      </div>
+      <div class="stage-scrim">
+        <div class="pp" style="width:380px">
+          <div class="pp-head"><span class="pp-sig">＋</span><span class="pp-type">~/code/floe<i class="pp-caret"></i></span><span class="pp-count">path</span></div>
+          <div class="pp-body">
+            <div class="pp-group">MACHINE</div>
+            <div class="pp-row"><i class="pp-mark" data-on></i><span class="pp-name">this mac</span></div>
+            <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">link</span></div>
+            <div class="pp-group">GROUP</div>
+            <div class="pp-row" data-at><i class="pp-mark" data-on></i><span class="pp-name">work</span></div>
+            <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">New group…</span></div>
+          </div>
+          <div class="pp-foot">⏎ add · ␣ pick · ⌘O browse · esc back</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage" style="max-width:490px; flex:0 0 490px">
+      <div class="stage-lane">
+        <div class="mini-rail"><i>◧</i><i>▤</i><i>⌥</i></div>
+        <div class="mini-panel" style="flex:0 0 150px"><div class="mini-head"><span style="color:var(--dim)">▤</span><span style="color:var(--text-strong)">projects</span></div>
+          <div class="mini-body"><div class="mini-row"><i class="dot"></i>floe</div><div class="mini-row" data-on><i class="dot dot-unread"></i>rookery</div></div></div>
+        <div class="mini-panel" style="flex:1"><div class="mini-head"><span style="color:var(--dim)">◧</span><span style="color:var(--text-strong)">master</span></div>
+          <div class="mini-body"><div class="mini-msg"><b>claude</b> tests green.</div></div>
+          <div class="mini-composer">type a message…</div></div>
+      </div>
+      <div class="stage-scrim">
+        <div class="pp" style="width:440px">
+          <div class="pp-head"><span class="pp-sig">＋</span><span class="pp-type">~/code/floe<i class="pp-caret"></i></span><span class="pp-count">path</span></div>
+          <div class="pp-split" style="min-height:150px">
+            <div class="pp-list" style="flex:0 0 190px">
+              <div class="pp-group">MACHINE</div>
+              <div class="pp-row"><i class="pp-mark" data-on></i><span class="pp-name">this mac</span></div>
+              <div class="pp-group">GROUP</div>
+              <div class="pp-row" data-at><i class="pp-mark" data-on></i><span class="pp-name">work</span></div>
+              <div class="pp-row"><i class="pp-mark"></i><span class="pp-name">New group…</span></div>
+            </div>
+            <div class="pp-side">
+              <div class="pp-facts">
+                <div class="pp-fact"><b>git</b><span class="ok">repo</span></div>
+                <div class="pp-fact"><b>branch</b><span>master</span></div>
+                <div class="pp-fact"><b>added</b><span class="warn">not yet</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="pp-foot">⏎ add · ␣ pick · ⌘O browse · esc back</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

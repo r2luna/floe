@@ -2,8 +2,14 @@ import { dialog } from 'electron'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename } from 'node:path'
-import { DEFAULT_GROUP, type Project, type ProjectEnvConfig, type Worktree } from '../shared/types'
-import { isGitRepo, repoRoot } from './git'
+import {
+  DEFAULT_GROUP,
+  type PathProbe,
+  type Project,
+  type ProjectEnvConfig,
+  type Worktree
+} from '../shared/types'
+import { isGitRepo, listWorktrees, repoRoot } from './git'
 import { floeConfig, setFloeValue } from './config/floe'
 import {
   createProject,
@@ -176,6 +182,37 @@ export async function addProjectByPath(
   const targetGroup = (group && group.trim()) || groups[0] || DEFAULT_GROUP
   if (!groups.includes(targetGroup)) writeGroups([...groups, targetGroup])
   return { project: toProject(createProject(root, { group: targetGroup })), created: true }
+}
+
+/**
+ * What a path is, without adding it — the add dialog's preview pane.
+ *
+ * Runs the same checks as addProjectByPath and in the same order, so what the
+ * pane says is what the add will do. It never expands `~`, never creates
+ * anything, and answers for a path that does not exist rather than throwing:
+ * the caller is asking about half-typed text.
+ */
+export async function probePath(picked: string): Promise<PathProbe> {
+  const path = picked.trim()
+  if (!path || !existsSync(path)) return { path, exists: false, isRepo: false }
+  if (!(await isGitRepo(path))) return { path, exists: true, isRepo: false }
+
+  const root = (await repoRoot(path)) ?? path
+  const existing = stored(root)
+  // One call for both facts: the main worktree carries the branch, and the list
+  // length is how many worktrees come along with the project.
+  const worktrees = await listWorktrees(root).catch(() => [] as Worktree[])
+  return {
+    path,
+    exists: true,
+    isRepo: true,
+    root,
+    name: existing?.name || basename(root),
+    branch: worktrees.find((w) => w.isMain)?.branch,
+    worktrees: worktrees.length,
+    added: !!existing,
+    group: existing ? toProject(existing).group : undefined
+  }
 }
 
 export function renameGroup(

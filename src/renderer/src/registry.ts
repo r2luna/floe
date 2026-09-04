@@ -22,7 +22,6 @@ import {
 } from './lane.ts'
 import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
-import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
 import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
@@ -145,6 +144,27 @@ function pageStep(c: CommandContext, rows: HTMLElement[]): number {
 function fileRow(c: CommandContext): HTMLElement | null {
   const active = document.activeElement as HTMLElement | null
   return active && c.panelEl(c.lane.focus)?.contains(active) ? active : null
+}
+
+/**
+ * The session the worktrees cursor is on, or null when it is on a branch.
+ *
+ * Read off the row's own `data-session` rather than by counting rows, exactly
+ * as `projectAtCursor` reads `data-project`: the list is grouped, and an index
+ * into "sessions, ignoring branches" is the kind of arithmetic that ticks the
+ * wrong chat the day a branch gets folded.
+ *
+ * The cursor rather than `document.activeElement`, unlike fileRow: the right-
+ * click menu holds focus while it is up, and "Select" from that menu has to
+ * mean the row it was opened on.
+ */
+function sessionOnRow(c: CommandContext): { id: string; worktreePath: string } | null {
+  const panel = c.lane.panels[c.lane.focus]
+  if (panel?.kind !== 'worktrees') return null
+  const row = c.rowsOf(c.panelEl(c.lane.focus))[panel.cursor ?? -1]
+  const id = row?.dataset.session
+  const worktreePath = row?.dataset.worktree
+  return id && worktreePath ? { id, worktreePath } : null
 }
 
 /**
@@ -355,7 +375,7 @@ function commentOnSelection(c: CommandContext): void {
   const from = lineOnRow(c, r[0])
   const to = lineOnRow(c, r[1])
   if (panel.kind === 'diff' && from !== undefined && to !== undefined) {
-    sendToComposer(c, shorten(fileRef(panel.sub ?? '', from, to).trim()) + '\n\n')
+    sendToComposer(c, fileRef(panel.sub ?? '', from, to).trim() + '\n\n')
     return
   }
 
@@ -365,9 +385,9 @@ function commentOnSelection(c: CommandContext): void {
     panel.kind === 'file'
       ? // A file panel reading its own root — a skill, which lives in Floe's
         // config — is not in the worktree, so a relative path would name
-        // nothing the agent can open. The full path is what gets sent; the
-        // composer only ever shows the short token standing for it.
-        shorten(fileRef(panel.root ? `${panel.root}/${panel.sub ?? ''}` : (panel.sub ?? ''), r[0], r[1]).trim()) + '\n\n'
+        // nothing the agent can open. The full path is what gets sent, and what
+        // the composer shows.
+        fileRef(panel.root ? `${panel.root}/${panel.sub ?? ''}` : (panel.sub ?? ''), r[0], r[1]).trim() + '\n\n'
       : (() => {
           const { rows } = parseUnifiedDiff(c.patchFor(panel.sub ?? ''))
           const nav = c.rowsOf(c.panelEl(c.lane.focus))
@@ -1275,6 +1295,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.addProject()
       },
       {
+        // The union is loaded per machine and a remote that is unreachable is
+        // simply left out of it, so this is the way back once the network is
+        // there again — without it the only retry was restarting the app.
+        id: 'project.reload',
+        title: 'Reload projects',
+        group: 'App',
+        keys: 'r',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
+        run: (c) => c.reloadProjects()
+      },
+      {
         id: 'group.create',
         title: 'New project group…',
         group: 'App',
@@ -1393,6 +1424,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.delete',
         title: 'Delete session…',
         group: 'Sessions',
+        keys: '⌘⇧W',
         enabled: (c) => c.lane.panels.some((p) => p.session),
         run: (c) => c.deleteSession()
       },
@@ -1535,6 +1567,57 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The housekeeping one, and the only session command that is not about
+        // the worktree you are in: it sweeps the whole open project, because a
+        // chat you abandoned an hour ago is just as dead on the branch next
+        // door. Nothing to sweep says so rather than opening a confirm.
+        id: 'session.deleteIdle',
+        title: 'Delete sessions idle for over an hour…',
+        group: 'Sessions',
+        run: (c) => c.deleteSession('idle')
+      },
+      {
+        // A tick, not a range. The sessions worth clearing out are scattered
+        // down the list and across branches, so `v`'s contiguous selection —
+        // which is what `selection.toggle` offers a diff — would be the wrong
+        // shape: you would have to tick the ones in between and then untick
+        // them again.
+        id: 'session.mark',
+        title: 'Select or unselect this session',
+        group: 'Sessions',
+        keys: 'x',
+        // A DOM question, like `project.delete`'s: the branch rows are cursor
+        // rows too, and there is nothing on one to tick.
+        enabled: (c) => !!sessionOnRow(c),
+        unavailable: () => 'put the cursor on a session — a branch has nothing to select',
+        run: (c) => {
+          const at = sessionOnRow(c)
+          if (at) c.markSession(at, 'toggle')
+        }
+      },
+      {
+        id: 'session.markClear',
+        title: 'Unselect every session',
+        group: 'Sessions',
+        keys: 'Esc',
+        enabled: (c) => c.markedSessions.length > 0,
+        unavailable: () => 'no session is selected',
+        run: (c) => c.clearMarkedSessions()
+      },
+      {
+        // One key for both, because they are one question: `d` deletes what is
+        // ticked, and with nothing ticked the row you are on IS the selection
+        // of one. Splitting them would leave `d` dead on a list you had not
+        // ticked anything in yet, which is the common case.
+        id: 'session.deleteMarked',
+        title: 'Delete the selected sessions…',
+        group: 'Sessions',
+        keys: 'd',
+        enabled: (c) => c.markedSessions.length > 0 || !!sessionOnRow(c),
+        unavailable: () => 'select a session first, or put the cursor on one',
+        run: (c) => c.deleteSession('marked')
+      },
+      {
         id: 'worktree.new',
         title: 'New worktree',
         group: 'Worktrees',
@@ -1646,6 +1729,47 @@ export const REGISTRY: Map<string, Command> = new Map(
           c.remove.cancel()
           c.setLane((l) => {
             const at = l.panels.findIndex((p) => p.kind === 'remove')
+            return at === -1 ? l : close(l, at)
+          })
+        }
+      },
+      // --- worktree provisioning ------------------------------------------
+      // The environment a worktree needs to run: .env, dependencies, site,
+      // database. Runs itself on create; these are the ways back to it.
+      {
+        id: 'worktree.provision',
+        title: 'Set up this worktree’s environment',
+        group: 'Worktrees',
+        keys: '⌘K W',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to set up — open one first',
+        // Every step is idempotent, so this is also the repair: run it on a
+        // worktree that was created before the app provisioned anything, or one
+        // whose install died halfway.
+        run: (c) => c.provision.start()
+      },
+      {
+        id: 'provision.confirm',
+        title: 'Provision: retry from the failed step',
+        group: 'Worktrees',
+        keys: '⏎',
+        enabled: (c) => c.provision.idle,
+        unavailable: () => 'the setup is still running',
+        run: (c) => c.provision.retry()
+      },
+      {
+        id: 'provision.cancel',
+        title: 'Provision: hide the checklist',
+        group: 'Worktrees',
+        keys: 'esc',
+        enabled: (c) => c.provision.active,
+        unavailable: () => 'no setup to hide',
+        // Only the checklist goes. The steps run in main and carry on — this is
+        // "stop showing me", not "stop".
+        run: (c) => {
+          c.provision.dismiss()
+          c.setLane((l) => {
+            const at = l.panels.findIndex((p) => p.kind === 'provision')
             return at === -1 ? l : close(l, at)
           })
         }

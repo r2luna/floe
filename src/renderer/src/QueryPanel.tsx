@@ -10,7 +10,6 @@ import { speakerKey } from './models'
 import { nickColor } from './nickColor'
 import { DEFAULT_MODE } from '../../shared/modes'
 import { parseQueryKey } from '../../shared/queries'
-import { expand } from './fileRefs'
 
 // The panel a query runs in.
 //
@@ -157,7 +156,7 @@ export function QueryPanel({
           pinned.current = true
           // No handle read here, on purpose: the panel IS the address. A line
           // opening with `@codex` inside the codex query is text, not routing.
-          send(expand(text), choice, attached?.images, attached?.files)
+          send(text, choice, attached?.images, attached?.files)
           setText('')
         }}
         // The mode is not the user's to change here — a query is read-only by

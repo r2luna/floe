@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>
+  body { margin: 0; padding: 16px; display: flex; gap: 16px; align-items: flex-start; }
+  .panel { width: 250px; border: 1px solid var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .panel-body { padding: 6px; }
+  .panel-name { font-size: 12px; }
+  .row-menu { position: static; }
+</style>
+</head>
+<body>
+  <div class="panel" data-focused data-kind="projects">
+    <header class="panel-head"><span class="panel-name">Projects</span></header>
+    <div class="panel-body"><div class="group">
+      <div class="group-label">WORK</div>
+      <button class="row" data-active><span class="dot"></span><span class="row-name">floe</span></button>
+      <button class="row" data-cursor><span class="dot"></span><span class="row-name">under the cursor</span></button>
+      <button class="row"><span class="dot"></span><span class="row-name">rookery</span></button>
+    </div></div>
+  </div>
+
+  <div class="panel" data-focused data-kind="diff">
+    <header class="panel-head"><span class="panel-name">Diff</span></header>
+    <div class="panel-body">
+      <div class="diff-hunk">@@ -12,7 +12,9 @@</div>
+      <div class="diff-row" data-sel><span class="diff-code">const a = 1</span></div>
+      <div class="diff-row" data-sel data-cursor><span class="diff-code">const b = 2</span></div>
+      <div class="diff-row"><span class="diff-code">const c = 3</span></div>
+    </div>
+  </div>
+
+  <div class="row-menu">
+    <button class="row-menu-item"><span class="row-menu-label">Open</span><span class="row-menu-keys">⏎</span></button>
+    <button class="row-menu-item" data-at><span class="row-menu-label">Select</span><span class="row-menu-keys">x</span></button>
+    <button class="row-menu-item"><span class="row-menu-label">Delete…</span><span class="row-menu-keys">d</span></button>
+  </div>
+</body>
+</html>

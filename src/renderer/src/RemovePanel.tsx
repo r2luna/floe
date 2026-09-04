@@ -91,7 +91,7 @@ function Step({
   // What is about to be destroyed, listed at the checkpoint that is asking
   // about it — "3 uncommitted changes" is not something anyone can answer yes
   // to without seeing which three.
-  const showChanges = step.id === 'worktree' && awaiting === 'force' && changes.length > 0
+  const showChanges = step.status === 'blocked' && awaiting === 'force' && changes.length > 0
 
   return (
     <li className={`merge-node${toneOf(step)}`}>

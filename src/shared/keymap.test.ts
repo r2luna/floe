@@ -12,6 +12,8 @@ test('the flags read straight off the context', () => {
   assert.equal(ok('typing')({ typing: true }), true)
   assert.equal(ok('typing')({}), false)
   assert.equal(ok('selecting')({ selecting: true }), true)
+  assert.equal(ok('marked')({ marked: true }), true)
+  assert.equal(ok('marked')({ selecting: true }), false)
   assert.equal(ok('stack-below')({ stackDown: true }), true)
   assert.equal(ok('stack-above')({ stackUp: true }), true)
 })

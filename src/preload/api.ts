@@ -48,6 +48,7 @@ import type {
   HarnessUsage,
   LocalAgent,
   MemoryStats,
+  PathProbe,
   PermissionMode,
   NeedsYouSession,
   PlanFile,
@@ -63,6 +64,7 @@ import type {
   Query,
   RemoteBranch,
   DropDatabaseResult,
+  UnlinkSiteResult,
   FileOp,
   RemoveBranchResult,
   RemovePreflight,
@@ -300,6 +302,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
               error?: string
             }>)
           : ipcRenderer.invoke('projects:addByPath', path, group),
+      // What the path IS, without adding it — the dialog's preview pane. Reads
+      // on the same machine the add would, so a remote path is checked over
+      // there rather than against this disk.
+      probe: (path: string, backend?: string): Promise<PathProbe> =>
+        backend && host.backendsCtl
+          ? (host.backendsCtl.invokeOn(backend, 'projects:probe', path) as Promise<PathProbe>)
+          : ipcRenderer.invoke('projects:probe', path),
       // Set (or clear, with null) a project's containerized-env config.
       setEnv: (path: string, env: ProjectEnvConfig | null): Promise<Project[]> =>
         ipcRenderer.invoke('projects:setEnv', path, env),
@@ -388,7 +397,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       branch: (root: string, branch: string, force: boolean): Promise<RemoveBranchResult> =>
         ipcRenderer.invoke('remove:branch', root, branch, force),
       dropDatabase: (root: string, target: string): Promise<DropDatabaseResult> =>
-        ipcRenderer.invoke('remove:dropDatabase', root, target)
+        ipcRenderer.invoke('remove:dropDatabase', root, target),
+      // Undo the Herd site the Laravel recipe linked, before the directory goes.
+      unlinkSite: (target: string): Promise<UnlinkSiteResult> =>
+        ipcRenderer.invoke('remove:unlinkSite', target)
     },
     provision: {
       run: (
