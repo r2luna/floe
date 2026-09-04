@@ -10,6 +10,7 @@ import { collapseSkills, hasSkill } from '../shared/skills'
 import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
 import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
+import type { QueryMark } from '../shared/types'
 
 // Claude Code stores each session as ~/.claude/projects/<encoded-cwd>/<id>.jsonl,
 // where the cwd path has every "/" and "." replaced with "-". We read those to
@@ -58,6 +59,18 @@ export interface TranscriptItem {
    * attributed to the model.
    */
   by?: 'user'
+  /**
+   * Set on the `query` tool rows this app writes into a chat: a side
+   * conversation opened, peeked at, merged or discarded. See QueryMark — it is
+   * what the fold in the transcript is drawn from.
+   */
+  query?: QueryMark
+  /**
+   * Which `@all` fan-out this answer belongs to. Items sharing one render as a
+   * single comparison block rather than as N replies in a row — the whole point
+   * of asking several at once is reading them against each other.
+   */
+  fanoutId?: string
   /**
    * Who spoke, when it was neither you nor the model answering you: another
    * voice in the channel. Two of them exist — another Claude session whose

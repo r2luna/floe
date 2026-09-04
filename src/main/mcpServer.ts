@@ -48,7 +48,17 @@ import {
 import { readSessionBuffer, sessionRuntime, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
-import { optionsForRoute, routeOf, startTurn } from './turn'
+import { dispatchTurn, optionsForRoute, routeOf } from './turn'
+import {
+  discardQuery,
+  fanOut,
+  mergeQuery,
+  openQueryFor,
+  peekQuery,
+  queriesFor,
+  refuseReason
+} from './queries'
+import type { Route } from '../shared/mentions'
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import {
@@ -209,13 +219,14 @@ function sendOptions(
   target: CreatedSession,
   prompt: string,
   named: { harness?: string; model?: string; effort?: Effort; mode?: PermissionMode }
-): { prompt: string; options: AgentRunOptions } {
+): { prompt: string; options: AgentRunOptions; route: Route | null } {
   const handle = named.harness ? null : routeOf(prompt)
   const harness = named.harness ?? handle?.harness
   if (!harness) {
     const options = runOptionsFor(target)
     return {
       prompt,
+      route: null,
       options: {
         ...options,
         model: named.model ?? options.model,
@@ -232,6 +243,10 @@ function sendOptions(
   }
   const options = optionsForRoute(route, target.id)
   return {
+    // Named a harness, by argument or by handle: this is a ROUTE, and it opens
+    // a query exactly as the composer's would (D7). Handed back rather than
+    // consumed here — the decision is turn.ts's, for all five doors at once.
+    route,
     // Sent without the handle, shown with it — the same split the composer
     // makes, so a transcript read back says who the message was for.
     prompt: route.prompt,
@@ -268,7 +283,15 @@ function deliverFollowup(sessionId: string, message: string): void {
   // Claude, which made `@codex …` mean one thing when sent and another when
   // scheduled.
   const sent = sendOptions(target, message, {})
-  startTurn(win, connKeyFor(target), target.worktreePath, sent.prompt, sent.options)
+  dispatchTurn({
+    win,
+    parentKey: connKeyFor(target),
+    worktreePath: target.worktreePath,
+    prompt: message,
+    route: sent.route,
+    origin: 'followup',
+    options: sent.options
+  })
 }
 
 function scheduleFollowup(fromToken: string, sessionId: string, delayMinutes: number, message: string): string {
@@ -561,8 +584,20 @@ function registerTools(server: McpServer, token: string): void {
           const named = routeOf(prompt) ? { mode: mode as PermissionMode } : { model, mode: mode as PermissionMode }
           const sent = stored
             ? sendOptions(stored, prompt, named)
-            : { prompt, options: { permissionMode: (mode as PermissionMode) ?? 'skip', model } }
-          startTurn(win, id, worktree, sent.prompt, sent.options)
+            : {
+                prompt,
+                route: routeOf(prompt),
+                options: { permissionMode: (mode as PermissionMode) ?? 'skip', model }
+              }
+          dispatchTurn({
+            win,
+            parentKey: id,
+            worktreePath: worktree,
+            prompt,
+            route: sent.route,
+            origin: 'mcp',
+            options: sent.options
+          })
         }
         if (select === true) {
           pushCommand({
@@ -609,16 +644,40 @@ function registerTools(server: McpServer, token: string): void {
         if (!target) return textResult({ error: `Unknown session: ${session_id}` })
         const win = getWindow()
         if (!win) return textResult({ error: 'No window available to run the session.' })
-        const key = connKeyFor(target)
         const sent = sendOptions(target, prompt, { harness, model, effort, mode })
         // Spawn the conn (if needed) BEFORE waiting, so a brand-new session has a
         // live process for waitForTurn to resolve against.
-        startTurn(win, key, target.worktreePath, sent.prompt, sent.options)
+        //
+        // Through dispatchTurn, so `@codex …` sent by an agent opens the very
+        // same query the composer's would. If the two doors diverge here, "could
+        // an agent do this without the UI?" stops being answerable.
+        const ran = dispatchTurn({
+          win,
+          parentKey: connKeyFor(target),
+          worktreePath: target.worktreePath,
+          prompt,
+          route: sent.route,
+          origin: 'mcp',
+          options: sent.options
+        })
+        if (ran.error) return textResult({ error: ran.error })
         if (wait) {
-          const text = await waitForTurn(key)
-          return textResult({ sessionId: target.id, reply: text, answeredBy: sent.options.provider ?? 'claude' })
+          // The key the turn actually started under — the QUERY's when one
+          // opened, or waiting would park on a session that is not answering.
+          const text = await waitForTurn(ran.key)
+          return textResult({
+            sessionId: target.id,
+            queryKey: ran.query ? ran.key : undefined,
+            reply: text,
+            answeredBy: sent.options.provider ?? 'claude'
+          })
         }
-        return textResult({ sessionId: target.id, ack: true, answeredBy: sent.options.provider ?? 'claude' })
+        return textResult({
+          sessionId: target.id,
+          queryKey: ran.query ? ran.key : undefined,
+          ack: true,
+          answeredBy: sent.options.provider ?? 'claude'
+        })
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -688,6 +747,134 @@ function registerTools(server: McpServer, token: string): void {
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
+    }
+  )
+
+  // --- Queries -------------------------------------------------------------
+  // A query is a side conversation running beside a session, read-only, in its
+  // own panel. An agent gets the same five verbs a person does — see
+  // docs/queries.md. (An agent running INSIDE a query has no Floe token at all
+  // and reaches none of this; that is D8.)
+  server.tool(
+    'open_query',
+    'Open a read-only side conversation with another harness beside a session, in its own panel, running in parallel. The same thing typing `@codex …` in the composer does.',
+    {
+      session_id: z.string().describe('The Floe session to open it beside.'),
+      harness: z
+        .enum(HARNESSES as [string, ...string[]])
+        .describe('Who answers in it. Must be a harness with a read-only mode — codex, claude or opencode.'),
+      prompt: z.string().optional().describe('An optional first message, sent as the query opens.'),
+      model: z.string().optional().describe("That harness's own slug."),
+      effort: z.enum(EFFORTS).optional().describe('How hard to think.')
+    },
+    async ({ session_id, harness, prompt, model, effort }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available.' })
+        // Through dispatchTurn when there is something to say, so an agent's
+        // query is opened by exactly the code the composer's is. Without a
+        // prompt there is no turn to dispatch, only a panel to raise.
+        if (prompt) {
+          const ran = dispatchTurn({
+            win,
+            parentKey: connKeyFor(target),
+            worktreePath: target.worktreePath,
+            prompt,
+            route: { harness, model, effort, prompt },
+            origin: 'mcp'
+          })
+          return ran.error ? textResult({ error: ran.error }) : textResult({ queryKey: ran.key })
+        }
+        const opened = openQueryFor(win, connKeyFor(target), target.worktreePath, {
+          harness,
+          model,
+          effort,
+          openedBy: 'agent'
+        })
+        return opened
+          ? textResult({ queryKey: opened.key })
+          : textResult({ error: refuseReason(harness) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'ask_all',
+    'Ask several harnesses the same thing at once. Each answers in its own read-only query, and the replies come back into the session side by side for comparison. The harnesses are the ones you name — this never fans out to everything installed.',
+    {
+      session_id: z.string().describe('The Floe session to ask from.'),
+      harnesses: z
+        .array(z.enum(HARNESSES as [string, ...string[]]))
+        .min(1)
+        .describe('Who to ask. Only harnesses with a read-only mode can hold a query.'),
+      prompt: z.string().describe('The message every one of them gets.'),
+      effort: z.enum(EFFORTS).optional().describe('One effort for all of them.')
+    },
+    async ({ session_id, harnesses, prompt, effort }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available.' })
+        const out = fanOut(win, connKeyFor(target), target.worktreePath, {
+          harnesses,
+          prompt,
+          effort,
+          openedBy: 'agent'
+        })
+        return textResult(out)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'list_queries',
+    "List a session's side conversations — open ones and the ones already merged or discarded.",
+    { session_id: z.string().describe('The Floe session id.') },
+    async ({ session_id }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        return textResult(queriesFor(target.id))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'peek_query',
+    "Hand the session what it has not yet read of a query, and let it take a turn on it. The query stays open.",
+    { query_key: z.string().describe('The query key, as `open_query`/`list_queries` report it.') },
+    async ({ query_key }) => {
+      const out = peekQuery(getWindow() ?? null, query_key)
+      return textResult(out.error ? { error: out.error } : { entries: out.entries })
+    }
+  )
+
+  server.tool(
+    'merge_query',
+    'Hand the session the rest of a query and close it. What was already peeked at is not sent twice.',
+    { query_key: z.string().describe('The query key to merge.') },
+    async ({ query_key }) => {
+      const out = mergeQuery(getWindow() ?? null, query_key)
+      return textResult(out.error ? { error: out.error } : { entries: out.entries, merged: true })
+    }
+  )
+
+  server.tool(
+    'discard_query',
+    'Close a query without the session ever seeing a word of it.',
+    { query_key: z.string().describe('The query key to discard.') },
+    async ({ query_key }) => {
+      const out = discardQuery(getWindow() ?? null, query_key)
+      return textResult(out.error ? { error: out.error } : { discarded: true })
     }
   )
 
@@ -1615,6 +1802,33 @@ export function mcpConfigFor(key: string, worktreePath?: string): string {
   } catch {
     // Non-fatal: agent.ts will still pass the path; a missing file just means no
     // floe tools for that session.
+  }
+  return file
+}
+
+/**
+ * The config a QUERY spawns with: no servers at all.
+ *
+ * A query gets no Floe token (D8). The token IS the session id (`/mcp/<key>`),
+ * and a query key resolves to no session — so a query would carry a token
+ * `findSessionAny` cannot resolve and every tool that depends on it would break
+ * in silence. Mating that with the read-only promise, the honest answer is that
+ * a conversation which only reads should not be opening panels, creating
+ * sessions or running commands in the app either.
+ *
+ * But not minting the token is not enough on its own: without a config of its
+ * own the CLI falls back to the Floe server registered GLOBALLY and comes back
+ * as `/mcp/global` — the same tools under the wrong identity. So the query is
+ * handed an empty config, and `--strict-mcp-config` alongside it (agent.ts) to
+ * ignore the global and project ones.
+ */
+export function emptyMcpConfigFor(key: string): string {
+  const file = join(app.getPath('temp'), `floe-mcp-none-${key}.json`)
+  try {
+    writeFileSync(file, JSON.stringify({ mcpServers: {} }))
+  } catch {
+    // Non-fatal, exactly as above: the path is still passed, and a missing file
+    // means no servers — which is what this asked for anyway.
   }
   return file
 }

@@ -6,7 +6,12 @@ import type { BrowserWindow } from 'electron'
 import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
-import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
+import { getCreatedSession } from './sessionStore'
+// Who this key IS — session or query. Every alias lookup in this file goes
+// through it, so a conversation the session table does not hold still resolves
+// instead of silently answering `undefined`. See identity.ts.
+import { agentIdentityNames, agentResumeId, linkAgentIdentity } from './identity'
+import { isQueryKey } from '../shared/queries'
 import { isAsyncLaunchAck, isTaskNotification, parsePeerMessage, parseTaskNotifications, resultText } from './claudeSessions'
 // Circular with handoff (it imports sendAgentEvent) — safe: both sides only
 // call the other's functions at runtime, never at module top level.
@@ -17,7 +22,7 @@ import { cancelRelay } from './relay'
 import { getSystemPrompt } from './appSettings'
 // Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
 // sides only call the other's functions at runtime, never at module top level.
-import { mcpConfigFor } from './mcpServer'
+import { emptyMcpConfigFor, mcpConfigFor } from './mcpServer'
 import { log } from './log'
 
 export interface Conn {
@@ -225,9 +230,7 @@ export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?:
  * of them; see resolveConn, which does the same for the live conn.
  */
 export function sessionNames(key: string): string[] {
-  const names = new Set([key])
-  const stored = getCreatedSession(key)
-  for (const n of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) if (n) names.add(n)
+  const names = new Set(agentIdentityNames(key))
   // A conn the store has not linked yet still knows the id the CLI gave it.
   const conn = conns.get(key)
   if (conn?.sessionId) names.add(conn.sessionId)
@@ -381,7 +384,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   // conn's id covers the in-app case; the persisted claudeId covers a respawn
   // after the machine slept or the app restarted — without it, an idle session
   // would silently start fresh and lose its whole history.
-  const resumeId = conns.get(key)?.sessionId ?? getCreatedSessionClaudeId(key)
+  const resumeId = conns.get(key)?.sessionId ?? agentResumeId(key)
 
   const args = [
     '-p',
@@ -414,8 +417,25 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   // caller. Auto-permit the floe tools — the wildcard covers all mcp__floe__*
   // without raising a permission prompt. These two argv entries are also what
   // the managed hooks' ps-ancestry walk detects (hooks.ts DETECT_FLOE).
-  args.push('--mcp-config', mcpConfigFor(key, worktreePath))
-  args.push('--allowedTools', 'mcp__floe')
+  //
+  // A query is the exception, and it takes both halves to be real (D8). Its key
+  // is not a session id, so the token it would carry resolves to nothing; and
+  // merely leaving the token out would let the CLI inherit the Floe server
+  // registered globally and come back as `/mcp/global` — the same tools under
+  // the wrong identity. So: an empty config, `--strict-mcp-config` to ignore
+  // the global and project ones, and no `--allowedTools`.
+  //
+  // Consequence, deliberately taken: the managed hooks stop firing inside a
+  // query, because DETECT_FLOE recognises a Floe process by exactly these two
+  // argv entries. `plan` is the barrier that replaces them — which is why a
+  // harness without `plan` cannot hold a query at all (queries.ts).
+  if (isQueryKey(key)) {
+    args.push('--mcp-config', emptyMcpConfigFor(key))
+    args.push('--strict-mcp-config')
+  } else {
+    args.push('--mcp-config', mcpConfigFor(key, worktreePath))
+    args.push('--allowedTools', 'mcp__floe')
+  }
 
   const child = spawn('claude', args, { cwd: worktreePath, env: process.env })
   const conn: Conn = {
@@ -554,7 +574,7 @@ function buildContent(prompt: string, images: ImageAttachment[], files: FileAtta
  * that would abort the turn the user is watching.
  */
 function reapSiblings(key: string): void {
-  const claudeId = getCreatedSessionClaudeId(key)
+  const claudeId = agentResumeId(key)
   for (const [k, c] of conns) {
     if (k === key) continue
     const same = c.sessionId === key || (!!claudeId && (k === claudeId || c.sessionId === claudeId))
@@ -659,10 +679,9 @@ export function sendToAgent(
 function resolveConn(key: string): [string, Conn] | undefined {
   const direct = conns.get(key)
   if (direct) return [key, direct]
-  const stored = getCreatedSession(key)
-  for (const k of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) {
-    const conn = k ? conns.get(k) : undefined
-    if (k && conn) return [k, conn]
+  for (const k of agentIdentityNames(key)) {
+    const conn = conns.get(k)
+    if (conn) return [k, conn]
   }
   // Last resort: the CLI's own id for a conn the store has not linked yet.
   for (const [k, c] of conns) if (c.sessionId === key) return [k, c]
@@ -703,13 +722,9 @@ export function dropSettled(key: string, requestId: string): void {
   }
 }
 
-/** Every other name this session is known by: its Floe id and its claude ids. */
+/** Every other name this conversation is known by — session or query. */
 function aliasKeys(key: string): string[] {
-  const stored = getCreatedSession(key)
-  if (!stored) return []
-  return [stored.id, stored.claudeId, ...(stored.pastClaudeIds ?? [])].filter(
-    (k): k is string => !!k
-  )
+  return agentIdentityNames(key)
 }
 
 /**
@@ -1080,7 +1095,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
     // one on every respawn — so the link has to be re-made each time, or the
     // session reopens showing only the turns up to the last fork. Done here,
     // not in the renderer: the transcript must survive with no panel mounted.
-    linkCreatedSession(key, msg.session_id)
+    linkAgentIdentity(key, msg.session_id)
   }
 
   const type = msg.type

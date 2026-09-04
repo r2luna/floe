@@ -406,6 +406,23 @@ is where you are when you want to go back.`,
       { key: 'ctrl+w', command: 'session.alternate' },
       { key: 'super+n', command: 'worktree.new' }
     ]
+  },
+  {
+    title: 'Queries',
+    doc: `A query is another agent answering beside this chat — \`@codex analisa isso\`
+opens one. The three keys are what end it: \`⌘⇧M\` merges the conversation into
+the chat, \`⌘⇧G\` lets the chat read it without closing anything, \`⌘⇧D\` throws
+it away.
+
+They work from either panel, so you can merge without leaving the chat. \`⌘W\`
+deliberately does NOT discard — closing a panel and throwing a conversation
+away are different things, and one key for both would make the safe habit
+destructive.`,
+    binds: [
+      { key: 'super+shift+m', command: 'query.merge' },
+      { key: 'super+shift+g', command: 'query.peek' },
+      { key: 'super+shift+d', command: 'query.discard' }
+    ]
   }
 ]
 
@@ -436,5 +453,8 @@ export const UNBOUND_SUGGESTIONS: Array<{ command: string; key?: string }> = [
   { command: 'keybindings.reset' },
   { command: 'session.delete', key: 'super+shift+w' },
   { command: 'session.deleteOthers' },
-  { command: 'session.deleteAll' }
+  { command: 'session.deleteAll' },
+  { command: 'query.open', key: 'super+shift+q' },
+  { command: 'query.focus' },
+  { command: 'query.reopen' }
 ]

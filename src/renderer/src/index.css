@@ -560,6 +560,18 @@ button {
   padding: 8px;
 }
 
+/* A conversation's body carries no inset of its own, because its footer has to
+   reach the panel's edges the way the header does. Inside the 8px the composer
+   was 582px wide against a 598px header — 8px of panel showing down each side
+   of it — and that gap is the whole difference between reading as the panel's
+   bottom EDGE and reading as a box parked at the bottom.
+   The transcript puts the inset back itself, at the header's own 11px, so the
+   words line up with the panel's title instead of merely being near it. */
+.panel[data-kind='chat'] > .panel-body,
+.panel[data-kind='query'] > .panel-body {
+  padding: 0;
+}
+
 .empty {
   margin: 0;
   padding: 6px;
@@ -871,14 +883,129 @@ button {
 
 /* --- composer ------------------------------------------------------------ */
 
+/* The composer is the panel's FOOTER, and it is the `.panel-head` rule turned
+   upside down — same height, same padding, same gap, same hairline, no fill.
+   Every value here is read off that rule on purpose: the two are the top and
+   bottom edge of one panel, and a footer that merely resembled the header
+   would read as a different kind of thing sitting at the bottom.
+   A bordered card around one line of text also spent a ring of pixels saying
+   "an input is here", which the caret already says. */
 .composer {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--panel-focused);
+  border-top: 1px solid var(--line-soft);
+  padding-inline: 11px;
 }
 
-.composer:focus-within {
+/* Deliberately NOT lit on focus. The header does not change when you use the
+   panel, and neither does this: the caret is what says where you are typing. */
+
+/* R6 — the launcher mounts the same Composer, and it is not a footer there: it
+   sits in the middle of an empty panel as the one thing on screen. A hairline
+   above a floating line would read as the bottom edge of nothing, so this
+   variant keeps the card the chat's gave up — border, radius, fill, and the
+   room to write more than one line before it starts to grow. */
+.composer[data-boxed] {
+  border: 1px solid var(--line);
+  border-top-color: var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  padding-inline: 0;
+}
+
+.composer[data-boxed]:focus-within {
   border-color: var(--edge);
+}
+
+/* Stacked, the way it always was: the text takes the width, the tools sit on
+   their own row beneath it. */
+.composer[data-boxed] .composer-bar {
+  display: block;
+  min-height: 0;
+}
+
+.composer[data-boxed] .composer-mirror,
+.composer[data-boxed] .composer-input {
+  padding: 14px 14px 4px;
+}
+
+/* Two lines of room before it grows — and never sized by the placeholder, so
+   the empty state is the height it will be once you start typing. */
+.composer[data-boxed] .composer-input:placeholder-shown {
+  field-sizing: fixed;
+}
+
+.composer[data-boxed] .composer-tools {
+  padding: 8px 10px 10px;
+  gap: 8px;
+}
+
+/* One row, and the row is what carries the header's height: the attachments
+   sit ABOVE it, so a message with three files does not squash the bar.
+   `min-height` rather than `height`, and that is the only difference from the
+   header: this one has to be able to grow when the message runs past one line. */
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: var(--head-h);
+}
+
+/* The text takes whatever the actions do not. */
+.composer-bar > .composer-stack {
+  flex: 1;
+  min-width: 0;
+}
+
+/* One line, and the padding of a bar rather than of a box. The mirror is a
+   <pre>, so its UA margin has to go too — left in, it is the difference
+   between a footer and a paragraph. Both must keep agreeing on every metric
+   that affects wrapping, which is why they are set together. */
+.composer-bar .composer-mirror,
+.composer-bar .composer-input {
+  margin: 0;
+  padding: 7px 0;
+}
+
+/* `field-sizing: content` measures the PLACEHOLDER while the field is empty,
+   and reserves a second line for it — a whole empty row in a bar that is one
+   line tall, before a character is typed. Empty, the field is sized by `rows`
+   instead (which is 1); the moment you type, `:placeholder-shown` stops
+   matching and it grows with the content as it always did. */
+.composer-bar .composer-input:placeholder-shown {
+  field-sizing: fixed;
+}
+
+/* Send, and stop while a turn runs — drawn as `.panel-act` is, because it is
+   the same thing at the other end of the panel: a bare icon the row can hold
+   without a frame around it. A ringed button here was the one element that
+   made the footer read as a form rather than as an edge. */
+.composer-send {
+  display: grid;
+  place-items: center;
+  flex: none;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.composer-send:hover,
+.composer-send:focus-visible {
+  color: var(--text-strong);
+  background: var(--wash-3);
+}
+
+/* Stopping is the one destructive thing on this bar, so it is the one thing
+   that is coloured. */
+.composer-send[data-stop] {
+  border-color: color-mix(in srgb, #c98177 45%, transparent);
+  color: #c98177;
+}
+
+:root[data-theme='light'] .composer-send[data-stop] {
+  border-color: #e3bdbf;
+  color: #b1454a;
 }
 
 /* --- drop target --------------------------------------------------------- */
@@ -1073,8 +1200,14 @@ button {
 .composer-tools {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 10px;
+  gap: 7px;
+  flex: none;
+}
+
+/* The chips ride above the bar, inside the same footer, so a long list of
+   attachments grows upward and the one-line bar stays one line. */
+.composer > .attachments {
+  padding-block: 6px 0;
 }
 
 /* --- markdown source colours --------------------------------------------- */
@@ -1728,6 +1861,220 @@ button {
   height: 100%;
 }
 
+/* A query's panel — the chat's shape at a third the width. It shares `.chat`
+   for the transcript itself, so nothing about how a message reads is
+   duplicated here; what is its own is only the frame. */
+/* No gap between the children: the actions band and the composer are two
+   stacked edges of the panel, and a gap between them turned the pair into two
+   floating strips with a stripe of panel showing through. The transcript keeps
+   its own breathing room below the last line instead (`.query-body`). */
+.query-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  height: 100%;
+}
+
+/* Same 11px as the chat's and the header's — one column, whatever the width.
+   The bottom padding is the gap the flex column no longer supplies: air under
+   the last line, without prising the footer off the panel's edge. */
+.query-body {
+  padding-inline: 11px;
+  padding-bottom: 10px;
+}
+
+/* A query's mark in the chat: opened, peeked at, merged, discarded. Sits at the
+   weight of a tool row — it is something that happened to the conversation, not
+   something said in it — and opens to what the query said. */
+.query-fold {
+  margin-top: 6px;
+}
+
+.query-fold-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.query-fold-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.query-fold-line:disabled {
+  cursor: default;
+}
+
+.query-fold-line:not(:disabled):hover .query-fold-text {
+  color: var(--fg);
+}
+
+/* Discarded: the line stays, and reads as spent. It enters nobody's context —
+   it is here so the conversation can be brought back, and for no other reason. */
+.query-fold[data-outcome='discarded'] .query-fold-text {
+  text-decoration: line-through;
+  text-decoration-color: var(--faint);
+}
+
+.query-fold-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.query-fold-body {
+  margin: 4px 0 0 16px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.query-fold-said {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+.query-fold-body-text {
+  white-space: pre-wrap;
+}
+
+/* The answers to one `@all`, side by side. Columns rather than a stack because
+   comparing is the reason you asked several — a vertical list is four replies
+   you scroll past, which is what this exists instead of. Wraps on a narrow
+   panel: two readable columns beat four unreadable ones. */
+.fanout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.fanout-col {
+  flex: 1 1 260px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.fanout-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+/* The actions sit at the far end of the header, away from the nick. */
+.fanout-head .chip {
+  margin-left: auto;
+}
+
+.fanout-head .chip + .chip {
+  margin-left: 0;
+}
+
+.fanout-body {
+  padding: 6px 8px 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* The picker `@all` raises when nothing is open to answer "who". Same rows and
+   the same place as the model menu, because it is the same kind of question. */
+.all-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 41;
+}
+
+.all-picker:focus {
+  outline: none;
+}
+
+/* The query's three actions: a band across the panel, not buttons sitting in
+   one. Full width, the header's own hairline and height, and the cells split it
+   evenly — so the panel reads as one object with three edges (title, actions,
+   composer) instead of a box with widgets floating inside it.
+   It also settles the narrow-panel problem outright: the panel is narrow by
+   design (it sits BESIDE the chat and both have to stay readable), three chips
+   carrying their own keys did not fit on one row at its minimum width, and the
+   one clipped by the edge was `discard` — the one you must never mis-click. */
+.query-acts {
+  display: flex;
+  border-top: 1px solid var(--line-soft);
+}
+
+.query-act {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  /* Shorter than the header and the composer on purpose. Those two are the
+     panel's real edges; this is a strip between them, and at their height it
+     read as a third peer — three equal bands stacked, none of them obviously
+     the place you type. */
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+/* Hairlines BETWEEN the cells only: an outer one would draw the box again. */
+.query-act + .query-act {
+  border-left: 1px solid var(--line-soft);
+}
+
+.query-act:hover,
+.query-act:focus-visible {
+  color: var(--text-strong);
+  background: var(--wash-3);
+}
+
+/* Throwing the conversation away is the one of the three you cannot undo by
+   pressing it again, so it is the one that is coloured — on hover, where the
+   pointer already is, rather than shouting from the resting state. */
+.query-act[data-tone='danger']:hover,
+.query-act[data-tone='danger']:focus-visible {
+  color: #c98177;
+}
+
+:root[data-theme='light'] .query-act[data-tone='danger']:hover,
+:root[data-theme='light'] .query-act[data-tone='danger']:focus-visible {
+  color: #b1454a;
+}
+
+/* The key, said quietly. `kbd` is boxed by default in this app — right in a
+   hint or a palette row, where it is the subject — but in a band of three
+   actions the box competes with the word it belongs to, and three of them turn
+   one row into six things to read. */
+.query-act kbd {
+  padding: 0;
+  border: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 9.5px;
+}
+
 /* --- transcript: IRC-style log -------------------------------------------- */
 
 /* No flex `gap` here: every child sets its own top margin, and the spacing is
@@ -1740,7 +2087,7 @@ button {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px 4px;
+  padding: 6px 11px;
   font-variant-ligatures: none;
   /* Chrome's scroll anchoring rewrites scrollTop when content above the
      viewport settles. In a streaming transcript that reads as the user
@@ -1879,20 +2226,6 @@ button {
 .irc-queued:hover .irc-queued-drop,
 .irc-queued-drop:focus-visible {
   opacity: 1;
-}
-
-.irc-stop {
-  margin-left: 8px;
-  padding: 1px 7px;
-  border: 1px solid color-mix(in srgb, #c98177 45%, transparent);
-  border-radius: 5px;
-  color: #c98177;
-  font-size: 10.5px;
-}
-
-:root[data-theme='light'] .irc-stop {
-  border-color: #e3bdbf;
-  color: #b1454a;
 }
 
 /* Armed ⌘L: outline only, like every other selected chip in the app. */

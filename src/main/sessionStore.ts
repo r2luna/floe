@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { dataDir } from './dataDir'
-import type { Effort, PermissionMode, ProjectUiState, ThreadComment, WorktreeUiState } from '../shared/types'
+import type { Effort, PermissionMode, ProjectUiState, Query, ThreadComment, WorktreeUiState } from '../shared/types'
 import { dropComment, isValidComment, stampSent, upsertComment } from '../shared/threadComments'
+import { closeQuery, dropQuery, isValidQuery, linkQuery, openQuery } from '../shared/queryStore'
 
 // Re-exported so existing importers (main/index.ts, preload) keep getting these
 // from './sessionStore'; the source of truth lives in shared/types.
@@ -107,6 +108,11 @@ interface Store {
   // The transcript itself is read back from Claude's JSONL; only the notes are
   // ours, so this is the one place they can survive a reload.
   threadComments: Record<string, ThreadComment[]>
+  // The side conversations opened off each session, keyed by session id. Same
+  // shape and same reason as threadComments: what a query needs to RUN is
+  // carried by its key, and only "it exists, on this harness, and here is the
+  // Claude session it resumes into" has to survive a restart.
+  queries: Record<string, Query[]>
 }
 
 const emptyView = (): ViewState => ({
@@ -123,7 +129,8 @@ const emptyStore = (): Store => ({
   view: emptyView(),
   prefs: {},
   reviewCheckpoints: {},
-  threadComments: {}
+  threadComments: {},
+  queries: {}
 })
 
 const storeFile = (): string => join(dataDir(), 'sessions.json')
@@ -175,7 +182,8 @@ function read(): Store {
       },
       prefs: (data.prefs as AppPrefs) ?? {},
       reviewCheckpoints: (data.reviewCheckpoints as Record<string, string>) ?? {},
-      threadComments: (data.threadComments as Record<string, ThreadComment[]>) ?? {}
+      threadComments: (data.threadComments as Record<string, ThreadComment[]>) ?? {},
+      queries: (data.queries as Record<string, Query[]>) ?? {}
     })
   } catch {
     return emptyStore()
@@ -595,6 +603,80 @@ export function markThreadCommentsSent(sessionKey: string, ids: string[], at = D
   write(store)
 }
 
+// --- Queries (side conversations opened off a session) ----------------------
+
+export function getQueries(sessionId: string): Query[] {
+  if (!sessionId) return []
+  return read().queries[sessionId] ?? []
+}
+
+/** Every query in the store, one read — for a lookup by query key. */
+export function findQuery(id: string): Query | undefined {
+  for (const list of Object.values(read().queries)) {
+    const found = list.find((q) => q.id === id)
+    if (found) return found
+  }
+  return undefined
+}
+
+/** Open (or reopen, or refocus) the query for one harness. Returns the entry. */
+export function addQuery(q: {
+  sessionId: string
+  harness: string
+  model?: string
+  effort?: Effort
+  mode: PermissionMode
+  openedBy?: 'user' | 'agent'
+}): Query | undefined {
+  const store = read()
+  const list = openQuery(store.queries[q.sessionId] ?? [], q)
+  const entry = list.find((x) => x.sessionId === q.sessionId && x.harness === q.harness)
+  // The shape check is the trust boundary, the same as a thread note's: a
+  // malformed entry is a bug upstream, and quietly storing a patched-up version
+  // would hide it.
+  if (!entry || !isValidQuery(entry)) return undefined
+  store.queries[q.sessionId] = list
+  write(store)
+  return entry
+}
+
+export function setQueryOutcome(id: string, outcome: 'merged' | 'discarded'): void {
+  const store = read()
+  const found = findQueryIn(store, id)
+  if (!found) return
+  store.queries[found.sessionId] = closeQuery(store.queries[found.sessionId], id, outcome)
+  write(store)
+}
+
+export function removeQuery(id: string): void {
+  const store = read()
+  const found = findQueryIn(store, id)
+  if (!found) return
+  const next = dropQuery(store.queries[found.sessionId], id)
+  // Drop the key entirely with the last query, so sessions.json does not
+  // accumulate an empty array for every session that ever held one.
+  if (next.length) store.queries[found.sessionId] = next
+  else delete store.queries[found.sessionId]
+  write(store)
+}
+
+/** Record the CLI id a query's turn reported — its own --resume trail. */
+export function linkQueryClaudeId(id: string, claudeId: string): void {
+  const store = read()
+  const found = findQueryIn(store, id)
+  if (!found) return
+  store.queries[found.sessionId] = linkQuery(store.queries[found.sessionId], id, claudeId)
+  write(store)
+}
+
+function findQueryIn(store: Store, id: string): Query | undefined {
+  for (const list of Object.values(store.queries)) {
+    const found = list.find((q) => q.id === id)
+    if (found) return found
+  }
+  return undefined
+}
+
 // Close a session for good: forget Floe's record of it. Non-destructive — the
 // Claude `.jsonl` is left on disk (still resumable via `claude --resume`); it
 // simply no longer shows in Floe, and stays gone across reloads.
@@ -606,6 +688,10 @@ export function closeSession(opts: { id: string; worktreePath: string; claudeId?
   // drained — so without this the file only grows: every closed session leaves
   // its whole review behind, unreachable and unreadable.
   delete store.threadComments[opts.id]
+  // Same reason as the notes above: a query is keyed by the session that opened
+  // it, so a closed session would leave its whole set of side conversations
+  // behind, unreachable and unreadable.
+  delete store.queries[opts.id]
   write(store)
 }
 
@@ -623,6 +709,10 @@ function forget(store: Store, worktreePath: string): boolean {
     worktreePath in store.reviewCheckpoints
   if (!had) return false
   for (const s of mine) if (s.claudeId) delete store.meta[s.claudeId]
+  // The side conversations go with the sessions that own them. Keyed by session
+  // id rather than by worktree, so without this a removed worktree left one
+  // entry per query behind, persisted and unreachable from any session.
+  for (const s of mine) delete store.queries[s.id]
   store.created = store.created.filter((s) => s.worktreePath !== worktreePath)
   delete store.view.viewByWorktree[worktreePath]
   delete store.view.agentByWorktree[worktreePath]

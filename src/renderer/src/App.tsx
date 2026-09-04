@@ -58,7 +58,8 @@ import { useProjectSetup } from './useProjectSetup'
 import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
-import { DEFAULT_GROUP, type ContextUsage, type McpCommand, type Project } from '../../shared/types'
+import { nickColor } from './nickColor'
+import { DEFAULT_GROUP, type ContextUsage, type McpCommand, type Project, type Query } from '../../shared/types'
 
 
 /**
@@ -83,9 +84,16 @@ const panelOf = (
 ): Panel => ({
   // The session id, not the title, makes a chat panel unique — two sessions can
   // share a title and would otherwise collapse into one panel.
-  id: session ? `chat:${session.id}` : `${kind}:${sub ?? ''}`,
+  //
+  // A QUERY panel is identified by its harness instead (`query:codex`), even
+  // though it carries a session too: asking codex a second thing is the same
+  // side conversation, so it must focus the panel that is already open rather
+  // than stack a second one beside it.
+  id: session && kind !== 'query' ? `chat:${session.id}` : `${kind}:${sub ?? ''}`,
   kind,
-  title: KINDS[kind].title,
+  // A query is titled by who answers in it — the panel head reads `codex`, in
+  // that harness's own nick colour, not the word "query" four times over.
+  title: kind === 'query' ? (sub ?? KINDS[kind].title) : KINDS[kind].title,
   sub,
   session,
   firstPrompt,
@@ -1414,6 +1422,67 @@ export default function App() {
     }
   }, [])
 
+  // --- Queries -----------------------------------------------------------------
+  // A query is born on any of four doors — the composer, an agent's
+  // `send_message`, a scheduled followup, or the model writing `@codex` into
+  // its own answer — and only the first of them has a panel in front of it. So
+  // the panel appears by being TOLD, not by whoever typed opening it: main
+  // announces, and every door lands in the same place.
+  //
+  // Behind a ref for the same reason the MCP listener is: one subscription,
+  // mounted once, always calling this render's closure.
+  const openQueryRef = useRef<
+    (p: { query: Query; worktreePath: string; parentKeys: string[] }) => void
+  >(() => {})
+  useEffect(() => window.floe.query.onOpened((p) => openQueryRef.current(p)), [])
+  openQueryRef.current = ({ query, worktreePath, parentKeys }): void => {
+    const session = { id: query.id, worktreePath }
+    setLane((l) => {
+      // Only into the chat it belongs to. An agent can open a query off ANY
+      // session — over `send_message`, on a followup timer — and the lane is
+      // showing whichever chat you are reading: dropped in unconditionally, the
+      // panel for another session's query appeared beside yours and was then
+      // saved as part of YOUR chat's panel set, coming back every time you
+      // opened it. The panel for a session you are not looking at arrives when
+      // you go there, from the store, like everything else that chat owns.
+      // Every name the parent answers to, resolved in main — the panel keys
+      // itself `claudeId ?? id` and the query is named after the stable id.
+      const shown = sessionKeyOf(l)
+      if (!shown || !parentKeys.includes(shown)) return l
+      const next = open(l, mkPanel('query', query.harness, session))
+      // A query panel is identified by its HARNESS (`query:codex`), so asking
+      // codex a second thing focuses the panel already open instead of stacking
+      // another. `open` focuses an existing id without touching what it shows —
+      // right for every other panel, wrong here: the codex panel left over from
+      // another session would come back still keyed to that session's query,
+      // streaming a conversation nobody is having. So it is pointed at this one.
+      return patchPanel(next, next.focus, { session })
+    })
+  }
+
+  // And down again when it ends. Merge and discard both close the panel; what
+  // stays behind is the fold in the chat, which the transcript draws from the
+  // chip main wrote — not from anything held here.
+  const closeQueryRef = useRef<(p: { key: string }) => void>(() => {})
+  useEffect(() => window.floe.query.onClosed((p) => closeQueryRef.current(p)), [])
+  closeQueryRef.current = ({ key }): void => {
+    // Out of the remembered sets too, not only out of the lane on screen. A
+    // query merged over MCP while you are reading another chat closes a panel
+    // that is not mounted — and the copy saved under its own session came back
+    // as an orphan the next time you opened that chat, streaming a conversation
+    // that had already ended.
+    bySession.current = Object.fromEntries(
+      Object.entries(bySession.current).map(([id, panels]) => [
+        id,
+        panels.filter((p) => !(p.kind === 'query' && p.session?.id === key))
+      ])
+    )
+    setLane((l) => {
+      const at = l.panels.findIndex((p) => p.kind === 'query' && p.session?.id === key)
+      return at === -1 ? l : closePanel(l, at, () => panelOf('branch'))
+    })
+  }
+
   // --- MCP control server -----------------------------------------------------
   // Commands an agent's tool pushed from main over mcp:command. run_command and
   // list_commands go through the SAME registry the keymap and the palette use —
@@ -1841,8 +1910,12 @@ export default function App() {
                 ? projects.current?.name
                 : kind === 'chat'
                   ? whereOf(panel.session?.worktreePath, panel.sub)
-                  : kind === 'edit'
-                    ? editTarget(panel.sub).path
+                  // A query's sub IS its title (the harness), so printing it
+                  // would say `codex` twice across one header.
+                  : kind === 'query'
+                    ? undefined
+                    : kind === 'edit'
+                      ? editTarget(panel.sub).path
                     // A cmdlog's sub is the runner key — machine text. The
                     // header says which command it is, and the command it runs.
                     : kind === 'cmdlog'
@@ -1893,7 +1966,24 @@ export default function App() {
                 {!bare && (
                   <header className="panel-head">
                     <Icon size={14} stroke={1.6} className="panel-icon" />
-                    <span className="panel-name">{panel.title}</span>
+                    {/* A query is titled by who answers in it, in that
+                        harness's own nick colour — the same colour its lines
+                        carry in the transcript, so the panel and the voice
+                        inside it read as one thing. */}
+                    <span
+                      className="panel-name"
+                      style={kind === 'query' ? { color: nickColor(panel.title) } : undefined}
+                    >
+                      {panel.title}
+                    </span>
+                    {/* Read-only, said out loud. A query never writes (D1/R5),
+                        and a panel that looks exactly like the chat beside it
+                        has to say how it differs. */}
+                    {kind === 'query' && (
+                      <span className="badge" title="Read-only — a query never writes">
+                        ro
+                      </span>
+                    )}
                     {/* The tree can be pointed at a directory inside the worktree
                         (`.` on a row), and the header is where that is said and
                         undone — clicking a segment roots there. */}

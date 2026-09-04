@@ -67,6 +67,35 @@ export function relayPrompt(harness: string, hops = 0): string {
   ].join('\n')
 }
 
+/**
+ * What the session's own model is handed when a query is peeked at or merged.
+ *
+ * The same envelope as the relay's, for the same reason: this is plumbing, and
+ * read back off the transcript it would look like a message the user typed.
+ *
+ * The difference from `relayPrompt` is the one that matters here. A relay is
+ * automatic and expects an answer back to the harness; a peek is something the
+ * PERSON asked for, from a conversation running in its own panel — and there is
+ * no handing anything back, because the query is still sitting there with a
+ * composer in it. So the model is told to read and act, and told plainly not to
+ * try to answer the other harness through this chat.
+ */
+export function queryPrompt(harness: string, opts: { merged: boolean; entries: number }): string {
+  return [
+    `${OPEN} from="${harness}">`,
+    opts.merged
+      ? `The ${harness} query beside this chat has been merged into it and closed. Everything it said that you had not already read is above.`
+      : `You are being shown ${opts.entries === 1 ? 'a message' : `${opts.entries} messages`} from the ${harness} query running beside this chat. It stays open; this is a look at it, not a handover.`,
+    '',
+    'Read it and act on it: say what you make of it, say where it is wrong and why, and do the work if there is work to do. Do not summarise it back — the person read it too.',
+    '',
+    opts.merged
+      ? `${harness} is gone from this thread. Anything else you want from it is a new query the person opens.`
+      : `Do not address ${harness} from here — it has its own panel and the person is talking to it there. Answer to them.`,
+    CLOSE
+  ].join('\n')
+}
+
 /** The stand-in for a relayed line in the transcript — stripped like the rest. */
 export const relayMark = (from: string): string => `${OPEN} from="${from}"/>`
 

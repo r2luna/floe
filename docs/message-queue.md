@@ -40,7 +40,15 @@ Notes on the steer path:
 These run as a single request/response (`codex exec`, `opencode run`, one HTTP
 call). There is no live loop to inject into, and firing a second exec while the
 first runs would race it. So the old client-side buffer still applies, only for
-these providers:
+these providers — and only for the harness **this chat itself answers as**.
+
+A message that names a harness (`@codex …`) no longer queues at all: it opens a
+**query** (`docs/queries.md`), which is a second conversation on its own key
+running in parallel, with its own panel and its own composer. Everything on this
+page then applies inside that panel, about that key — a query answered by codex
+queues what you type while it works, exactly as described below. What changed is
+only that you are no longer waiting for the *chat's* turn to end before you can
+talk to somebody else.
 
 1. **Buffer** — `queued` state in `useTranscript.ts`, one list per session.
 2. **Enqueue** — `send()` while `running` and the chosen provider is not

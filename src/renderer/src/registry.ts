@@ -24,12 +24,53 @@ import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
+import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
 import { startSkillDraft } from './skillDraft.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import type { FileOp } from '../../shared/types.ts'
+
+/** The chat the lane is showing — what a query is opened off. */
+const chatOf = (c: CommandContext): Panel | undefined =>
+  c.lane.panels.find((p) => p.kind === 'chat' && p.session)
+
+/**
+ * The query these commands act on: the focused panel if it is one, else the
+ * only one open.
+ *
+ * Both, because both are where you press the key from. You read the query in
+ * its own panel and merge it from there; you also watch it from the chat and
+ * merge it without moving. Falling back to "the only one open" is unambiguous
+ * exactly when there is nothing to be ambiguous about.
+ */
+function queryIndex(c: CommandContext): number {
+  const focused = c.lane.panels[c.lane.focus]
+  if (focused?.kind === 'query') return c.lane.focus
+  const found = c.lane.panels.findIndex((p) => p.kind === 'query')
+  return found
+}
+
+const queryPanel = (c: CommandContext): Panel | undefined => {
+  const at = queryIndex(c)
+  return at === -1 ? undefined : c.lane.panels[at]
+}
+
+/** Peek, merge or discard — one call, because they differ only in the verb. */
+function runQuery(c: CommandContext, action: 'peek' | 'merge' | 'discard'): void {
+  const key = queryPanel(c)?.session?.id
+  if (!key) return
+  // The panel comes down (or stays up) on main's `query:closed` announcement,
+  // never from here: an agent can merge a query too, and the panel must behave
+  // the same way whoever asked.
+  void window.floe.query[action](key)
+    .then((r) => {
+      if (r.error) return c.say(r.error)
+      if (action === 'peek' && !r.entries) c.say('Nothing new in the query.')
+    })
+    .catch((e) => c.say(reason(e)))
+}
 
 /**
  * Scroll the focused panel's content.
@@ -1370,6 +1411,128 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Sessions',
         enabled: (c) => !!c.worktree || c.lane.panels.some((p) => p.session),
         run: (c) => c.deleteSession('all')
+      },
+      // --- queries ---------------------------------------------------------
+      // A query is a conversation running beside this one. Every one of these
+      // acts on the query panel the lane is focused on, falling back to the
+      // only one open — so the keys work whether you are typing in the query or
+      // watching from the chat, which is the whole point of it being parallel.
+      {
+        id: 'query.open',
+        title: 'Ask another harness…',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const chat = chatOf(c)
+          if (!chat?.session) return
+          c.askText({
+            placeholder: 'harness — codex, claude, opencode',
+            verb: 'Open query with',
+            onDone: (harness) => {
+              const name = harness.trim().replace(/^@/, '')
+              if (!name) return
+              void window.floe.query
+                .open(chat.session!.id, chat.session!.worktreePath, name)
+                // The panel arrives on the `query:opened` announcement, not
+                // from here: a query is born on four doors and only one of them
+                // has a person in front of it.
+                .then((r) => r.error && c.say(r.error))
+                .catch((e) => c.say(reason(e)))
+            }
+          })
+        }
+      },
+      {
+        id: 'query.focus',
+        title: 'Go to the query',
+        group: 'Queries',
+        enabled: (c) => queryIndex(c) !== -1,
+        run: (c) => {
+          const at = queryIndex(c)
+          if (at !== -1) c.setLane((l) => focusAt(l, at))
+        }
+      },
+      {
+        // The chat reads what it has not read of the query. Nothing closes —
+        // that is what makes peek different from merge, and why it has its own
+        // key rather than being merge with a modifier.
+        id: 'query.peek',
+        title: 'Peek: let the chat read the query',
+        group: 'Queries',
+        keys: '⌘⇧G',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'peek')
+      },
+      {
+        id: 'query.merge',
+        title: 'Merge the query into the chat',
+        group: 'Queries',
+        keys: '⌘⇧M',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'merge')
+      },
+      {
+        // Its own binding, deliberately NOT ⌘W. Closing a panel and throwing a
+        // conversation away are different things, and one key for both would
+        // make the safe habit destructive.
+        id: 'query.discard',
+        title: 'Discard the query',
+        group: 'Queries',
+        keys: '⌘⇧D',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'discard')
+      },
+      {
+        // The way back from a discard. The conversation is still on disk under
+        // its own key — the dead line in the chat is what remembers it.
+        id: 'query.reopen',
+        title: 'Reopen a discarded query…',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const chat = chatOf(c)
+          if (!chat?.session) return
+          void window.floe.query
+            .list(chat.session.id)
+            .then((all) => {
+              const closed = all.filter((q) => q.outcome)
+              if (!closed.length) return c.say('No closed queries here.')
+              c.askText({
+                placeholder: closed.map((q) => q.harness).join(', '),
+                verb: 'Reopen query with',
+                onDone: (harness) => {
+                  const found = closed.find((q) => q.harness === harness.trim().replace(/^@/, ''))
+                  if (!found) return c.say(`No closed query with ${harness}.`)
+                  void window.floe.query
+                    .reopen(found.id)
+                    .then((r) => r.error && c.say(r.error))
+                    .catch((e) => c.say(reason(e)))
+                }
+              })
+            })
+            .catch((e) => c.say(reason(e)))
+        }
+      },
+      {
+        // `@all` without typing it. The message is whatever is in the composer
+        // — this only puts the handle in front of it, so the one rule that
+        // reads it stays the one in mentions.ts.
+        id: 'chat.all',
+        title: 'Ask several harnesses at once (@all)',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const el = findComposer(c)
+          if (!el) return
+          el.focus()
+          // Typed through the DOM rather than through React state, because the
+          // registry has no handle on the draft — and `input` is what the
+          // composer already listens to, so the mirror and the trigger menu
+          // update exactly as they would if you had typed it.
+          const at = el.selectionStart ?? 0
+          el.setRangeText('@all ', 0, at === 0 ? 0 : 0, 'end')
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+        }
       },
       {
         id: 'worktree.new',

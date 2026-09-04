@@ -16,7 +16,7 @@ import { relayBack, relayMark, relayPrompt } from '../shared/relay'
 import { activeTurnKeys, onceTurnDone, sessionNames } from './agent'
 // Circular with turn.ts (it arms the relay, the relay starts turns) — safe on
 // the same terms as agent↔mcpServer: neither side runs the other at import.
-import { optionsForRoute, startTurn } from './turn'
+import { dispatchTurn, optionsForRoute, startTurn } from './turn'
 import { log } from './log'
 
 /**
@@ -154,10 +154,20 @@ export function armRelay(
  *
  * So every turn a session answers in its own voice is watched too. The rule is
  * the same one everywhere else in the app (shared/relay.ts): a handle at the
- * start of a line addresses that harness, mid-sentence it is only a name. What
- * comes back is relayed to the session's own model exactly as if you had
- * addressed it yourself, and the hop cap is the same cap — the two cannot talk
- * forever just because it was the model, not you, that started them off.
+ * start of a line addresses that harness, mid-sentence it is only a name.
+ *
+ * Where it goes is now a QUERY (D7): one rule for the handle, whichever door
+ * wrote it, so a `@codex` the model wrote opens the same panel a `@codex` you
+ * typed would. Handed to dispatchTurn explicitly rather than left to the
+ * `provider !== own.provider` heuristic downstream — that test cannot tell a
+ * query key from a session and would arm a relay INSIDE the query.
+ *
+ * Consequence to own: an agent can put a panel on your screen. That is the
+ * "agent first" principle taken at its word, so the query wears the mark of who
+ * opened it.
+ *
+ * The hop cap is unchanged and still counts: the two cannot talk forever just
+ * because it was the model, not you, that started them off.
  */
 export function armAddress(
   win: BrowserWindow,
@@ -180,16 +190,24 @@ export function armAddress(
     // saying its own name, not handing anything over.
     if (!route || route.harness === mine) return
     later(() => {
-      if (!live() || busy(key)) return
+      if (!live()) return
+      // Deliberately NOT gated on `busy(key)` any more. That guard existed
+      // because the answer used to take a turn in THIS chat, and two turns in
+      // one session is what the queue exists to prevent. A query runs beside
+      // the session, so a message you typed while it worked is no longer a
+      // reason to drop the handle the model wrote — dropping it silently is.
       log('address', { key, from: mine, to: route.harness, hops })
       // Carried, so the answer comes back on the next hop and not on the first:
       // by the time the harness replies, one exchange has already happened.
       spent.set(key, hops + 1)
-      startTurn(win, key, worktreePath, route.prompt, {
-        ...optionsForRoute(route, key),
-        // Shown as nothing: the line is already in the chat above, under the
-        // model's own name, with the handle drawn as the handle it is.
-        shown: relayMark(mine)
+      dispatchTurn({
+        win,
+        parentKey: key,
+        worktreePath,
+        prompt: route.prompt,
+        route,
+        origin: 'agent',
+        options: { ...optionsForRoute(route, key), shown: relayMark(mine) }
       })
     })
   })

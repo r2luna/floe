@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { handleRows, routeAt, rosterOf, splitMentions, unrouted } from './mentions.ts'
+import { handleRows, routeAll, routeAt, rosterOf, splitMentions, unrouted } from './mentions.ts'
 import type { TranscriptItem } from '../../main/claudeSessions.ts'
 
 test('a handle is split out of the sentence around it', () => {
@@ -235,4 +235,27 @@ test('a full stop ends the sentence, it does not end up in the slug', () => {
     prompt: 'revisa'
   })
   assert.deepEqual(routeAt('@ollama:llama3.2:latest. resuma', ['ollama'])?.model, 'llama3.2:latest')
+})
+
+test('@all is one message to several, and names none of them', () => {
+  // The targets are not in the text and must not be: fanning out to every
+  // harness the machine has installed is the failure this shape prevents (R7).
+  assert.deepEqual(routeAll('@all o que voces acham disso'), {
+    effort: undefined,
+    prompt: 'o que voces acham disso'
+  })
+})
+
+test('@all:high sets one effort for everybody', () => {
+  assert.deepEqual(routeAll('@all:high revisa o diff'), {
+    effort: 'high',
+    prompt: 'revisa o diff'
+  })
+  // Not an effort: `@all:opus` would otherwise go out at a level nobody chose.
+  assert.equal(routeAll('@all:opus revisa'), null)
+})
+
+test('@all mid-sentence is a word', () => {
+  assert.equal(routeAll('manda isso pro @all depois'), null)
+  assert.equal(routeAll('@allowlist do repo'), null)
 })

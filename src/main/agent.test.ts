@@ -703,6 +703,22 @@ test('activeTurnKeys: a runtime with no conn still reports its turn', () => {
   assert.ok(!activeTurnKeys().includes('codex-sess'))
 })
 
+test('activeTurnKeys stays raw — a query key is in it, on purpose', () => {
+  // The set is the authority both reconcilers correct themselves against, and a
+  // QueryPanel's `useTranscript` is one of them: it treats "not in this list,
+  // and quiet" as proof the turn ended. Hide the qkey here and every query
+  // would conclude on its own that it had finished, drop the typing line, and
+  // drain its queue over a turn that was still running.
+  //
+  // The projection is filtered instead, in exactly one place — see
+  // useSessionActivity in renderer/src/useRunning.ts.
+  const { win } = fakeWin()
+  markTurnStart('qsess~codex')
+  assert.ok(activeTurnKeys().includes('qsess~codex'))
+  sendAgentEvent(win, 'qsess~codex', { kind: 'done', ok: true })
+  assert.ok(!activeTurnKeys().includes('qsess~codex'))
+})
+
 test('a replay says who is answering, not just what model', () => {
   markTurnStart('routed-sess', { provider: 'codex', effort: 'high', mode: 'plan' })
   const snap = replaySnapshot('routed-sess')

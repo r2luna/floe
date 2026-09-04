@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import type { TranscriptItem } from './claudeSessions'
@@ -35,6 +35,24 @@ export function logTurn(sessionId: string, item: TranscriptItem): void {
   } catch {
     // A transcript that cannot be written is not worth failing a turn over —
     // the answer is already on screen.
+  }
+}
+
+/**
+ * Throw one conversation's log away.
+ *
+ * Discarding a query means the chat never sees a word of it — so leaving the
+ * file behind would keep every thrown-away conversation on disk forever, each
+ * one unreachable from the app that wrote it. The only caller is a discard, and
+ * a discard is the one action that says "this did not happen".
+ */
+export function dropRuntimeTranscript(sessionId: string): void {
+  if (!sessionId) return
+  try {
+    rmSync(fileFor(sessionId), { force: true })
+  } catch {
+    // Nothing to lose: the log is a convenience, and one that will not delete
+    // is not worth failing the discard over.
   }
 }
 

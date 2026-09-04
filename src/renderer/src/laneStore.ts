@@ -81,9 +81,22 @@ export interface LaneMemory {
   byWorktree: Record<string, string | null>
 }
 
-/** The session a lane is showing, or null when it is showing none. */
+/**
+ * The session a lane is showing, or null when it is showing none.
+ *
+ * The panel in the session SLOT, not merely the first one carrying a session: a
+ * query panel carries one too — its own key, `sess~codex` — and it is not the
+ * session the lane is showing. Read the other way, opening a query registered
+ * as a session SWITCH, and the swap that follows one restored the (empty) panel
+ * set for the query's key over the lane that had just gained it. The panel
+ * appeared and vanished in the same tick.
+ *
+ * `!sessionOwns` is the test because it is already the line between "the
+ * session" and "what the session opened": the chat sits at the slot's own
+ * order, everything past it belongs to the chat rather than being it.
+ */
 export function sessionKeyOf(lane: Lane): string | null {
-  return lane.panels.find((p) => p.session)?.session?.id ?? null
+  return lane.panels.find((p) => p.session && !sessionOwns(p))?.session?.id ?? null
 }
 
 /** The panels the session opened: everything to the right of the session slot,

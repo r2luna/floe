@@ -63,3 +63,29 @@ export function routeAt(text: string, harnesses: readonly string[]): Route | nul
     prompt: text.slice(m[0].length).trimStart()
   }
 }
+
+/**
+ * `@all` — one message to several agents at once.
+ *
+ * Not a harness, and deliberately not spelled as one: `routeAt` reads a handle
+ * that names WHO answers, and `all` names nobody. What it carries is the
+ * message and, optionally, one effort for everybody (`@all:high`) — the targets
+ * are the caller's to decide, because the right answer depends on what is
+ * already open (R7): the queries you have, or a picker if you have none.
+ *
+ * Fanning out to every harness installed on the machine is the failure mode
+ * this shape exists to make impossible. Four turns nobody asked for is not a
+ * feature, and there is nowhere in this function to produce them.
+ *
+ * The same rule as a handle: only at the very start of the line. `@all` in the
+ * middle of a sentence is a word.
+ */
+export function routeAll(text: string): { effort?: Effort; prompt: string } | null {
+  const m = /^\s*@all(?::([\w-]+))?[,;.!?]*(\s|$)/.exec(text)
+  if (!m) return null
+  // Anything after the colon that is not one of the five is not an effort, and
+  // guessing would send `@all:opus` out at a level nobody chose.
+  const effort = EFFORTS.includes(m[1] as Effort) ? (m[1] as Effort) : undefined
+  if (m[1] && !effort) return null
+  return { effort, prompt: text.slice(m[0].length).trimStart() }
+}

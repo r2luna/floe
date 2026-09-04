@@ -1,0 +1,386 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Raia como painel — ações, composer e @all</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome. As peças do app usam as classes REAIS — .panel, .panel-head,
+   .chat-panel, .composer, .composer-tools, .tool, .model, .irc-typing,
+   .model-head. Só o que não existe ainda é prefixado m-. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.m-sub{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:82ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 10px; max-width:82ch; }
+.opt{ margin:0 0 34px; max-width:1020px; }
+.tradeoff{ color:var(--dim); font-size:12px; margin:9px 0 0; max-width:82ch; }
+.tradeoff b{ color:var(--dimmest); font-weight:700; }
+.stage{ background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius);
+  height:330px; overflow:hidden; display:flex; gap:10px; box-sizing:border-box; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:9; }
+.stage[data-tall]{ height:430px; }
+hr.div{ border:none; border-top:1px solid var(--line-soft); margin:0 0 26px; max-width:1020px; }
+
+/* --- transcrito ---------------------------------------------------------- */
+.m-chat{ flex:1; min-width:0; border-right:1px solid var(--line-soft); }
+.m-chat:only-child{ border-right:none; }
+.m-feed{ flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;
+  gap:9px; padding:9px 11px; font-size:12px; }
+.m-nick{ font-weight:700; }
+.m-nick[data-v=you]{ color:var(--nick-you); }
+.m-nick[data-v=claude]{ color:var(--nick-claude); }
+.m-nick[data-v=codex]{ color:var(--nick-codex); }
+.m-body{ color:var(--text); }
+.m-body.dim{ color:var(--dim); }
+.m-tool{ color:var(--time-dim); font-size:11px; }
+.m-sys{ color:var(--time-dim); font-size:11px; font-style:italic; }
+.m-mention{ color:var(--nick-codex); font-weight:600; }
+.m-mention[data-v=all]{ color:var(--accent); }
+.m-chev{ color:var(--dim); font-size:10px; }
+
+/* Chips do mock (as ações da raia, os marcadores). Outline sempre. */
+.m-chip{ display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line);
+  border-radius:var(--radius); color:var(--dim); font-size:11px; padding:1px 7px; cursor:default; }
+.m-chip[data-v=codex]{ color:var(--nick-codex);
+  border-color:color-mix(in oklab, var(--nick-codex) 40%, transparent);
+  background:color-mix(in oklab, var(--nick-codex) 7%, transparent); }
+.m-chip[data-v=claude]{ color:var(--nick-claude);
+  border-color:color-mix(in oklab, var(--nick-claude) 40%, transparent);
+  background:color-mix(in oklab, var(--nick-claude) 7%, transparent); }
+.m-chip[data-v=danger]{ color:#c49495; border-color:#352829; background:#221b1c; }
+/* Todo tom tintado precisa da variante clara, ou o preenchimento escuro vira
+   um bloco sólido na superfície branca. */
+:root[data-theme='light'] .m-chip[data-v=danger]{ color:#b1454a; border-color:#e3bdbf; background:#f9eef0; }
+.m-chip .k{ color:var(--faint); }
+.m-dot{ width:5px; height:5px; border-radius:50%; background:var(--working); flex:none;
+  display:inline-block; }
+.m-dot[data-idle]{ background:var(--faint); }
+
+/* --- o painel da raia ---------------------------------------------------- */
+.m-lane{ flex:0 0 330px; border:none; border-radius:0; background:none; }
+.m-lane .panel-head .m-chip{ margin-left:auto; }
+.m-lanebody{ flex:1; min-height:0; display:flex; flex-direction:column; gap:8px;
+  padding:9px 11px; overflow:hidden; font-size:12px; }
+/* O rodapé de ações: fica entre o transcrito e o composer da raia, que é
+   exatamente onde a barra de ferramentas de um painel já mora no app. */
+.m-laneacts{ flex:none; display:flex; gap:6px; align-items:center; flex-wrap:wrap;
+  justify-content:flex-end; padding:7px 11px; border-top:1px solid var(--line-soft); }
+
+/* --- registro colapsado no chat ----------------------------------------- */
+.m-fold{ display:flex; align-items:center; gap:7px; color:var(--dim); font-size:11px;
+  border-left:2px solid var(--nick-codex); padding:3px 0 3px 9px; }
+.m-fold[data-dead]{ border-color:var(--faint); color:var(--faint); }
+
+/* --- bloco mesclado ------------------------------------------------------ */
+.m-merged{ border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.m-mergedhead{ display:flex; align-items:center; gap:7px; padding:4px 9px;
+  border-bottom:1px solid var(--line-soft); font-size:11px; color:var(--dim); }
+.m-mergedbody{ padding:7px 9px; display:flex; flex-direction:column; gap:5px;
+  font-size:11px; color:var(--dim); }
+
+/* --- seletor do @all: sobe do composer, como o menu de modelo já faz ----- */
+.m-composerwrap{ position:relative; }
+.m-picker{ position:absolute; left:0; bottom:calc(100% + 6px); width:340px;
+  background:var(--panel); border:1px solid var(--edge); border-radius:var(--radius);
+  padding:5px 0; z-index:3; }
+.m-pickhead{ display:flex; align-items:center; padding:3px 9px 5px; font-size:11px;
+  color:var(--text-strong); border-bottom:1px solid var(--line-soft); margin-bottom:3px; }
+.m-pickhead span{ margin-left:auto; color:var(--faint); }
+.m-opt{ display:flex; align-items:center; gap:8px; padding:2px 9px; font-size:12px; color:var(--text); }
+.m-opt[data-on]{ background:var(--wash-3); }
+.m-box{ width:11px; height:11px; border:1px solid var(--edge); border-radius:var(--radius-sm);
+  flex:none; display:inline-flex; align-items:center; justify-content:center;
+  font-size:9px; color:var(--accent); line-height:1; }
+.m-opt[data-on] .m-box{ border-color:var(--accent); }
+.m-optsub{ margin-left:auto; color:var(--faint); font-size:11px; }
+.m-pickfoot{ border-top:1px solid var(--line-soft); margin-top:4px; padding:5px 9px 1px;
+  color:var(--faint); font-size:11px; display:flex; gap:10px; }
+
+
+/* --- o composer de uma linha ---------------------------------------------
+   Rodapé do painel, não caixa flutuante dentro dele: mesma altura, mesmo
+   padding lateral e o mesmo hairline do .panel-head, só que na borda de baixo.
+   Os dois se olham de ponta a ponta e o corpo fica entre eles. */
+.m-foot{ flex:none; border-top:1px solid var(--line-soft); }
+.m-bar{ display:flex; align-items:center; gap:8px; height:var(--head-h);
+  box-sizing:border-box; padding-inline:11px; }
+.m-bar .tool{ flex:none; }
+.m-caret{ color:var(--dim); flex:none; }
+.m-typed{ flex:1; min-width:0; color:var(--text-strong); font-size:12px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.m-typed[data-ph]{ color:var(--dim); }
+.m-bar .model-mode{ flex:none; }
+/* O envio: chip de contorno como todo botão do app. Vira `stop` durante o
+   turno, que é o mesmo botão dizendo a outra coisa que dá pra fazer ali. */
+.m-send{ flex:none; padding:1px 7px; border:1px solid var(--edge); border-radius:var(--radius);
+  color:var(--dim); font-size:11px; background:none; font-family:inherit; cursor:pointer; }
+.m-send:hover{ color:var(--text-strong); border-color:var(--dimmer); }
+.m-send[data-stop]{ border-color:color-mix(in srgb, #c98177 45%, transparent); color:#c98177; }
+:root[data-theme='light'] .m-send[data-stop]{ border-color:#e3bdbf; color:#b1454a; }
+/* Anexos acima da barra, como hoje: imagens e arquivos na mesma fila. */
+.m-attach-row{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; padding:8px 11px 0; }
+/* Miniatura de mentira, no tamanho que o chip de imagem já usa (42px). */
+.m-thumb{ display:block; width:42px; height:42px; background:var(--well); }
+
+/* --- molduras do bloco C ------------------------------------------------- */
+.m-demo{ border:1px solid var(--line-soft); border-radius:var(--radius); overflow:hidden;
+  background:var(--panel); margin-bottom:14px; }
+.m-demohead{ display:flex; align-items:center; gap:7px; height:var(--head-h);
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.m-demobody{ padding:9px 11px; font-size:12px; }
+
+/* --- comparação do @all -------------------------------------------------- */
+.m-compare{ border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.m-comparehead{ display:flex; align-items:center; gap:7px; padding:4px 9px;
+  border-bottom:1px solid var(--line-soft); font-size:11px; color:var(--dim); }
+.m-panes{ display:flex; }
+.m-pane{ flex:1; min-width:0; padding:7px 9px; display:flex; flex-direction:column; gap:6px; }
+.m-pane + .m-pane{ border-left:1px solid var(--line-soft); }
+.m-pane .m-body{ font-size:11px; }
+.m-pick{ margin-top:auto; display:flex; gap:6px; }
+</style>
+</head>
+<body>
+
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">tema</button>
+
+<h1>Raia como painel — ações, composer e <code>@all</code></h1>
+<p class="m-sub">
+  A raia é um painel do app, com <code>.panel-head</code> e a mesma navegação entre painéis.
+  O composer é uma linha só dos dois lados: anexar, o que você digita, o modo e o envio.
+  Harness e modelo saíram da barra — o cabeçalho de cada resposta já imprime
+  <code>claude@opus-5</code>, e a raia diz quem é no próprio título do painel.
+  O que sobra é o <b>modo</b>, que é a única coisa ali que você troca no meio da conversa:
+  a raia abre em <code>Plan</code> e é assim que o <b>read-only</b> fica visível.
+</p>
+
+<!-- ==================== C ==================== -->
+<div class="opt">
+  <h2>C — Três jeitos de arrumar a barra</h2>
+  <p class="note">Mesmos elementos, três posições: anexar, ⌘L, o texto, o modo e o envio. A barra é rodapé do painel nos três — encostada nas bordas, na altura do cabeçalho.</p>
+  <div class="stage" style="height:auto; display:block; padding:14px">
+    <div>
+      <div class="note" style="margin:0 0 5px">C1 — anexar na ponta esquerda, modo e envio na direita</div>
+      <div class="m-demo">
+        <div class="m-demohead"><span class="panel-icon">▍</span><span class="panel-name">chat</span></div>
+        <div class="m-demobody"><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Feito em agent.ts.</span></div>
+        <div class="m-foot"><div class="m-bar"><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="m-caret">›</span><span class="m-typed">segue, e roda o typecheck no fim</span><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="note" style="margin:0 0 5px">C2 — texto na borda, todas as ações agrupadas à direita</div>
+      <div class="m-demo">
+        <div class="m-demohead"><span class="panel-icon">▍</span><span class="panel-name">chat</span></div>
+        <div class="m-demobody"><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Feito em agent.ts.</span></div>
+        <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">segue, e roda o typecheck no fim</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="note" style="margin:0 0 5px">C3 — sem botão de envio: ⏎ manda, e o botão só nasce enquanto o turno roda</div>
+      <div class="m-demo">
+        <div class="m-demohead"><span class="panel-icon">▍</span><span class="panel-name">chat</span></div>
+        <div class="m-demobody"><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Feito em agent.ts.</span></div>
+        <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">segue, e roda o typecheck no fim</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span></div></div>
+      </div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>C2 é o que está aplicado abaixo:</b> tudo que é ação encostado na direita, e o texto começando na borda esquerda junto com o cursor. <b>C1</b> prende o <code>＋</code> na ponta esquerda — não anda de lugar, mas espalha os controles pelas duas pontas. <b>C3</b> é o mais fiel ao teclado-primeiro, ao custo de não ter alvo de clique pra enviar.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S1 ==================== -->
+<div class="opt">
+  <h2>S1 — Painel aberto, raia correndo em paralelo</h2>
+  <p class="note">Claude trabalhando à esquerda, codex respondendo à direita. Duas barras de uma linha, nenhuma fila.</p>
+  <div class="stage">
+    <div class="m-chat chat-panel">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">move o estado de turno pra ${key}:${harness}</span></div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Vou começar por agent.ts, que é onde conns vive.</span></div>
+        <div class="m-tool">↳ editou src/main/turn.ts</div>
+        <div class="m-sys">codex lane open · ⌥→ focus panel</div>
+      </div>
+      <div class="irc-typing" data-live>
+        <span class="irc-nick" style="color:var(--nick-claude)">claude</span>
+        <span> is typing</span>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">segue, e roda o typecheck no fim</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send" data-stop>■ stop</button></div></div>
+    </div>
+
+    <div class="m-lane panel" data-focused>
+      <div class="panel-head">
+        <span class="panel-icon">◆</span>
+        <span class="panel-name" style="color:var(--nick-codex)">codex</span>
+        <span class="panel-sub">3 msgs · 18s</span>
+        <span class="m-chip">ro</span>
+      </div>
+      <div class="m-lanebody">
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">analisa o schema do sessionStore</span></div>
+        <div><span class="m-nick" data-v=codex>codex</span> <span class="m-body dim">sessions.json é um array plano. A chave composta não toca o arquivo, só o índice em memória.</span></div>
+      </div>
+      <div class="m-laneacts">
+        <span class="m-chip" data-v=claude>merge <span class="k">⌘⇧M</span></span>
+        <span class="m-chip">peek <span class="k">⌘⇧G</span></span>
+        <span class="m-chip" data-v=danger>discard <span class="k">⌘⇧D</span></span>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">e o hook de reload?</span><button class="tool">＋</button><span class="model-mode" data-tone="plan">Plan</span><button class="m-send">↑</button></div></div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>O composer da raia não precisa de <code>@</code>:</b> quem você está falando já é o painel em que o cursor está. O handle só existe no chat principal. <b>⌘L não aparece na raia</b> — ela não tem mensagem anterior pra emendar.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S2 ==================== -->
+<div class="opt">
+  <h2>S2 — Espiar (⌘⇧G): o principal lê, nada fecha</h2>
+  <p class="note">O Claude recebe o que ainda não viu da raia. A marca d'água anda, o painel segue vivo, e a linha <code>— claude has read up to here —</code> mostra onde ele parou.</p>
+  <div class="stage">
+    <div class="m-chat chat-panel">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">As três chamadas que leem conns.get(key) passam a precisar do harness.</span></div>
+        <div class="m-sys">↯ claude peeked at the codex lane · 4 messages · lane still open</div>
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">isso muda o que você ia fazer?</span></div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Muda: o codex tem razão que o parsing se espalha. Vou passar {key, harness} como objeto.</span></div>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">boa, segue assim</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+    </div>
+
+    <div class="m-lane panel">
+      <div class="panel-head">
+        <span class="panel-icon">◆</span>
+        <span class="panel-name" style="color:var(--nick-codex)">codex</span>
+        <span class="panel-sub">4 read · 2 new</span>
+        <span class="m-chip">ro</span>
+      </div>
+      <div class="m-lanebody">
+        <div><span class="m-nick" data-v=codex>codex</span> <span class="m-body dim">…o custo real é o parsing de "key:harness" espalhado por 6 arquivos.</span></div>
+        <div class="m-sys">— claude has read up to here —</div>
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">e o hook de reload?</span></div>
+        <div><span class="m-nick" data-v=codex>codex</span> <span class="m-body dim">O reload relê sessions.json, então não vê raia nenhuma.</span></div>
+      </div>
+      <div class="m-laneacts">
+        <span class="m-chip" data-v=claude>merge <span class="k">⌘⇧M</span></span>
+        <span class="m-chip">peek <span class="k">⌘⇧G</span></span>
+        <span class="m-chip" data-v=danger>discard <span class="k">⌘⇧D</span></span>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed" data-ph>Reply…</span><button class="tool">＋</button><span class="model-mode" data-tone="plan">Plan</span><button class="m-send">↑</button></div></div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>Mesclar depois de espiar</b> só manda o que está abaixo da linha — a marca d'água por <code>(sessão, harness)</code> de <code>handoff.ts</code> já garante isso hoje.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S3 ==================== -->
+<div class="opt">
+  <h2>S3 — Mesclar (⌘⇧M): a raia fecha e vira contexto</h2>
+  <p class="note">O painel fecha, a conversa entra no principal como bloco dobrado, e o Claude responde já contando com ela. Com anexos no composer pra ver que a barra não briga por espaço.</p>
+  <div class="stage">
+    <div class="m-chat chat-panel" style="flex:1">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">As três chamadas que leem conns.get(key) passam a precisar do harness.</span></div>
+        <div class="m-merged">
+          <div class="m-mergedhead"><span class="m-dot" data-idle></span> <b style="color:var(--nick-codex)">codex</b> lane merged · 6 messages · 2m14s <span class="m-chip">▸ open</span></div>
+          <div class="m-mergedbody">
+            <div><span class="m-nick" data-v=codex>codex</span> sessions.json é um array plano; a chave composta não toca o arquivo.</div>
+            <div><span class="m-nick" data-v=codex>codex</span> o custo real é o parsing de "key:harness" espalhado por 6 arquivos.</div>
+            <div><span class="m-nick" data-v=codex>codex</span> o reload relê sessions.json, então não vê raia nenhuma.</div>
+          </div>
+        </div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Li a raia. Vou passar {key, harness} como objeto e deixar o reload como está.</span></div>
+      </div>
+      <div class="m-foot">
+      <div class="m-attach-row"><span class="chip"><span class="chip-name">sessionStore.ts</span> ✕</span><span class="chip chip-image"><span class="m-thumb"></span><span class="chip-num">1</span></span><span class="chip"><span class="chip-name">turn.ts</span> ✕</span></div>
+      <div class="m-bar"><span class="m-caret">›</span><span class="m-typed">confere contra esse arquivo e roda os testes</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>O bloco vem dobrado:</b> mesclar é sobre o Claude ler, não sobre você reler. <b>Por baixo</b> é o <code>buildPacket</code> que já existe, com a raia como origem.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S4 ==================== -->
+<div class="opt">
+  <h2>S4 — Descartar (⌘⇧D): fecha sem mandar nada</h2>
+  <p class="note">O Claude nunca vê uma palavra da raia. Fica só uma linha morta com <code>ver</code> e <code>reabrir</code> — ela é UI, não entra no contexto de ninguém.</p>
+  <div class="stage">
+    <div class="m-chat chat-panel" style="flex:1">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">move o estado de turno pra ${key}:${harness}</span></div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Vou começar por agent.ts, que é onde conns vive.</span></div>
+        <div class="m-fold" data-dead>✕ codex lane · 6 messages · discarded <span class="m-chip">▸ view</span> <span class="m-chip">↺ reopen</span></div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">typecheck limpo, 41 testes passando.</span></div>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">beleza, commita</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>Q4 segue aberta:</b> a linha morta fica visível ou some de vez? Ela é o que permite <code>reabrir</code> e <code>⌘Z</code>.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S5 ==================== -->
+<div class="opt">
+  <h2>S5 — <code>@all</code> sem raia aberta: o seletor</h2>
+  <p class="note">O seletor sobe do composer, no mesmo lugar e no mesmo formato do menu de modelo — agrupado por harness, multi-escolha. Cada escolhido vira uma raia.</p>
+  <div class="stage" data-tall>
+    <div class="m-chat chat-panel" style="flex:1">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body">move o estado de turno pra ${key}:${harness}</span></div>
+        <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span> <span class="m-body dim">Feito em agent.ts. Falta decidir a forma da chave.</span></div>
+      </div>
+      <div class="m-composerwrap">
+        <div class="m-picker">
+          <div class="m-pickhead">who joins the conversation <span>2 picked · ro</span></div>
+          <div class="model-head">claude <span class="model-agent-note">in the chat</span></div>
+          <div class="m-opt" data-on><span class="m-box">✓</span> opus-5 <span class="m-optsub">main</span></div>
+          <div class="model-head">codex</div>
+          <div class="m-opt" data-on><span class="m-box">✓</span> gpt-5.6-sol <span class="m-optsub">high</span></div>
+          <div class="m-opt"><span class="m-box"></span> gpt-5.6-mini</div>
+          <div class="model-head">gemini</div>
+          <div class="m-opt"><span class="m-box"></span> gemini-3-pro</div>
+          <div class="model-head">ollama <span class="model-agent-note">local</span></div>
+          <div class="m-opt"><span class="m-box"></span> qwen3:latest</div>
+          <div class="m-pickfoot"><span>⏎ confirm</span><span>space toggles</span><span>esc cancels</span></div>
+        </div>
+        <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed"><span class="m-mention" data-v=all>@all</span><button class="tool">＋</button><button class="tool tool-link">↩</button> chave composta ou um Map de raias?</span><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>Com raia já aberta o seletor não aparece:</b> <code>@all</code> vai pras raias abertas mais o principal. Ele só existe pro caso "ainda não tem ninguém" — nunca dispara pra todo harness instalado.</p>
+</div>
+<hr class="div" />
+
+<!-- ==================== S6 ==================== -->
+<div class="opt">
+  <h2>S6 — A resposta do <code>@all</code>: comparação e escolha</h2>
+  <p class="note">As duas respostas chegam num bloco comparável. <code>seguir</code> manda a escolhida pro contexto do principal; <code>open lane</code> transforma a outra em painel se você quiser continuar com ela.</p>
+  <div class="stage">
+    <div class="m-chat chat-panel" style="flex:1">
+      <div class="m-feed chat">
+        <div><span class="m-nick" data-v=you>r2luna</span> <span class="m-body"><span class="m-mention" data-v=all>@all</span> chave composta ou um Map de raias?</span></div>
+        <div class="m-compare">
+          <div class="m-comparehead"><span class="m-dot" data-idle></span> 2 replies · 41s <span class="m-chip">ro</span></div>
+          <div class="m-panes">
+            <div class="m-pane">
+              <div><span class="m-nick" data-v=claude>claude</span><span class="irc-host">@opus-5</span></div>
+              <div class="m-body dim">Chave composta. Toca 6 sites de leitura e nenhuma estrutura nova; o watchdog segue funcionando sem saber que raia existe.</div>
+              <div class="m-pick"><span class="m-chip" data-v=claude>follow <span class="k">⌘1</span></span><span class="m-chip">open lane</span></div>
+            </div>
+            <div class="m-pane">
+              <div><span class="m-nick" data-v=codex>codex</span><span class="irc-host">@gpt-5.6-sol</span></div>
+              <div class="m-body dim">Map de raias. A chave composta espalha parsing de string; um Map&lt;key, Lane[]&gt; mantém o ciclo de vida num lugar só.</div>
+              <div class="m-pick"><span class="m-chip" data-v=codex>follow <span class="k">⌘2</span></span><span class="m-chip">open lane</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="m-foot"><div class="m-bar"><span class="m-caret">›</span><span class="m-typed">segue o do codex, mas mantém o watchdog como está</span><button class="tool">＋</button><button class="tool tool-link">↩</button><span class="model-mode" data-tone="acceptEdits">Accept</span><button class="m-send">↑</button></div></div>
+    </div>
+  </div>
+  <p class="tradeoff"><b>Escolher é mesclar:</b> a resposta vencedora entra no contexto do principal pelo mesmo packet, e a perdedora dobra.</p>
+</div>
+
+</body>
+</html>

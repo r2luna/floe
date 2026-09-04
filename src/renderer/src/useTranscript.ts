@@ -10,6 +10,7 @@ import type {
   ImageAttachment,
   PermissionMode
 } from '../../shared/types'
+import type { Route } from '../../shared/mentions.ts'
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
 import { takeBatch, type Queued } from './queue'
@@ -100,7 +101,7 @@ export interface Transcript {
      * message is addressed or it is not, and the transcript text follows from
      * that rather than standing in for it.
      */
-    addressed?: { shown: string }
+    addressed?: { shown: string; route: Route }
   ) => void
   /** Drop a queued message before it is ever sent. */
   unqueue: (id: string) => void
@@ -311,13 +312,39 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // all until the chat is reopened and read back off the JSONL.
       dispatch({
         type: 'push',
-        item: { role: 'tool', name: event.name, summary: event.summary, at: Date.now() }
+        // `query` rides along when there is one: it is what the transcript's
+        // fold is drawn from, and losing it here would leave a merged query as
+        // a sentence with nothing to open.
+        item: {
+          role: 'tool',
+          name: event.name,
+          summary: event.summary,
+          query: event.query,
+          at: Date.now()
+        }
       })
     } else if (event.kind === 'steer') {
       // A message typed into this turn while it ran, replayed to a panel that
       // mounted after it was said. It is a line of yours like any other; the
       // reducer drops the JSONL copy if the CLI has already written one.
       dispatch({ type: 'push', item: { role: 'user', text: event.text, at: event.at } })
+    } else if (event.kind === 'fanout') {
+      // One column of an `@all` comparison. Pushed as a settled assistant line
+      // under the harness that wrote it — it IS what that harness said — and
+      // stamped with the fan-out it belongs to, which is what makes the Log
+      // draw the answers side by side instead of one after another.
+      dispatch({
+        type: 'push',
+        item: {
+          role: 'assistant',
+          provider: event.provider,
+          model: event.model,
+          text: event.text,
+          fanoutId: event.fanoutId,
+          query: event.query,
+          at: Date.now()
+        }
+      })
     } else if (event.kind === 'peer') {
       // Another session's message, spoken into this channel under its own nick.
       // Pushed like any settled line: it arrives mid-turn, so it lands where it
@@ -676,7 +703,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       images?: ImageAttachment[],
       files?: FileAttachment[],
       linked?: boolean,
-      addressed?: { shown: string }
+      addressed?: { shown: string; route: Route }
     ) => {
       if (!worktreePath || !sessionId || !prompt.trim()) return
       // While a question is up, ⏎ answers it — free text is the "Other" lane.
@@ -684,6 +711,19 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // Claude Code TUI.
       if (question) {
         answerActive([prompt.trim()])
+        return
+      }
+      // A handle at the front opens a QUERY, and a query is not this chat: the
+      // turn runs under `sess~codex`, streams into its own panel, and leaves
+      // nothing here but the chip main writes. So it does not go through
+      // `deliver` — no optimistic line, no `running`, no clock — and it never
+      // queues, because not waiting for the turn in flight is the entire point.
+      // Main decides where it lands; the route is what says it is one (see
+      // dispatchTurn).
+      if (addressed?.route) {
+        void window.floe.agent
+          .start(key, worktreePath, prompt, { ...(choice ?? choiceRef.current), permissionMode: (choice ?? choiceRef.current).mode ?? DEFAULT_MODE }, images ?? [], files ?? [], addressed.route)
+          .catch((e: unknown) => setError(String(e)))
         return
       }
       // A routed message does NOT become the session's choice: `@codex` is one

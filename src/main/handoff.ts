@@ -33,7 +33,9 @@
 import type { BrowserWindow } from 'electron'
 import { loadClaudeTranscript, type TranscriptItem } from './claudeSessions'
 import { readRuntimeTranscript, logTurn } from './runtimeLog'
-import { getCreatedSession, getCreatedSessionClaudeId } from './sessionStore'
+// Session or query — the transcript reader must not care which registry holds
+// the key it was handed. See identity.ts.
+import { agentIdentityNames, agentResumeId } from './identity'
 import { buildPacket, PACKET_OPEN, stripPacket } from '../shared/handoff'
 import { hasRelay, stripRelay } from '../shared/relay'
 // Circular with agent.ts (it imports seedFor) — safe on the same terms as
@@ -87,22 +89,14 @@ function authoredBy(item: TranscriptItem): string | undefined {
  * history doubles on every switch.
  */
 export function sessionTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
-  const claude = loadClaudeTranscript(worktreePath, getCreatedSessionClaudeId(sessionId) ?? sessionId)
+  const claude = loadClaudeTranscript(worktreePath, agentResumeId(sessionId) ?? sessionId)
   // Under every name this session has answered to, not just the one asked for.
   // The log is keyed by whatever key the turn ran under — Floe's own id for a
   // session an agent drives, the CLI's for a panel that has been through a
   // Claude turn — so a chat where both harnesses have spoken has its history in
   // two files, and reading one of them dropped codex out of the conversation
   // entirely. Same rule as agent.ts's sessionNames, for the same reason.
-  const stored = getCreatedSession(sessionId)
-  const names = [
-    ...new Set(
-      [sessionId, stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])].filter(
-        (n): n is string => !!n
-      )
-    )
-  ]
-  const runtime = names.flatMap(readRuntimeTranscript)
+  const runtime = agentIdentityNames(sessionId).flatMap(readRuntimeTranscript)
   const all = runtime.length
     ? [...claude, ...runtime].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
     : claude
@@ -114,6 +108,70 @@ export function sessionTranscript(worktreePath: string, sessionId: string): Tran
     // the filter below drops the line entirely. See shared/relay.ts.
     .map((i) => (i.text && hasRelay(i.text) ? { ...i, text: stripRelay(i.text) } : i))
     .filter((i) => i.role !== 'user' || (i.text ?? '').trim().length > 0)
+}
+
+/**
+ * How far one conversation has been read INTO another.
+ *
+ * The watermarks above answer "what has this harness not seen of its own
+ * chat". This answers a different question — "what has the chat not been shown
+ * of the query beside it" — and it needs its own storage for a reason that only
+ * looks like a detail: `watermark()` reads Claude's off its transcript, and
+ * Claude never speaks inside a codex query, so it would read 0 forever and a
+ * merge after a peek would re-ship every line.
+ *
+ * Same shape, same lifetime (a Map that dies with the process, which is also
+ * when the conns and threads it describes die), keyed by the pair rather than
+ * by (key, harness).
+ */
+const readInto = new Map<string, number>()
+
+const readKey = (fromKey: string, toKey: string): string => `${fromKey}»${toKey}`
+
+/** Drop a closed query's read marks, next to the watermarks they sit beside. */
+export function forgetRead(fromKey: string): void {
+  for (const k of [...readInto.keys()]) if (k.startsWith(`${fromKey}»`)) readInto.delete(k)
+}
+
+/**
+ * One conversation, packaged for another to read — what peek and merge send.
+ *
+ * `since: 'watermark'` is everything `toKey` has not been shown yet, which is
+ * what makes merge-after-peek send the rest instead of the lot. `'all'` is the
+ * whole thing, for a caller that wants it whatever has been read.
+ *
+ * Returns null when there is nothing new: the caller says so rather than
+ * starting a turn whose entire content is an empty block.
+ */
+export function packetFrom(
+  worktreePath: string,
+  fromKey: string,
+  toKey: string,
+  opts: { since: 'watermark' | 'all'; to: string }
+): { packet: string; entries: number } | null {
+  const items = sessionTranscript(worktreePath, fromKey)
+  const seen = opts.since === 'watermark' ? (readInto.get(readKey(fromKey, toKey)) ?? 0) : 0
+  // Our own chips are bookkeeping, not conversation — the same filter seedFor
+  // applies, and for the same reason.
+  const gap = items.filter(
+    (i) => (i.at ?? 0) > seen && !(i.role === 'tool' && (i.name === 'handoff' || i.name === 'query'))
+  )
+  if (!gap.length) return null
+  const packet = buildPacket(gap, { to: opts.to })
+  if (!packet) return null
+  // Moved at the START, exactly as seedFor does: a turn that dies halfway has
+  // still delivered its packet, and re-sending would pay twice for context the
+  // model already read.
+  //
+  // Marked at the LAST ENTRY SENT rather than at the wall clock. The two are
+  // nearly the same instant, and the difference is the bug: an entry written
+  // while the packet was being built carries an earlier `at` than `Date.now()`,
+  // so a clock mark would skip it and the chat would never see that line at
+  // all. The mark can only move forward.
+  const last = gap[gap.length - 1].at ?? Date.now()
+  readInto.set(readKey(fromKey, toKey), Math.max(seen, last))
+  log('query-packet', { from: fromKey, to: toKey, entries: gap.length, chars: packet.length })
+  return { packet, entries: gap.length }
 }
 
 /**

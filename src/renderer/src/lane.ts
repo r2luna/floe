@@ -200,7 +200,12 @@ export function toggleKind(lane: Lane, kind: string, create: () => Panel): Lane 
  */
 export function closePanel(lane: Lane, index: number, emptyState: () => Panel): Lane {
   const panel = lane.panels[index]
-  if (!panel?.session) return close(lane, index)
+  // Only the panel in the SESSION slot leaves an empty state behind: closing
+  // the chat means the branch is showing no conversation, which is what the
+  // launcher says. A query panel carries a session too — its own key — and
+  // carries no such meaning: closing one leaves the lane one panel shorter, not
+  // a second launcher beside the first.
+  if (!panel?.session || (panel.slot ?? panel.kind) !== 'session') return close(lane, index)
   const panels = [...lane.panels]
   // A fresh panel, not a patch: the old one carries a session id, a first
   // prompt and a width the launcher must not inherit.

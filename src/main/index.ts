@@ -69,7 +69,20 @@ import {
 import { answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
-import { startTurn } from './turn'
+import { dispatchTurn } from './turn'
+import {
+  discardQuery,
+  fanOut,
+  forgetQueriesOf,
+  mergeQuery,
+  openQueryFor,
+  peekQuery,
+  queriesFor,
+  refuse,
+  refuseReason,
+  reopenQuery
+} from './queries'
+import type { Route } from '../shared/mentions'
 import { ensureAgentHookInstalled } from './hooks'
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
@@ -78,6 +91,7 @@ import { listClaudeSessions, listResumableSessions, computeProjectActivity, read
 import {
   setSessionTitle,
   getCreatedSession,
+  findQuery,
   applyAiTitle,
   setCreatedSessionMode,
   setCreatedSessionModel,
@@ -383,16 +397,27 @@ function registerIpc(): void {
       prompt: string,
       options: AgentRunOptions,
       images: ImageAttachment[] = [],
-      files: FileAttachment[] = []
+      files: FileAttachment[] = [],
+      route: Route | null = null
     ) => {
       const win = BrowserWindow.fromWebContents(event.sender)
       if (!win) return
       // The composer has already read any handle at the front and picked the
       // harness itself — it has the machine's installed list and the menu that
-      // offered them. Everything downstream of that decision (skills, the
-      // provider split) is the same work `send_message` needs, and lives in
-      // turn.ts so both doors do it once.
-      startTurn(win, key, worktreePath, prompt, options, images, files)
+      // offered them. It passes that ROUTE on rather than throwing it away:
+      // where a routed message goes is one decision for all five doors, and it
+      // is made in turn.ts. See dispatchTurn.
+      dispatchTurn({
+        win,
+        parentKey: key,
+        worktreePath,
+        prompt,
+        route,
+        origin: 'user',
+        options,
+        images,
+        files
+      })
     }
   )
   // Composer `!` shell mode: run a one-shot command in the worktree and return
@@ -424,6 +449,77 @@ function registerIpc(): void {
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
+  })
+
+  // --- Queries: side conversations opened off a session -------------------
+  handle('query:list', (_event, sessionKey: string) => queriesFor(sessionKey))
+  handle(
+    'query:open',
+    (
+      event,
+      sessionKey: string,
+      worktreePath: string,
+      harness: string,
+      model?: string,
+      effort?: Effort
+    ) => {
+      const win = BrowserWindow.fromWebContents(event.sender) ?? null
+      const opened = openQueryFor(win, sessionKey, worktreePath, {
+        harness,
+        model,
+        effort,
+        openedBy: 'user'
+      })
+      if (opened) return { query: opened.query }
+      const error = refuseReason(harness)
+      refuse(win, sessionKey, error)
+      return { error }
+    }
+  )
+  // The three actions that close the cycle, plus the way back from a discard.
+  // Every one of them is main's: a query's transcript, its conn and the
+  // watermark between it and the chat all live here, and an action that ran in
+  // the renderer would be doing it with none of them.
+  handle('query:peek', (event, qkey: string) =>
+    peekQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
+  )
+  handle('query:merge', (event, qkey: string) =>
+    mergeQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
+  )
+  handle('query:discard', (event, qkey: string) =>
+    discardQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
+  )
+  // `@all`: one message to several, each in its own query, answers mirrored
+  // back into the chat as a comparison. The TARGETS come from the caller and
+  // are never inferred — see R7 in docs/queries.md.
+  handle(
+    'query:all',
+    (
+      event,
+      sessionKey: string,
+      worktreePath: string,
+      harnesses: string[],
+      prompt: string,
+      effort?: Effort
+    ) => {
+      const win = BrowserWindow.fromWebContents(event.sender) ?? null
+      if (!Array.isArray(harnesses) || !harnesses.length) return { error: 'No harnesses given.' }
+      return fanOut(win, sessionKey, worktreePath, { harnesses, prompt, effort })
+    }
+  )
+  // What a merged or discarded query actually said, for the fold in the chat to
+  // open. Read on demand rather than carried on the chip: a conversation is
+  // thousands of characters, the fold is closed by default (merging is about
+  // the model reading it, not you re-reading it), and most are never opened.
+  handle('query:transcript', (_event, qkey: string) => {
+    const found = findQuery(qkey)
+    const parent = found ? getCreatedSession(found.sessionId) : undefined
+    if (!parent) return []
+    return sessionTranscript(parent.worktreePath, qkey)
+  })
+  handle('query:reopen', (event, qkey: string) => {
+    const opened = reopenQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
+    return opened ? { query: opened.query } : { error: `Unknown query: ${qkey}` }
   })
 
   // The renderer's reply to a run_command/list_commands pushed by the MCP
@@ -498,7 +594,13 @@ function registerIpc(): void {
     return title && applyAiTitle(c.claudeId, title) ? title : null
   })
   handle('sessions:link', (_event, id: string, claudeId: string) => linkCreatedSession(id, claudeId))
-  handle('sessions:close', (_event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
+  handle('sessions:close', (event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
+    // Its side conversations first, while the store still says they exist:
+    // `closeSession` below drops the records, and after that there is nothing
+    // left to find the running conns, threads and watermarks by. Each one is
+    // stopped and forgotten outright — a query whose session is gone has no
+    // panel to reopen it in and no chat to merge it into.
+    forgetQueriesOf(BrowserWindow.fromWebContents(event.sender) ?? null, opts.id)
     // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
     // history in memory, keyed by the session key the renderer used — either
     // id. A closed session's history is unreachable, so drop it here.
