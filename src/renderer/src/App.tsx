@@ -1183,6 +1183,15 @@ export default function App() {
       : []
 
   /**
+   * Where focus goes in a panel with no rows to land on, when the panel itself
+   * is the wrong answer. The terminal marks its xterm textarea: focusing the
+   * panel shell instead hands you a terminal you cannot type into, which is
+   * what ⌃L back into an open one used to do.
+   */
+  const focusSink = (panel: HTMLElement | null | undefined): HTMLElement | null =>
+    panel?.querySelector<HTMLElement>('[data-focus-sink]') ?? null
+
+  /**
    * The project the cursor is sitting on, for `d` and `m`.
    *
    * Read off the row's own `data-project` rather than by counting rows: the list
@@ -1372,7 +1381,7 @@ export default function App() {
       const fallback = rows.findIndex((r) => r.hasAttribute('data-active'))
       const idx = at ?? (fallback === -1 ? undefined : fallback)
       const row = idx != null ? rows[Math.min(idx, rows.length - 1)] : undefined
-      ;(row ?? el).focus({ preventScroll: true })
+      ;(row ?? focusSink(el) ?? el).focus({ preventScroll: true })
       // Record the default as the cursor, rather than leaving it implicit in
       // DOM focus. Otherwise the row is focused but unmarked, and the next j
       // would start counting from nowhere instead of from where you are.
@@ -1949,7 +1958,7 @@ export default function App() {
     if (!el) return
     const rows = rowsOf(el)
     const at = lane.panels[lane.focus]?.cursor
-    ;(rows[Math.min(at ?? 0, rows.length - 1)] ?? el).focus({ preventScroll: true })
+    ;(rows[Math.min(at ?? 0, rows.length - 1)] ?? focusSink(el) ?? el).focus({ preventScroll: true })
   }
 
   // The inline new-worktree form's wiring, handed to the worktrees panel while

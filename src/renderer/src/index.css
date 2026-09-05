@@ -944,6 +944,9 @@ button {
 .composer {
   border-top: 1px solid var(--line-soft);
   padding-inline: 11px;
+  /* Its own width is what decides whether the bar stays one line — a panel is
+     resized by hand, so the window's width says nothing about this one's. */
+  container: composer / inline-size;
 }
 
 /* Deliberately NOT lit on focus. The header does not change when you use the
@@ -1023,6 +1026,26 @@ button {
    matching and it grows with the content as it always did. */
 .composer-bar .composer-input:placeholder-shown {
   field-sizing: fixed;
+}
+
+/* Narrow panel: the tools take about 200px whatever the panel does, so past
+   this width the text is down to a dozen characters and wraps under its own
+   placeholder. Below it the bar stacks — text on its line, tools on theirs —
+   which is the layout `[data-boxed]` already uses. */
+@container composer (max-width: 400px) {
+  .composer-bar {
+    display: block;
+    min-height: 0;
+  }
+
+  .composer-bar .composer-mirror,
+  .composer-bar .composer-input {
+    padding: 7px 0 0;
+  }
+
+  .composer-bar .composer-tools {
+    padding-bottom: 7px;
+  }
 }
 
 /* Send, and stop while a turn runs — drawn as `.panel-act` is, because it is
@@ -1407,6 +1430,21 @@ button {
 .composer[data-model-left] .model-menu {
   right: auto;
   left: anchor(left);
+}
+
+/* Stacked, the tools own a whole row: the chip goes back to the right end of
+   it — otherwise the cluster crams into the left third and the row is empty.
+   Which puts it against the panel's right edge, so its menu hangs off the
+   left again, the way it does everywhere the chip is not left-aligned. */
+@container composer (max-width: 400px) {
+  .composer[data-model-left] .model {
+    margin-left: auto;
+  }
+
+  .composer[data-model-left] .model-menu {
+    right: anchor(right);
+    left: auto;
+  }
 }
 
 /* Until the chat's own model is read, the chip still holds the last chat's —

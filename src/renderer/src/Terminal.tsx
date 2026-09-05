@@ -4,8 +4,17 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
+import { resolveKey } from './keys'
 import { SOLID_BG, XTERM_THEME, rgbChannels } from './xtermTheme'
 import { attachTerminal, detachTerminal, noteTerminalOutput } from './terminalBus'
+
+/**
+ * The commands a press is allowed to leave the terminal for. Kept deliberately
+ * short: every chord listed here is one the shell stops receiving (⌃L no longer
+ * clears, ⌃H no longer backspaces), and moving between columns is worth that
+ * where killing a line or sending EOF is not.
+ */
+const LEAVES_TERMINAL = new Set<string>(['panel.left', 'panel.right'])
 
 /**
  * A live shell. The PTY lives in the main process keyed by `termId`, so the
@@ -76,7 +85,23 @@ export function TerminalPanel({
     // — the native paste event already reaches xterm's textarea, and doing both
     // pasted the text twice.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type !== 'keydown' || !navigator.clipboard) return true
+      if (e.type !== 'keydown') return true
+      // Hand the lane's own chords back to the window keymap. xterm listens in
+      // CAPTURE on its textarea and stopPropagation()s every ctrl chord it turns
+      // into a byte, so App's listener never saw ⌃H/⌃L — you could enter the
+      // terminal from the keyboard but not leave it. Returning false makes xterm
+      // ignore the press entirely: nothing goes to the PTY and the event bubbles
+      // out untouched. Asked of the keymap rather than hardcoded, so rebinding
+      // panel.left/right moves this with it.
+      const action = resolveKey({
+        key: e.key,
+        meta: e.metaKey,
+        ctrl: e.ctrlKey,
+        shift: e.shiftKey,
+        alt: e.altKey
+      })
+      if (action && LEAVES_TERMINAL.has(action.id)) return false
+      if (!navigator.clipboard) return true
       if (!(e.metaKey || (e.ctrlKey && e.shiftKey))) return true
       if (e.code === 'KeyC' && term.hasSelection()) {
         void navigator.clipboard.writeText(term.getSelection())
@@ -114,6 +139,10 @@ export function TerminalPanel({
     term.parser.registerOscHandler(11, (d) => (d === '?' ? reply(11, SOLID_BG) : false))
 
     term.open(host)
+    // The panel has no rows, so the lane would otherwise land focus on its
+    // shell — where the keyboard reaches the app but not the shell. Marks the
+    // one element worth focusing; see `focusSink` in App.tsx.
+    term.textarea?.setAttribute('data-focus-sink', '')
     try {
       term.loadAddon(new CanvasAddon())
     } catch {

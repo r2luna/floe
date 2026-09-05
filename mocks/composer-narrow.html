@@ -1,0 +1,81 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Composer — narrow panel stacks the tools</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:24px 28px; }
+h3{ font-size:11px; font-weight:400; color:var(--faint); margin:0 0 6px; }
+.row{ display:flex; gap:24px; align-items:flex-start; }
+.panel{ border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+.body{ height:70px; }
+.w380{ width:380px } .w420{ width:420px } .w600{ width:600px }
+svg{ display:block }
+</style>
+</head>
+<body>
+<div class="row">
+  <div>
+    <h3>380 — stacked</h3>
+    <div class="panel w380"><div class="body"></div>
+      <div class="composer" data-model-left>
+        <div class="composer-bar">
+          <div class="composer-stack">
+            <pre class="composer-mirror"></pre>
+            <textarea class="composer-input" rows="1" placeholder="Type while it works — ⏎ queues…"></textarea>
+          </div>
+          <div class="composer-tools">
+            <button class="tool"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M7.5 2v11M2 7.5h11"/></svg></button>
+            <button class="tool tool-link"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M9 3 5 7l4 4"/></svg></button>
+            <span class="vim-mode" data-mode="insert">ins</span>
+            <button class="model"><span class="model-mode" data-tone="skip">bypass</span><svg width="13" height="13" viewBox="0 0 13 13" stroke="currentColor" fill="none"><path d="m3 5 3.5 3.5L10 5"/></svg></button>
+            <button class="composer-send" data-stop><svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor"><rect width="11" height="11"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <h3>420 — one line</h3>
+    <div class="panel w420"><div class="body"></div>
+      <div class="composer" data-model-left>
+        <div class="composer-bar">
+          <div class="composer-stack">
+            <pre class="composer-mirror"></pre>
+            <textarea class="composer-input" rows="1" placeholder="Type while it works — ⏎ queues…"></textarea>
+          </div>
+          <div class="composer-tools">
+            <button class="tool"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M7.5 2v11M2 7.5h11"/></svg></button>
+            <button class="tool tool-link"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M9 3 5 7l4 4"/></svg></button>
+            <span class="vim-mode" data-mode="insert">ins</span>
+            <button class="model"><span class="model-mode" data-tone="skip">bypass</span><svg width="13" height="13" viewBox="0 0 13 13" stroke="currentColor" fill="none"><path d="m3 5 3.5 3.5L10 5"/></svg></button>
+            <button class="composer-send" data-stop><svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor"><rect width="11" height="11"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <h3>600 — one line</h3>
+    <div class="panel w600"><div class="body"></div>
+      <div class="composer" data-model-left>
+        <div class="composer-bar">
+          <div class="composer-stack">
+            <pre class="composer-mirror"></pre>
+            <textarea class="composer-input" rows="1" placeholder="Reply…"></textarea>
+          </div>
+          <div class="composer-tools">
+            <button class="tool"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M7.5 2v11M2 7.5h11"/></svg></button>
+            <button class="tool tool-link"><svg width="15" height="15" viewBox="0 0 15 15" stroke="currentColor" fill="none"><path d="M9 3 5 7l4 4"/></svg></button>
+            <button class="model"><span class="model-mode" data-tone="acceptEdits">auto</span><svg width="13" height="13" viewBox="0 0 13 13" stroke="currentColor" fill="none"><path d="m3 5 3.5 3.5L10 5"/></svg></button>
+            <button class="composer-send"><svg width="14" height="14" viewBox="0 0 14 14" stroke="currentColor" fill="none"><path d="M7 12V2m-4 4 4-4 4 4"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
