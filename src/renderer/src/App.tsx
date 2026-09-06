@@ -1478,6 +1478,8 @@ export default function App() {
     editSkill,
     panelEl: panelAt,
     rowsOf,
+    project: projects.current?.path,
+    openChat: (session, firstPrompt) => setLane((l) => open(l, mkPanel('chat', undefined, session, firstPrompt))),
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
@@ -2573,14 +2575,17 @@ export default function App() {
                           // past five arguments to skip it.
                           firstAttached: child.firstAttached
                         })
-                        // A preview leaves the focus where it was — by id, not
-                        // by index: the panel that opened may have shifted right
-                        // to make room for the one it opened.
-                        if (child.focus === false) {
-                          const back = next.panels.findIndex((p) => p.id === panel.id)
-                          if (back !== -1) return { ...next, focus: back }
-                        }
-                        return next
+                        // Two ways to say "do not take the focus": a preview
+                        // (`focus: false`), and a panel that FOLLOWS something
+                        // — the colony's board swapping the card's chat in as
+                        // the cursor moves, or every `j` would drop you out of
+                        // the panel you are driving. Either way the focus goes
+                        // back by id, not by index: the panel that opened may
+                        // have shifted right to make room for the one it
+                        // opened.
+                        if (child.focus !== false && !child.keepFocus) return next
+                        const back = next.panels.findIndex((p) => p.id === panel.id)
+                        return back === -1 ? next : focusAt(next, back)
                       })
                     }
                   />

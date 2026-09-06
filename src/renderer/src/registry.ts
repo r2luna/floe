@@ -207,6 +207,50 @@ function drawRow(c: CommandContext): HTMLElement | null {
 }
 
 /**
+ * The task the cursor is on, read off the row's own `data-task`.
+ *
+ * By attribute rather than by counting: a column is three bands with labels
+ * between them, and an index into "cards, ignoring band tags" is exactly the
+ * arithmetic that archives the wrong task the day a band is added.
+ */
+function taskRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'colony') return null
+  const row = fileRow(c)
+  return row?.dataset.task ? row : null
+}
+
+/**
+ * Move the cursor to the column `delta` steps sideways, keeping your row.
+ *
+ * Each column's body is a `data-nav-group`, so `j`/`k` already stay inside one;
+ * this is the other axis. Empty columns are collapsed to a spine and hold no
+ * rows, so they are skipped for free — stepping onto one would land the cursor
+ * on nothing.
+ */
+function colonyStep(c: CommandContext, delta: 1 | -1): void {
+  const panel = c.panelEl(c.lane.focus)
+  const all = c.rowsOf(panel)
+  if (!all.length) return
+  const groups = [...(panel?.querySelectorAll<HTMLElement>('[data-nav-group]') ?? [])].filter(
+    (g) => g.querySelector('button, [data-nav]')
+  )
+  const active = document.activeElement as HTMLElement | null
+  const here = groups.findIndex((g) => g.contains(active))
+  const from = here === -1 ? (delta > 0 ? -1 : groups.length) : here
+  const group = groups[from + delta]
+  if (!group) return
+  const rows = [...group.querySelectorAll<HTMLElement>('button, [data-nav]')]
+  // Keep your row where the column is tall enough, clamp where it is not —
+  // leaving a five-card column for a one-card one must not overshoot.
+  const at = here === -1 ? 0 : [...groups[here].querySelectorAll<HTMLElement>('button, [data-nav]')].indexOf(active as HTMLElement)
+  const row = rows[Math.min(Math.max(at, 0), rows.length - 1)]
+  if (!row) return
+  row.focus()
+  const to = all.indexOf(row)
+  c.setLane((l) => patchPanel(l, l.focus, { cursor: to }))
+}
+
+/**
  * The command row the cursor is on, as its id.
  *
  * Read off the row's own `data-command` rather than by counting rows, for the
@@ -1195,6 +1239,111 @@ export const REGISTRY: Map<string, Command> = new Map(
           const rel = drawRow(c)?.dataset.drawing
           const root = c.worktree?.path
           if (rel && root) void window.floe.draw.reveal(root, rel).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // The board's own session, in the same slot the card chats use (D7) —
+        // never a second chat beside the first.
+        id: 'colony.nanny',
+        title: 'Ask the nanny',
+        group: 'Colony',
+        keys: 'Escape',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'the nanny belongs to a project — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          void window.floe.colony
+            .nanny(project)
+            .then((n) =>
+              c.openChat({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
+            )
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // There is deliberately no "new task" dialog (D8). `n` is the keyboard
+        // path to the same place the header button goes: the nanny, with the
+        // composer ready — she already knows the base branch, which stage is
+        // full and what is queued ahead of it.
+        id: 'colony.new',
+        title: 'New task…',
+        group: 'Colony',
+        keys: 'n',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'a task belongs to a project — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          void window.floe.colony
+            .nanny(project)
+            .then((n) => {
+              c.openChat({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
+              // After the panel has mounted: the composer does not exist on the
+              // frame the chat is opened in.
+              setTimeout(() => findComposer(c)?.focus(), 60)
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'colony.left',
+        title: 'Previous column',
+        group: 'Colony',
+        keys: 'h',
+        run: (c) => colonyStep(c, -1)
+      },
+      {
+        id: 'colony.right',
+        title: 'Next column',
+        group: 'Colony',
+        keys: 'l',
+        run: (c) => colonyStep(c, 1)
+      },
+      {
+        // Two jobs, one intent — run this. On a backlog card it cuts the
+        // worktree (which is why releasing is a key and not automatic: a card
+        // nobody started has not paid for one). On a card a lane parked with a
+        // reason, it puts it back at its stage's door.
+        id: 'colony.start',
+        title: 'Start this task',
+        group: 'Colony',
+        keys: 's',
+        enabled: (c) => !!taskRow(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const id = taskRow(c)?.dataset.task
+          if (id) void window.floe.colony.release(id).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'colony.archive',
+        title: 'Archive this task',
+        group: 'Colony',
+        keys: 'x',
+        enabled: (c) => !!taskRow(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const id = taskRow(c)?.dataset.task
+          const project = c.project
+          if (!id || !project) return
+          // The worktree is deliberately left standing. A card leaving the board
+          // is a bookkeeping change; deleting a branch with work on it is not,
+          // and the removal flow is where that question gets asked properly.
+          void window.floe.colony.remove(id, project).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // The board IS its config file, so "edit stages" is the file — opened in
+        // the reader every other file gets, rooted at the config dir.
+        id: 'colony.stages',
+        title: 'Edit the board\u2019s stages…',
+        group: 'Colony',
+        run: (c) => {
+          void window.floe.config
+            .paths()
+            .then((paths) => c.setLane((l) => open(l, c.makePanel('edit', 'floe.toml', paths.dir))))
+            .catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

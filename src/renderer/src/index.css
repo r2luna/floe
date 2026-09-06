@@ -7108,3 +7108,436 @@ kbd {
 :root[data-theme='light'] .key[data-armed] {
   background: #00000008;
 }
+
+/* --- the colony board ------------------------------------------------------
+
+   One column per agent profile, one card per task. Three things carry meaning
+   and they are kept strictly apart (specs/colony/spec.md):
+
+     the BAND says the status — needs-you, working, holding — so no card prints
+     a status word;
+     the BORDER says where the cursor is;
+     the ACCENT says "this needs you", and nothing else in here is allowed to
+     wear it.
+
+   Everything below follows from that. */
+
+.board {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  height: 100%;
+  min-height: 0;
+  /* Cards are targets, not prose: dragging across one painted a selection down
+     its padding, which read as a stray bar drawn on the card. */
+  user-select: none;
+}
+
+/* No scrollbar inside the board. A column that overflows still scrolls; the
+   thumb sitting between two cards was reading as a bar drawn ON one of them. */
+.board *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.board * {
+  scrollbar-width: none;
+}
+
+.fcol {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* Capped, not merely grown: with one column open and seven collapsed, an
+     uncapped grow stretches a list of three cards across 900px and the reading
+     line goes with it. */
+  flex: 1 1 210px;
+  max-width: 360px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  background: var(--wash-1);
+}
+
+.fcol[data-empty] {
+  background: none;
+}
+
+/* An empty column collapses to a thin spine: eight stages at full width is
+   ~1700px and leaves no room for the chat beside the board. Collapsed, the whole
+   pipeline fits, and a column opens the moment it gets a card. */
+.fcol[data-collapsed] {
+  flex: 0 0 30px;
+}
+
+.fcol[data-collapsed] .fcol-body,
+.fcol[data-collapsed] .fcol-cap,
+.fcol[data-collapsed] .fcol-def {
+  display: none;
+}
+
+.fcol[data-collapsed] .fcol-head {
+  flex-direction: column;
+  height: 100%;
+  padding: 8px 0;
+  gap: 8px;
+  border: 0;
+}
+
+.fcol[data-collapsed] .fcol-name {
+  writing-mode: vertical-rl;
+}
+
+/* A stage config dropped while tasks were still in it. It keeps its column,
+   capped at 0, until it drains — no task disappears because a file was edited. */
+.fcol[data-retired] {
+  opacity: 0.55;
+}
+
+.fcol-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  padding: 5px 8px;
+  flex: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.fcol-name {
+  color: var(--dimmer);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.fcol[data-live] .fcol-name {
+  color: var(--text-strong);
+}
+
+.fcol-n {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+/* taken/cap. Text rather than ticks: at a cap of five the ticks are noise, and
+   the number answers "does another one fit?" without counting anything. */
+.fcol-cap {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.fcol-cap[data-full] {
+  color: var(--accent);
+}
+
+/* What the column IS: the skill it runs and the model it runs it on. In the
+   header because that is the column's definition — the name is just a label. */
+.fcol-def {
+  flex-basis: 100%;
+  display: flex;
+  gap: 6px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.fcol-skill {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcol-model {
+  flex: none;
+}
+
+/* A harness that is not the app's default is worth naming: the model alone reads
+   as "opus" whether it came from claude or from codex. */
+.fcol-model[data-alt] {
+  color: var(--dimmer);
+}
+
+.fcol-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  /* Fills the column, which is what gives the holding band's `margin-top: auto`
+     something to push against — without it the queue sits under the last card
+     instead of at the door. */
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* A band groups the rows under one status. Only the two that are not "working"
+   are labelled — the cap counter in the header already counts the working. */
+.fband {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Indented to the card's own text, not to the band's edge: the label names the
+   rows under it, so it has to start where they start. */
+.fband-tag {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding-inline: 6px;
+}
+
+.fband-tag[data-tone='ask'] {
+  color: var(--accent);
+}
+
+/* Holding sits in the column the task is trying to ENTER, at the bottom, pinned:
+   with five cards working above it, a queue that scrolled away would hide the
+   only thing that explains why nothing is moving. */
+.fband[data-hold] {
+  margin-top: auto;
+  position: sticky;
+  bottom: -6px;
+  padding: 5px 0 0;
+  border-top: 1px dashed var(--line);
+  background: var(--panel);
+}
+
+/* --- the card: one task, one worktree ------------------------------------- */
+
+.fcard {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The cursor, on a card rather than on a row.
+
+   The rule above marks any [data-cursor] with a 2px bar down its left edge and a
+   wash behind it. That mark was designed for full-width list rows, where the bar
+   is the only edge available; a card already has four borders, so here the
+   border itself carries the cursor and the bar is switched off. Two marks for
+   one state read as two states. The opt-out is REQUIRED, not tidying: the
+   selector is attribute-only and hits anything inside a focused panel. */
+.fcard[data-cursor]::before,
+.fq[data-cursor]::before {
+  display: none;
+}
+
+/* Selected, panel NOT focused: "where I was". A border one step up from the
+   other cards and nothing else — it has to lose to the focused mark below, or
+   coming back to the board would not feel like coming back. */
+.fcard[data-cursor],
+.fq[data-cursor] {
+  border-color: var(--edge);
+  background: var(--wash-2);
+}
+
+/* Selected, panel focused: "where I am". Three things move together, because one
+   of them alone is not findable across eight columns — the border takes the
+   cursor slate, the surface lifts off the column, and the card's own text comes
+   up a step so the selected card reads as the legible one.
+
+   NOT the accent: accent means "this needs you" everywhere in the app, and a
+   cursor wearing it would read as a card asking to be answered. #55688f is the
+   tone the rule above already gives a focused cursor — the same mark, drawn on a
+   box instead of a row. */
+.panel[data-focused] .fcard[data-cursor],
+.panel[data-focused] .fq[data-cursor] {
+  border-color: #55688f;
+  background: var(--panel-focused);
+}
+
+.panel[data-focused] .fcard[data-cursor] .fcard-line {
+  color: var(--text);
+}
+
+.panel[data-focused] .fcard[data-cursor] .fkind,
+.panel[data-focused] .fq[data-cursor] .fq-name {
+  color: var(--text);
+  border-color: var(--edge);
+}
+
+:root[data-theme='light'] .panel[data-focused] .fcard[data-cursor],
+:root[data-theme='light'] .panel[data-focused] .fq[data-cursor] {
+  border-color: #3a64a8;
+}
+
+.fcard-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fkind {
+  border: 1px solid var(--line);
+  border-radius: 1px;
+  color: var(--dimmer);
+  font-size: 10px;
+  padding: 0 5px;
+  flex: none;
+}
+
+.fpass {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+/* Times a lane handed this card back. Dimmer than the pass count and only drawn
+   when it is not zero: a `↩0` on every card would be noise, and the whole point
+   of the mark is that seeing it at all means something. */
+.freturn {
+  margin-left: auto;
+  color: var(--dimmer);
+  font-size: 10px;
+}
+
+/* With both, the pass count stops being the one pushed right. */
+.freturn + .fpass {
+  margin-left: 6px;
+}
+
+.fcard-name {
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcard-line {
+  color: var(--dim);
+  font-size: 11px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A lane that ended without a hand-off line. The contract says that is a pass
+   with a warning, so the warning has to be on the card that passed. */
+.fcard-warn {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.fcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--time-dim);
+  font-size: 10px;
+}
+
+/* Needs you, as a badge — never as a border. The border belongs to the cursor,
+   and a card can be selected AND asking at the same time; a mark that borrowed
+   the border would simply vanish in that case. */
+.hmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 50%;
+  color: var(--accent);
+}
+
+/* --- a holding row -------------------------------------------------------- */
+
+/* One line: nothing is running, so there is no elapsed and no token count. What
+   it keeps is its place in the queue. */
+.fq {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--wash-1);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fq-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dimmer);
+  font-size: 11px;
+}
+
+.fq-pos {
+  color: var(--faint);
+  font-size: 10px;
+  flex: none;
+}
+
+/* --- the attention strip -------------------------------------------------- */
+
+/* The one thing on this board that costs you something: tasks that stopped on a
+   question. This is what the accent is reserved for. */
+.fatt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -8px -8px 8px;
+  padding: 5px 11px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+:root[data-theme='light'] .fatt {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.fatt-tag {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  flex: none;
+}
+
+.fatt-item {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fatt-item b {
+  color: var(--text-strong);
+  font-weight: 400;
+}
+
+.fatt-key {
+  color: var(--dim);
+  font-size: 11px;
+  margin-left: auto;
+  flex: none;
+}
+
+/* A board whose config does not parse says why, where the board would be. */
+.col-err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 11px;
+}

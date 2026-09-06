@@ -14,6 +14,7 @@ import {
   IconGitBranch,
   IconGitCompare,
   IconGitMerge,
+  IconLayoutColumns,
   IconMessage,
   IconMessage2,
   IconNotes,
@@ -51,6 +52,7 @@ import {
 import { QueryPanel } from './QueryPanel'
 import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
+import { ColonyBoard } from './ColonyBoard'
 import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
@@ -238,6 +240,25 @@ export const KINDS = {
   },
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
+  // The agent board — one column per agent profile, one card per task, one
+  // worktree per card. It sits LEFT of the session slot so the card's chat opens
+  // to its right (D1); below ~900px the columns squeeze past reading, and the
+  // lane scrolls rather than shrinking them further.
+  colony: {
+    icon: IconLayoutColumns,
+    title: 'colony',
+    width: 1100,
+    grow: true,
+    min: 900,
+    order: 20,
+    needsProject: true,
+    // Deliberately NOT a "new task" button (D8): tasks are created by asking the
+    // nanny, who already knows the base branch, which stage is full and what is
+    // queued ahead of it — `n` and ESC are how you reach her. The one thing a
+    // header button is right for here is the board's own definition, because the
+    // board IS its config file.
+    action: { icon: IconSettings, title: 'Edit the stages…', command: 'colony.stages' }
+  },
   changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
   // The guided merge's checklist. Beside `changes`, and deliberately narrow for
   // the same reason: the review checkpoint sends you to the diff, and both have
@@ -471,7 +492,7 @@ const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdl
  */
 export const RAIL_GROUPS: PanelKind[][] = [
   // Where the work lives.
-  ['projects', 'worktrees'],
+  ['projects', 'worktrees', 'colony'],
   // What the work did to the tree — read it, review it, land it.
   ['changes', 'merge', 'files', 'plans', 'draw'],
   // What the agents are made of: the skills they can run and the servers they
@@ -512,6 +533,14 @@ export type OpenFn = (child: {
   firstChoice?: ModelChoice
   /** What was dropped or pasted into that first message. */
   firstAttached?: Attached
+  /**
+   * Put the panel in the lane WITHOUT taking focus off the panel that opened it.
+   *
+   * For a panel that follows a cursor rather than answering a keypress: the
+   * colony's board swaps the card's chat into the session slot as you move, and
+   * stealing focus there would drop you out of the board on every `j`.
+   */
+  keepFocus?: boolean
 }) => void
 
 const HOME = '~'
@@ -703,6 +732,8 @@ export function PanelBody({
         onOpen={onOpen}
       />
     )
+  if (kind === 'colony')
+    return <ColonyBoard project={projects.current?.path} onOpen={onOpen} onCommand={onCommand} />
   // The query's key IS its identity (`sess~codex`), and it arrives as the
   // panel's `session` for exactly the reason a chat's does: it is what
   // `useTranscript` streams.

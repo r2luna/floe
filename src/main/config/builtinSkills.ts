@@ -11,6 +11,8 @@
 // corrected skill; a user who wants their own version writes a global or project
 // skill of the same name, which wins the lookup (config/skills.ts).
 
+import { COLONY_SKILLS } from './colonySkills'
+
 export interface BuiltinSkill {
   name: string
   /** The markdown, frontmatter included — exactly what lands on disk. */
@@ -84,4 +86,9 @@ user asked for one worktree). Then report what was added, one line each, with
 the flags you set and why any of them was left off auto-start.
 `
 
-export const BUILTIN_SKILLS: BuiltinSkill[] = [{ name: 'setup-commands', text: SETUP_COMMANDS }]
+export const BUILTIN_SKILLS: BuiltinSkill[] = [
+  { name: 'setup-commands', text: SETUP_COMMANDS },
+  // The colony's six lanes and its nanny. In their own file because each one is
+  // a page of instructions and seven of them here would bury this one.
+  ...COLONY_SKILLS
+]

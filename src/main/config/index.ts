@@ -15,6 +15,7 @@ import { ensureFloeConfig, floeConfigPath, floeConfigResult, invalidateFloeConfi
 import { invalidateProjects, projectScan } from './projectStore'
 import { invalidateEditorCache } from '../editors'
 import { readCommands } from './commandStore'
+import { colonyConfig, globalColony } from './colony'
 import { ensureKeybindings } from '../keybindings'
 import { ensureBuiltinSkills, ensureSkills } from './skills'
 import { ensureSystemPrompt, systemPromptPath } from '../appSettings'
@@ -39,7 +40,15 @@ export function initConfig(): void {
  */
 export function configErrors(): ConfigError[] {
   const errors: ConfigError[] = [...floeConfigResult().errors, ...projectScan().errors]
-  for (const project of projectScan().projects) errors.push(...readCommands(project.path).errors)
+  // `[colony]` lives in floe.toml but is not read by parseFloeConfig, so its own
+  // errors come from here — once, not once per project.
+  errors.push(...globalColony().errors)
+  for (const project of projectScan().projects) {
+    errors.push(...readCommands(project.path).errors)
+    // And the project's own board. A stage naming a skill nobody has starts
+    // nothing, so a colony that does not run has to be able to say why here.
+    errors.push(...colonyConfig(project.path).errors.filter((e) => e.file !== floeConfigPath()))
+  }
   return errors
 }
 
