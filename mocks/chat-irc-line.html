@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Floe — chat as one line per message</title>
+<style>
+@font-face { font-family:"CommitMonoPinguim"; font-weight:400; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2"); }
+@font-face { font-family:"CommitMonoPinguim"; font-weight:700; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2"); }
+
+:root{
+  --mono:"CommitMonoPinguim",ui-monospace,Menlo,monospace;
+  --bg:#0d0e11; --panel:#141519; --line:#23252b; --line-soft:#1c1e23;
+  --text:#c9ccd2; --text-strong:#e8eaee; --dim:#6d7280; --faint:#575d6a;
+  --edge:#343a45; --well:#1b1d23; --accent:#d3956d; --working:#6d93c9;
+  --time-dim:#4e5460; --wash-4:#ffffff0a; --radius:4px; --prose-line:1.65;
+  --nick-you:#f494b2; --nick-claude:#ec9e79; --nick-codex:#b9b368; --nick-3:#42c4af;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --panel:#f6f6f4; --line:#dcdcd8; --line-soft:#e7e7e3;
+  --text:#3b3f46; --text-strong:#16181c; --dim:#767b85; --faint:#9aa1ad;
+  --edge:#c8c9c5; --well:#eeeeea; --time-dim:#9aa1ad; --wash-4:#0000000a;
+  --nick-you:#b9416f; --nick-claude:#ab5529; --nick-codex:#717105; --nick-3:#00816c;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--mono); font-size:13px; line-height:1.55;
+}
+.page{padding:28px 32px 80px; max-width:1120px}
+h1{font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px}
+.sub{color:var(--dim); font-size:12px; margin:0 0 24px}
+.variant{margin-bottom:34px}
+.vtitle{
+  display:flex; align-items:baseline; gap:10px; margin:0 0 10px;
+  font-size:12px; font-weight:700; color:var(--text-strong);
+}
+.vtitle span{font-weight:400; color:var(--dim)}
+.panel{
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+  padding:14px 16px; width:820px;
+}
+.toggle{
+  position:fixed; top:18px; right:22px; background:transparent; color:var(--text);
+  border:1px solid var(--edge); border-radius:var(--radius);
+  font:inherit; font-size:11px; padding:4px 10px; cursor:pointer;
+}
+
+/* shared atoms ---------------------------------------------------------- */
+.t{color:var(--time-dim); font-size:11px}
+.n{font-weight:700}
+.you{color:var(--nick-you)} .cl{color:var(--nick-claude)} .cx{color:var(--nick-codex)}
+.sub-agent{color:var(--nick-3)}
+.peer{
+  color:var(--faint); font-size:10.5px; border:1px solid var(--line);
+  border-radius:2px; padding:0 4px;
+}
+.cost{color:var(--time-dim); font-size:10.5px; float:right; padding-left:12px}
+code{
+  padding:1px 5px; border-radius:var(--radius); background:var(--wash-4);
+  font:inherit; color:var(--text-strong);
+}
+pre{
+  margin:6px 0; padding:8px 10px; background:var(--well);
+  border:1px solid var(--line-soft); border-radius:var(--radius);
+  color:var(--text-strong); font:inherit; overflow:auto;
+}
+.tool{color:var(--dim)}
+.tool b{color:var(--text); font-weight:400}
+
+/* V1 — flowing line, wraps to the left margin ---------------------------- */
+.v1 .row{padding:2px 0; line-height:var(--prose-line)}
+.v1 .row + .row.newspeaker{margin-top:10px}
+.v1 .t{margin-right:8px}
+.v1 .n{margin-right:8px}
+
+/* V2 — hanging indent: text wraps under the text ------------------------- */
+.v2 .row{
+  display:grid; grid-template-columns:auto auto 1fr; gap:0 8px;
+  padding:2px 0; line-height:var(--prose-line);
+}
+.v2 .row + .row.newspeaker{margin-top:10px}
+.v2 .cont .t, .v2 .cont .n{visibility:hidden}
+
+/* V3 — right-aligned nick column, irssi style ---------------------------- */
+.v3 .row{
+  display:grid; grid-template-columns:42px 92px 1fr; gap:0 10px;
+  padding:2px 0; line-height:var(--prose-line);
+}
+.v3 .row + .row.newspeaker{margin-top:10px}
+.v3 .n{text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.v3 .body{border-left:1px solid var(--line-soft); padding-left:10px; margin-left:-4px}
+.v3 .cont .t, .v3 .cont .n{visibility:hidden}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+
+<h1>chat — one line per message</h1>
+<p class="sub">[time] [nick] text… — three ways to handle the wrap, same transcript in each.</p>
+
+<!-- ================= V1 ================= -->
+<div class="variant v1">
+  <div class="vtitle">V1 — flowing <span>wrap returns to the left margin, like a raw IRC log</span></div>
+  <div class="panel">
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n you">rafael</span>the composer eats the first keystroke after the palette closes, can you look</div>
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n cl">claude</span>Looking. <code>Palette.tsx</code> restores focus on unmount, but the composer's <code>onFocus</code> guard drops the event that arrives in the same tick.</div>
+    <div class="row"><span class="t">14:03</span><span class="n cl">claude</span><span class="tool">ran <b>grep -rn "restoreFocus" src/renderer/src</b> · 4 hits</span></div>
+    <div class="row"><span class="t">14:03</span><span class="n cl">claude</span>Fixed by deferring the restore to a microtask so the keydown lands after focus settles — one line in <code>Palette.tsx:214</code>. Tests and typecheck pass.<span class="cost">1m 12s · ↓18.4k</span></div>
+    <div class="row newspeaker"><span class="t">14:05</span><span class="n cx">codex</span><span class="peer">session</span> second opinion: the microtask is fine, but the same guard exists in <code>Terminal.tsx</code> and will bite the same way when the terminal panel closes.</div>
+    <div class="row newspeaker"><span class="t">14:06</span><span class="n sub-agent">explore</span><span class="peer">agent</span> checked 3 panels — only Terminal shares the guard.</div>
+  </div>
+</div>
+
+<!-- ================= V2 ================= -->
+<div class="variant v2">
+  <div class="vtitle">V2 — hanging indent <span>wrapped text stays under the text column; nick hidden on continuation</span></div>
+  <div class="panel">
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n you">rafael</span><span class="body">the composer eats the first keystroke after the palette closes, can you look — it only happens when the palette was opened with ⌘K and not when it was opened from the row menu</span></div>
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n cl">claude</span><span class="body">Looking. <code>Palette.tsx</code> restores focus on unmount, but the composer's <code>onFocus</code> guard drops the event that arrives in the same tick, so the character is swallowed before React sees it.</span></div>
+    <div class="row cont"><span class="t">14:03</span><span class="n cl">claude</span><span class="body tool">ran <b>grep -rn "restoreFocus" src/renderer/src</b> · 4 hits</span></div>
+    <div class="row cont"><span class="t">14:03</span><span class="n cl">claude</span><span class="body">Fixed by deferring the restore to a microtask:<pre>queueMicrotask(() =&gt; composerRef.current?.focus())</pre><span class="cost">1m 12s · ↓18.4k</span></span></div>
+    <div class="row newspeaker"><span class="t">14:05</span><span class="n cx">codex</span><span class="body"><span class="peer">session</span> second opinion: the microtask is fine, but the same guard exists in <code>Terminal.tsx</code> and will bite the same way when the terminal panel closes.</span></div>
+    <div class="row newspeaker"><span class="t">14:06</span><span class="n sub-agent">explore</span><span class="body"><span class="peer">agent</span> checked 3 panels — only Terminal shares the guard.</span></div>
+  </div>
+</div>
+
+<!-- ================= V3 ================= -->
+<div class="variant v3">
+  <div class="vtitle">V3 — aligned columns <span>fixed time + right-aligned nick, body behind a rule</span></div>
+  <div class="panel">
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n you">rafael</span><span class="body">the composer eats the first keystroke after the palette closes, can you look — it only happens when the palette was opened with ⌘K and not when it was opened from the row menu</span></div>
+    <div class="row newspeaker"><span class="t">14:02</span><span class="n cl">claude</span><span class="body">Looking. <code>Palette.tsx</code> restores focus on unmount, but the composer's <code>onFocus</code> guard drops the event that arrives in the same tick, so the character is swallowed before React sees it.</span></div>
+    <div class="row cont"><span class="t">14:03</span><span class="n cl">claude</span><span class="body tool">ran <b>grep -rn "restoreFocus" src/renderer/src</b> · 4 hits</span></div>
+    <div class="row cont"><span class="t">14:03</span><span class="n cl">claude</span><span class="body">Fixed by deferring the restore to a microtask:<pre>queueMicrotask(() =&gt; composerRef.current?.focus())</pre><span class="cost">1m 12s · ↓18.4k</span></span></div>
+    <div class="row newspeaker"><span class="t">14:05</span><span class="n cx">codex</span><span class="body"><span class="peer">session</span> second opinion: the microtask is fine, but the same guard exists in <code>Terminal.tsx</code> and will bite the same way when the terminal panel closes.</span></div>
+    <div class="row newspeaker"><span class="t">14:06</span><span class="n sub-agent">explore</span><span class="body"><span class="peer">agent</span> checked 3 panels — only Terminal shares the guard.</span></div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

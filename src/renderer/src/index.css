@@ -913,6 +913,28 @@ button {
   font-size: 12px;
 }
 
+/* On a phone the greeting is two lines whatever you do — "Good afternoon," and
+   a name will not fit in 390px at 21px — so it stops pretending to be a row:
+   the mark goes above the words and the whole block centres under it, instead
+   of a mark stranded beside a paragraph that wrapped around it. */
+:root[data-narrow] .greet {
+  flex-direction: column;
+  gap: 10px;
+  font-size: 18px;
+  text-align: center;
+}
+
+:root[data-narrow] .greet-branch {
+  margin-top: -10px;
+}
+
+/* 18vh of it is a third of a phone. The launcher is the whole screen here, and
+   the composer has to stay in reach of a thumb. */
+:root[data-narrow] .launcher {
+  gap: 18px;
+  padding-bottom: 8vh;
+}
+
 /* Painted by its `penguin-tone-*` class — see `[appearance] penguin-color`.
    The accent stays as the fallback for any mark rendered without a tone. */
 .greet-mark {
@@ -1444,6 +1466,16 @@ button {
   .composer[data-model-left] .model-menu {
     right: anchor(right);
     left: auto;
+  }
+
+  /* The launcher's chip names all four — harness, model, effort, mode — and at
+     this width they do not fit: `Opus 5` broke across two lines inside its own
+     chip. Harness and mode stay, because those are what the message is about to
+     be sent AS; the model and the effort are a tap away in the menu behind the
+     chevron, and the answer's own header prints them the moment one arrives. */
+  .composer[data-boxed] .model-name,
+  .composer[data-boxed] .model-effort {
+    display: none;
   }
 }
 
@@ -2188,15 +2220,9 @@ button {
   overflow-anchor: none;
 }
 
-/* A run of entries from one speaker is separated from the next run, not from
-   its own continuation lines — that spacing is what marks the grouping. */
-.irc-entry:not([data-cont]) {
-  margin-top: 12px;
-}
-
-.chat > .irc-entry:first-child {
-  margin-top: 0;
-}
+/* Nothing between messages: the log is one column of lines, and a gap that
+   groups a run would be air the transcript reads slower for. What separates
+   two speakers is the time and the nick at the head of the line. */
 
 .irc-head {
   display: flex;
@@ -2204,15 +2230,31 @@ button {
   gap: 8px;
 }
 
-/* A run that OPENS with work is headed on its own, outside any entry (see the
-   Log), so it has to take the run spacing the entries get from the rule above —
-   or the agent's header would sit tight against the message it is answering. */
-.chat > .irc-head {
-  margin-top: 12px;
+/* `14:02 rafael ` at the head of the message's own first line. Floated rather
+   than inline so the words that wrap under it return to the left margin — the
+   shape of every chat log — and so a message that opens with a code block or a
+   table drops that block below the line instead of squeezing it. */
+.irc-lead {
+  float: left;
+  /* The gap the words start after. On the float, not the nick, so it survives
+     whatever the nick is followed by. */
+  margin-right: 8px;
 }
 
-.chat > .irc-head:first-child {
-  margin-top: 0;
+/* The gaps the flex header gets from `gap`, which a float cannot use. */
+.irc-lead .irc-time {
+  margin-right: 8px;
+}
+
+.irc-lead .irc-peer {
+  margin-left: 8px;
+}
+
+/* Only words share the head's line. Anything with a box of its own — a code
+   slab, a table, a list — clears it and starts below, because beside a float
+   it would either be squeezed into the leftover width or lose its marker. */
+.irc-body .md > :not(p) {
+  clear: left;
 }
 
 .irc-nick {
@@ -2224,9 +2266,10 @@ button {
   font-size: 11px;
 }
 
-/* What the turn cost, at the right end of the header: `4m 46s · ↓89.6k tokens`.
-   In the timestamp's grey — it is the same class of information as the clock
-   beside it, and it must never compete with the answer itself. */
+/* What the turn cost, at the right end of the line the run opens on:
+   `4m 46s · ↓89.6k tokens`. In the timestamp's grey — it is the same class of
+   information as the clock beside it, and it must never compete with the
+   answer itself. */
 .irc-cost {
   display: flex;
   gap: 8px;
@@ -2234,6 +2277,13 @@ button {
   padding-left: 12px;
   color: var(--time-dim);
   font-size: 10.5px;
+}
+
+/* In a message it rides the opening line from the right, so it floats — the
+   header's `margin-left: auto` only works on the flex row. */
+.irc-body > .irc-cost {
+  float: right;
+  margin-left: 0;
 }
 
 .irc-cost-sep {
@@ -2250,10 +2300,21 @@ button {
      Rendered markdown turns this off again below, because there the block
      elements carry the structure and raw whitespace would double the gaps. */
   white-space: pre-wrap;
+  /* Holds the head's floats. Without it a message still streaming — a line of
+     head with no words yet — would let them hang into the message below. */
+  display: flow-root;
 }
 
 .irc-body b {
   color: var(--text-strong);
+}
+
+/* In a message, paragraphs stack with no gap at all. With nothing between two
+   messages, 13px between two paragraphs of ONE message read as the bigger
+   break — the grouping backwards. A rendered `.md` file keeps its own spacing:
+   that is a document, not a line someone said. */
+.irc-body .md p {
+  margin-bottom: 0;
 }
 
 /* Inline code only — `.md-code`, never a bare `code`. The fenced block is a
@@ -5367,7 +5428,9 @@ kbd {
 /* --- fenced code ---------------------------------------------------------- */
 
 .md-block {
-  margin: 0 0 10px;
+  /* The paragraph rhythm, so a slab between two paragraphs sits in the same
+     gap they give each other. */
+  margin: 0 0 13px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   overflow: hidden;
@@ -5431,7 +5494,9 @@ kbd {
 
 .md-pre {
   margin: 0;
-  padding: 9px 10px;
+  /* The code needs room off the frame — at 9px/10px it read as text pressed
+     against the border rather than a slab you can look into. */
+  padding: 12px 14px;
   overflow-x: auto;
   font: inherit;
   line-height: 1.5;
@@ -6797,12 +6862,39 @@ kbd {
    through panels you cannot see is how you lose track of what is open. The
    desktop answers this with the panels themselves — you can see them. Here the
    heads are listed instead, in lane order, so the row IS the lane's map. */
-.lane-tabs {
+/* The bar holds two things that must not move together: the tabs, which scroll
+   sideways with the lane, and the hamburger, which never may. */
+.lane-bar {
   display: flex;
+  align-items: center;
   gap: 6px;
   flex: none;
   padding: 7px 8px;
   border-bottom: 1px solid var(--line-soft);
+}
+
+/* The rail in one glyph. The outline-chip pattern, sized for a thumb. */
+.lane-menu {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 30px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  color: var(--dim);
+}
+
+.lane-menu[aria-expanded='true'] {
+  border-color: var(--line);
+  background: var(--wash-2);
+  color: var(--text-strong);
+}
+
+.lane-tabs {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -6848,50 +6940,101 @@ kbd {
   background: var(--wash-3);
 }
 
-/* --- the rail, along the bottom ------------------------------------------
-   Same icons, same order, same grouping — a strip under the thumb instead of a
-   column against a pointer's edge. It scrolls rather than hiding half of
-   itself behind a "more", which would make those panels a second class. */
+/* --- the rail, as a drawer -----------------------------------------------
+   Narrow, the rail is a hamburger in the bar and a list behind it. The strip of
+   icons this replaces ran along the bottom: it cost a row of height the
+   composer wanted, scrolled sideways so half the panels sat behind a swipe, and
+   named none of them — a phone has the room to write "worktrees", it just has
+   to spend it vertically. Same icons, same order, same grouping. */
 :root[data-narrow] .workspace {
   flex-direction: column;
 }
 
-:root[data-narrow] .rail {
-  flex-direction: row;
-  padding: 0 8px 8px;
-  overflow-x: auto;
-  scrollbar-width: none;
+.rail-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  /* From the left, where the rail was and where the button that opened it is. */
+  justify-content: flex-start;
+  background: #0506084d;
+}
+
+:root[data-theme='light'] .rail-sheet {
+  background: #3d434e1f;
+}
+
+/* Panel chrome, like the palette: same fill, same hairline. Full height and no
+   corners on the edge it is attached to — it is the window's side, not a card
+   floating over it. */
+.rail-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: min(260px, 78vw);
+  padding: 8px;
+  border-right: 1px solid var(--line);
+  background: var(--panel-focused);
+  overflow-y: auto;
+  outline: none;
+}
+
+.rail-drawer-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The hairline between blocks the rail draws, kept: you aim at a group first. */
+.rail-drawer-group + .rail-drawer-group {
+  padding-top: 9px;
   border-top: 1px solid var(--line-soft);
-  padding-top: 8px;
 }
 
-:root[data-narrow] .rail::-webkit-scrollbar {
-  display: none;
-}
-
-:root[data-narrow] .rail-group {
-  flex-direction: row;
-}
-
-/* The hairline turns with the strip: between blocks, not above them. */
-:root[data-narrow] .rail-group + .rail-group {
-  margin: 0 0 0 9px;
-  padding: 0 0 0 9px;
-  border-top: none;
-  border-left: 1px solid var(--line-soft);
-}
-
-/* 44px is what a thumb hits; 32px is sized for a pointer. */
-:root[data-narrow] .rail-btn {
-  flex: none;
-  width: 44px;
+/* 40px is what a thumb hits. Left-aligned with the icon in the rail's own
+   column, so the names start where the eye is already going down. */
+.rail-drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
   height: 40px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--dim);
+  text-align: left;
+  text-transform: capitalize;
 }
 
-/* A tooltip that opens on hover says nothing to a finger, and this one opens
-   to the LEFT of a button that is now at the bottom of the screen. */
-:root[data-narrow] .rail-tip {
-  display: none;
+/* One highlight, driven by the drawer's cursor — the finger moves it and so do
+   j/k, so hover and the keyboard can never light two rows at once. */
+.rail-drawer-item[data-at] {
+  border-color: var(--line);
+  background: var(--wash-2);
+  color: var(--text-strong);
+}
+
+.rail-drawer-item:disabled {
+  opacity: 0.32;
+  cursor: default;
+  text-transform: none;
+}
+
+.rail-drawer-label {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The key that opens the same panel, in the column every list of bindings in
+   the app puts them: the drawer teaches its way out of itself. */
+.rail-drawer-item kbd {
+  flex: none;
+  border-color: var(--line-soft);
+  background: var(--wash-2);
+  color: var(--dim);
+  font-size: 10.5px;
+  text-transform: none;
 }
 
 /* --- the key bar ----------------------------------------------------------
@@ -6904,7 +7047,11 @@ kbd {
   display: flex;
   gap: 5px;
   flex: none;
-  padding: 7px 8px 0;
+  /* Closed on both edges now that nothing follows it: the bar IS the bottom of
+     the app, and with only padding above it the chips read as six boxes loose
+     on the screen instead of one strip. */
+  padding: 7px 8px;
+  border-top: 1px solid var(--line-soft);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -6913,16 +7060,23 @@ kbd {
   display: none;
 }
 
-/* The outline chip again, at a size a thumb hits: 34px tall against the rail's
-   40px, so the two strips read as one block without looking like two rails. */
+/* The outline chip again, at a size a thumb hits.
+
+   `flex: 1 0 auto`, so the app's six keys divide the width evenly and the row
+   reads as one bar of equal keys — a keyboard, which is what it is. It only
+   ever grows: the terminal's set is longer than the screen, and there the keys
+   stay at their own width and the bar scrolls, as before.
+
+   The border is the soft line, not the hard one: six chips at full contrast
+   across the bottom of a phone shout louder than the panel above them. */
 .key {
-  flex: none;
+  flex: 1 0 auto;
   display: grid;
   place-items: center;
   min-width: 34px;
-  height: 34px;
+  height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   color: var(--dim);
   font-size: 12px;

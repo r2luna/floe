@@ -2047,17 +2047,23 @@ export function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolea
 }
 
 /**
- * The line that opens a run: who is speaking, when, and what the run cost.
+ * Who is speaking, when, and what the run cost: `14:02 rafael …`.
  *
- * Its own component because a run does not always open with words. Work — tool
- * calls, subagents — can come first, and it is headed by whoever ran it (see
- * actOwner) rather than inheriting the header above, which is the user's.
+ * The clock comes first because it is the one part every line has in the same
+ * shape — five characters, so the eye reads down a straight column of times and
+ * the nicks start where the message does.
+ *
+ * `inline` is how a message wears it: not a header line above the words but the
+ * first thing ON their line, the way a chat log has always printed. Without it
+ * (a run that OPENS with work, see actOwner) it stays its own row, because
+ * there are no words on that line to sit in front of.
  */
 function Head({
   who,
   at,
   peer,
-  cost
+  cost,
+  inline
 }: {
   who: Who
   at?: number
@@ -2068,12 +2074,15 @@ function Head({
   peer?: 'session' | 'agent'
   /** What the whole run cost, printed on the header that opens it. */
   cost?: TranscriptItem
+  /** Draw it as the opening of the message's own line rather than a row above. */
+  inline?: boolean
 }) {
-  return (
-    <div className="irc-head">
-      {/* One span, not two: the header is a flex row with a gap, so
-          a sibling would put air between the name and its host and
-          stop `claude@opus-5` reading as a single address. */}
+  const said = (
+    <>
+      <span className="irc-time">{clock(at)}</span>
+      {/* One span, not two: the head is spaced by margins, so a sibling would
+          put air between the name and its host and stop `claude@opus-5`
+          reading as a single address. */}
       <span className="irc-nick" style={{ color: nickColor(who.nick) }}>
         {who.nick}
         {who.ident && <span className="irc-host">!{who.ident}</span>}
@@ -2083,8 +2092,24 @@ function Head({
           are agents, and neither is the model you are talking to: one is
           another session, the other one it sent out itself. */}
       {peer && <span className="irc-peer">{peer}</span>}
-      <span className="irc-time">{clock(at)}</span>
-      {cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />}
+    </>
+  )
+  const turn = cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />
+  // Both halves float, so both come before the words they ride beside — a
+  // float placed after the line's text lands on whatever line the text ended
+  // on. The cost stays OUTSIDE the lead: a float nested in a float would be
+  // laid out inside it, at the left end of the line.
+  if (inline)
+    return (
+      <>
+        {turn}
+        <span className="irc-lead">{said}</span>
+      </>
+    )
+  return (
+    <div className="irc-head">
+      {said}
+      {turn}
     </div>
   )
 }
@@ -2106,15 +2131,18 @@ function Entry({
 }) {
   return (
     <div className="irc-entry" data-cont={!isNew || undefined}>
-      {isNew && (
-        <Head
-          who={whoOf(item)}
-          at={item.at}
-          peer={item.from ? (item.role === 'user' ? 'session' : 'agent') : undefined}
-          cost={cost}
-        />
-      )}
       <div className="irc-body">
+        {/* Inside the body, not above it: the time and the nick open the same
+            line the message does, and the words wrap back under them. */}
+        {isNew && (
+          <Head
+            who={whoOf(item)}
+            at={item.at}
+            peer={item.from ? (item.role === 'user' ? 'session' : 'agent') : undefined}
+            cost={cost}
+            inline
+          />
+        )}
         {/* Only the model's side is markdown. Rendering the user's own
             words would reformat what they typed. */}
         {item.role === 'assistant' ? (
@@ -2144,12 +2172,13 @@ function Entry({
  */
 function TurnCost({ ms, tokens }: { ms?: number; tokens?: number }) {
   if (!ms && !tokens) return null
+  // A span, not a div: inline it lives inside the lead, which is itself inline.
   return (
-    <div className="irc-cost">
+    <span className="irc-cost">
       {!!ms && <span>{elapsed(ms)}</span>}
       {!!ms && !!tokens && <span className="irc-cost-sep">·</span>}
       {!!tokens && <span>↓{(tokens / 1000).toFixed(1)}k tokens</span>}
-    </div>
+    </span>
   )
 }
 
@@ -2185,10 +2214,10 @@ export function QuestionBlock({
   return (
     <div className="irc-entry">
       <div className="irc-head">
+        <span className="irc-time">{clock(Date.now())}</span>
         <span className="irc-nick" style={{ color: nickColor(typist) }}>
           {typist}
         </span>
-        <span className="irc-time">{clock(Date.now())}</span>
       </div>
       <div className="irc-body irc-question">
         {q.questions.map((qq, i) => {

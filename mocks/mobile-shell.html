@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-narrow data-touch>
+<head><meta charset="utf-8" /><title>Floe — the phone shell</title>
+<!-- The app's real stylesheet. Nothing here re-declares an app rule: if the bar
+     or the drawer looks wrong in this page it is wrong in the app. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: #0b0d10; color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { display: flex; gap: 28px; padding: 22px; }
+  .lbl { margin: 0 0 8px; color: var(--dim); font-size: 11px; }
+  /* A phone, drawn at its own size. 390×740 is an iPhone 14. */
+  .phone { position: relative; width: 390px; height: 740px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); }
+  .phone .rail-sheet { position: absolute; }
+  .theme { position: fixed; top: 14px; right: 18px; padding: 4px 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+</style></head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+
+<div>
+  <p class="lbl"><b>1 · the bar</b> — hamburger, then the open panels, and no rail along the bottom</p>
+  <div class="phone"><div class="app">
+    <div class="lane-bar">
+      <button class="lane-menu" aria-label="Panels" aria-expanded="false"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <nav class="lane-tabs" aria-label="open panels">
+        <span class="lane-tab"><button class="lane-tab-go">worktrees</button></span>
+        <span class="lane-tab" data-on><button class="lane-tab-go">chat</button><button class="lane-tab-x">✕</button></span>
+        <span class="lane-tab"><button class="lane-tab-go">terminal</button></span>
+      </nav>
+    </div>
+    <div class="workspace">
+      <div class="lane"><div class="lane-col"><section class="panel" data-focused>
+        <div class="panel-head"><span class="panel-title">chat</span></div>
+        <div class="panel-body"><div class="chat"><div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-you)">pinguim</span></span>vamos anotar treinamento de consultores de história da familia hoje.</div></div><div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Nota criada e no ar. Pode mandar as coisas que eu vou preenchendo.</p></div></div></div></div></div>
+      </section></div></div>
+      <div class="keybar">
+        <button class="key" data-wide>⇧⌘P</button><button class="key" data-wide>esc</button><button class="key" data-wide>tab</button><button class="key">↑</button><button class="key">↓</button><button class="key" data-wide>⇧⏎</button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<div>
+  <p class="lbl"><b>2 · the drawer</b> — the rail's own groups, with names and the keys that open them</p>
+  <div class="phone"><div class="app">
+    <div class="lane-bar">
+      <button class="lane-menu" aria-label="Panels" aria-expanded="true"><svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <nav class="lane-tabs" aria-label="open panels">
+        <span class="lane-tab"><button class="lane-tab-go">worktrees</button></span>
+        <span class="lane-tab" data-on><button class="lane-tab-go">chat</button><button class="lane-tab-x">✕</button></span>
+      </nav>
+    </div>
+    <div class="workspace"><div class="lane"><div class="lane-col"><section class="panel"><div class="panel-head"><span class="panel-title">chat</span></div></section></div></div></div>
+    <div class="rail-sheet"><div class="rail-drawer" role="menu">
+      <div class="rail-drawer-group">
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">projects</span><kbd>⌘1</kbd></button>
+        <button class="rail-drawer-item" data-at><span class="ico">◆</span><span class="rail-drawer-label">worktrees</span><kbd>⌘2</kbd></button>
+      </div>
+      <div class="rail-drawer-group">
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">changes</span><kbd>⌘3</kbd></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">merge</span></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">files</span><kbd>⌘4</kbd></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">plans</span></button>
+        <button class="rail-drawer-item" disabled><span class="ico">◆</span><span class="rail-drawer-label">draw needs a project</span></button>
+      </div>
+      <div class="rail-drawer-group">
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">skills</span></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">mcp</span></button>
+      </div>
+      <div class="rail-drawer-group">
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">commands</span></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">terminal</span><kbd>⌘J</kbd></button>
+      </div>
+      <div class="rail-drawer-group">
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">account</span></button>
+        <button class="rail-drawer-item"><span class="ico">◆</span><span class="rail-drawer-label">settings</span><kbd>⌘,</kbd></button>
+      </div>
+    </div></div>
+  </div></div>
+</div>
+
+</div>
+</body></html>

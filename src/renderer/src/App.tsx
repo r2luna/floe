@@ -1,5 +1,6 @@
 import {
   IconGitCompare,
+  IconMenu2,
   IconLayoutColumns,
   IconLayoutRows,
   IconTrash,
@@ -27,7 +28,8 @@ import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdO
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
-import { useNarrow } from './useNarrow'
+import { useNarrow, useTouch } from './useNarrow'
+import { RailMenu } from './RailMenu'
 import { installPluginCommands, runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
 import { Palette } from './Palette'
@@ -596,9 +598,20 @@ export default function App() {
   // one thing CSS cannot do — listing the open panels, which only the lane
   // knows.
   const narrow = useNarrow()
+  // Whether a finger is driving, which is a different question from how wide
+  // the window is: a desktop window dragged narrow still has a keyboard.
+  const touch = useTouch()
+  // The rail's drawer. Narrow only — there the rail is one button, not a strip.
+  const [railMenu, setRailMenu] = useState(false)
+  // Unfolding the phone brings the rail itself back, so the drawer standing for
+  // it is over: left open, it would spring back the next time you folded.
+  useEffect(() => {
+    if (!narrow) setRailMenu(false)
+  }, [narrow])
 
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
+  const menuRef = useRef<HTMLButtonElement>(null)
   // Column elements, for the splitters: a drag writes the new width here
   // directly and only tells the lane about it when the mouse comes up.
   const colRefs = useRef(new Map<string, HTMLElement>())
@@ -2138,36 +2151,76 @@ export default function App() {
   return (
     <div className="app">
       {/* Narrow only: the lane is a screen wide, so everything open but the
-          panel you are on is off-screen. The heads are listed in lane order —
-          the row is the map of a lane you cannot see. Nothing new is reachable
-          from here: tapping a tab is ⌘[ / ⌘] arriving at that panel, and the
-          ✕ is the header's own close. */}
-      {narrow && columns.length > 0 && (
-        <nav className="lane-tabs" ref={tabsRef} aria-label="open panels">
-          {columns.map((column) => {
-            const [{ panel: head, index }] = column
-            const on = column.some((p) => p.index === lane.focus)
-            return (
-              <span key={head.id} className="lane-tab" data-on={on || undefined}>
-                <button
-                  className="lane-tab-go"
-                  onClick={() => setLane((l) => focusAt(l, index))}
-                >
-                  {head.title}
-                </button>
-                {on && index > 0 && (
-                  <button
-                    className="lane-tab-x"
-                    aria-label={`Close ${head.title}`}
-                    onClick={() => setLane((l) => closePanel(l, index, () => panelOf('branch')))}
-                  >
-                    <IconX size={11} stroke={1.8} />
-                  </button>
-                )}
-              </span>
-            )
-          })}
-        </nav>
+          panel you are on is off-screen. What is open is listed in lane order —
+          the row is the map of a lane you cannot see — after the one button
+          that opens everything else. Nothing new is reachable from here:
+          tapping a tab is ⌘[ / ⌘] arriving at that panel, and the ✕ is the
+          header's own close. */}
+      {narrow && (
+        <div className="lane-bar">
+          {/* The rail, folded into one button — see RailMenu. Outside the tab
+              row rather than in it: the tabs scroll, and the way to every panel
+              the app has must not be able to scroll off the screen. */}
+          <button
+            ref={menuRef}
+            className="lane-menu"
+            aria-label="Panels"
+            aria-expanded={railMenu}
+            onClick={() => setRailMenu((up) => !up)}
+          >
+            <IconMenu2 size={17} stroke={1.5} />
+          </button>
+          {columns.length > 0 && (
+            <nav className="lane-tabs" ref={tabsRef} aria-label="open panels">
+              {columns.map((column) => {
+                const [{ panel: head, index }] = column
+                const on = column.some((p) => p.index === lane.focus)
+                return (
+                  <span key={head.id} className="lane-tab" data-on={on || undefined}>
+                    <button
+                      className="lane-tab-go"
+                      onClick={() => setLane((l) => focusAt(l, index))}
+                    >
+                      {head.title}
+                    </button>
+                    {on && index > 0 && (
+                      <button
+                        className="lane-tab-x"
+                        aria-label={`Close ${head.title}`}
+                        onClick={() =>
+                          setLane((l) => closePanel(l, index, () => panelOf('branch')))
+                        }
+                      >
+                        <IconX size={11} stroke={1.8} />
+                      </button>
+                    )}
+                  </span>
+                )
+              })}
+            </nav>
+          )}
+        </div>
+      )}
+      {narrow && railMenu && (
+        <RailMenu
+          groups={RAIL.map((group) =>
+            group.map((kind) => ({
+              kind,
+              label: KINDS[kind].title,
+              icon: KINDS[kind].icon,
+              off: !canOpen(kind),
+              reason: whyCannotOpen(kind),
+              keys: railKeys.get(kind)
+            }))
+          )}
+          onPick={(kind) => openFromRail(kind as PanelKind)}
+          // Never leave focus on something that just closed: it goes back to the
+          // button that opened the drawer, which is where the tab order is.
+          onClose={() => {
+            setRailMenu(false)
+            menuRef.current?.focus()
+          }}
+        />
       )}
       <div className="workspace">
         <div className="lane" ref={laneRef}>
@@ -2605,10 +2658,12 @@ export default function App() {
             )
           })}
         </div>
-        {/* Narrow only, and only because the hardware forces it: no on-screen
-            keyboard has Esc, Tab or Ctrl, which is most of how a shell is
-            driven. Above the rail so the keyboard pushes it up as one strip. */}
-        {narrow && (
+        {/* Only because the hardware forces it — so it asks about the hardware
+            and not the width: no on-screen keyboard has Esc, Tab or Ctrl, which
+            is most of how a shell is driven, but a desktop window dragged
+            narrow has all three and wants none of this. At the bottom, so the
+            on-screen keyboard pushes it up as one strip. */}
+        {narrow && touch && (
           <KeyBar
             termId={termIdOf(
               lane.panels[lane.focus]?.kind ?? '',
@@ -2620,43 +2675,48 @@ export default function App() {
             chordLabels={chordLabels}
           />
         )}
-        <nav className="rail">
-          {RAIL.map((group) => (
-            // Grouped so related panels read as one block — see RAIL in panels.
-            <div className="rail-group" key={group.join()}>
-              {group.map((kind) => {
-                const Icon = KINDS[kind].icon
-                const off = !canOpen(kind)
-                return (
-                  <button
-                    key={kind}
-                    className="rail-btn"
-                    // Dimmed and inert rather than hidden: the rail's shape is how
-                    // you learn what the app has, and a row that reshuffles as you
-                    // move around is harder to aim at than one that greys out.
-                    data-off={off || undefined}
-                    disabled={off}
-                    aria-label={off ? whyCannotOpen(kind) : KINDS[kind].title}
-                    onClick={() => openFromRail(kind)}
-                  >
-                    <Icon size={17} stroke={1.5} />
-                    {/* The app's own tooltip rather than the OS `title`, for two
-                        reasons: it can carry the key that opens the panel — which
-                        is the thing a keyboard-first app most wants to teach, and
-                        the one moment the user is already asking "what is this" —
-                        and it opens inward, so it is not clipped by the window edge
-                        the native one sat against. aria-hidden: the button's own
-                        label already says all of this to a screen reader. */}
-                    <span className="rail-tip" aria-hidden="true">
-                      {off ? whyCannotOpen(kind) : KINDS[kind].title}
-                      {!off && railKeys.has(kind) && <kbd>{railKeys.get(kind)}</kbd>}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </nav>
+        {/* The rail is the wide layout's. Narrow, the same panels live in the
+            drawer behind the hamburger: a strip of icons along the bottom cost
+            a thumb's worth of height and named none of them. */}
+        {!narrow && (
+          <nav className="rail">
+            {RAIL.map((group) => (
+              // Grouped so related panels read as one block — see RAIL in panels.
+              <div className="rail-group" key={group.join()}>
+                {group.map((kind) => {
+                  const Icon = KINDS[kind].icon
+                  const off = !canOpen(kind)
+                  return (
+                    <button
+                      key={kind}
+                      className="rail-btn"
+                      // Dimmed and inert rather than hidden: the rail's shape is how
+                      // you learn what the app has, and a row that reshuffles as you
+                      // move around is harder to aim at than one that greys out.
+                      data-off={off || undefined}
+                      disabled={off}
+                      aria-label={off ? whyCannotOpen(kind) : KINDS[kind].title}
+                      onClick={() => openFromRail(kind)}
+                    >
+                      <Icon size={17} stroke={1.5} />
+                      {/* The app's own tooltip rather than the OS `title`, for two
+                          reasons: it can carry the key that opens the panel — which
+                          is the thing a keyboard-first app most wants to teach, and
+                          the one moment the user is already asking "what is this" —
+                          and it opens inward, so it is not clipped by the window edge
+                          the native one sat against. aria-hidden: the button's own
+                          label already says all of this to a screen reader. */}
+                      <span className="rail-tip" aria-hidden="true">
+                        {off ? whyCannotOpen(kind) : KINDS[kind].title}
+                        {!off && railKeys.has(kind) && <kbd>{railKeys.get(kind)}</kbd>}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+          </nav>
+        )}
       </div>
 
       {adding && (

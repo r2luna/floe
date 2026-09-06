@@ -28,21 +28,42 @@ export const isNarrow = (width: number): boolean => width < WIDE_AT
  * of them moved.
  */
 export function useNarrow(): boolean {
-  const query = `(max-width: ${WIDE_AT - 1}px)`
-  const [narrow, setNarrow] = useState(() => window.matchMedia(query).matches)
+  return useFlag(`(max-width: ${WIDE_AT - 1}px)`, 'narrow')
+}
+
+/**
+ * Whether the pointer is a finger.
+ *
+ * Narrow is about the WINDOW; this is about the hardware, and they are not the
+ * same question. A desktop window dragged down to 700px is narrow and still has
+ * a keyboard — it must not get the key bar, which exists only because an
+ * on-screen keyboard has no Esc, Tab or Ctrl. `pointer: coarse` is the phone and
+ * the tablet, and nothing that came with keys.
+ */
+export function useTouch(): boolean {
+  return useFlag('(pointer: coarse)', 'touch')
+}
+
+/**
+ * One media query, watched and mirrored onto <html> as `data-<flag>` — the same
+ * way the theme is, so CSS reads the answer without owning a second copy of the
+ * rule that produced it.
+ */
+function useFlag(query: string, flag: string): boolean {
+  const [on, setOn] = useState(() => window.matchMedia(query).matches)
 
   useEffect(() => {
     const mq = window.matchMedia(query)
-    const read = () => setNarrow(mq.matches)
+    const read = () => setOn(mq.matches)
     read()
     mq.addEventListener('change', read)
     return () => mq.removeEventListener('change', read)
   }, [query])
 
   useEffect(() => {
-    if (narrow) document.documentElement.dataset.narrow = ''
-    else delete document.documentElement.dataset.narrow
-  }, [narrow])
+    if (on) document.documentElement.dataset[flag] = ''
+    else delete document.documentElement.dataset[flag]
+  }, [on, flag])
 
-  return narrow
+  return on
 }
