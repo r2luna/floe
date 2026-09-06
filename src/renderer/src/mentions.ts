@@ -21,7 +21,7 @@ import { NEEDS_MODEL } from '../../shared/modes.ts'
 // `@codex …` the same way the composer does. See shared/mentions.ts.
 import { routeAt } from '../../shared/mentions.ts'
 
-export { routeAt, type Route } from '../../shared/mentions.ts'
+export { routeAt, routeAll, type Route } from '../../shared/mentions.ts'
 
 export interface Handle {
   nick: string

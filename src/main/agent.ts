@@ -6,7 +6,12 @@ import type { BrowserWindow } from 'electron'
 import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
-import { getCreatedSession, getCreatedSessionClaudeId, linkCreatedSession } from './sessionStore'
+import { getCreatedSession } from './sessionStore'
+// Who this key IS — session or query. Every alias lookup in this file goes
+// through it, so a conversation the session table does not hold still resolves
+// instead of silently answering `undefined`. See identity.ts.
+import { agentIdentityNames, agentResumeId, linkAgentIdentity } from './identity'
+import { isQueryKey } from '../shared/queries'
 import { isAsyncLaunchAck, isTaskNotification, parsePeerMessage, parseTaskNotifications, resultText } from './claudeSessions'
 // Circular with handoff (it imports sendAgentEvent) — safe: both sides only
 // call the other's functions at runtime, never at module top level.
@@ -17,7 +22,7 @@ import { cancelRelay } from './relay'
 import { getSystemPrompt } from './appSettings'
 // Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
 // sides only call the other's functions at runtime, never at module top level.
-import { mcpConfigFor } from './mcpServer'
+import { emptyMcpConfigFor, mcpConfigFor } from './mcpServer'
 import { log } from './log'
 
 export interface Conn {
@@ -225,9 +230,7 @@ export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?:
  * of them; see resolveConn, which does the same for the live conn.
  */
 export function sessionNames(key: string): string[] {
-  const names = new Set([key])
-  const stored = getCreatedSession(key)
-  for (const n of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) if (n) names.add(n)
+  const names = new Set(agentIdentityNames(key))
   // A conn the store has not linked yet still knows the id the CLI gave it.
   const conn = conns.get(key)
   if (conn?.sessionId) names.add(conn.sessionId)
@@ -235,20 +238,43 @@ export function sessionNames(key: string): string[] {
   return [...names]
 }
 
+/**
+ * Is the turn this replay claims REALLY still in flight?
+ *
+ * Where a conn is filed under that name it is the authority — a replay left
+ * `running` by a `done` that never arrived would otherwise put the typing line
+ * back on screen every time the chat is opened. Where there is no conn (codex
+ * and the other one-shot runtimes keep none) the replay is the only mark there
+ * is, so it has to be believed.
+ *
+ * Pure, and exported for its unit test: the whole bug is one branch of it, and
+ * the `conns` map it reads has no seam a test can reach. Same reason
+ * `watchdogAction` is shaped this way.
+ */
+export function replayInFlight(
+  replay: { running?: boolean } | undefined,
+  conn: { turnActive: boolean } | undefined
+): boolean {
+  if (!replay?.running) return false
+  return !conn || conn.turnActive
+}
+
 export function replaySnapshot(key: string): AgentReplay {
   const names = sessionNames(key)
-  let snapshot = replays.get(key)
-  if (!snapshot?.running) {
+  // The same liveness test for the panel's OWN key as for its aliases. Asking
+  // under the key directly used to skip it, so a strand — a conn killed without
+  // a `done`, a turn marked under a name whose child then went — answered every
+  // reopen with `running: true` and a `startedAt` from that dead turn. The
+  // typing line never stopped, and the panel cut its on-disk transcript at that
+  // timestamp expecting this snapshot to replay the rest, which it could not:
+  // everything said since the strand simply vanished from the chat.
+  const inFlight = (name: string): boolean => replayInFlight(replays.get(name), conns.get(name))
+  let snapshot = inFlight(key) ? replays.get(key) : undefined
+  if (!snapshot) {
     for (const name of names) {
-      const other = name === key ? undefined : replays.get(name)
-      // Only a turn that is REALLY still in flight. Where a conn is filed under
-      // that name it is the authority — a replay left `running` by a `done`
-      // that never arrived would otherwise put the typing line back on screen
-      // every time the chat is opened, which is the bug this fixes. Where there
-      // is no conn (codex and the other one-shot runtimes keep none) the replay
-      // is the only mark there is.
-      if (other?.running && (!conns.has(name) || hasActiveTurn(name))) {
-        snapshot = other
+      if (name === key) continue
+      if (inFlight(name)) {
+        snapshot = replays.get(name)
         break
       }
     }
@@ -381,7 +407,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   // conn's id covers the in-app case; the persisted claudeId covers a respawn
   // after the machine slept or the app restarted — without it, an idle session
   // would silently start fresh and lose its whole history.
-  const resumeId = conns.get(key)?.sessionId ?? getCreatedSessionClaudeId(key)
+  const resumeId = conns.get(key)?.sessionId ?? agentResumeId(key)
 
   const args = [
     '-p',
@@ -414,8 +440,25 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   // caller. Auto-permit the floe tools — the wildcard covers all mcp__floe__*
   // without raising a permission prompt. These two argv entries are also what
   // the managed hooks' ps-ancestry walk detects (hooks.ts DETECT_FLOE).
-  args.push('--mcp-config', mcpConfigFor(key, worktreePath))
-  args.push('--allowedTools', 'mcp__floe')
+  //
+  // A query is the exception, and it takes both halves to be real (D8). Its key
+  // is not a session id, so the token it would carry resolves to nothing; and
+  // merely leaving the token out would let the CLI inherit the Floe server
+  // registered globally and come back as `/mcp/global` — the same tools under
+  // the wrong identity. So: an empty config, `--strict-mcp-config` to ignore
+  // the global and project ones, and no `--allowedTools`.
+  //
+  // Consequence, deliberately taken: the managed hooks stop firing inside a
+  // query, because DETECT_FLOE recognises a Floe process by exactly these two
+  // argv entries. `plan` is the barrier that replaces them — which is why a
+  // harness without `plan` cannot hold a query at all (queries.ts).
+  if (isQueryKey(key)) {
+    args.push('--mcp-config', emptyMcpConfigFor(key))
+    args.push('--strict-mcp-config')
+  } else {
+    args.push('--mcp-config', mcpConfigFor(key, worktreePath))
+    args.push('--allowedTools', 'mcp__floe')
+  }
 
   const child = spawn('claude', args, { cwd: worktreePath, env: process.env })
   const conn: Conn = {
@@ -554,7 +597,7 @@ function buildContent(prompt: string, images: ImageAttachment[], files: FileAtta
  * that would abort the turn the user is watching.
  */
 function reapSiblings(key: string): void {
-  const claudeId = getCreatedSessionClaudeId(key)
+  const claudeId = agentResumeId(key)
   for (const [k, c] of conns) {
     if (k === key) continue
     const same = c.sessionId === key || (!!claudeId && (k === claudeId || c.sessionId === claudeId))
@@ -576,12 +619,25 @@ export function sendToAgent(
   files: FileAttachment[] = []
 ): void {
   const optionsKey = optionsKeyFor(options)
-  let conn = conns.get(key)
+  // Under every name this session answers to, not just the one the panel holds.
+  // The renderer switches its key from the Floe id to the claudeId the moment
+  // the CLI reports it, mid-turn — so `conns.get(key)` alone missed the child
+  // that was still working and spawned a SECOND claude for the same session.
+  // The first one was then stranded: nothing writes to it, nothing reaps it
+  // (reapSiblings spares an active turn), so its `turnActive` and its replay
+  // stay true forever. That strand is the eternal "claude is typing", and —
+  // because replaySnapshot then hands the panel that dead turn's `startedAt` —
+  // it is also why reopening the chat dropped every message written since it.
+  // Same aliasing answerQuestion/respondPermission already resolve through.
+  const found = resolveConn(key)
+  let connKey = found?.[0] ?? key
+  let conn = found?.[1]
   // The process may have died while we were idle (machine slept, claude reaped)
   // before `close` fired. Writing to its stdin would break; drop it so we respawn
   // and --resume from the persisted session id instead.
   if (conn && isChildDead(conn.child)) {
-    conns.delete(key)
+    conns.delete(connKey)
+    connKey = key
     conn = undefined
   }
   // A send while a turn is in flight is a steer: the message goes into the live
@@ -591,14 +647,14 @@ export function sendToAgent(
   // which would abort the very turn being steered.
   if (conn && conn.turnActive) {
     conn.lastActivityAt = Date.now()
-    log('turn-steer', { key, promptLen: prompt.length, images: images.length, files: files.length })
+    log('turn-steer', { key, connKey, promptLen: prompt.length, images: images.length, files: files.length })
     pushTranscript(conn, `user: ${prompt}`)
     // Into the replay, not onto the wire: the panel that typed it is already
     // showing it, and every other viewer of this session gets it when the CLI
     // absorbs it into the JSONL. That write only happens at the end of the tool
     // call in flight, so until then the replay is the only place a panel
     // mounting mid-turn can read what was said.
-    const replay = replays.get(key)
+    const replay = replays.get(connKey)
     if (replay?.running) replay.events.push({ kind: 'steer', text: options.shown ?? prompt, at: Date.now() })
     write(conn, { type: 'user', message: { role: 'user', content: buildContent(prompt, images, files) } })
     return
@@ -606,7 +662,12 @@ export function sendToAgent(
   if (conn && conn.optionsKey !== optionsKey) {
     clearDeltas(conn) // a late flush from the dead conn must not leak into the new one
     conn.child.kill('SIGTERM')
-    conns.delete(key)
+    conns.delete(connKey)
+    // Whatever name that child ran under, it is gone: the replacement is filed
+    // under the name the panel holds NOW, and the old replay must not outlive
+    // its process claiming a turn is still in flight.
+    replays.delete(connKey)
+    connKey = key
     conn = undefined
   }
   const freshSpawn = !conn
@@ -621,7 +682,11 @@ export function sendToAgent(
   // only this turn's reply, and record the prompt in the live transcript buffer.
   conn.lastAssistantText = ''
   lastErrors.delete(key) // a new turn supersedes the previous failure
-  markTurnStart(key, { provider: 'claude', effort: options.effort, mode: options.permissionMode }, win)
+  // Marked under the name the CONN answers to, which is the name its events —
+  // and its `done` — will arrive under (spawnConn captured it). Marked under
+  // the panel's name instead, a turn steered into an aliased conn would open a
+  // replay nothing ever closes. replaySnapshot resolves the alias for readers.
+  markTurnStart(connKey, { provider: 'claude', effort: options.effort, mode: options.permissionMode }, win)
   conn.turnActive = true
   conn.turnClosed = false
   conn.turnStartedAt = Date.now()
@@ -632,7 +697,7 @@ export function sendToAgent(
   conn.turnStartedOnFreshConn = freshSpawn
   conn.heldForSubagentsAt = null
   conn.stuckLogged = false
-  log('turn-start', { key, promptLen: prompt.length, images: images.length, files: files.length })
+  log('turn-start', { key, connKey, promptLen: prompt.length, images: images.length, files: files.length })
   pushTranscript(conn, `user: ${prompt}`)
   // Everything this session said to another harness since Claude's last turn.
   // Usually '' — a session that has only ever been Claude's is resumed from its
@@ -659,10 +724,9 @@ export function sendToAgent(
 function resolveConn(key: string): [string, Conn] | undefined {
   const direct = conns.get(key)
   if (direct) return [key, direct]
-  const stored = getCreatedSession(key)
-  for (const k of [stored?.id, stored?.claudeId, ...(stored?.pastClaudeIds ?? [])]) {
-    const conn = k ? conns.get(k) : undefined
-    if (k && conn) return [k, conn]
+  for (const k of agentIdentityNames(key)) {
+    const conn = conns.get(k)
+    if (conn) return [k, conn]
   }
   // Last resort: the CLI's own id for a conn the store has not linked yet.
   for (const [k, c] of conns) if (c.sessionId === key) return [k, c]
@@ -703,13 +767,9 @@ export function dropSettled(key: string, requestId: string): void {
   }
 }
 
-/** Every other name this session is known by: its Floe id and its claude ids. */
+/** Every other name this conversation is known by — session or query. */
 function aliasKeys(key: string): string[] {
-  const stored = getCreatedSession(key)
-  if (!stored) return []
-  return [stored.id, stored.claudeId, ...(stored.pastClaudeIds ?? [])].filter(
-    (k): k is string => !!k
-  )
+  return agentIdentityNames(key)
 }
 
 /**
@@ -1080,7 +1140,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
     // one on every respawn — so the link has to be re-made each time, or the
     // session reopens showing only the turns up to the last fork. Done here,
     // not in the renderer: the transcript must survive with no panel mounted.
-    linkCreatedSession(key, msg.session_id)
+    linkAgentIdentity(key, msg.session_id)
   }
 
   const type = msg.type

@@ -63,6 +63,7 @@ const {
   markTurnStart,
   sendAgentEvent,
   replaySnapshot,
+  replayInFlight,
   activeTurnKeys,
   dropSettled
 } = await import('./agent.ts')
@@ -691,6 +692,25 @@ test('replaySnapshot: a finished turn does not come back as running', () => {
   assert.equal(replaySnapshot('floe-ended').running, false)
 })
 
+test('replayInFlight: a stranded conn does not keep a turn alive', () => {
+  // The reported bug, as one decision. A session whose panel key flipped
+  // mid-turn (Floe id → claudeId) used to get a SECOND claude spawned under the
+  // new name, stranding the first conn: nothing writes to it, so no `done` ever
+  // clears its replay. Asked under the stranded name, the snapshot answered
+  // "running, started 40 minutes ago" forever — an eternal typing line, and a
+  // panel that then cut its on-disk transcript at that timestamp and dropped
+  // every message written since. The conn is the authority: its turn is over.
+  assert.equal(replayInFlight({ running: true }, fakeConn({ turnActive: false })), false)
+  // A turn genuinely in flight still is one.
+  assert.equal(replayInFlight({ running: true }, fakeConn({ turnActive: true })), true)
+  // codex and the local agents keep no conn — `markTurnStart` is the only mark
+  // they leave, so there is nothing to contradict it.
+  assert.equal(replayInFlight({ running: true }, undefined), true)
+  // And `done` still ends it, conn or no conn.
+  assert.equal(replayInFlight({ running: false }, undefined), false)
+  assert.equal(replayInFlight(undefined, fakeConn({ turnActive: true })), false)
+})
+
 test('activeTurnKeys: a runtime with no conn still reports its turn', () => {
   // codex and the local agents keep no conn — `markTurnStart` is the only mark
   // they leave. Built from `conns` alone this list called their turns idle, and
@@ -701,6 +721,22 @@ test('activeTurnKeys: a runtime with no conn still reports its turn', () => {
   assert.ok(activeTurnKeys().includes('codex-sess'))
   sendAgentEvent(win, 'codex-sess', { kind: 'done', ok: true })
   assert.ok(!activeTurnKeys().includes('codex-sess'))
+})
+
+test('activeTurnKeys stays raw — a query key is in it, on purpose', () => {
+  // The set is the authority both reconcilers correct themselves against, and a
+  // QueryPanel's `useTranscript` is one of them: it treats "not in this list,
+  // and quiet" as proof the turn ended. Hide the qkey here and every query
+  // would conclude on its own that it had finished, drop the typing line, and
+  // drain its queue over a turn that was still running.
+  //
+  // The projection is filtered instead, in exactly one place — see
+  // useSessionActivity in renderer/src/useRunning.ts.
+  const { win } = fakeWin()
+  markTurnStart('qsess~codex')
+  assert.ok(activeTurnKeys().includes('qsess~codex'))
+  sendAgentEvent(win, 'qsess~codex', { kind: 'done', ok: true })
+  assert.ok(!activeTurnKeys().includes('qsess~codex'))
 })
 
 test('a replay says who is answering, not just what model', () => {

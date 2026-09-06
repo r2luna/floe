@@ -18,6 +18,11 @@ export const currentBackend = (): string => window.floe.backends.current()
 export const backendOf = (p: Project | null | undefined): string => p?.backend ?? LOCAL
 export const backendLabel = (id: string): string =>
   window.floe.backends.list().find((b) => b.id === id)?.label ?? id
+export const isRemote = (id: string): boolean =>
+  window.floe.backends.list().find((b) => b.id === id)?.remote ?? false
+/** The socket to a machine: 'open' is the only state its projects can be read in. */
+export const backendState = (id: string): 'connecting' | 'open' | 'closed' =>
+  window.floe.backends.state(id)
 
 /**
  * Point the window at a machine and rebuild the app on it.
@@ -74,26 +79,6 @@ export const dropLanding = (): void => {
 // --- the union ---------------------------------------------------------------
 
 /**
- * Run `fn` against every backend, dropping the ones that fail: a machine that
- * is down (tunnel dead, daemon restarting) must never empty the panel of the
- * machines that are up.
- */
-async function fanOut<T>(
-  fn: (id: string) => Promise<T>
-): Promise<{ id: string; value: Awaited<T> }[]> {
-  const settled = await Promise.all(
-    backendIds().map(async (id) => {
-      try {
-        return { id, value: await fn(id) }
-      } catch {
-        return null
-      }
-    })
-  )
-  return settled.filter((r): r is { id: string; value: Awaited<T> } => r !== null)
-}
-
-/**
  * Group names are shared across machines on purpose — a "Projects" group holding
  * local and remote repos is the point — and they are matched case-insensitively:
  * the panel renders them uppercase, so `elevaris` here and `Elevaris` there read
@@ -110,22 +95,80 @@ export function canonGroup(name: string): string {
   return name
 }
 
-/** Every backend's projects and groups, tagged with the machine they came from. */
-export async function loadProjectUnion(): Promise<{ projects: Project[]; groups: string[] }> {
-  const per = await fanOut(async (id) => {
-    const [groups, list] = await Promise.all([
-      window.floe.backends.invokeOn(id, 'projects:groups') as Promise<string[]>,
-      window.floe.backends.invokeOn(id, 'projects:list') as Promise<Project[]>
-    ])
-    return { groups, projects: list.map((p) => ({ ...p, backend: id })) }
-  })
+/** One machine's answer, as it lands. */
+export interface ProjectSlice {
+  /** The load this slice belongs to — a stale one is ignored. */
+  gen: number
+  backend: string
+  projects: Project[]
+  groups: string[]
+  /** The machine did not answer. Its rows are not in this slice — see the load. */
+  error?: string
+}
+
+/**
+ * How long one machine gets to answer before the panel calls it offline.
+ *
+ * Not the socket's own timeout, which is the OS's and runs for minutes: with no
+ * network the read simply never comes back, and a spinner that turns for two
+ * minutes says nothing you can act on. Eight seconds is long enough for a
+ * healthy link over a slow connection and short enough to hand you the retry
+ * while you still care. A late answer is not thrown away — see the load.
+ */
+const SLICE_MS = 8000
+
+/**
+ * Every backend's projects, handed over one machine at a time.
+ *
+ * Deliberately not a single awaited union: a machine that is unreachable takes
+ * as long as the OS takes to give up on its socket, and waiting for it held the
+ * whole panel on "Loading…" — with the network down, the local projects were
+ * ready in milliseconds and unreadable for a minute. So each slice is reported
+ * the moment it lands and the caller paints what it has: local first, remotes
+ * behind it, and a machine that is down reported as an error rather than as
+ * silence.
+ *
+ * `gen` is handed back with every slice because a slow machine can answer after
+ * the next load has already started — the caller uses it to tell a late answer
+ * from a current one.
+ *
+ * Group spelling is settled by arrival order rather than backend order now.
+ * Local answers in milliseconds and remotes do not, so in practice it is still
+ * this machine's spelling that wins.
+ */
+let generation = 0
+
+export async function loadProjectUnion(onSlice: (slice: ProjectSlice) => void): Promise<void> {
   canonical.clear()
-  return {
-    // Canonicalise the group list FIRST: it arrives in the user's own order, so
-    // that is the spelling to keep — the projects then follow it.
-    groups: [...new Set(per.flatMap((r) => r.value.groups.map(canonGroup)))],
-    projects: per.flatMap((r) => r.value.projects.map((p) => ({ ...p, group: canonGroup(p.group) })))
-  }
+  const gen = ++generation
+  await Promise.all(
+    backendIds().map(async (id) => {
+      // The slow answer still counts when it arrives — it just arrives after the
+      // machine was already reported as offline, and reports it back as up.
+      const late = setTimeout(
+        () => onSlice({ gen, backend: id, projects: [], groups: [], error: 'no answer' }),
+        SLICE_MS
+      )
+      try {
+        const [groups, list] = await Promise.all([
+          window.floe.backends.invokeOn(id, 'projects:groups') as Promise<string[]>,
+          window.floe.backends.invokeOn(id, 'projects:list') as Promise<Project[]>
+        ])
+        onSlice({
+          gen,
+          backend: id,
+          // Canonicalise the group list FIRST: it arrives in the user's own
+          // order, so that is the spelling to keep — the projects follow it.
+          groups: groups.map(canonGroup),
+          projects: list.map((p) => ({ ...p, backend: id, group: canonGroup(p.group) }))
+        })
+      } catch (e) {
+        onSlice({ gen, backend: id, projects: [], groups: [], error: (e as Error).message })
+      } finally {
+        clearTimeout(late)
+      }
+    })
+  )
 }
 
 /**

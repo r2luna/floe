@@ -26,6 +26,18 @@ import { readSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
 import { floeConfig } from './config/floe'
 import { getCreatedSession } from './sessionStore'
+import { isQueryKey, parentKeyOf } from '../shared/queries'
+// Circular with queries.ts (it starts the turns that merge and peek) — safe on
+// the same terms as relay.ts: neither side touches the other at module level.
+import {
+  canRunInQuery,
+  echoOpening,
+  noteOpened,
+  openQueryFor,
+  queryOptions,
+  refuse,
+  refuseReason
+} from './queries'
 
 /**
  * The handle this prompt opens with, if it opens with one.
@@ -48,7 +60,10 @@ export const routeOf = (prompt: string): Route | null => routeAt(prompt, HARNESS
 export function optionsForRoute(route: Route, sessionId?: string): AgentRunOptions {
   const config = floeConfig()
   const set = config.harness[route.harness] ?? {}
-  const session = sessionId ? getCreatedSession(sessionId) : undefined
+  // A query key is not a session, so the effort the person last chose lives on
+  // the session it was opened FROM. Without this the lookup misses and the
+  // query silently falls back to floe.toml's default.
+  const session = sessionId ? getCreatedSession(parentKeyOf(sessionId)) : undefined
   const claude = route.harness === 'claude'
   const model = route.model ?? set.model ?? (claude ? config.agent.model : '')
   const effort = route.effort ?? set.effort ?? session?.effort ?? (config.agent.effort as Effort)
@@ -70,7 +85,11 @@ export function optionsForRoute(route: Route, sessionId?: string): AgentRunOptio
  * exactly as a message addressed to that harness would.
  */
 export function optionsForSession(key: string): AgentRunOptions {
-  const session = getCreatedSession(key)
+  // Resolved through the parent for a query key. Left to miss, it would report
+  // `claude` for a codex query — which is the exact condition startTurn reads
+  // to arm the relay, so the relay would fire INSIDE the query and Claude would
+  // take a turn in the codex panel.
+  const session = getCreatedSession(parentKeyOf(key))
   const harness = session?.provider ?? 'claude'
   const base = optionsForRoute({ harness, prompt: '' }, key)
   // The session's OWN model, not the harness default: a chat pinned to sonnet
@@ -112,8 +131,15 @@ export function startTurn(
   // harness, the relay brings the answer back here; answered in the session's
   // own voice, armAddress delivers whatever IT addresses — which is what makes
   // `@codex` written by the model reach codex, and not just read like it did.
-  if (provider !== (own.provider ?? 'claude')) armRelay(win, key, worktreePath, provider, own)
-  else armAddress(win, key, worktreePath, own)
+  //
+  // Except inside a query. Nothing watches a query's `done` for what to do
+  // next — merge and peek are what read it, under your command and at the
+  // moment you give it. A relay armed here would start a turn of the parent's
+  // own model in the query's panel the second the harness finished.
+  if (!isQueryKey(key)) {
+    if (provider !== (own.provider ?? 'claude')) armRelay(win, key, worktreePath, provider, own)
+    else armAddress(win, key, worktreePath, own)
+  }
   if (provider !== 'claude') {
     void runRuntime(
       win,
@@ -129,4 +155,109 @@ export function startTurn(
     return
   }
   sendToAgent(win, key, worktreePath, expanded, options, images, files)
+}
+
+/**
+ * The one place a prompt's DESTINATION is decided.
+ *
+ * There are five doors into startTurn, not one — the composer (`agent:start`),
+ * the MCP `send_message`, `create_session` with a prompt, a scheduled followup,
+ * and the relay itself. Deciding in the composer's `onSend` would cover exactly
+ * one of them: an agent sending `@codex …` over `send_message` would keep the
+ * old semantics, and "could an agent do this without the UI?" would stop being
+ * answerable. So the decision lives beside the rest of what has to be true of a
+ * turn whichever door it was.
+ *
+ * It takes INTENTION, not text to reinterpret. Three of those doors strip the
+ * handle before they get here — the composer sends `route.prompt`, `sendOptions`
+ * returns the prompt without it, `armAddress` the same — so a `routeOf(prompt)`
+ * inside this function would read clean text and never redirect anything. Each
+ * door has already parsed the route; it passes it on instead of throwing it out.
+ *
+ * With a route, the message opens (or refocuses) a query and runs there — D7,
+ * always, not only while the session is busy. Without one it is the session's
+ * own turn, exactly as before.
+ */
+export interface Dispatch {
+  win: BrowserWindow
+  /** The session this is being said in. Never a query key — see below. */
+  parentKey: string
+  worktreePath: string
+  prompt: string
+  /** The handle this message opened with, already read by the door. */
+  route?: Route | null
+  /** Who is sending. `user` is the composer; the rest are agents or timers. */
+  origin: 'user' | 'mcp' | 'followup' | 'agent'
+  /** What a NON-routed turn runs on, when the door already resolved it. */
+  options?: AgentRunOptions
+  images?: ImageAttachment[]
+  files?: FileAttachment[]
+}
+
+export interface Dispatched {
+  /** The key the turn actually started under — the query's, if it opened one. */
+  key: string
+  /** Set when this opened a query rather than taking the session's turn. */
+  query?: boolean
+  /** Set instead of starting anything, with the reason in the caller's words. */
+  error?: string
+}
+
+export function dispatchTurn(d: Dispatch): Dispatched {
+  const { win, parentKey, worktreePath, prompt } = d
+  if (!d.route)
+    return (
+      startTurn(
+        win,
+        parentKey,
+        worktreePath,
+        prompt,
+        d.options ?? optionsForSession(parentKey),
+        d.images,
+        d.files
+      ),
+      { key: parentKey }
+    )
+
+  // A query cannot open a query. The cascade already dies one hop out — nothing
+  // watches a query's answer (see startTurn) and a query gets no MCP token
+  // (D8) — so this is the belt to those braces, for the day somebody hands a
+  // query a token and forgets why it did not have one.
+  if (isQueryKey(parentKey)) {
+    const error = 'A query cannot open another query.'
+    refuse(win, parentKey, error)
+    return { key: parentKey, error }
+  }
+
+  const opened = openQueryFor(win, parentKey, worktreePath, {
+    harness: d.route.harness,
+    model: d.route.model,
+    effort: d.route.effort,
+    openedBy: d.origin === 'user' ? 'user' : 'agent'
+  })
+  if (!opened) {
+    const error = refuseReason(d.route.harness)
+    refuse(win, parentKey, error)
+    return { key: parentKey, error }
+  }
+  // One conversation, one turn at a time — the rule docs/message-queue.md
+  // already states, applied at the door instead of only in the composer. Two
+  // `@codex` in quick succession used to run two `codex exec` on one thread,
+  // and the second overwrote the first's bookkeeping.
+  if (!canRunInQuery(win, opened.key, d.route.harness))
+    return { key: opened.key, query: true, error: `${d.route.harness} is still answering.` }
+  noteOpened(win, parentKey, opened.query)
+  // The panel shows the line that opened it. Before the turn, so it lands above
+  // the answer rather than after it.
+  echoOpening(win, opened.key, d.prompt)
+  startTurn(
+    win,
+    opened.key,
+    worktreePath,
+    d.route.prompt,
+    queryOptions(optionsForRoute(d.route, parentKey)),
+    d.images,
+    d.files
+  )
+  return { key: opened.key, query: true }
 }

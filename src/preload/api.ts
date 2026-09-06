@@ -21,6 +21,7 @@ import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
 import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
 import type { Board, ColonyTask, TaskKind } from '../shared/colony'
+import type { Route } from '../shared/mentions'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -48,6 +49,7 @@ import type {
   HarnessUsage,
   LocalAgent,
   MemoryStats,
+  PathProbe,
   PermissionMode,
   NeedsYouSession,
   PlanFile,
@@ -60,8 +62,10 @@ import type {
   ProjectActivity,
   ProjectEnvConfig,
   ProvisionEvent,
+  Query,
   RemoteBranch,
   DropDatabaseResult,
+  UnlinkSiteResult,
   FileOp,
   RemoveBranchResult,
   RemovePreflight,
@@ -299,6 +303,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
               error?: string
             }>)
           : ipcRenderer.invoke('projects:addByPath', path, group),
+      // What the path IS, without adding it — the dialog's preview pane. Reads
+      // on the same machine the add would, so a remote path is checked over
+      // there rather than against this disk.
+      probe: (path: string, backend?: string): Promise<PathProbe> =>
+        backend && host.backendsCtl
+          ? (host.backendsCtl.invokeOn(backend, 'projects:probe', path) as Promise<PathProbe>)
+          : ipcRenderer.invoke('projects:probe', path),
       // Set (or clear, with null) a project's containerized-env config.
       setEnv: (path: string, env: ProjectEnvConfig | null): Promise<Project[]> =>
         ipcRenderer.invoke('projects:setEnv', path, env),
@@ -387,7 +398,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       branch: (root: string, branch: string, force: boolean): Promise<RemoveBranchResult> =>
         ipcRenderer.invoke('remove:branch', root, branch, force),
       dropDatabase: (root: string, target: string): Promise<DropDatabaseResult> =>
-        ipcRenderer.invoke('remove:dropDatabase', root, target)
+        ipcRenderer.invoke('remove:dropDatabase', root, target),
+      // Undo the Herd site the Laravel recipe linked, before the directory goes.
+      unlinkSite: (target: string): Promise<UnlinkSiteResult> =>
+        ipcRenderer.invoke('remove:unlinkSite', target)
     },
     provision: {
       run: (
@@ -413,8 +427,16 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         prompt: string,
         options: AgentRunOptions,
         images: ImageAttachment[] = [],
-        files: FileAttachment[] = []
-      ): Promise<void> => ipcRenderer.invoke('agent:start', key, worktreePath, prompt, options, images, files),
+        files: FileAttachment[] = [],
+        /**
+         * The handle this message opened with, already read by the composer.
+         * Passed on rather than dropped: where a routed message goes is one
+         * decision for all five doors into a turn, and it is made in main's
+         * turn.ts — see dispatchTurn.
+         */
+        route: Route | null = null
+      ): Promise<void> =>
+        ipcRenderer.invoke('agent:start', key, worktreePath, prompt, options, images, files, route),
       answer: (key: string, toolUseId: string, answer: string, answers?: string[][]): Promise<void> =>
         ipcRenderer.invoke('agent:answer', key, toolUseId, answer, answers),
       permission: (key: string, requestId: string, allow: boolean): Promise<void> =>
@@ -432,6 +454,76 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, payload: AgentEventEnvelope): void => cb(payload)
         ipcRenderer.on('agent:event', listener)
         return () => ipcRenderer.removeListener('agent:event', listener)
+      }
+    },
+    // Side conversations opened off a session — see docs/queries.md.
+    query: {
+      /** Every query this session has, open or closed, oldest first. */
+      list: (sessionKey: string): Promise<Query[]> => ipcRenderer.invoke('query:list', sessionKey),
+      /** Open (or refocus) the query for one harness, without sending anything. */
+      open: (
+        sessionKey: string,
+        worktreePath: string,
+        harness: string,
+        model?: string,
+        effort?: Effort
+      ): Promise<{ query?: Query; error?: string }> =>
+        ipcRenderer.invoke('query:open', sessionKey, worktreePath, harness, model, effort),
+      /** The chat reads what it has not read. The query stays open. */
+      peek: (qkey: string): Promise<{ entries: number; error?: string }> =>
+        ipcRenderer.invoke('query:peek', qkey),
+      /** The chat reads the rest, and the query closes. */
+      merge: (qkey: string): Promise<{ entries: number; error?: string }> =>
+        ipcRenderer.invoke('query:merge', qkey),
+      /** The query closes and the chat never sees a word of it. */
+      discard: (qkey: string): Promise<{ entries: number; error?: string }> =>
+        ipcRenderer.invoke('query:discard', qkey),
+      /**
+       * `@all` — one message to several harnesses at once, each in its own
+       * query, the answers mirrored back into the chat side by side.
+       *
+       * The targets are passed in and never inferred: fanning out to every
+       * harness on the machine is four turns nobody asked for (R7).
+       */
+      all: (
+        sessionKey: string,
+        worktreePath: string,
+        harnesses: string[],
+        prompt: string,
+        effort?: Effort
+      ): Promise<{ fanoutId?: string; keys?: string[]; refused?: string[]; error?: string }> =>
+        ipcRenderer.invoke('query:all', sessionKey, worktreePath, harnesses, prompt, effort),
+      /** What a closed query said — read on demand by the fold in the chat. */
+      transcript: (qkey: string): Promise<TranscriptItem[]> =>
+        ipcRenderer.invoke('query:transcript', qkey),
+      /** Bring a closed one back — its transcript is still its own. */
+      reopen: (qkey: string): Promise<{ query?: Query; error?: string }> =>
+        ipcRenderer.invoke('query:reopen', qkey),
+      /** A query ended, and how. The panel comes down where it is showing. */
+      onClosed: (
+        cb: (payload: { key: string; outcome: 'merged' | 'discarded'; entries: number }) => void
+      ): (() => void) => {
+        const listener = (
+          _event: IpcRendererEvent,
+          payload: { key: string; outcome: 'merged' | 'discarded'; entries: number }
+        ): void => cb(payload)
+        ipcRenderer.on('query:closed', listener)
+        return () => ipcRenderer.removeListener('query:closed', listener)
+      },
+      /**
+       * A query is born on any of four doors, only one of which is the composer
+       * in front of you — so the panel appears by being told, not by being
+       * asked. See main/queries.ts.
+       */
+      onOpened: (
+        cb: (payload: { query: Query; worktreePath: string; parentKeys: string[] }) => void
+      ): (() => void) => {
+        const listener = (
+          _event: IpcRendererEvent,
+          payload: { query: Query; worktreePath: string; parentKeys: string[] }
+        ): void => cb(payload)
+        ipcRenderer.on('query:opened', listener)
+        return () => ipcRenderer.removeListener('query:opened', listener)
       }
     },
     shell: {

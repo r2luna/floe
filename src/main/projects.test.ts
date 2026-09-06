@@ -83,3 +83,52 @@ test('a path that is not a repository is refused, and says nothing about created
   assert.equal(res.created, undefined)
   assert.equal(res.project, undefined)
 })
+
+// The dialog's preview pane runs on this. Its whole promise is that it answers
+// with what the add WOULD do, so these assert the two in step.
+test('probePath answers for a repo before it is added', async () => {
+  reset()
+  const dir = repo()
+  const probe = await projects.probePath(dir)
+  assert.equal(probe.exists, true)
+  assert.equal(probe.isRepo, true)
+  assert.equal(probe.root, dir)
+  assert.equal(probe.added, false, 'nothing has been added yet')
+  assert.equal(probe.group, undefined)
+})
+
+test('probePath reports a project Floe already has, and its group', async () => {
+  reset()
+  const dir = repo()
+  await projects.addProjectByPath(dir, 'Work')
+  store.invalidateProjects()
+
+  const probe = await projects.probePath(dir)
+  assert.equal(probe.added, true)
+  assert.equal(probe.group, 'Work')
+})
+
+test('probePath separates "nothing there" from "there, but not a repo"', async () => {
+  reset()
+  const missing = await projects.probePath(join(tmpdir(), 'floe-not-here-at-all'))
+  assert.equal(missing.exists, false)
+  assert.equal(missing.isRepo, false)
+
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), 'floe-plain-')))
+  const notRepo = await projects.probePath(plain)
+  assert.equal(notRepo.exists, true)
+  assert.equal(notRepo.isRepo, false, 'a folder is not a repository')
+})
+
+// A path pointing INSIDE a repo is added as the repo root; the pane has to name
+// that root, or it would describe a project that is never created.
+test('probePath resolves a subdirectory to the repo root', async () => {
+  reset()
+  const dir = repo()
+  const sub = join(dir, 'packages', 'app')
+  mkdirSync(sub, { recursive: true })
+
+  const probe = await projects.probePath(sub)
+  assert.equal(probe.root, dir)
+  assert.equal(probe.path, sub, 'it still says which path was asked about')
+})

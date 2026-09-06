@@ -454,3 +454,63 @@ test('a steer reloads as the line you typed, where you typed it', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// A task that finishes while the turn is running is enqueued, and the CLI keeps
+// only that queued copy — no `user` line follows it. Reloading it verbatim
+// pasted the raw notification into the chat under the user's own nick.
+test('a QUEUED task-notification does not reload as a user message', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-queued-notify'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-03T16:30:00.000Z', message: { content: 'sobe o daemon e mapeia o resto' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-03T16:30:04.000Z',
+      message: { content: [{ type: 'tool_use', id: 't2', name: 'Agent', input: { subagent_type: 'Explore', description: 'Map the boot path' } }] }
+    },
+    // A background Bash command that died: no <result>, only a <summary>.
+    {
+      type: 'attachment',
+      timestamp: '2026-09-03T16:34:00.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt:
+          '<task-notification>\n<task-id>bwm4core5</task-id>\n<tool-use-id>toolu_01Mtvk</tool-use-id>\n<status>failed</status>\n<summary>Background command "Start a local test daemon" failed with exit code 143</summary>\n</task-notification>'
+      }
+    },
+    // An async agent finishing the same way: its report is the only copy there is.
+    {
+      type: 'attachment',
+      timestamp: '2026-09-03T16:34:30.000Z',
+      attachment: {
+        type: 'queued_command',
+        prompt: '<task-notification>\n<task-id>a91</task-id>\n<tool-use-id>t2</tool-use-id>\n<status>completed</status>\n<result>O boot passa por webBoot.</result>\n</task-notification>'
+      }
+    },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-03T16:34:40.000Z',
+      message: { content: [{ type: 'text', text: 'o daemon caiu, mas o mapa veio' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.ok(!items.some((i) => (i.text ?? '').includes('task-notification')), 'no raw notification in the chat')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.from ?? null]),
+      [
+        ['user', null],
+        ['subagent', null],
+        ['assistant', 'explore-t2'],
+        ['assistant', null]
+      ]
+    )
+    assert.equal(items[1].running, false, 'the queued notification still closes the row it names')
+    assert.equal(items[2].text, 'O boot passa por webBoot.')
+    // Neither notification restarted the turn clock.
+    assert.equal(items[3].ms, 280_000)
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

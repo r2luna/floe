@@ -45,6 +45,18 @@ const laneWith = (sessionId: string, ...opened: Panel[]): Lane => ({
 test('the lane knows which session it is showing', () => {
   assert.equal(sessionKeyOf(laneWith('s1')), 's1')
   assert.equal(sessionKeyOf({ panels: [panel('projects', 0)], focus: 0 }), null)
+  // A query panel carries a session too — its own key — and it is not the one
+  // the lane is showing. Read as one, opening a query registered as a session
+  // switch, and the swap that follows restored the query key's (empty) panel
+  // set over the lane that had just gained the panel.
+  const withQuery = laneWith(
+    's1',
+    panel('query', 35, { sub: 'codex', session: { id: 's1~codex', worktreePath: '/w' } })
+  )
+  assert.equal(sessionKeyOf(withQuery), 's1')
+  // And it travels with the chat that opened it, like everything else past the
+  // session slot.
+  assert.deepEqual(scopedOf(withQuery).map((p) => p.kind), ['query'])
 })
 
 test('only what the session opened is session-scoped', () => {

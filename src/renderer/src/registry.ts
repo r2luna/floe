@@ -22,14 +22,54 @@ import {
 } from './lane.ts'
 import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
-import { shorten } from './fileRefs.ts'
 import type { Command, CommandContext } from './commands.ts'
+import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
 import { startSkillDraft } from './skillDraft.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import type { FileOp } from '../../shared/types.ts'
+
+/** The chat the lane is showing — what a query is opened off. */
+const chatOf = (c: CommandContext): Panel | undefined =>
+  c.lane.panels.find((p) => p.kind === 'chat' && p.session)
+
+/**
+ * The query these commands act on: the focused panel if it is one, else the
+ * only one open.
+ *
+ * Both, because both are where you press the key from. You read the query in
+ * its own panel and merge it from there; you also watch it from the chat and
+ * merge it without moving. Falling back to "the only one open" is unambiguous
+ * exactly when there is nothing to be ambiguous about.
+ */
+function queryIndex(c: CommandContext): number {
+  const focused = c.lane.panels[c.lane.focus]
+  if (focused?.kind === 'query') return c.lane.focus
+  const found = c.lane.panels.findIndex((p) => p.kind === 'query')
+  return found
+}
+
+const queryPanel = (c: CommandContext): Panel | undefined => {
+  const at = queryIndex(c)
+  return at === -1 ? undefined : c.lane.panels[at]
+}
+
+/** Peek, merge or discard — one call, because they differ only in the verb. */
+function runQuery(c: CommandContext, action: 'peek' | 'merge' | 'discard'): void {
+  const key = queryPanel(c)?.session?.id
+  if (!key) return
+  // The panel comes down (or stays up) on main's `query:closed` announcement,
+  // never from here: an agent can merge a query too, and the panel must behave
+  // the same way whoever asked.
+  void window.floe.query[action](key)
+    .then((r) => {
+      if (r.error) return c.say(r.error)
+      if (action === 'peek' && !r.entries) c.say('Nothing new in the query.')
+    })
+    .catch((e) => c.say(reason(e)))
+}
 
 /**
  * Scroll the focused panel's content.
@@ -104,6 +144,27 @@ function pageStep(c: CommandContext, rows: HTMLElement[]): number {
 function fileRow(c: CommandContext): HTMLElement | null {
   const active = document.activeElement as HTMLElement | null
   return active && c.panelEl(c.lane.focus)?.contains(active) ? active : null
+}
+
+/**
+ * The session the worktrees cursor is on, or null when it is on a branch.
+ *
+ * Read off the row's own `data-session` rather than by counting rows, exactly
+ * as `projectAtCursor` reads `data-project`: the list is grouped, and an index
+ * into "sessions, ignoring branches" is the kind of arithmetic that ticks the
+ * wrong chat the day a branch gets folded.
+ *
+ * The cursor rather than `document.activeElement`, unlike fileRow: the right-
+ * click menu holds focus while it is up, and "Select" from that menu has to
+ * mean the row it was opened on.
+ */
+function sessionOnRow(c: CommandContext): { id: string; worktreePath: string } | null {
+  const panel = c.lane.panels[c.lane.focus]
+  if (panel?.kind !== 'worktrees') return null
+  const row = c.rowsOf(c.panelEl(c.lane.focus))[panel.cursor ?? -1]
+  const id = row?.dataset.session
+  const worktreePath = row?.dataset.worktree
+  return id && worktreePath ? { id, worktreePath } : null
 }
 
 /**
@@ -358,7 +419,7 @@ function commentOnSelection(c: CommandContext): void {
   const from = lineOnRow(c, r[0])
   const to = lineOnRow(c, r[1])
   if (panel.kind === 'diff' && from !== undefined && to !== undefined) {
-    sendToComposer(c, shorten(fileRef(panel.sub ?? '', from, to).trim()) + '\n\n')
+    sendToComposer(c, fileRef(panel.sub ?? '', from, to).trim() + '\n\n')
     return
   }
 
@@ -368,9 +429,9 @@ function commentOnSelection(c: CommandContext): void {
     panel.kind === 'file'
       ? // A file panel reading its own root — a skill, which lives in Floe's
         // config — is not in the worktree, so a relative path would name
-        // nothing the agent can open. The full path is what gets sent; the
-        // composer only ever shows the short token standing for it.
-        shorten(fileRef(panel.root ? `${panel.root}/${panel.sub ?? ''}` : (panel.sub ?? ''), r[0], r[1]).trim()) + '\n\n'
+        // nothing the agent can open. The full path is what gets sent, and what
+        // the composer shows.
+        fileRef(panel.root ? `${panel.root}/${panel.sub ?? ''}` : (panel.sub ?? ''), r[0], r[1]).trim() + '\n\n'
       : (() => {
           const { rows } = parseUnifiedDiff(c.patchFor(panel.sub ?? ''))
           const nav = c.rowsOf(c.panelEl(c.lane.focus))
@@ -1383,6 +1444,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.addProject()
       },
       {
+        // The union is loaded per machine and a remote that is unreachable is
+        // simply left out of it, so this is the way back once the network is
+        // there again — without it the only retry was restarting the app.
+        id: 'project.reload',
+        title: 'Reload projects',
+        group: 'App',
+        keys: 'r',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
+        run: (c) => c.reloadProjects()
+      },
+      {
         id: 'group.create',
         title: 'New project group…',
         group: 'App',
@@ -1501,6 +1573,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.delete',
         title: 'Delete session…',
         group: 'Sessions',
+        keys: '⌘⇧W',
         enabled: (c) => c.lane.panels.some((p) => p.session),
         run: (c) => c.deleteSession()
       },
@@ -1519,6 +1592,179 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Sessions',
         enabled: (c) => !!c.worktree || c.lane.panels.some((p) => p.session),
         run: (c) => c.deleteSession('all')
+      },
+      // --- queries ---------------------------------------------------------
+      // A query is a conversation running beside this one. Every one of these
+      // acts on the query panel the lane is focused on, falling back to the
+      // only one open — so the keys work whether you are typing in the query or
+      // watching from the chat, which is the whole point of it being parallel.
+      {
+        id: 'query.open',
+        title: 'Ask another harness…',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const chat = chatOf(c)
+          if (!chat?.session) return
+          c.askText({
+            placeholder: 'harness — codex, claude, opencode',
+            verb: 'Open query with',
+            onDone: (harness) => {
+              const name = harness.trim().replace(/^@/, '')
+              if (!name) return
+              void window.floe.query
+                .open(chat.session!.id, chat.session!.worktreePath, name)
+                // The panel arrives on the `query:opened` announcement, not
+                // from here: a query is born on four doors and only one of them
+                // has a person in front of it.
+                .then((r) => r.error && c.say(r.error))
+                .catch((e) => c.say(reason(e)))
+            }
+          })
+        }
+      },
+      {
+        id: 'query.focus',
+        title: 'Go to the query',
+        group: 'Queries',
+        enabled: (c) => queryIndex(c) !== -1,
+        run: (c) => {
+          const at = queryIndex(c)
+          if (at !== -1) c.setLane((l) => focusAt(l, at))
+        }
+      },
+      {
+        // The chat reads what it has not read of the query. Nothing closes —
+        // that is what makes peek different from merge, and why it has its own
+        // key rather than being merge with a modifier.
+        id: 'query.peek',
+        title: 'Peek: let the chat read the query',
+        group: 'Queries',
+        keys: '⌘⇧G',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'peek')
+      },
+      {
+        id: 'query.merge',
+        title: 'Merge the query into the chat',
+        group: 'Queries',
+        keys: '⌘⇧M',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'merge')
+      },
+      {
+        // Its own binding, deliberately NOT ⌘W. Closing a panel and throwing a
+        // conversation away are different things, and one key for both would
+        // make the safe habit destructive.
+        id: 'query.discard',
+        title: 'Discard the query',
+        group: 'Queries',
+        keys: '⌘⇧D',
+        enabled: (c) => !!queryPanel(c),
+        run: (c) => runQuery(c, 'discard')
+      },
+      {
+        // The way back from a discard. The conversation is still on disk under
+        // its own key — the dead line in the chat is what remembers it.
+        id: 'query.reopen',
+        title: 'Reopen a discarded query…',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const chat = chatOf(c)
+          if (!chat?.session) return
+          void window.floe.query
+            .list(chat.session.id)
+            .then((all) => {
+              const closed = all.filter((q) => q.outcome)
+              if (!closed.length) return c.say('No closed queries here.')
+              c.askText({
+                placeholder: closed.map((q) => q.harness).join(', '),
+                verb: 'Reopen query with',
+                onDone: (harness) => {
+                  const found = closed.find((q) => q.harness === harness.trim().replace(/^@/, ''))
+                  if (!found) return c.say(`No closed query with ${harness}.`)
+                  void window.floe.query
+                    .reopen(found.id)
+                    .then((r) => r.error && c.say(r.error))
+                    .catch((e) => c.say(reason(e)))
+                }
+              })
+            })
+            .catch((e) => c.say(reason(e)))
+        }
+      },
+      {
+        // `@all` without typing it. The message is whatever is in the composer
+        // — this only puts the handle in front of it, so the one rule that
+        // reads it stays the one in mentions.ts.
+        id: 'chat.all',
+        title: 'Ask several harnesses at once (@all)',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const el = findComposer(c)
+          if (!el) return
+          el.focus()
+          // Typed through the DOM rather than through React state, because the
+          // registry has no handle on the draft — and `input` is what the
+          // composer already listens to, so the mirror and the trigger menu
+          // update exactly as they would if you had typed it.
+          const at = el.selectionStart ?? 0
+          el.setRangeText('@all ', 0, at === 0 ? 0 : 0, 'end')
+          el.dispatchEvent(new Event('input', { bubbles: true }))
+        }
+      },
+      {
+        // The housekeeping one, and the only session command that is not about
+        // the worktree you are in: it sweeps the whole open project, because a
+        // chat you abandoned an hour ago is just as dead on the branch next
+        // door. Nothing to sweep says so rather than opening a confirm.
+        id: 'session.deleteIdle',
+        title: 'Delete sessions idle for over an hour…',
+        group: 'Sessions',
+        run: (c) => c.deleteSession('idle')
+      },
+      {
+        // A tick, not a range. The sessions worth clearing out are scattered
+        // down the list and across branches, so `v`'s contiguous selection —
+        // which is what `selection.toggle` offers a diff — would be the wrong
+        // shape: you would have to tick the ones in between and then untick
+        // them again.
+        id: 'session.mark',
+        title: 'Select or unselect this session',
+        group: 'Sessions',
+        keys: 'x',
+        // A DOM question, like `project.delete`'s: the branch rows are cursor
+        // rows too, and there is nothing on one to tick.
+        enabled: (c) => !!sessionOnRow(c),
+        unavailable: () => 'put the cursor on a session — a branch has nothing to select',
+        run: (c) => {
+          const at = sessionOnRow(c)
+          if (at) c.markSession(at, 'toggle')
+        }
+      },
+      {
+        id: 'session.markClear',
+        title: 'Unselect every session',
+        group: 'Sessions',
+        keys: 'Esc',
+        enabled: (c) => c.markedSessions.length > 0,
+        unavailable: () => 'no session is selected',
+        run: (c) => c.clearMarkedSessions()
+      },
+      {
+        // One key for both, because they are one question: `d` deletes what is
+        // ticked, and with nothing ticked the row you are on IS the selection
+        // of one. Splitting them would leave `d` dead on a list you had not
+        // ticked anything in yet, which is the common case.
+        id: 'session.deleteMarked',
+        title: 'Delete the selected sessions…',
+        group: 'Sessions',
+        keys: 'd',
+        enabled: (c) => c.markedSessions.length > 0 || !!sessionOnRow(c),
+        unavailable: () => 'select a session first, or put the cursor on one',
+        run: (c) => c.deleteSession('marked')
       },
       {
         id: 'worktree.new',
@@ -1632,6 +1878,47 @@ export const REGISTRY: Map<string, Command> = new Map(
           c.remove.cancel()
           c.setLane((l) => {
             const at = l.panels.findIndex((p) => p.kind === 'remove')
+            return at === -1 ? l : close(l, at)
+          })
+        }
+      },
+      // --- worktree provisioning ------------------------------------------
+      // The environment a worktree needs to run: .env, dependencies, site,
+      // database. Runs itself on create; these are the ways back to it.
+      {
+        id: 'worktree.provision',
+        title: 'Set up this worktree’s environment',
+        group: 'Worktrees',
+        keys: '⌘K W',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to set up — open one first',
+        // Every step is idempotent, so this is also the repair: run it on a
+        // worktree that was created before the app provisioned anything, or one
+        // whose install died halfway.
+        run: (c) => c.provision.start()
+      },
+      {
+        id: 'provision.confirm',
+        title: 'Provision: retry from the failed step',
+        group: 'Worktrees',
+        keys: '⏎',
+        enabled: (c) => c.provision.idle,
+        unavailable: () => 'the setup is still running',
+        run: (c) => c.provision.retry()
+      },
+      {
+        id: 'provision.cancel',
+        title: 'Provision: hide the checklist',
+        group: 'Worktrees',
+        keys: 'esc',
+        enabled: (c) => c.provision.active,
+        unavailable: () => 'no setup to hide',
+        // Only the checklist goes. The steps run in main and carry on — this is
+        // "stop showing me", not "stop".
+        run: (c) => {
+          c.provision.dismiss()
+          c.setLane((l) => {
+            const at = l.panels.findIndex((p) => p.kind === 'provision')
             return at === -1 ? l : close(l, at)
           })
         }

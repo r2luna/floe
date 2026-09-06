@@ -32,7 +32,7 @@ export async function load(url, context, next) {
 `
 register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.url)
 
-const { seedFor, forgetSeen, sessionTranscript } = await import('./handoff.ts')
+const { seedFor, forgetSeen, forgetRead, packetFrom, sessionTranscript } = await import('./handoff.ts')
 const { PACKET_OPEN } = await import('../shared/handoff.ts')
 const { relayPrompt } = await import('../shared/relay.ts')
 
@@ -66,7 +66,10 @@ function claudeSaid(id: string, role: 'user' | 'assistant', text: string): void 
 function runtimeSaid(id: string, item: Record<string, unknown>): void {
   const dir = join(process.env.FLOE_TEST_USERDATA!, 'runtime-transcripts')
   mkdirSync(dir, { recursive: true })
-  appendFileSync(join(dir, `${id}.jsonl`), JSON.stringify({ at: tick(), ...item }) + '\n')
+  // Same name runtimeLog.fileFor mints — a query key holds a `~`, which it
+  // sanitises away, and writing the raw name would leave the log unreadable.
+  const file = `${id.replace(/[^\w.-]/g, '_')}.jsonl`
+  appendFileSync(join(dir, file), JSON.stringify({ at: tick(), ...item }) + '\n')
 }
 
 test('a session that has only ever been Claude hands Claude nothing', () => {
@@ -228,4 +231,65 @@ test('a relay envelope is plumbing, and never reads back as something you typed'
     sessionTranscript(WORKTREE, 'relay-id').map((i) => i.text),
     ['@codex e ai?', 'e ai', 'meu parecer']
   )
+})
+
+// --- packetFrom: one conversation packaged for another to read --------------
+//
+// What peek and merge send. The watermark it keeps is its own — `watermark()`
+// above reads Claude's off ITS transcript, and Claude never speaks inside a
+// codex query, so it would read 0 forever and a merge after a peek would
+// re-ship every line.
+
+test('a peek sends what the chat has not read, and a merge sends the rest', () => {
+  fresh()
+  forgetRead('sess~codex')
+  runtimeSaid('sess~codex', { role: 'user', text: 'analisa o schema' })
+  runtimeSaid('sess~codex', { role: 'assistant', provider: 'codex', text: 'sessions.json e um array plano' })
+
+  const peek = packetFrom(WORKTREE, 'sess~codex', 'sess', { since: 'watermark', to: 'claude' })
+  assert.equal(peek?.entries, 2)
+  assert.match(peek!.packet, /array plano/)
+
+  // Nothing new since: the caller is told so rather than starting a turn whose
+  // whole content is an empty block.
+  assert.equal(packetFrom(WORKTREE, 'sess~codex', 'sess', { since: 'watermark', to: 'claude' }), null)
+
+  // The query went on talking. A merge now carries the REST, not the lot.
+  runtimeSaid('sess~codex', { role: 'user', text: 'e o hook de reload?' })
+  runtimeSaid('sess~codex', { role: 'assistant', provider: 'codex', text: 'o reload rele sessions.json' })
+  const merge = packetFrom(WORKTREE, 'sess~codex', 'sess', { since: 'watermark', to: 'claude' })
+  assert.equal(merge?.entries, 2)
+  assert.match(merge!.packet, /rele sessions.json/)
+  assert.doesNotMatch(merge!.packet, /array plano/)
+})
+
+test('since:all ignores what has already been read', () => {
+  fresh()
+  forgetRead('sess2~codex')
+  runtimeSaid('sess2~codex', { role: 'assistant', provider: 'codex', text: 'primeira' })
+  packetFrom(WORKTREE, 'sess2~codex', 'sess2', { since: 'watermark', to: 'claude' })
+  const all = packetFrom(WORKTREE, 'sess2~codex', 'sess2', { since: 'all', to: 'claude' })
+  assert.equal(all?.entries, 1)
+  assert.match(all!.packet, /primeira/)
+})
+
+test('the query chip is bookkeeping, and never travels inside a packet', () => {
+  fresh()
+  forgetRead('sess3~codex')
+  runtimeSaid('sess3~codex', { role: 'tool', name: 'query', summary: 'codex query open' })
+  runtimeSaid('sess3~codex', { role: 'assistant', provider: 'codex', text: 'a resposta' })
+  const out = packetFrom(WORKTREE, 'sess3~codex', 'sess3', { since: 'watermark', to: 'claude' })
+  assert.equal(out?.entries, 1)
+  assert.doesNotMatch(out!.packet, /query open/)
+})
+
+test('a closed query leaves no read mark behind for the next one on that key', () => {
+  fresh()
+  forgetRead('sess4~codex')
+  runtimeSaid('sess4~codex', { role: 'assistant', provider: 'codex', text: 'primeira' })
+  packetFrom(WORKTREE, 'sess4~codex', 'sess4', { since: 'watermark', to: 'claude' })
+  // Discard, then ask the same harness again: the reopened query starts unread.
+  forgetRead('sess4~codex')
+  const again = packetFrom(WORKTREE, 'sess4~codex', 'sess4', { since: 'watermark', to: 'claude' })
+  assert.equal(again?.entries, 1)
 })

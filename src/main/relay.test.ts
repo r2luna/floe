@@ -33,6 +33,7 @@ const SOURCE = {
     "\\nexport function sessionNames(key) { return [key] }",
   'stub:turn':
     "export function startTurn(win, key, worktreePath, prompt, options) { globalThis.__turns.push({ key, prompt, options }) }" +
+    "\\nexport function dispatchTurn(d) { globalThis.__turns.push({ key: d.parentKey, prompt: d.prompt, options: d.options, route: d.route }); return { key: d.parentKey, query: !!d.route } }" +
     "\\nexport function optionsForRoute(route) { return { provider: route.harness, model: '', effort: 'medium' } }"
 }
 export async function load(url, context, next) {
@@ -46,6 +47,8 @@ interface Started {
   key: string
   prompt: string
   options: AgentRunOptions
+  /** Set when the turn went through dispatchTurn with a handle on it. */
+  route?: { harness: string }
 }
 declare global {
   // eslint-disable-next-line no-var
@@ -252,4 +255,28 @@ test('stop stops a handle the model wrote, too', (t) => {
   cancelRelay('s15')
   ends(t, 's15', '@codex revisa isso')
   assert.equal(globalThis.__turns.length, 0)
+})
+
+test('a handle the model wrote opens a query, and arms nothing of its own', (t) => {
+  fresh(t, 's16')
+  speaks(t, 's16', '@codex revisa o diff de relay.ts')
+  const [turn] = globalThis.__turns
+  // Routed through dispatchTurn with the handle still attached — the decision
+  // of where it goes belongs to turn.ts, for all five doors at once. Left to
+  // the `provider !== own.provider` heuristic downstream, a query key would
+  // read as a Claude session and the relay would arm inside the query.
+  assert.equal(turn.route?.harness, 'codex')
+  assert.equal(turn.key, 's16')
+})
+
+test('a message you typed while it worked no longer swallows the handle', (t) => {
+  fresh(t, 's17')
+  armAddress(WIN, 's17', '/wt', CLAUDE)
+  globalThis.__waiters['s17'].forEach((w) => w('@codex revisa isso'))
+  // The old guard stood down here, because the answer used to take a turn in
+  // THIS chat. A query runs beside the session, so the handle is delivered.
+  globalThis.__active = ['s17']
+  settle(t)
+  assert.equal(globalThis.__turns.length, 1)
+  assert.equal(globalThis.__turns[0].route?.harness, 'codex')
 })

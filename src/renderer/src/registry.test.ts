@@ -28,6 +28,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     findNext: () => {},
     addProject: () => {},
     createGroup: () => {},
+    reloadProjects: () => {},
     moveProject: () => {},
     deleteProject: () => {},
     startMoveProject: () => {},
@@ -38,6 +39,9 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     newWorktree: () => {},
     useBackend: () => {},
     deleteSession: () => {},
+    markedSessions: [],
+    markSession: () => {},
+    clearMarkedSessions: () => {},
     cycleSession: () => {},
     askText: () => {},
     say: () => {},
@@ -76,6 +80,13 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       force: () => {},
       retry: () => {},
       cancel: () => {}
+    },
+    provision: {
+      active: false,
+      idle: false,
+      start: () => {},
+      retry: () => {},
+      dismiss: () => {}
     },
     setup: {
       active: false,

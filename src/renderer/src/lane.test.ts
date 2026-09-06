@@ -337,6 +337,10 @@ const chat = (id: string): Panel => ({
   kind: 'chat',
   title: id,
   order: 30,
+  // The chat and the launcher share the session slot — the launcher IS the
+  // chat's empty state. It is what tells `closePanel` which panel leaves one
+  // behind, so the fixture carries it exactly as `panelOf` does.
+  slot: 'session',
   session: { id: `s-${id}`, worktreePath: '/w' }
 })
 const launcher = (): Panel => ({ id: 'branch:', kind: 'branch', title: 'branch', order: 30 })
@@ -368,4 +372,20 @@ test('closing a chat keeps focus on the column it replaced', () => {
   lane = open(lane, chat('c1'))
   lane = closePanel(lane, 1, launcher)
   assert.equal(lane.focus, 1, 'focus stays where the conversation was')
+})
+
+test('closing a query leaves nothing behind, not a second launcher', () => {
+  // A query panel carries a session too — its own key, `sess~codex` — but it is
+  // not the conversation the branch is showing. Read as one, merging a query
+  // put a second launcher in the lane beside the first.
+  const query: Panel = {
+    id: 'query:codex',
+    kind: 'query',
+    title: 'codex',
+    order: 35,
+    session: { id: 's-c1~codex', worktreePath: '/w' }
+  }
+  const lane: Lane = { panels: [chat('c1'), query], focus: 1 }
+  const after = closePanel(lane, 1, launcher)
+  assert.deepEqual(after.panels.map((p) => p.kind), ['chat'])
 })

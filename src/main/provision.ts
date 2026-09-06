@@ -703,6 +703,35 @@ async function dropContainerWorktree(
 // Guard: never drop the main checkout's database (a copied-but-never-repointed
 // .env would otherwise nuke the real dev DB). Returns 'dropped' or 'skipped';
 // throws (message → step detail) when the drop command fails.
+// Unlink the worktree's Herd site, undoing the `herd link` the Laravel recipe
+// made. Runs BEFORE the worktree directory goes: `herd unlink` reads the site
+// from the directory it is called in, and a link left behind keeps serving a
+// path that no longer exists.
+//
+// Every absence is a skip, not a failure: no Herd installed, a stack that never
+// linked anything, a site already unlinked by hand. Removing a worktree must not
+// stop on a site that is already gone.
+export async function unlinkWorktreeSite(worktreePath: string, log: Log): Promise<'unlinked' | 'skipped'> {
+  if (!existsSync(join(worktreePath, 'artisan'))) {
+    log('Not a Laravel worktree — no Herd site to unlink')
+    return 'skipped'
+  }
+  try {
+    await runShell('herd', ['unlink'], worktreePath, log)
+    return 'unlinked'
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    if (/not found/i.test(message)) {
+      log('herd not found — skipping')
+      return 'skipped'
+    }
+    // Herd exits non-zero when the directory was never linked. That is the
+    // desired end state either way, so it is reported, not raised.
+    log(`herd unlink: ${message}`)
+    return 'skipped'
+  }
+}
+
 export async function dropWorktreeDatabase(
   worktreePath: string,
   mainRoot: string,

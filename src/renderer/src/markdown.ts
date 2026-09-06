@@ -88,7 +88,7 @@ function inline(text: string, out: Token[], isRef?: (token: string) => boolean):
  * `isRef` is what turns a file or session reference into a chip in the
  * composer. It is passed in rather than decided here: the file panel highlights
  * the same markdown and has no references to draw, and the composer's answer
- * depends on the sessions this project has and the paths it has shortened.
+ * depends on the sessions this project has and the files in its worktree.
  */
 export function tokenizeMarkdown(text: string, isRef?: (token: string) => boolean): Token[] {
   const out: Token[] = []

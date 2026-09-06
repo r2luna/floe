@@ -101,6 +101,34 @@ export interface Project {
   env?: ProjectEnvConfig
 }
 
+/**
+ * What Floe can say about a path BEFORE it is added — the add-project dialog's
+ * preview pane, answered while you type.
+ *
+ * Deliberately the same checks addProjectByPath runs, in the same order: a pane
+ * that said "repo ✓" for a path the add then refuses would be worse than no
+ * pane at all. No `~` expansion here for exactly that reason — the add does not
+ * expand it either.
+ */
+export interface PathProbe {
+  /** The path as asked about, so a stale answer can be dropped. */
+  path: string
+  exists: boolean
+  isRepo: boolean
+  /** The repo root, when the path points inside a repo rather than at its top. */
+  root?: string
+  /** What the project would be called — the root's basename. */
+  name?: string
+  /** The branch the main worktree is on. */
+  branch?: string
+  /** How many worktrees come with it: they are added along with the project. */
+  worktrees?: number
+  /** Already a Floe project — adding it again only re-opens the one you have. */
+  added?: boolean
+  /** The group it already sits in, when it is already added. */
+  group?: string
+}
+
 // Per-project containerized environment. Only the fields you can't reliably infer
 // live here — PHP version above all (the reason to containerize); package manager
 // and DB engine carry sane defaults inferred elsewhere but can be pinned.
@@ -621,6 +649,68 @@ export interface ThreadComment {
   sentAt?: number
 }
 
+// --- Queries (a side conversation opened off a session) ---------------------
+
+// `@codex analisa isso` with Claude mid-turn opens a QUERY: its own panel, its
+// own transcript, running in parallel instead of queueing behind the turn in
+// flight. It is read-only by construction, and three actions close the cycle —
+// merge (the conversation becomes the session's context), peek (the session
+// reads it with nothing closing) and discard.
+//
+// The registry is small on purpose. Everything a query needs to RUN it already
+// has by being an agent key (`sessionId~harness`, see shared/queries.ts); this
+// only records the things a key cannot carry: that it is open, what it is
+// running on, and — after a restart — which Claude session on disk is its own.
+/**
+ * The stamp a query leaves on the CHAT's transcript.
+ *
+ * The conversation itself belongs to the query's own panel — merging is about
+ * the model reading it, not about you re-reading it — so what the chat keeps is
+ * one line: which query, what became of it, and how much went over. Structured
+ * rather than parsed back out of the summary text, because the fold that draws
+ * it needs the key to fetch the conversation and the outcome to know whether to
+ * offer `reopen`.
+ */
+export interface QueryMark {
+  /** The query's agent key — what `query:transcript` and `reopen` are given. */
+  key: string
+  harness: string
+  outcome?: 'merged' | 'discarded'
+  /** How many entries went to the chat. Absent for "opened"; 0 for a discard. */
+  entries?: number
+}
+
+export interface Query {
+  /** The agent key it runs under: `queryKey(sessionId, harness)`. */
+  id: string
+  sessionId: string
+  harness: string
+  model?: string
+  effort?: Effort
+  mode: PermissionMode
+  openedAt: number
+  closedAt?: number
+  outcome?: 'merged' | 'discarded'
+  /**
+   * Who opened it. A query is not only a thing a person opens: an agent can
+   * open one over `send_message`, on a followup timer, or by writing `@codex`
+   * into its own answer — so the panel says which, rather than letting a window
+   * appear with nobody's name on it.
+   */
+  openedBy?: 'user' | 'agent'
+  /**
+   * The CLI's session id for THIS query, and the ones it has forked away from.
+   *
+   * A query key is not a session, so the session table cannot answer "what does
+   * this resume into". Without these a query answered by Claude loses its own
+   * history the moment the app restarts — and merge and peek then find nothing
+   * to build a packet out of. Same trail, and the same reason, as
+   * CreatedSession.claudeId / pastClaudeIds.
+   */
+  claudeId?: string
+  pastClaudeIds?: string[]
+}
+
 // --- Attachments (images pasted or dropped into the composer) --------------
 
 export interface ImageAttachment {
@@ -812,7 +902,10 @@ export type AgentEvent =
   | { kind: 'turn'; provider?: string; model?: string; effort?: string; mode?: PermissionMode }
   | { kind: 'text'; text: string }
   | { kind: 'reasoning'; text: string } // extended-thinking delta (streams before the text answer)
-  | { kind: 'tool'; name: string; summary?: string }
+  // `query` is set only on the chat's own query chips — see QueryMark. It is
+  // what lets the transcript draw a merged conversation as a fold you can open
+  // and a discarded one as a line you can bring back, instead of prose.
+  | { kind: 'tool'; name: string; summary?: string; query?: QueryMark }
   | { kind: 'image'; mediaType: string; data: string } // a tool returned an image (e.g. Read of a PNG)
   | { kind: 'question'; toolUseId: string; questions: AgentQuestion[] }
   | { kind: 'artifact'; spec: ArtifactSpec } // an inline decision panel (see shared/artifact.ts)
@@ -848,6 +941,19 @@ export type AgentEvent =
   // stream; the panel prints it as the agent's own line in the channel. `ms` is
   // the Codex bridge's alone: a Task row times itself from when it opened.
   | { kind: 'subagent-done'; toolUseId: string; reply?: string; ms?: number }
+  // One answer from an `@all` fan-out, mirrored into the CHAT so the replies
+  // can be read side by side. The conversation itself still belongs to that
+  // harness's own query panel — this is the comparison, not the transcript.
+  // Items sharing a `fanoutId` render as one block; see the Log.
+  | {
+      kind: 'fanout'
+      fanoutId: string
+      provider: string
+      model?: string
+      text: string
+      /** The query it came from — what `follow` and `open` on that column act on. */
+      query: QueryMark
+    }
   | { kind: 'done'; ok: boolean }
   | { kind: 'error'; message: string }
 
@@ -1101,7 +1207,7 @@ export interface MergeStep {
 // yes/no checkpoints — force-remove a dirty tree, then optionally delete the
 // branch. Reuses the merge step status vocabulary.
 
-export type RemoveStepId = 'preflight' | 'database' | 'worktree' | 'branch'
+export type RemoveStepId = 'preflight' | 'database' | 'site' | 'worktree' | 'branch'
 
 export type RemoveStepStatus = MergeStepStatus
 
@@ -1120,6 +1226,15 @@ export interface RemovePreflight {
   changes: string[] // porcelain lines (e.g. " M src/app.ts"), for display
   hasBranch: boolean // a real branch exists → we can offer to delete it
   merged: boolean // branch already merged into base → safe `-d` vs force `-D`
+  message?: string // why ok is false
+}
+
+// Result of unlinking the worktree's Herd site. `unlinked` is false when the
+// step was a safe no-op — no Herd, no Laravel, or nothing linked to begin with.
+export interface UnlinkSiteResult {
+  ok: boolean
+  unlinked: boolean
+  detail?: string
   message?: string // why ok is false
 }
 

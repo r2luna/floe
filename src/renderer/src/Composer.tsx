@@ -1,7 +1,9 @@
 import {
   IconArrowBackUp,
+  IconArrowUp,
   IconChevronDown,
   IconFileText,
+  IconPlayerStopFilled,
   IconPlus,
   IconX
 } from '@tabler/icons-react'
@@ -15,7 +17,7 @@ import {
   useState,
   type ReactNode
 } from 'react'
-import type { Attached, FileAttachment, ImageAttachment } from '../../shared/types'
+import type { Attached } from '../../shared/types'
 import {
   imageNum,
   insertImageRef,
@@ -38,6 +40,7 @@ import {
 import { DEFAULT_MODE, MODES, modesFor, nearestMode } from '../../shared/modes.ts'
 import { useLocalAgents } from './useLocalAgents'
 import { pushHistory, readHistory } from './history'
+import { usePending } from './drafts'
 import { useVimEnabled } from './appearance'
 import { blockAt, vimKey, vimStart, type VimState } from './vim'
 
@@ -92,10 +95,13 @@ export function Composer({
   onStop,
   onChoice,
   pinned,
+  modeLocked,
+  boxed,
   pinPending,
   onDigit,
   onEmptyEnter,
-  modelLeft
+  modelLeft,
+  draftKey
 }: {
   value: string
   onChange: (next: string) => void
@@ -113,6 +119,27 @@ export function Composer({
   /** The pin has not been read yet: what is shown now is the last chat's, not
       this one's. Held blank rather than swapped mid-flight. */
   pinPending?: boolean
+  /**
+   * The pinned MODE is not the user's to change — a query is read-only by
+   * construction, and the mode is the whole of that guarantee (docs/queries.md).
+   *
+   * Without this the mode you last used travels into the query and the chip
+   * says `bypass` over a turn that runs at `plan`: not merely wrong, but the
+   * one lie this composer must not tell.
+   */
+  modeLocked?: boolean
+  /**
+   * The BOX, not the footer — what the branch launcher mounts.
+   *
+   * The chat's composer is the panel's bottom edge: one line, a hairline above
+   * it, the mode alone on the chip because the transcript already prints who
+   * answered on every reply. None of that is true here. The launcher's composer
+   * is the only thing on an empty screen, with no transcript above it to have
+   * said anything yet — so it keeps the card it always had, the two lines of
+   * room, and the full harness · model · effort · mode label, which is the one
+   * place that label is the whole point.
+   */
+  boxed?: boolean
   placeholder?: string
   autoFocus?: boolean
   footer?: ReactNode
@@ -140,6 +167,10 @@ export function Composer({
   /** Put the model chip on the left, beside the tool buttons, instead of the
       far right — in a chat it then sits under the start of what you type. */
   modelLeft?: boolean
+  /** Where the unsent message is filed — the same key its text is under. What
+      was pasted in follows the text: without a key the chips only live as long
+      as this composer is mounted. */
+  draftKey?: string
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -190,11 +221,16 @@ export function Composer({
     // mode is a property of the next turn, not of the last one. So the mode you
     // have keeps travelling, snapped to what the pinned harness can do.
     setChoice((prev) => {
-      const next = { ...pinned, mode: nearestMode(prev.mode ?? DEFAULT_MODE, pinned.provider) }
+      const next = {
+        ...pinned,
+        mode: modeLocked
+          ? (pinned.mode ?? DEFAULT_MODE)
+          : nearestMode(prev.mode ?? DEFAULT_MODE, pinned.provider)
+      }
       onChoice?.(next)
       return next
     })
-  }, [pinned])
+  }, [pinned, modeLocked])
 
   // Keep the cursor row in view as ↑/↓ walk it past the fold.
   useEffect(() => {
@@ -227,6 +263,10 @@ export function Composer({
   // Which modes this harness can honestly do. Empty for a runtime with no tools
   // (LM Studio, Ollama) — the row is then not rendered at all.
   const modes = modesFor(choice.provider)
+  // Offered, as opposed to merely true. A locked mode is still SHOWN on the
+  // chip — it is the one thing the chip is for — but it is not something to
+  // walk, cycle or pick: a query runs read-only or it is not a query.
+  const modeOptions = modeLocked ? [] : modes
   const mode = choice.mode ?? DEFAULT_MODE
   const claude = !choice.provider || choice.provider === 'claude'
   // Each row carries whether it is the current pick, so opening the menu can
@@ -264,7 +304,7 @@ export function Composer({
             col: RAIL
           }))
         ]),
-    ...modes.map((m) => ({
+    ...modeOptions.map((m) => ({
       run: () => choose({ mode: m }),
       on: m === mode,
       col: RAIL
@@ -493,8 +533,9 @@ export function Composer({
     setDrill([])
   }
 
-  const [images, setImages] = useState<ImageAttachment[]>([])
-  const [files, setFiles] = useState<FileAttachment[]>([])
+  // Kept beside the text under the same key, so leaving the panel with a
+  // pasted screenshot and coming back finds it still attached.
+  const { images, files, setImages, setFiles } = usePending(draftKey)
   const [rejected, setRejected] = useState<string[]>([])
   // Set while the file picker is (or just was) up: the attach button's hover
   // style is suppressed until the pointer proves it is still there.
@@ -609,9 +650,9 @@ export function Composer({
     // ⌃⇧M cycles the mode in place — it is the one part of the choice you
     // change mid-chat (plan, then auto once the plan is agreed), and stopping
     // to open a menu for it every time is the thing that reaches for a mouse.
-    if (e.key.toLowerCase() === 'm' && e.ctrlKey && e.shiftKey && modes.length) {
+    if (e.key.toLowerCase() === 'm' && e.ctrlKey && e.shiftKey && modeOptions.length) {
       e.preventDefault()
-      return choose({ mode: modes[(modes.indexOf(mode) + 1) % modes.length] })
+      return choose({ mode: modeOptions[(modeOptions.indexOf(mode) + 1) % modeOptions.length] })
     }
 
     // ⌃M and the menu's own keys live on the window — see the effect above.
@@ -694,19 +735,7 @@ export function Composer({
       // Empty ⏎ confirms a multi-select question in progress; everything else
       // about an empty send is still a no-op downstream.
       if (value.trim() === '' && onEmptyEnter?.()) return
-      pushHistory(value)
-      at.current = -1
-      // The chips go with the message, and only then stop being pending. An
-      // empty send is a no-op downstream, so the attachments stay put rather
-      // than being thrown away on a stray ⏎.
-      onSend(choice, images.length || files.length ? { images, files } : undefined)
-      // A sent message ends the edit: the next draft starts typing.
-      if (vimOn) setVim(vimStart('insert'))
-      if (value.trim() !== '') {
-        setImages([])
-        setFiles([])
-        setRejected([])
-      }
+      submit()
       return
     }
 
@@ -791,11 +820,33 @@ export function Composer({
     }
   }
 
+  /**
+   * Send what is typed. ⏎ and the send button are the same call, deliberately:
+   * the button exists so the bar reads as a bar, not so there are two ways for
+   * a message to leave with different bookkeeping behind them.
+   */
+  function submit(): void {
+    pushHistory(value)
+    at.current = -1
+    // The chips go with the message, and only then stop being pending. An
+    // empty send is a no-op downstream, so the attachments stay put rather
+    // than being thrown away on a stray ⏎.
+    onSend(choice, images.length || files.length ? { images, files } : undefined)
+    // A sent message ends the edit: the next draft starts typing.
+    if (vimOn) setVim(vimStart('insert'))
+    if (value.trim() !== '') {
+      setImages([])
+      setFiles([])
+      setRejected([])
+    }
+  }
+
   const chips = images.length + files.length + rejected.length > 0
 
   return (
     <div
       className="composer"
+      data-boxed={boxed || undefined}
       ref={box}
       data-model-left={modelLeft || undefined}
       data-dropping={dropping || undefined}
@@ -846,6 +897,9 @@ export function Composer({
         </div>
       )}
 
+      {/* One row: the text on the left edge, every action grouped on the
+          right. The bar is the panel's footer — see `.composer` in the CSS. */}
+      <div className="composer-bar">
       <div className="composer-stack">
         <pre ref={mirror} className="composer-mirror" aria-hidden="true">
           {mirrorTokens.map((t, i) =>
@@ -858,13 +912,15 @@ export function Composer({
             )
           )}
           {/* A trailing newline keeps the last line visible while scrolled to
-              the bottom, matching how the textarea reserves that room. */}
-          {'\n'}
+              the bottom, matching how the textarea reserves that room. Only
+              once there IS more than one line: on a one-line bar it is a whole
+              empty row of height spent reserving room nothing can scroll to. */}
+          {boxed || value.includes('\n') ? '\n' : ''}
         </pre>
         <textarea
           ref={input}
           className="composer-input"
-          rows={2}
+          rows={boxed ? 2 : 1}
           spellCheck={false}
           placeholder={placeholder}
           value={value}
@@ -969,20 +1025,61 @@ export function Composer({
             setPicking((p) => !p)
           }}
         >
-          {/* harness · model · effort · mode — the harness first, because it is
-              the part that decides what you are talking to, and the mode last
-              because it is the part you change most often mid-chat. */}
-          <span className="model-harness">{picked.harness}</span>
-          {picked.model && <span className="model-name">{picked.model}</span>}
-          <span className="model-effort">{picked.effort}</span>
-          {modes.length > 0 && (
+          {/* The MODE, and nothing else. Harness, model and effort left the
+              chip because the transcript already prints them on every answer's
+              header (`claude@opus-5`) — saying them a second time under the
+              text spent the whole bar on a fact that was already on screen.
+              The mode is the one part that is neither said elsewhere nor
+              settled: it is what you change mid-chat. The menu behind it is
+              unchanged and still picks all four. */}
+          {boxed ? (
+            <>
+              <span className="model-harness">{picked.harness}</span>
+              {picked.model && <span className="model-name">{picked.model}</span>}
+              <span className="model-effort">{picked.effort}</span>
+              {modes.length > 0 && (
+                <span className="model-mode" data-tone={mode}>
+                  {picked.mode}
+                </span>
+              )}
+            </>
+          ) : modes.length > 0 ? (
             <span className="model-mode" data-tone={mode}>
               {picked.mode}
             </span>
+          ) : (
+            <span className="model-harness">{picked.harness}</span>
           )}
           <IconChevronDown size={13} stroke={1.8} />
         </button>
         {footer}
+        {/* Send, and stop while a turn runs — one button, because they are one
+            place: the thing you press about the message in flight. It reuses
+            the same `onStop` the typing line used to carry, which is why that
+            line no longer has a stop of its own. */}
+        {boxed ? null : onStop ? (
+          <button
+            className="composer-send"
+            data-stop
+            title="Interrupt (⌘.)"
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={onStop}
+          >
+            <IconPlayerStopFilled size={11} stroke={2} />
+          </button>
+        ) : (
+          <button
+            className="composer-send"
+            title="Send (⏎)"
+            // Never take focus off the composer: the caret has to stay where it
+            // was so typing continues straight after a click.
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={submit}
+          >
+            <IconArrowUp size={14} stroke={2} />
+          </button>
+        )}
+      </div>
       </div>
 
       {menuOpen && (
@@ -1001,7 +1098,11 @@ export function Composer({
             </div>
           )}
           {matches.map(({ item, hits }, i) => (
-            <Fragment key={item.id}>
+            // Keyed by position as well as id: two rows CAN write the same
+            // token (a session titled like a file path), and a repeated key
+            // reconciles the rows onto each other, leaving the previous
+            // query's rows on screen under the new query's highlights.
+            <Fragment key={`${i}:${item.id}`}>
               {item.group && item.group !== matches[i - 1]?.item.group && (
                 <div className="composer-menu-group">{item.group}</div>
               )}
@@ -1164,10 +1265,10 @@ export function Composer({
                         have would fail the turn rather than be ignored. Each
                         carries its own tone, so the one that can rewrite your
                         worktree does not look like the one that cannot. */}
-                    {modes.length > 0 && (
+                    {modeOptions.length > 0 && (
                       <div className="model-group">
                         <div className="model-head">mode</div>
-                        {modes.map((id) => {
+                        {modeOptions.map((id) => {
                           const at = ++mi
                           const info = MODES.find((m) => m.id === id)!
                           return (

@@ -11,6 +11,13 @@ export interface PaletteItem {
   detail?: string
   /** The chord that runs this, drawn as key chips on the right. */
   keys?: string
+  /**
+   * A short tag drawn in a box at the right edge — the machine a project is on.
+   * Separate from `detail` because it is a fact about where the row lives
+   * rather than more of its description, and the projects panel already draws
+   * that fact this way.
+   */
+  badge?: string
   group?: string
   /**
    * Always offered, whatever the query. "Add project…" has to be there
@@ -112,4 +119,29 @@ export function capGroups<T extends PaletteItem>(rows: Scored<T>[], n: number): 
     seen.set(row.item.group, count)
     return count <= n
   })
+}
+
+/**
+ * Split a row's title into the dim context and the name the eye lands on.
+ *
+ * A file row is a whole path, and the part you are scanning for is the last
+ * segment — drawn at full strength, with everything above it dim. The match
+ * indices are split along with the text, or the highlight would slide off the
+ * name the moment a row had a directory.
+ *
+ * A title with no `/` is all name: a command or a project has no context half,
+ * and inventing one would put an empty span in front of every row.
+ */
+export function splitTitle(
+  title: string,
+  hits: number[]
+): { dir: string; name: string; dirHits: number[]; nameHits: number[] } {
+  const cut = title.lastIndexOf('/') + 1
+  if (cut <= 0) return { dir: '', name: title, dirHits: [], nameHits: hits }
+  return {
+    dir: title.slice(0, cut),
+    name: title.slice(cut),
+    dirHits: hits.filter((i) => i < cut),
+    nameHits: hits.filter((i) => i >= cut).map((i) => i - cut)
+  }
 }

@@ -16,7 +16,9 @@ import {
   IconGitMerge,
   IconLayoutColumns,
   IconMessage,
+  IconMessage2,
   IconNotes,
+  IconPackage,
   IconPalette,
   IconPencil,
   IconPlug,
@@ -47,6 +49,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode
 } from 'react'
+import { QueryPanel } from './QueryPanel'
+import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
 import { backendLabel, backendOf, LOCAL } from './backends'
@@ -65,7 +69,7 @@ import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
-import { describeRef, expand, splitRefs } from './fileRefs'
+import { describeRef, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
 import { splitSkills } from '../../shared/skills'
 import { renderMarkdown, type MdLine } from './markdown'
@@ -95,9 +99,9 @@ import {
   type ModelChoice
 } from './models'
 import type { FloeConfig } from '../../main/config/floe'
-import { HARNESSES } from '../../shared/modes'
+import { HARNESSES, supportsMode } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
-import { handleRows, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
+import { handleRows, routeAll, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
 import { nickColor } from './nickColor'
 // Whose header a line prints under. The rules live next to their test, not in
 // the panel that draws them — see speakers.ts.
@@ -120,11 +124,13 @@ import { RunInTerminal } from './runInTerminal'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
+import { ProvisionPanel } from './ProvisionPanel'
 import { SetupPanel } from './SetupPanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
 import type { Remove } from './useRemove'
+import type { Provision } from './useProvision'
 import type { ProjectSetup } from './useProjectSetup'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
@@ -136,7 +142,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import type { Attached, ClaudeStats, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import type { Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
@@ -218,6 +224,20 @@ export const KINDS = {
     // same command the palette offers.
     action: { icon: IconTrash, title: 'Delete session…', command: 'session.delete' }
   },
+  // A side conversation running beside the chat: `@codex analisa isso` while
+  // Claude works. Narrow, because it sits NEXT to the chat and both have to be
+  // readable at once — and deliberately not `sticky`: the chat is the thing you
+  // must never lose track of, and a second pinned panel would fight it for the
+  // lane's left edge. `sub` is the harness, so the panel id is `query:codex`
+  // and asking codex twice focuses the panel instead of opening a second one.
+  query: {
+    icon: IconMessage2,
+    title: 'query',
+    width: 330,
+    min: 260,
+    order: 35,
+    needsProject: true
+  },
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
   // The agent board — one column per agent profile, one card per task, one
@@ -249,6 +269,12 @@ export const KINDS = {
   // click any time is an invitation, and nothing about removing a worktree
   // should be one. It arrives only when ⌘K X starts a removal.
   remove: { icon: IconTrash, title: 'remove', width: 340, min: 260, order: 41, needsProject: true },
+  // The worktree's ENVIRONMENT: .env, dependencies, site, database. Distinct
+  // from `setup` below, which is the project's commands — this one is per
+  // worktree and runs on create. Off the rail for the same reason as that one:
+  // it is not a place you go, it is something that happens to a worktree you
+  // just made and that you watch until it is ready.
+  provision: { icon: IconPackage, title: 'provision', width: 340, min: 260, order: 41, needsProject: true },
   // The project setup's checklist — the commands a freshly added project gets.
   // Same shape and width as the merge and the removal, and NOT on the rail for
   // the removal's reason turned around: an icon you can click any time is an
@@ -452,7 +478,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup', 'provision']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -491,6 +517,12 @@ export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED
 export type OpenFn = (child: {
   kind: PanelKind
   sub?: string
+  /**
+   * Whether the new panel takes focus. False is a preview: the list that opened
+   * it keeps the cursor, so moving down the list changes what is shown beside
+   * it without you having to walk back for the next row.
+   */
+  focus?: boolean
   /** Read `sub` relative to this instead of the worktree. See Panel.root. */
   root?: string
   /** For a chat: which session it shows. */
@@ -535,9 +567,12 @@ export function PanelBody({
   projects,
   movingProject,
   worktrees,
+  marks,
+  onMark,
   changes,
   merge,
   remove,
+  provision,
   setup,
   onEnterProject,
   onEnterWorktree,
@@ -569,11 +604,17 @@ export function PanelBody({
   /** The project being moved between groups, while `m` has a move running. */
   movingProject?: { path: string; group: string } | null
   worktrees: Worktrees
+  /** The sessions ticked in the worktrees list, by Floe's own session id. */
+  marks?: ReadonlySet<string>
+  /** Tick one, or tick up to it from the last one — see App.markSession. */
+  onMark?: (target: { id: string; worktreePath: string }, mode: 'toggle' | 'range') => void
   changes: Changes
   /** The guided merge in flight, for the merge panel. See useMerge. */
   merge: Merge
   /** The guided removal in flight, for the remove panel. See useRemove. */
   remove: Remove
+  /** The worktree's setup in flight, for the setup panel. See useProvision. */
+  provision: Provision
   /** The project setup in flight, for the setup panel. See useProjectSetup. */
   setup: ProjectSetup
   /**
@@ -659,6 +700,9 @@ export function PanelBody({
         creating={newWorktree}
         onOpen={onOpen}
         openSession={openSession}
+        marks={marks}
+        onMark={onMark}
+        onCommand={onCommand}
         find={find}
       />
     )
@@ -690,11 +734,25 @@ export function PanelBody({
     )
   if (kind === 'colony')
     return <ColonyBoard project={projects.current?.path} onOpen={onOpen} onCommand={onCommand} />
+  // The query's key IS its identity (`sess~codex`), and it arrives as the
+  // panel's `session` for exactly the reason a chat's does: it is what
+  // `useTranscript` streams.
+  if (kind === 'query')
+    return session ? (
+      <QueryPanel
+        session={session}
+        harness={sub ?? ''}
+        menuItems={menuItems}
+        onCommand={onCommand}
+      />
+    ) : null
   if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
   // The checklist draws itself from the flow and dispatches command ids for
   // everything it offers — the chips and the keys are the same commands.
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
+  if (kind === 'provision')
+    return <ProvisionPanel flow={provision.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'setup') return <SetupPanel flow={setup.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files')
     return <FilesTree root={cwd} scope={sub} onOpen={onOpen} onCommand={onCommand} find={find} />
@@ -800,6 +858,16 @@ export function PanelBody({
 }
 
 /* --- launcher ------------------------------------------------------------ */
+
+/**
+ * Whether a harness can hold a query at all — the `plan` gate, read from the
+ * one table that says what each runtime can honestly do.
+ *
+ * Duplicated on this side deliberately: the picker has to draw the refusal
+ * BEFORE anything is sent, and main refuses again when it is (see
+ * `canOpenQuery`). Both read `shared/modes.ts`, so they cannot disagree.
+ */
+const canHoldQuery = (harness: string): boolean => supportsMode(harness, 'plan')
 
 /** No conversation yet — a stable identity so the roster memo holds. */
 const NO_TRANSCRIPT: TranscriptItem[] = []
@@ -920,16 +988,11 @@ function Launcher({
   // rather than when the launcher opened, so an abandoned launcher leaves
   // nothing behind.
   const start = (choice: ModelChoice, attached?: Attached) => {
-    // Two forms of the same message: what was typed names files the short way,
-    // what is sent names them the way the agent can open. The title stays the
-    // typed one — a session called `/Users/…/skills/example.md:7-23` reads as
-    // nothing at all in the sidebar.
     const typed = text.trim()
-    const prompt = expand(typed)
     if (!typed) return
     const id = crypto.randomUUID()
     void window.floe.claude
-      .createSession({ id, worktreePath: cwd, title: prompt.slice(0, 60) })
+      .createSession({ id, worktreePath: cwd, title: typed.slice(0, 60) })
       .then(() => {
         // The prompt now lives in the session; leaving it in the launcher would
         // greet you with your last message the next time you land on the branch.
@@ -939,7 +1002,7 @@ function Launcher({
           kind: 'chat',
           sub: typed.slice(0, 40),
           session: { id, worktreePath: cwd },
-          firstPrompt: prompt,
+          firstPrompt: typed,
           firstChoice: choice,
           firstAttached: attached
         })
@@ -973,10 +1036,14 @@ function Launcher({
       <Composer
         value={text}
         onChange={setText}
+        draftKey={`branch:${cwd}`}
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
         autoFocus
+        // The card, not the footer: this composer is the only thing on an empty
+        // screen, with nothing above it to be the bottom edge of. See `boxed`.
+        boxed
         menuItems={composerMenu}
       />
 
@@ -1096,7 +1163,7 @@ export function elapsed(ms: number): string {
  * tokens)`. Its own component with its own interval, so the second-by-second
  * tick re-renders this line and not the transcript above it.
  */
-function TypingMeter({ startedAt, tokens }: { startedAt?: number; tokens: number }) {
+export function TypingMeter({ startedAt, tokens }: { startedAt?: number; tokens: number }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (!startedAt) return
@@ -1113,7 +1180,7 @@ function TypingMeter({ startedAt, tokens }: { startedAt?: number; tokens: number
 
 // How far from the bottom still counts as "reading the latest" — a rounding
 // error or a half-line of overscroll must not be read as scrolling away.
-const PIN_SLOP = 80
+export const PIN_SLOP = 80
 
 /**
  * A worktree's git dirt: `+2 ~5 −1` for what is still uncommitted, `⇡2 ⇣3` for
@@ -1157,7 +1224,7 @@ function GitDirt({ status }: { status?: WorktreeStatus }) {
  * same thing in both, and without this it fell through to the `#` list and
  * offered files.
  */
-function useComposerMenu(
+export function useComposerMenu(
   base: ((t: Trigger) => PaletteItem[]) | undefined,
   opts: { items: TranscriptItem[]; provider?: string; agents: LocalAgent[] }
 ): { menu: (t: Trigger) => PaletteItem[]; harnesses: string[] } {
@@ -1230,6 +1297,39 @@ function ChatPanel({
   onOpen?: OpenFn
 }) {
   const [text, setText] = useDraft(session?.id)
+  // The queries this chat already has open — the answer to "who does `@all` go
+  // to" whenever there is one. A ref, not state: it is read at send time and
+  // nothing renders from it, so a re-render per query opening would be waste.
+  const openQueryHarnesses = useRef<string[]>([])
+  useEffect(() => {
+    // Emptied FIRST, not merely refilled: the load below is async, and a send
+    // in the gap would have fanned this chat's `@all` out to the harnesses of
+    // the chat you just left.
+    openQueryHarnesses.current = []
+    if (!session?.id) return
+    let alive = true
+    const load = (): void => {
+      void window.floe.query
+        .list(session.id)
+        .catch(() => [])
+        .then((all) => {
+          if (alive) openQueryHarnesses.current = all.filter((q) => !q.closedAt).map((q) => q.harness)
+        })
+    }
+    load()
+    // A query can be born or die without this panel doing anything — an agent
+    // opens one, a merge closes one — so the list is refreshed on both edges.
+    const off = [window.floe.query.onOpened(load), window.floe.query.onClosed(load)]
+    return () => {
+      alive = false
+      for (const stop of off) stop()
+    }
+  }, [session?.id])
+
+  // An `@all` waiting on who it goes to. R7: the fan-out never guesses — with
+  // queries already open it goes to those plus this chat, and with none it
+  // asks. This holds the message while it is asking.
+  const [asking, setAsking] = useState<{ prompt: string; effort?: Effort } | null>(null)
   // Armed by ⌘L: the message being typed joins the one above it instead of
   // taking its own turn. Off by default — one message, one turn is the rule,
   // and linking is the exception you ask for.
@@ -1559,9 +1659,8 @@ function ChatPanel({
             is typing
             <Spinner />
             <TypingMeter startedAt={startedAt} tokens={tokens} />
-            <button className="irc-stop" onClick={stop} title="Interrupt (⌘.)">
-              stop
-            </button>
+            {/* No stop here any more: the composer's send button becomes the
+                stop while a turn runs, which is where your hand already is. */}
           </div>
         )}
 
@@ -1586,9 +1685,24 @@ function ChatPanel({
         ))}
       </div>
 
+      {asking && session && (
+        <AllPicker
+          own={choice.provider ?? 'claude'}
+          canHold={canHoldQuery}
+          onCancel={() => setAsking(null)}
+          onPick={(picked) => {
+            void window.floe.query
+              .all(session.id, session.worktreePath, picked, asking.prompt, asking.effort)
+              .catch(() => {})
+            setAsking(null)
+            setText('')
+          }}
+        />
+      )}
       <Composer
         value={text}
         onChange={setText}
+        draftKey={session?.id}
         onSend={(choice, attached) => {
           repin()
           // A line that OPENS with `@codex` is addressed to codex: that one
@@ -1597,16 +1711,49 @@ function ChatPanel({
           // name, and `route` is null — see mentions.ts.
           // A handle with nothing after it is not an errand — it goes out as
           // the plain line it is, rather than starting a turn with no message.
+          // `@all` first: it is not a handle naming a harness, so `routeAt`
+          // would read it as prose and send it to whoever the picker says.
+          const all = routeAll(text)
+          if (all?.prompt.trim() && session) {
+            // Queries already open ARE the answer to "who": you have already
+            // said who you are talking to, and asking again would be the app
+            // forgetting the panels on its own screen (R7).
+            // The open queries PLUS the harness answering here (R7): "who am I
+            // talking to" includes the chat you are typing in, and leaving it
+            // out made `@all` in a Claude chat with one codex query ask codex
+            // alone. Deduped, because the chat's harness may already have one.
+            const own = choice.provider ?? 'claude'
+            const open = [
+              ...new Set([
+                ...openQueryHarnesses.current,
+                ...(canHoldQuery(own) ? [own] : [])
+              ])
+            ]
+            if (openQueryHarnesses.current.length) {
+              void window.floe.query
+                .all(session.id, session.worktreePath, open, all.prompt, all.effort)
+                .catch(() => {})
+              setText('')
+              return
+            }
+            setAsking({ prompt: all.prompt, effort: all.effort })
+            return
+          }
           const addressed = routeAt(text, harnesses)
           const route = addressed?.prompt.trim() ? addressed : null
           // Busy or idle, ⏎ means "this is what I want to say". The hook decides
           // whether that starts a turn now or waits for the current one to end.
           const going = route ? routeChoice(route, choice) : choice
           if (route)
-            send(expand(route.prompt), going, attached?.images, attached?.files, linking, {
-              shown: expand(text)
+            // The whole line, handle and all, plus the route that was read off
+            // it. Main takes the handle back off on the way to the query — the
+            // decision of WHERE it goes is turn.ts's, for all five doors at
+            // once, so this passes the route on rather than acting on it.
+            send(text, going, attached?.images, attached?.files, linking, {
+              shown: text,
+              route
             })
-          else send(expand(text), going, attached?.images, attached?.files, linking)
+          else send(text, going, attached?.images, attached?.files, linking)
           setText('')
           setLinking(false)
         }}
@@ -1669,10 +1816,10 @@ const isMessage = (item: TranscriptItem): boolean =>
 /**
  * Your own words, with file references drawn as chips.
  *
- * The message on the wire carries the full path — that is the point of it — but
- * a line of `/Users/…/.config/floe/skills/example.md:7-23` in the log is a wall
- * you have to read to find the two things you care about: which file, which
- * lines. The chip says exactly those, and the tooltip still has the path.
+ * The message on the wire carries the full path — that is the point of it — and
+ * the chip carries it too: `src/renderer/src/panels.tsx`, not `panels.tsx`,
+ * because which of four files of that name you meant is the part worth
+ * reading. The chip only sets it apart from the sentence around it.
  *
  * Everything else is left alone: this is what the user typed, and rendering it
  * as markdown would reformat their own sentence back at them.
@@ -1811,11 +1958,11 @@ function MentionText({ text }: { text: string }) {
 }
 
 function FileChip({ ref_ }: { ref_: string }) {
-  const { name, lines, full } = describeRef(ref_)
+  const { path, lines, full } = describeRef(ref_)
   return (
     <span className="file-ref" title={full}>
       <IconFileText size={12} stroke={1.6} />
-      <span className="file-ref-name">{name}</span>
+      <span className="file-ref-name">{path}</span>
       {lines && <span className="file-ref-lines">{lines}</span>}
     </span>
   )
@@ -1925,7 +2072,7 @@ function useThrottled<T>(value: T, ms: number): T {
  * ~600 full parses over a 20 KB answer. MessageBody is memoised on text, so
  * holding the text to one change per ~150ms cuts that 5× with no visible lag.
  */
-function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolean }) {
+export function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolean }) {
   const text = useThrottled(item.text ?? '', 150)
   return <Entry item={text === (item.text ?? '') ? item : { ...item, text }} isNew={isNew} streaming />
 }
@@ -2038,7 +2185,7 @@ function TurnCost({ ms, tokens }: { ms?: number; tokens?: number }) {
 }
 
 /** What the composer says while a question is up — the keys ARE the UI. */
-function questionHint(q: PendingQuestion): string {
+export function questionHint(q: PendingQuestion): string {
   const active = q.questions[q.index]
   if (!active) return 'Reply…'
   const digits = active.options.length > 1 ? `1–${active.options.length}` : '1'
@@ -2054,7 +2201,7 @@ function questionHint(q: PendingQuestion): string {
  * pressed) in the composer like any other reply. Settled questions collapse to
  * one line; upcoming ones are announced but dimmed.
  */
-function QuestionBlock({
+export function QuestionBlock({
   q,
   typist,
   onAnswer,
@@ -2124,7 +2271,7 @@ function QuestionBlock({
 // transcript indices (base + i), not window indices: with window indices,
 // every appended item slides the 100-item window and hands each key a
 // different item, remounting (and re-parsing) the whole visible log per delta.
-const Log = memo(function Log({
+export const Log = memo(function Log({
   items,
   cwd,
   base = 0,
@@ -2203,6 +2350,30 @@ const Log = memo(function Log({
     // A run of calls — commands and tool calls alike — is one act of work, so
     // it is one block: the agent exploring reads as one thing happening, not as
     // a stack of separate events between two paragraphs.
+    // Answers to one `@all`, gathered into one block. They arrive in whatever
+    // order the harnesses finish, which is exactly why they must not be laid
+    // out in it: the point of asking several at once is reading them against
+    // each other, and a column that moved because codex was slow would be a
+    // different comparison every time you looked.
+    if (item.fanoutId) {
+      const run: TranscriptItem[] = []
+      const at = i
+      const id = item.fanoutId
+      while (i < items.length && items[i].fanoutId === id) run.push(items[i++])
+      i--
+      out.push(<FanoutBlock items={run} key={base + at} />)
+      continue
+    }
+
+    // A query's own mark is not part of the agent's run of calls: it is
+    // something that happened to the CONVERSATION — a second one opened beside
+    // it, was read from, and ended. Folded into a run of greps it would read as
+    // a tool the model called, which is exactly what it is not.
+    if (item.role === 'tool' && item.name === 'query') {
+      out.push(<QueryFold item={item} key={base + i} />)
+      continue
+    }
+
     if (item.role === 'tool') {
       const run: TranscriptItem[] = []
       const at = i
@@ -2382,6 +2553,142 @@ function CallsFold({ items, cwd }: { items: TranscriptItem[]; cwd?: string }): R
       <RunFold count={items.length} kind={kind} verbs={verbs}>
         {lines}
       </RunFold>
+    </div>
+  )
+}
+
+/**
+ * The answers to one `@all`, side by side.
+ *
+ * Each column is a query that is still open and still yours — the block is the
+ * comparison, not the conversation. So the two things a column offers are the
+ * two things you actually want from a comparison: **follow** sends that one
+ * into the chat's own context (the peek it already has), and **open** puts its
+ * panel back on screen to keep talking to it. Neither ends anything: choosing
+ * a path is not throwing the others away, and `discard` is still a key.
+ */
+function FanoutBlock({ items }: { items: TranscriptItem[] }): ReactNode {
+  return (
+    <div className="fanout">
+      {items.map((item, n) => {
+        const who = item.provider ?? 'claude'
+        const key = item.query?.key
+        return (
+          <div className="fanout-col" key={n}>
+            <div className="fanout-head">
+              <span className="irc-nick" style={{ color: nickColor(who) }}>
+                {who}
+              </span>
+              {item.model && <span className="irc-host">@{item.model}</span>}
+              {key && (
+                <>
+                  <button
+                    className="chip"
+                    title="Send this one into the chat's context (peek)"
+                    onClick={() => void window.floe.query.peek(key).catch(() => {})}
+                  >
+                    follow
+                  </button>
+                  <button
+                    className="chip"
+                    title="Put this query's panel back on screen"
+                    onClick={() => void window.floe.query.reopen(key).catch(() => {})}
+                  >
+                    open
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="fanout-body">
+              <MarkdownLines text={item.text ?? ''} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * A query's mark in the chat: opened, peeked at, merged, discarded.
+ *
+ * Closed by default, and that is the design of the merge rather than a default
+ * chosen for tidiness — merging is about the model reading the conversation,
+ * not about you reading it a second time. It opens to what was said, fetched
+ * when you ask for it: a conversation is thousands of characters and most of
+ * these are never opened.
+ *
+ * A discarded query keeps its line too. It enters nobody's context — that is
+ * the whole promise of a discard — and it is the only way back to a
+ * conversation you threw away, so `reopen` lives on it.
+ */
+function QueryFold({ item }: { item: TranscriptItem }): ReactNode {
+  const mark = item.query
+  const [open, setOpen] = useState(false)
+  const [said, setSaid] = useState<TranscriptItem[] | null>(null)
+  useEffect(() => {
+    if (!open || said || !mark?.key) return
+    let alive = true
+    void window.floe.query
+      .transcript(mark.key)
+      .catch(() => [])
+      .then((items) => alive && setSaid(items))
+    return () => {
+      alive = false
+    }
+  }, [open, said, mark?.key])
+
+  // Nothing to open: "a query opened" is news, not a conversation.
+  const openable = !!mark?.outcome
+  return (
+    <div className="query-fold" data-outcome={mark?.outcome}>
+      <div className="query-fold-head">
+        <button
+          className="query-fold-line"
+          disabled={!openable}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <IconCaretRightFilled
+            size={11}
+            className="tool-mark"
+            style={open ? { transform: 'rotate(90deg)' } : undefined}
+          />
+          <span className="query-fold-text">
+            {mark?.harness && (
+              <span className="irc-nick" style={{ color: nickColor(mark.harness) }}>
+                {mark.harness}
+              </span>
+            )}{' '}
+            {item.summary?.replace(new RegExp(`^${mark?.harness ?? ''}\\s*`), '')}
+          </span>
+        </button>
+        {mark?.outcome === 'discarded' && (
+          <button
+            className="chip"
+            title="Open this conversation again (⌘K)"
+            onClick={() => void window.floe.query.reopen(mark.key).catch(() => {})}
+          >
+            reopen
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="query-fold-body">
+          {said === null && <div className="irc-sys">Reading…</div>}
+          {said?.length === 0 && <div className="irc-sys">Nothing was said.</div>}
+          {said?.map((said_, n) => (
+            <div className="query-fold-said" key={n}>
+              <span
+                className="irc-nick"
+                style={{ color: nickColor(said_.provider ?? (said_.role === 'user' ? 'you' : 'claude')) }}
+              >
+                {said_.role === 'user' ? 'you' : (said_.provider ?? 'claude')}
+              </span>{' '}
+              <span className="query-fold-body-text">{said_.text ?? said_.summary}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -2592,9 +2899,10 @@ function BashRow({ command }: { command: string }) {
 const LETTER = { added: 'A', modified: 'M', deleted: 'D', untracked: '?' } as const
 
 /**
- * Everything the worktree changed against its review base. Picking a file opens
- * its diff beside this list, and the two stay on screen together — you pick the
- * next file from the same list, without scrolling back to find it.
+ * Everything the worktree changed against its review base. The diff follows the
+ * cursor: landing on a row opens that file beside the list, and the two stay on
+ * screen together — you read the branch by walking the list, one press per file.
+ * Enter (or a click) hands the cursor to the diff, to scroll and select in it.
  */
 function ChangesList({
   changes,
@@ -2630,6 +2938,10 @@ function ChangesList({
           key={f.relPath}
           title={f.relPath}
           onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
+          // The cursor IS the DOM focus here — j/k focus the row — so focusing
+          // is the only signal that the selected file changed. The preview must
+          // not take the focus back, or the next j would move inside the diff.
+          onFocus={() => onOpen({ kind: 'diff', sub: f.relPath, focus: false })}
         >
           <span className="change-status" data-status={LETTER[f.status]}>
             {LETTER[f.status]}
@@ -4216,9 +4528,12 @@ function ProjectsList({
   onOpen: OpenFn
   find?: string
 }) {
-  if (projects.loading) return <p className="empty">Loading…</p>
+  // Only this machine's own list holds the panel back: a remote that is slow or
+  // unreachable is reported under the list instead, so the local projects are
+  // there to work in while the network is not.
+  if (projects.loading && !projects.all.length) return <p className="empty">Loading…</p>
   if (projects.error) return <p className="empty error">{projects.error}</p>
-  if (!projects.all.length)
+  if (!projects.all.length && !projects.remotes.length)
     return (
       <p className="empty">
         No projects yet — <kbd>⌘/</kbd> to add one.
@@ -4285,6 +4600,25 @@ function ProjectsList({
           ))}
         </div>
       ))}
+      {/* The machines still to answer. Named rather than counted: with one
+          remote down the question is which one, and "retry" is the whole
+          recovery — the list above is already usable. */}
+      {projects.remotes.length > 0 && (
+        <div className="remote-notes">
+          {projects.remotes.map((b) => (
+            <div className="remote-note" key={b.id}>
+              {b.state === 'loading' ? <Spinner /> : <span className="remote-off">○</span>}
+              <span className="row-name">{b.label}</span>
+              <span className="remote-why">{b.state === 'loading' ? 'connecting…' : 'offline'}</span>
+              {b.state === 'offline' && (
+                <button className="chip" onClick={() => projects.reload()}>
+                  retry
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       {moving && (
         <p className="panel-hint">
           <kbd>j</kbd>/<kbd>k</kbd> pick a group · <kbd>↵</kbd> move · <kbd>Esc</kbd> cancel
@@ -4357,6 +4691,9 @@ function WorktreesList({
   creating,
   onOpen,
   openSession,
+  marks,
+  onMark,
+  onCommand,
   find
 }: {
   worktrees: Worktrees
@@ -4367,6 +4704,12 @@ function WorktreesList({
   onOpen: OpenFn
   /** The session the lane is showing, so the list can say which one that is. */
   openSession?: string | null
+  /** The sessions ticked for deletion, by Floe's own session id. */
+  marks?: ReadonlySet<string>
+  /** Tick one, or tick up to it from the last one — see App.markSession. */
+  onMark?: (target: { id: string; worktreePath: string }, mode: 'toggle' | 'range') => void
+  /** Run a command by id — what the right-click menu dispatches. */
+  onCommand?: (id: string) => void
   /** The find bar's query — the run of text it matched is tinted in the row. */
   find?: string
 }) {
@@ -4386,6 +4729,48 @@ function WorktreesList({
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
   const { busy, waiting, unread } = useSessionActivity(openKeys)
+
+  // Where the right-click menu is, and the row that opened it — closing hands
+  // focus back so the list continues where it was rather than nowhere.
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  // What the right-click menu offers. Every item runs a command id rather than
+  // acting, so the menu and the keys cannot drift — which is also why each one
+  // prints its key. See the rule at the top of commands.ts.
+  //
+  // The commands read the row the CURSOR is on, and opening the menu already
+  // focused that row, so nothing has to be threaded through: right-clicking a
+  // session and pressing `x` on it are the same two steps in the same order.
+  const picks = marks?.size ?? 0
+  const rowItems: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    {
+      label: menu && marks?.has(menu.row.dataset.session ?? '') ? 'Unselect' : 'Select',
+      keys: 'x',
+      run: () => onCommand?.('session.mark')
+    },
+    {
+      label: 'Unselect all',
+      keys: 'Esc',
+      disabled: picks === 0,
+      run: () => onCommand?.('session.markClear')
+    },
+    {
+      // Says how many, because with a selection open `d` is not about the row
+      // you right-clicked — and a menu reading "Delete session…" over four
+      // ticked sessions would be describing the wrong thing.
+      label: picks > 1 ? `Delete ${picks} selected sessions…` : 'Delete session…',
+      keys: 'd',
+      run: () => onCommand?.('session.deleteMarked')
+    }
+  ]
 
   // Which branches are folded shut. Click/Enter/Space on a branch that is
   // ALREADY current toggles it — the first press is "take me here", the next
@@ -4479,11 +4864,25 @@ function WorktreesList({
             // the mark that says the answer is waiting. `busy` is corrected
             // against the main process every few seconds (see reconcileLive).
             const working = marked(busy)
+            // Ticked for deletion. Floe's own id, never the claudeId: the tick
+            // is a row in THIS list, and the two ids would let one session be
+            // ticked twice.
+            const picked = !!marks?.has(s.id)
             return (
             <button
               className="row row-session"
               key={s.id}
               title={s.title}
+              // Which session a row is, for the commands that act on the row the
+              // cursor is on — `x` and `d` read these rather than counting rows,
+              // which a folded branch would throw off.
+              data-session={s.id}
+              data-worktree={worktree.path}
+              // Ticked for deletion, which is a different question from every
+              // other state this row carries: unread is about the conversation,
+              // active is about what you are looking at, and this is about what
+              // `d` is going to throw away.
+              data-picked={picked || undefined}
               // An answer arrived while you were elsewhere. Cleared by opening
               // it, which is the only way to read it.
               data-unread={marked(unread) || undefined}
@@ -4491,7 +4890,14 @@ function WorktreesList({
               // cursor shows where you last MOVED; this shows what you are
               // actually looking at, and they are different questions.
               data-active={(!!openSession && names.includes(openSession)) || undefined}
-              onClick={() => {
+              onClick={(e) => {
+                // ⌘ ticks one, ⇧ ticks up to it — the gestures every list uses,
+                // and neither of them opens the chat: a selection you had to
+                // navigate away from to make would not be a selection.
+                if (e.metaKey || e.ctrlKey)
+                  return onMark?.({ id: s.id, worktreePath: worktree.path }, 'toggle')
+                if (e.shiftKey)
+                  return onMark?.({ id: s.id, worktreePath: worktree.path }, 'range')
                 worktrees.select(worktree.path)
                 // `claudeId` names the transcript file on disk; Floe's own id
                 // does not. Sending the wrong one reads an empty conversation.
@@ -4500,6 +4906,15 @@ function WorktreesList({
                   sub: s.title,
                   session: { id: s.claudeId ?? s.id, worktreePath: worktree.path }
                 })
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault()
+                const row = e.currentTarget as HTMLElement
+                // Focus first: the menu's items run the same commands the keys
+                // do, and those read the row the CURSOR is on — which focusing
+                // is what moves (see App's onFocusCapture).
+                row.focus()
+                setMenu({ x: e.clientX, y: e.clientY, row })
               }}
             >
               <SessionMark
@@ -4514,6 +4929,7 @@ function WorktreesList({
           })}
         </div>
       ))}
+      {menu && <RowMenu at={menu} items={rowItems} onClose={closeMenu} />}
     </>
   )
 }

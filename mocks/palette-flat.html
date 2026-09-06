@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>
+  body { margin: 0; padding: 16px; display: flex; gap: 16px; align-items: flex-start; }
+  .palette, .composer-menu, .model-menu { position: static; width: 260px; }
+</style>
+</head>
+<body>
+  <div class="palette">
+    <div class="palette-list">
+      <div class="palette-group">COMMANDS</div>
+      <button class="palette-row"><span class="palette-title">New worktree</span><span class="palette-keys">⌘N</span></button>
+      <button class="palette-row" data-at><span class="palette-title">Delete selected sessions…</span><span class="palette-keys">d</span></button>
+      <button class="palette-row" data-at><span class="palette-title">Adjacent, so they stack</span><span class="palette-keys">x</span></button>
+      <button class="palette-row"><span class="palette-title">Merge worktree</span><span class="palette-keys">⌘K M</span></button>
+    </div>
+  </div>
+
+  <div class="composer-menu">
+    <div class="composer-menu-group">SKILLS</div>
+    <button class="composer-menu-row"><span class="composer-menu-title">deploy</span></button>
+    <button class="composer-menu-row" data-at><span class="composer-menu-title">code-review</span></button>
+    <button class="composer-menu-row"><span class="composer-menu-title">simplify</span></button>
+  </div>
+
+  <div class="model-menu">
+    <div class="model-options">
+      <button class="model-option">haiku</button>
+      <button class="model-option" data-at>sonnet</button>
+      <button class="model-option" data-on>opus</button>
+    </div>
+  </div>
+</body>
+</html>

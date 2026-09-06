@@ -266,6 +266,7 @@ adds a project rather than repeating a search — \`/\` still searches it, and
 \`n\` still repeats the match everywhere else.`,
     binds: [
       { key: 'n', command: 'project.add', when: 'panel == "projects"' },
+      { key: 'r', command: 'project.reload', when: 'panel == "projects"' },
       { key: 'd', command: 'project.delete', when: 'panel == "projects"' },
       { key: 'm', command: 'project.move.start', when: 'panel == "projects"' },
       { key: 'j', command: 'project.move.down', when: 'moving' },
@@ -318,6 +319,27 @@ invitation, and this is not one.`,
       { key: 'super+k x', command: 'worktree.remove' },
       { key: 'enter', command: 'remove.confirm', when: 'panel == "remove"' },
       { key: 'escape', command: 'remove.cancel', when: 'panel == "remove"' }
+    ]
+  },
+  {
+    title: 'Worktree setup',
+    doc: `A new worktree provisions itself: it copies the main checkout's \`.env\`
+and rewrites it for this branch, creates the storage directories, installs the
+dependencies, links the site and creates and migrates a database of its own.
+The checklist opens on its own while that runs.
+
+The per-branch database is the part that matters most. Two worktrees sharing
+one \`DB_DATABASE\` overwrite each other's test data, and the failure looks like
+a bug in the feature rather than a shared database.
+
+\`⌘K W\` runs it again for the worktree you are in. Every step is idempotent, so
+it is also the repair for an install that died halfway. Over the checklist,
+\`⏎\` re-runs from the step that failed and Escape only hides it — the steps run
+in main and carry on.`,
+    binds: [
+      { key: 'super+k w', command: 'worktree.provision' },
+      { key: 'enter', command: 'provision.confirm', when: 'panel == "provision"' },
+      { key: 'escape', command: 'provision.cancel', when: 'panel == "provision"' }
     ]
   },
   {
@@ -423,13 +445,56 @@ comment on — loose, it would swallow the letter for no reason.`,
     doc: `\`⌃I\` and \`⌃O\` walk this branch's sessions with vim's jumplist sense: \`⌃O\`
 goes back through what you were doing, \`⌃I\` forward again. \`⌃W\` is the other
 chat, not the readline word-delete — it has to work from the composer, which
-is where you are when you want to go back.`,
+is where you are when you want to go back.
+
+\`⌘⇧W\` forgets the open session: shift on \`⌘W\`, which closes the panel, so
+the pair reads as "close this" and "close this for good". It asks first, and
+what it deletes is Floe's record — the transcript stays on disk.`,
     binds: [
       { key: 'super+t', command: 'session.new' },
+      { key: 'super+shift+w', command: 'session.delete' },
       { key: 'ctrl+i', command: 'session.prev' },
       { key: 'ctrl+o', command: 'session.next' },
       { key: 'ctrl+w', command: 'session.alternate' },
       { key: 'super+n', command: 'worktree.new' }
+    ]
+  },
+  {
+    title: 'Queries',
+    doc: `A query is another agent answering beside this chat — \`@codex analisa isso\`
+opens one. The three keys are what end it: \`⌘⇧M\` merges the conversation into
+the chat, \`⌘⇧G\` lets the chat read it without closing anything, \`⌘⇧D\` throws
+it away.
+
+They work from either panel, so you can merge without leaving the chat. \`⌘W\`
+deliberately does NOT discard — closing a panel and throwing a conversation
+away are different things, and one key for both would make the safe habit
+destructive.`,
+    binds: [
+      { key: 'super+shift+m', command: 'query.merge' },
+      { key: 'super+shift+g', command: 'query.peek' },
+      { key: 'super+shift+d', command: 'query.discard' }
+    ]
+  },
+  {
+    title: 'Selecting Sessions',
+    doc: `In the worktree list \`x\` ticks the session under the cursor and \`d\` deletes
+what is ticked — or, with nothing ticked, the one you are on. Ticks are a SET,
+not a range: sessions worth clearing out are scattered down the list and under
+different branches, so \`v\`'s contiguous selection would be the wrong shape.
+
+\`escape\` unticks everything. The mouse says the same three things — \`⌘\`-click
+ticks one, \`⇧\`-click ticks up to it from the last one, and right-click offers
+all three with their keys printed beside them — and a red button appears in
+the panel header while anything is ticked, so what \`d\` is about to delete is
+always on screen.
+
+\`d\` asks before it deletes, and what it deletes is Floe's record: the Claude
+transcripts stay on disk.`,
+    binds: [
+      { key: 'x', command: 'session.mark', when: 'panel == "worktrees"' },
+      { key: 'd', command: 'session.deleteMarked', when: 'panel == "worktrees"' },
+      { key: 'escape', command: 'session.markClear', when: 'panel == "worktrees" and marked' }
     ]
   }
 ]
@@ -459,7 +524,10 @@ export const UNBOUND_SUGGESTIONS: Array<{ command: string; key?: string }> = [
   { command: 'group.delete' },
   { command: 'auth.account', key: 'super+shift+a' },
   { command: 'keybindings.reset' },
-  { command: 'session.delete', key: 'super+shift+w' },
   { command: 'session.deleteOthers' },
-  { command: 'session.deleteAll' }
+  { command: 'session.deleteAll' },
+  { command: 'session.deleteIdle' },
+  { command: 'query.open', key: 'super+shift+q' },
+  { command: 'query.focus' },
+  { command: 'query.reopen' }
 ]

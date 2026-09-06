@@ -7,11 +7,19 @@ import { join } from 'node:path'
 
 // Same in-memory hook the other main-process tests use. HOME points at a temp
 // dir so floe.toml is this test's, not the machine's.
+// The four modules turn.ts calls out to are stubbed — but only when turn.ts is
+// the importer, so the real sessionStore and floe.toml reader still answer. The
+// stubs record what would have happened: which turn was started, on which key,
+// and whether the relay was armed. That is the whole of what dispatchTurn and
+// startTurn decide, and none of it needs a child process.
 const hookSource = `
 import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+const STUBS = { './agent': 'stub:agent', './relay': 'stub:relay', './runtimes': 'stub:runtimes', './queries': 'stub:queries' }
 export async function resolve(specifier, context, next) {
   if (specifier === 'electron') return { url: 'stub:electron', shortCircuit: true, format: 'module' }
+  if (STUBS[specifier] && (context.parentURL ?? '').endsWith('/turn.ts'))
+    return { url: STUBS[specifier], shortCircuit: true, format: 'module' }
   if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\\.[a-z]+$/i.test(specifier)) {
     try {
       const base = context.parentURL ? new URL(specifier, context.parentURL) : pathToFileURL(specifier)
@@ -21,11 +29,34 @@ export async function resolve(specifier, context, next) {
   }
   return next(specifier, context)
 }
+const SOURCE = {
+  'stub:electron': "export const app = { getPath: () => process.env.FLOE_TEST_USERDATA || '/tmp' }; export class BrowserWindow {}; export const ipcMain = { handle(){}, on(){} }; export const dialog = {}; export const shell = {}; export const safeStorage = { isEncryptionAvailable: () => false }; export default {};",
+  'stub:agent':
+    "export function sendToAgent(win, key, wt, prompt, options) { globalThis.__started.push({ key, prompt, options, on: 'claude' }) }",
+  'stub:runtimes':
+    "export function runRuntime(win, key, wt, prompt, provider, model, effort, permissionMode) { globalThis.__started.push({ key, prompt, options: { provider, model, effort, permissionMode }, on: provider }) }",
+  'stub:relay':
+    "export function armRelay(win, key) { globalThis.__armed.push({ kind: 'relay', key }) }" +
+    "\\nexport function armAddress(win, key) { globalThis.__armed.push({ kind: 'address', key }) }",
+  'stub:queries':
+    "export const QUERY_MODE = 'plan'" +
+    "\\nexport function canOpenQuery(h) { return globalThis.__canOpen.includes(h) }" +
+    "\\nexport function refuseReason(h) { return h + ' has no read-only mode' }" +
+    "\\nexport function canRunInQuery(win, key, harness) { return !globalThis.__busyQ.includes(key) }" +
+    "\\nexport function openQueryFor(win, parentKey, wt, spec) {" +
+    "\\n  if (!globalThis.__canOpen.includes(spec.harness)) return null" +
+    "\\n  const key = parentKey + '~' + spec.harness" +
+    "\\n  const query = { id: key, sessionId: parentKey, harness: spec.harness, openedBy: spec.openedBy }" +
+    "\\n  globalThis.__opened.push(query)" +
+    "\\n  return { query, key }" +
+    "\\n}" +
+    "\\nexport function noteOpened() {}" +
+    "\\nexport function echoOpening(win, key, text) { globalThis.__echoed.push({ key, text }) }" +
+    "\\nexport function refuse(win, key, reason) { globalThis.__refused.push({ key, reason }) }" +
+    "\\nexport function queryOptions(base) { return { ...base, permissionMode: 'plan' } }"
+}
 export async function load(url, context, next) {
-  if (url === 'stub:electron') {
-    const src = "export const app = { getPath: () => process.env.FLOE_TEST_USERDATA || '/tmp' }; export class BrowserWindow {}; export const ipcMain = { handle(){}, on(){} }; export const dialog = {}; export const shell = {}; export const safeStorage = { isEncryptionAvailable: () => false }; export default {};"
-    return { format: 'module', shortCircuit: true, source: src }
-  }
+  if (SOURCE[url]) return { format: 'module', shortCircuit: true, source: SOURCE[url] }
   return next(url, context)
 }
 `
@@ -50,7 +81,50 @@ writeFileSync(
   ].join('\n')
 )
 
-const { routeOf, optionsForRoute } = await import('./turn.ts')
+interface TurnStarted {
+  key: string
+  prompt: string
+  options: { provider?: string; permissionMode?: string }
+  on: string
+}
+interface QueryOpened {
+  id: string
+  harness: string
+  openedBy?: string
+}
+declare global {
+  // eslint-disable-next-line no-var
+  var __started: TurnStarted[]
+  // eslint-disable-next-line no-var
+  var __armed: Array<{ kind: string; key: string }>
+  // eslint-disable-next-line no-var
+  var __opened: QueryOpened[]
+  // eslint-disable-next-line no-var
+  var __echoed: Array<{ key: string; text: string }>
+  // eslint-disable-next-line no-var
+  var __refused: Array<{ key: string; reason: string }>
+  // The harnesses that can hold a query in this test — the `plan` gate.
+  // eslint-disable-next-line no-var
+  var __canOpen: string[]
+  /** Query keys already answering, for the one-turn-at-a-time guard. */
+  // eslint-disable-next-line no-var
+  var __busyQ: string[]
+}
+
+const { routeOf, optionsForRoute, dispatchTurn, startTurn } = await import('./turn.ts')
+
+const WIN = {} as never
+const CLAUDE = { provider: 'claude', model: 'opus', effort: 'medium', permissionMode: 'skip' } as never
+
+function fresh(): void {
+  globalThis.__started = []
+  globalThis.__armed = []
+  globalThis.__opened = []
+  globalThis.__echoed = []
+  globalThis.__refused = []
+  globalThis.__canOpen = ['claude', 'codex', 'opencode']
+  globalThis.__busyQ = []
+}
 
 test('a handle is read the same way whichever door the prompt came in', () => {
   assert.deepEqual(routeOf('@codex revisa isso'), {
@@ -86,4 +160,126 @@ test('a routed message takes the harness block, then falls back', () => {
   assert.equal(claude.provider, 'claude')
   assert.equal(claude.model, 'opus')
   assert.equal(claude.effort, 'medium')
+})
+
+test('a message with no handle is the session\'s own turn', () => {
+  fresh()
+  const out = dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: 'segue',
+    origin: 'user',
+    options: CLAUDE
+  })
+  assert.equal(out.key, 'sess')
+  assert.equal(out.query, undefined)
+  assert.deepEqual(globalThis.__opened, [])
+  assert.equal(globalThis.__started[0].key, 'sess')
+})
+
+test('a routed message opens the query and runs there, not in the session', () => {
+  fresh()
+  const out = dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: '@codex analisa isso',
+    route: { harness: 'codex', prompt: 'analisa isso' },
+    origin: 'user'
+  })
+  assert.equal(out.key, 'sess~codex')
+  assert.equal(out.query, true)
+  assert.equal(globalThis.__opened[0].harness, 'codex')
+  const [turn] = globalThis.__started
+  assert.equal(turn.key, 'sess~codex')
+  // The handle came off on the way, exactly as it does for a session turn.
+  assert.equal(turn.prompt, 'analisa isso')
+  // Read-only, whatever the parent is on. The parent here is `skip`.
+  assert.equal(turn.options.permissionMode, 'plan')
+  // And the panel shows the line that opened it.
+  assert.deepEqual(globalThis.__echoed, [{ key: 'sess~codex', text: '@codex analisa isso' }])
+})
+
+test('a turn on a query key arms neither the relay nor the address', () => {
+  fresh()
+  startTurn(WIN, 'sess~codex', '/wt', 'e o hook de reload?', {
+    provider: 'codex',
+    model: '',
+    effort: 'medium',
+    permissionMode: 'plan'
+  })
+  // Nothing watches a query\'s answer: merge and peek are what read it, under
+  // your command. Armed here, the parent\'s own model would take a turn inside
+  // the query panel the second codex finished.
+  assert.deepEqual(globalThis.__armed, [])
+  assert.equal(globalThis.__started[0].on, 'codex')
+})
+
+test('a session turn still arms, so nothing else changed', () => {
+  fresh()
+  startTurn(WIN, 'sess', '/wt', 'segue', CLAUDE)
+  assert.equal(globalThis.__armed.length, 1)
+})
+
+test('a query cannot open another query', () => {
+  fresh()
+  const out = dispatchTurn({
+    win: WIN,
+    parentKey: 'sess~codex',
+    worktreePath: '/wt',
+    prompt: '@gemini o que achas',
+    route: { harness: 'gemini', prompt: 'o que achas' },
+    origin: 'agent'
+  })
+  assert.match(out.error ?? '', /cannot open another query/)
+  assert.deepEqual(globalThis.__opened, [])
+  assert.deepEqual(globalThis.__started, [])
+  assert.equal(globalThis.__refused[0].key, 'sess~codex')
+})
+
+test('a harness with no read-only mode is refused, not approximated', () => {
+  fresh()
+  const out = dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: '@gemini revisa',
+    route: { harness: 'gemini', prompt: 'revisa' },
+    origin: 'user'
+  })
+  assert.match(out.error ?? '', /gemini has no read-only mode/)
+  assert.deepEqual(globalThis.__started, [])
+  // Said in the chat that asked, so the refusal is not silent.
+  assert.equal(globalThis.__refused[0].key, 'sess')
+})
+
+test('who opened it is carried through, so an agent-opened panel says so', () => {
+  fresh()
+  dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: 'revisa',
+    route: { harness: 'codex', prompt: 'revisa' },
+    origin: 'agent'
+  })
+  assert.equal(globalThis.__opened[0].openedBy, 'agent')
+})
+
+test('a second message into a busy query does not start a turn beside the first', () => {
+  fresh()
+  globalThis.__busyQ = ['sess~codex']
+  const out = dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: '@codex e mais isso',
+    route: { harness: 'codex', prompt: 'e mais isso' },
+    origin: 'user'
+  })
+  assert.match(out.error ?? '', /still answering/)
+  // One conversation, one turn: a second `codex exec` on the same thread races
+  // the first, and whichever finishes last overwrites the other's bookkeeping.
+  assert.deepEqual(globalThis.__started, [])
 })

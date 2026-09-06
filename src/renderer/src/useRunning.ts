@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentEvent, AgentEventEnvelope, NotifySoundId } from '../../shared/types'
+import { isQueryKey } from '../../shared/queries.ts'
 import { playDoneSound } from './sounds.ts'
 
 // Sessions with an answer you have not seen. Kept in the same store as the
@@ -124,6 +125,17 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
   useEffect(
     () =>
       window.floe.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
+        // A query's activity is the QUERY panel's business, not the session
+        // list's. This is the ONE place the projection is filtered: the raw
+        // APIs stay raw, because `useTranscript` uses `agent.active()` as its
+        // watchdog and a hidden qkey would make every QueryPanel conclude on
+        // its own that the turn had ended, drop "is typing" and drain its queue
+        // over a live turn. See the plan's "the filter is the projection's".
+        //
+        // The unread mark is the concrete leak: a qkey never matches a row in
+        // the list (openKeys only ever holds the session's own aliases), so a
+        // mark set on one can never be read and hangs there for good.
+        if (isQueryKey(key)) return
         lastEventAt.current.set(key, Date.now())
         const live = event.kind !== 'done' && event.kind !== 'error'
         // Any turn ending is the news the sound carries — including the session
@@ -188,8 +200,11 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
       ])
       if (stopped) return
       const now = Date.now()
-      if (keys) setBusy((prev) => reconcileLive(prev, keys, lastEventAt.current, now))
-      if (asking) setWaiting((prev) => reconcileLive(prev, asking, lastEventAt.current, now))
+      // Filtered HERE and not in main, for the reason above: `agent.active()`
+      // has to keep telling the truth to the panel that asks about itself.
+      const own = (list: string[]): string[] => list.filter((k) => !isQueryKey(k))
+      if (keys) setBusy((prev) => reconcileLive(prev, own(keys), lastEventAt.current, now))
+      if (asking) setWaiting((prev) => reconcileLive(prev, own(asking), lastEventAt.current, now))
     }
     void sync()
     const timer = setInterval(() => void sync(), 4_000)
