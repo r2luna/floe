@@ -17,6 +17,8 @@ import type {
 import { COMMAND_IDS } from '../shared/commandIds'
 import { parseArtifactSpec } from '../shared/artifact'
 import { listProjects } from './projects'
+import { boardFor, pushBoard, releaseTask } from './colony/runner'
+import { addTask, getTask, removeTask, TASK_KINDS, type TaskKind } from './colony/store'
 import {
   changedFiles,
   createWorktree,
@@ -1113,6 +1115,85 @@ function registerTools(server: McpServer, token: string): void {
         ok: true,
         note: "Decision panel shown. Wait for the user's follow-up message with their selection before continuing."
       })
+    }
+  )
+
+  // --- Colony (the agent board — one column per profile, one worktree per card)
+
+  server.tool(
+    'colony_board',
+    "The project's colony board: every column with its skill, model and cap, and every task in it. Read this before answering anything about the board — the lanes move cards while you are idle, so a remembered board is a wrong one.",
+    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    async ({ project }) => {
+      try {
+        return textResult(boardFor(projectFor(project) ?? project))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_add_task',
+    'Put a task on the board. With start=true it is released straight away: its worktree and branch are cut, its brief is written to specs/<branch>/task.md, and it goes to the first stage. Without it, it waits in the backlog and costs nothing.',
+    {
+      project: z.string().describe('The repo root path of the project.'),
+      name: z
+        .string()
+        .describe("Short kebab-case name — the branch's last segment. What the change IS, not what it fixes."),
+      brief: z.string().describe('What the first lane reads. The request in the user\'s own words, plus the file, symbol or reproduction you can see.'),
+      kind: z.enum(TASK_KINDS as [string, ...string[]]).optional().describe('feat, fix or chore. Defaults to feat.'),
+      start: z.boolean().optional().describe('Release it now — this is what cuts the worktree. Default false.')
+    },
+    async ({ project, name, brief, kind, start }) => {
+      try {
+        const root = projectFor(project) ?? project
+        const task = addTask({ project: root, name, brief, kind: kind as TaskKind | undefined })
+        const win = getWindow()
+        if (start && win) {
+          const released = await releaseTask(win, task.id)
+          pushBoard(win, root)
+          return textResult(released)
+        }
+        pushBoard(win, root)
+        return textResult(task)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_start_task',
+    'Release a task from the backlog: cut its worktree and branch, write its brief where the first lane looks for it, and put it at that stage\'s door. A no-op for a task that already left the backlog.',
+    { task: z.string().describe('The task id, from colony_board.') },
+    async ({ task }) => {
+      try {
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available to cut a worktree in.' })
+        const released = await releaseTask(win, task)
+        pushBoard(win, released.project)
+        return textResult(released)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_remove_task',
+    'Take a task off the board. Its worktree and branch are left standing — a card leaving the board is bookkeeping, and deleting work is a different question, asked by remove_worktree.',
+    { task: z.string().describe('The task id, from colony_board.') },
+    async ({ task }) => {
+      try {
+        const found = getTask(task)
+        if (!found) return textResult({ error: `Unknown task: ${task}` })
+        removeTask(task)
+        pushBoard(getWindow(), found.project)
+        return textResult({ ok: true, removed: found.name })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
     }
   )
 

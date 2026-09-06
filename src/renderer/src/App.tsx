@@ -1263,6 +1263,8 @@ export default function App() {
     editSkill,
     panelEl: panelAt,
     rowsOf,
+    project: projects.current?.path,
+    openChat: (session, firstPrompt) => setLane((l) => open(l, mkPanel('chat', undefined, session, firstPrompt))),
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
@@ -2163,8 +2165,9 @@ export default function App() {
                     // every panel has an order, so nothing needs to say "after
                     // me".
                     onOpen={(child) =>
-                      setLane((l) =>
-                        open(l, {
+                      setLane((l) => {
+                        const from = l.panels[l.focus]
+                        const next = open(l, {
                           ...mkPanel(
                             child.kind,
                             child.sub,
@@ -2179,7 +2182,14 @@ export default function App() {
                           // past five arguments to skip it.
                           firstAttached: child.firstAttached
                         })
-                      )
+                        // A panel that FOLLOWS something — the colony's board
+                        // swapping the card's chat in as the cursor moves —
+                        // must not take the focus with it, or every `j` would
+                        // drop you out of the panel you are driving.
+                        if (!child.keepFocus) return next
+                        const back = next.panels.findIndex((p) => p.id === from?.id)
+                        return back === -1 ? next : focusAt(next, back)
+                      })
                     }
                   />
                 </div>

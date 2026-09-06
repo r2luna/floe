@@ -255,6 +255,75 @@ check-interval-hours = 6
 groups = ["Projects"]
 
 # ------------------------------------------------------------------------------
+# | The Colony Board
+# ------------------------------------------------------------------------------
+# |
+# | One column per agent profile, one card per task, one worktree per card. This
+# | is the board every project starts from; a project overrides it in
+# | \`projects/<dir>/colony.toml\`, which is read with the same two rules:
+# |
+# |   THE STAGE LIST IS ALL-OR-NOTHING. Declare any \`[[colony.stage]]\` here and
+# |   it replaces the built-in six entirely. Patching an ordered list needs
+# |   "insert after coder" rules nobody can read at a glance.
+# |
+# |   SCALARS INHERIT. \`cap\` unset in a project's file means this one.
+# |
+# | A stage carries five things, and the ORDER OF THE FILE IS THE EXECUTION
+# | ORDER — there is no \`order\` key to drift from it:
+# |
+# |   name     the column label, free text
+# |   skill    the FLOE skill that runs when a task enters (not a slash command
+# |            belonging to one harness — that is what lets a lane change model)
+# |   harness  claude, codex, opencode, gemini, lmstudio, ollama. Unset means
+# |            whatever a new session would have used
+# |   model    that harness's own slug. Unset, likewise
+# |   cap      how many tasks this stage WORKS at once. Tasks waiting to ENTER it
+# |            cost nothing, so a full stage never freezes the one behind it
+# |
+# | \`inbox\` and \`done\` are never written here. They are the ends of any board —
+# | backlog and exit — not stages, and declaring them would invite deleting them.
+# |
+# | Commented out because the built-in board is the same list: uncomment to
+# | change it. The six skills it names ship with Floe.
+# |
+# ------------------------------------------------------------------------------
+
+# [colony]
+# cap = 5
+#
+# [[colony.stage]]
+# name  = "specifier"
+# skill = "colony-specify"
+# model = "opus"
+#
+# [[colony.stage]]
+# name  = "coder"
+# skill = "colony-implement"
+# model = "opus"
+#
+# [[colony.stage]]
+# name  = "cleaner"
+# skill = "colony-refactor"
+# model = "opus"
+# cap   = 1
+#
+# [[colony.stage]]
+# name  = "architect"
+# skill = "colony-architecture"
+# model = "sonnet"
+#
+# [[colony.stage]]
+# name  = "hardener"
+# skill = "colony-review"
+# model = "opus"
+#
+# [[colony.stage]]
+# name  = "qa"
+# skill = "colony-verify"
+# model = "haiku"   # a lane that runs the suite does not need opus
+
+
+# ------------------------------------------------------------------------------
 # | Integrations
 # ------------------------------------------------------------------------------
 # |

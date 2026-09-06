@@ -20,6 +20,7 @@ import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
 import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
+import type { Board, ColonyTask, TaskKind } from '../shared/colony'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -760,6 +761,27 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // Stamp notes as sent. They stay in the list — the thread is the record.
       markSent: (sessionKey: string, ids: string[]): Promise<void> =>
         ipcRenderer.invoke('threadComments:markSent', sessionKey, ids)
+    },
+    // The colony board. One read, so the panel repaints from a single shape.
+    colony: {
+      board: (project: string): Promise<Board> => ipcRenderer.invoke('colony:board', project),
+      add: (task: { project: string; name: string; kind?: TaskKind; brief: string }): Promise<ColonyTask> =>
+        ipcRenderer.invoke('colony:add', task),
+      // Cuts the worktree and puts the card at the first stage's door.
+      release: (id: string): Promise<ColonyTask> => ipcRenderer.invoke('colony:release', id),
+      remove: (id: string, project: string): Promise<void> => ipcRenderer.invoke('colony:remove', id, project),
+      // `fresh` says she was just minted, so the caller opens her with `opener`
+      // as the chat's first message — a nanny who has not read her own skill is
+      // just a chat in the project root.
+      nanny: (
+        project: string
+      ): Promise<{ sessionId: string; worktreePath: string; fresh: boolean; opener: string }> =>
+        ipcRenderer.invoke('colony:nanny', project),
+      onEvent: (cb: (event: { project: string }) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, event: { project: string }): void => cb(event)
+        ipcRenderer.on('colony:event', listener)
+        return () => ipcRenderer.removeListener('colony:event', listener)
+      }
     },
     plans: {
       list: (worktreePath: string, branch?: string): Promise<PlanFile[]> =>

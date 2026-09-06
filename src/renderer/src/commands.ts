@@ -92,6 +92,16 @@ export interface CommandContext {
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
+  /** The open project's repo root. The colony board is scoped to it. */
+  project?: string
+  /**
+   * Put a session in the lane's session slot.
+   *
+   * `makePanel` cannot: a chat is identified by its SESSION and not by a `sub`,
+   * so building one needs an argument the registry has no other reason to take.
+   * The colony is the caller — it opens the nanny, and the card's own chat.
+   */
+  openChat: (session: { id: string; worktreePath: string }, firstPrompt?: string) => void
   /**
    * The worktree's registered processes.
    *

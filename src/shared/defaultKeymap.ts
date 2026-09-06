@@ -59,6 +59,27 @@ agent ran is often the one you want to run yourself.`,
     ]
   },
   {
+    title: 'The colony board',
+    doc: `The board is two axes: \`h\`/\`l\` cross columns and \`j\`/\`k\` walk the cards
+inside one. The cursor drives the panel to its right, so moving is reading;
+\`⏎\` forces the card's chat open and takes you into it.
+
+\`ESC\` swaps that same panel to the nanny — the board's own session, one per
+project. \`n\` goes there too, with the composer ready, because there is no "new
+task" dialog: she already knows the base branch and which stage is full.
+
+\`s\` releases a task from the backlog, which is where its worktree gets cut, and
+\`x\` takes a card off the board without touching its branch.`,
+    binds: [
+      { key: 'h', command: 'colony.left', when: 'panel == "colony"' },
+      { key: 'l', command: 'colony.right', when: 'panel == "colony"' },
+      { key: 's', command: 'colony.start', when: 'panel == "colony"' },
+      { key: 'x', command: 'colony.archive', when: 'panel == "colony"' },
+      { key: 'n', command: 'colony.new', when: 'panel == "colony"' },
+      { key: 'escape', command: 'colony.nanny', when: 'panel == "colony"' }
+    ]
+  },
+  {
     title: 'Panels',
     doc: `\`⌃H\` and \`⌃L\` always cross columns, never onto a panel stacked above or
 below. They use ctrl rather than a bare letter because moving between panels
@@ -87,11 +108,15 @@ the narrower one first. \`⌘1\`–\`⌘9\` jump straight to a panel by position
     doc: `\`panel.goto\` opens a panel by name rather than by position, so the binding
 means the same thing whatever the layout looks like. From the project and
 worktree lists, bare \`h\` and \`l\` jump between the two directly — those keys
-stay free everywhere else.`,
+stay free everywhere else.
+
+\`⌘K B\` is the colony board — b for board, because \`⌘K C\` is already the
+commands panel and the two are the pair you would most easily confuse.`,
     binds: [
       { key: 'super+e', command: 'panel.goto', arg: 'worktrees' },
       { key: 'super+shift+e', command: 'panel.goto', arg: 'projects' },
       { key: 'super+y', command: 'panel.goto', arg: 'terminal' },
+      { key: 'super+k b', command: 'panel.goto', arg: 'colony' },
       { key: 'super+k g', command: 'panel.goto', arg: 'changes' },
       { key: 'super+k f', command: 'panel.goto', arg: 'files' },
       { key: 'super+k p', command: 'panel.goto', arg: 'plans' },

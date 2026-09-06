@@ -1,0 +1,433 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — colony panel (agent kanban, project scope)</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+
+  /* --- lane shell (just enough to see the panel where it would sit) ------- */
+  .lane { display: flex; gap: 8px; height: 100vh; padding: 8px; box-sizing: border-box; }
+  .lane-col { display: flex; min-width: 0; }
+  .lane-col[data-w="220"] { flex: 0 0 220px; }
+  .lane-col[data-w="600"] { flex: 0 0 600px; }
+  .lane-col[data-grow] { flex: 1 1 900px; min-width: 900px; }
+  .panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+           background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .panel[hidden] { display: none; }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px;
+                border-bottom: 1px solid var(--line-soft); flex: none; }
+  .panel-name { color: var(--text-strong); flex: none; }
+  .panel-sub { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+  .glyph { color: var(--dim); flex: none; }
+
+  /* Chrome's own blue: the focus ring it draws on a clicked button, and the
+     selection wash. Both are the browser's, not the app's, and both read as a
+     bright bar in a window with no saturated colour in it. */
+  :focus { outline: none; }
+  :focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+  ::selection { background: var(--wash-4); color: var(--text-strong); }
+
+  /* buttons are outline chips, never filled */
+  .act { border: 1px solid var(--edge); background: var(--wash-1); color: var(--text); border-radius: 1px;
+         font: inherit; font-size: 11px; padding: 2px 9px; cursor: pointer; }
+  .act:hover { background: var(--wash-3); }
+  .act[data-on] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+  /* --- attention: the tasks that are stuck waiting on YOU ---------------- */
+  .fatt { display: flex; align-items: center; gap: 10px; margin: -8px -8px 8px; padding: 5px 11px;
+          border-bottom: 1px solid var(--line-soft); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  .fatt-tag { color: var(--accent); font-size: 10px; letter-spacing: .08em; flex: none; }
+  .fatt-item { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fatt-item b { color: var(--text-strong); font-weight: 400; }
+  .fatt-key { color: var(--dim); font-size: 11px; margin-left: auto; flex: none; }
+
+  /* --- the board --------------------------------------------------------- */
+  .board { display: flex; gap: 6px; align-items: stretch; height: 100%; min-height: 0; }
+  /* Cards are targets, not prose. Dragging across one used to paint the
+     browser's blue selection down its padding, which read as a stray bar. */
+  .board { user-select: none; }
+  /* No scrollbar inside the board. A column that overflows still scrolls; the
+     thumb sitting between two cards was reading as a bar drawn ON one of them. */
+  .board *::-webkit-scrollbar { width: 0; height: 0; }
+  .board * { scrollbar-width: none; }
+  .fcol { display: flex; flex-direction: column; min-width: 0; flex: 1 1 210px;
+          border: 1px dashed var(--line); border-radius: var(--radius); background: var(--wash-1); }
+  .fcol[data-empty] { background: none; }
+  /* An empty column collapses to a thin spine: eight stages fit beside a chat
+     instead of turning the board into a field of empty boxes. */
+  .fcol[data-collapsed] { flex: 0 0 30px; }
+  .fcol[data-collapsed] .fcol-body { display: none; }
+  .fcol[data-collapsed] .fcol-head { flex-direction: column; height: 100%; padding: 8px 0; gap: 8px; border: 0; }
+  .fcol[data-collapsed] .fcol-name { writing-mode: vertical-rl; }
+  .fcol[data-collapsed] .fcol-cap, .fcol[data-collapsed] .fcol-def { display: none; }
+
+  .fcol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 5px 8px; flex: none;
+               border-bottom: 1px solid var(--line-soft); }
+  /* What this column IS: the skill it runs and the model it runs it on. In the
+     header because that is the column's definition — the name is just a label. */
+  .fcol-def { flex-basis: 100%; display: flex; gap: 6px; color: var(--faint); font-size: 10px; }
+  .fcol-skill { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fcol-model { flex: none; }
+  /* A harness that is not the app's default is worth naming; the model alone
+     would read as "opus" whether it came from claude or from codex. */
+  .fcol-model[data-alt] { color: var(--dimmer); }
+  .fcol-name { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+  .fcol[data-live] .fcol-name { color: var(--text-strong); }
+  .fcol-n { color: var(--faint); font-size: 10px; }
+  /* taken/cap. Text rather than ticks: at a cap of five the ticks are noise and
+     the number answers "does another one fit?" without counting anything. */
+  .fcol-cap { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcol-cap[data-full] { color: var(--accent); }
+
+  /* A column is three bands, and the band is what says the status — so the
+     card itself carries no status word. Only the two that are not "working"
+     are labelled: the cap counter in the header already counts the working. */
+  .fband { display: flex; flex-direction: column; gap: 4px; }
+  /* Indented to the card's own text, not to the band's edge: the label names
+     the rows under it, so it has to start where they start. */
+  .fband-tag { color: var(--faint); font-size: 10px; letter-spacing: .06em; padding-inline: 6px; }
+  .fband-tag[data-tone="ask"] { color: var(--accent); }
+  /* Holding sits in the column the task is trying to ENTER, at the bottom,
+     pinned: with five cards working above it, a queue that scrolled away would
+     hide the only thing that explains why nothing is moving. */
+  .fband[data-hold] { margin-top: auto; position: sticky; bottom: -6px; padding: 5px 0 0;
+                      border-top: 1px dashed var(--line); background: var(--panel); }
+  .fq { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid var(--line-soft);
+        border-radius: var(--radius); background: var(--wash-1); }
+  .fq-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmer); font-size: 11px; }
+  .fq-pos { color: var(--faint); font-size: 10px; }
+
+  /* --- card = one task = one worktree ------------------------------------ */
+  .fcard { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
+           padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+  /* The cursor, on a card rather than on a row.
+     `index.css` marks any [data-cursor] with a 2px bar down its left edge and a
+     wash behind it. That mark was designed for full-width list rows, where the
+     bar is the only edge available; a card already has four borders, so here the
+     border itself carries the cursor and the bar is switched off. Two marks for
+     one state read as two states. */
+  .fcard[data-cursor]::before { display: none; }
+
+  /* Selected, panel NOT focused: "where I was". A border one step up from the
+     other cards and nothing else — it must lose to the focused mark below, or
+     coming back to the board would not feel like coming back. */
+  .fcard[data-cursor] { border-color: var(--edge); background: var(--wash-2); }
+
+  /* Selected, panel focused: "where I am". Three things move together, because
+     one of them alone is not findable across eight columns — the border takes
+     the cursor slate, the surface lifts off the column, and the card's own text
+     comes up a step so the selected card reads as the legible one.
+
+     NOT the accent: accent is "this needs you" everywhere in the app — the
+     attention strip, the needs-you band, a blocked card, the unread dot. A
+     cursor wearing it would read as a card asking for an answer. #55688f is the
+     tone index.css already gives the focused cursor, so this is the same mark
+     the rest of the app uses, drawn on a box instead of a row. */
+  .panel[data-focused] .fcard[data-cursor] { border-color: #55688f; background: var(--panel-focused); }
+  .panel[data-focused] .fcard[data-cursor] .fcard-line { color: var(--text); }
+  .panel[data-focused] .fcard[data-cursor] .fcard-foot { color: var(--dimmer); }
+  .panel[data-focused] .fcard[data-cursor] .fkind { color: var(--text); border-color: var(--edge); }
+
+  /* And the column it sits in says so in its header, so finding the cursor is
+     one glance at the header row rather than a scan of every card. */
+  .fcol[data-here] .fcol-name { color: var(--text-strong); }
+  /* Needs you, as a badge — never as a border. The border belongs to the
+     cursor, and a card can be selected AND asking at the same time; a mark that
+     borrowed the border would simply vanish in that case. In the app this is a
+     tabler icon; here a glyph. */
+  .hmark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; flex: none;
+           border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 50%;
+           color: var(--accent); font-size: 9px; }
+  .fq-name { flex: 1 1 40px; }
+  /* what the task already carries. A held task that a stage signed off has a
+     diff; one straight out of the backlog has none, and that is the whole
+     difference between the two rows. */
+  .fq-dirt { flex: none; font-size: 10px; }
+  .fcard-top { display: flex; align-items: center; gap: 6px; }
+  .fkind { border: 1px solid var(--line); border-radius: 1px; color: var(--dimmer); font-size: 10px; padding: 0 5px; }
+  .fpass { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcard-name { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fcard-line { color: var(--dim); font-size: 11px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .fcard-foot { display: flex; align-items: center; gap: 8px; color: var(--time-dim); font-size: 10px; }
+  .fcard-foot .grow { margin-left: auto; }
+  .dirt-a { color: #6ea86e; } .dirt-m { color: #c9a05f; } .dirt-d { color: #c07f7f; }
+
+  /* --- the command chat (the "lieutenant" of the reference shot) --------- */
+  .msg { margin-bottom: 10px; }
+  .msg-head { display: flex; gap: 8px; align-items: baseline; }
+  .msg-nick { color: var(--nick-you); }
+  .msg-nick[data-who="claude"] { color: var(--nick-claude); }
+  .msg-nick[data-who="nanny"] { color: var(--nick-gemini); }
+  .msg-time { color: var(--time-dim); font-size: 10px; }
+  .msg-body { color: var(--text); }
+  .msg-body .dim { color: var(--dim); }
+  .composer { flex: none; border-top: 1px solid var(--line-soft); padding: 8px 10px; color: var(--faint); }
+
+  /* --- key bar ----------------------------------------------------------- */
+  .keys { flex: none; display: flex; gap: 14px; padding: 4px 11px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 10px; }
+  .keys b { color: var(--dimmer); font-weight: 400; }
+
+  .toolbar { position: fixed; right: 10px; bottom: 8px; display: flex; gap: 6px; z-index: 5; }
+
+  :root[data-theme='light'] .fatt { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+</style>
+</head>
+<body>
+<div class="lane">
+
+  <!-- projects (exists already, here only for context) -->
+  <div class="lane-col" data-w="220">
+    <div class="panel">
+      <div class="panel-head"><span class="glyph">▤</span><span class="panel-name">projects</span></div>
+      <div class="panel-body" style="padding:6px 4px">
+        <div class="row row-session" style="padding-left:8px"><span class="dot"></span><span class="row-name">floe</span></div>
+        <div class="row row-session" data-active style="padding-left:8px"><span class="dot dot-unread"></span><span class="row-name">rookery</span></div>
+        <div class="row row-session" style="padding-left:8px"><span class="dot"></span><span class="row-name">pinguim.io</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- COLONY: the new panel -->
+  <div class="lane-col" data-grow>
+    <div class="panel" data-focused>
+      <div class="panel-head">
+        <span class="glyph">◫</span>
+        <span class="panel-name">colony</span>
+        <span class="panel-sub">rookery · base master · 12 tasks · 6 in flight</span>
+        <button class="act" id="collapse" data-on>empty columns: spine</button>
+        <button class="act">edit stages…</button>
+      </div>
+
+      <div class="panel-body">
+        <div class="fatt">
+          <span class="fatt-tag">ATTENTION</span>
+          <span class="fatt-item"><b>tactical-persistence</b> — the specifier asks whether the old format still has to be read</span>
+          <span class="fatt-key">⏎ answer · 2 waiting</span>
+        </div>
+
+        <div class="board" id="board"></div>
+      </div>
+
+      <div class="keys">
+        <span><b>h l</b> column</span><span><b>j k</b> card</span><span><b>⏎</b> open chat</span>
+        <span><b>H L</b> move stage</span><span><b>n</b> new task → nanny</span><span><b>x</b> archive</span><span><b>ESC</b> nanny</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- One slot, two occupants: the chat of the card under the cursor, and the
+       nanny — the board's own session. ESC swaps between them. -->
+  <div class="lane-col" data-w="600">
+    <div class="panel" id="p-chat">
+      <div class="panel-head"><span class="glyph">▸</span><span class="panel-name">chat</span><span class="panel-sub">entity-identity · coder</span></div>
+      <div class="panel-body">
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick">r2luna</span><span class="msg-time">14:21</span></div>
+          <div class="msg-body">how is the board?</div>
+        </div>
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick" data-who="claude">claude<span class="irc-host">@opus-5</span></span><span class="msg-time">14:21</span></div>
+          <div class="msg-body">
+            Six tasks in flight, two stopped waiting on you.<br><br>
+            <span class="dim">specifier</span> — full at 5/5, one more holding at its door.<br>
+            <span class="dim">coder</span> — entity-identity, 12m, writing the store.<br>
+            <span class="dim">cleaner</span> — targeting-policy, second CRAP pass.<br><br>
+            thrust-clamp is holding at cleaner's door — cleaner runs one at a time.
+          </div>
+        </div>
+      </div>
+      <div class="composer">Follow-up… (⏎ send · ⇧⏎ newline)</div>
+    </div>
+
+    <div class="panel" id="p-nanny" hidden>
+      <div class="panel-head"><span class="glyph">◐</span><span class="panel-name">nanny</span><span class="panel-sub">rookery · the whole board</span></div>
+      <div class="panel-body">
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick">r2luna</span><span class="msg-time">14:24</span></div>
+          <div class="msg-body">what is holding?</div>
+        </div>
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick" data-who="nanny">nanny</span><span class="msg-time">14:24</span></div>
+          <div class="msg-body">
+            Two things, and neither needs a decision from you yet.<br><br>
+            <span class="dim">specifier</span> is full at 5/5, so signal-rollup has been holding at its door for 9m.
+            tactical-persistence is the one holding a spot without using it — it is blocked on your answer.<br><br>
+            <span class="dim">cleaner</span> runs one at a time, so thrust-clamp finished in coder 4m ago
+            and is still holding. Raising that cap to 2 clears both.<br><br>
+            Everything else is moving.
+          </div>
+        </div>
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick">r2luna</span><span class="msg-time">14:26</span></div>
+          <div class="msg-body">new task: the polling loop drops events while the tab is backgrounded</div>
+        </div>
+        <div class="msg">
+          <div class="msg-head"><span class="msg-nick" data-who="nanny">nanny</span><span class="msg-time">14:26</span></div>
+          <div class="msg-body">
+            Worktree <span class="dim">fix/backgrounded-polling</span> off master, kind <span class="dim">fix</span>.<br>
+            It is in the backlog. specifier is full, so it holds at that door until a spot opens —
+            two ahead of it. Say the word and it jumps the line.
+          </div>
+        </div>
+      </div>
+      <div class="composer">Ask the nanny… (⏎ send · ⇧⏎ newline)</div>
+    </div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="act" id="focus" data-on>board focused</button>
+  <button class="act" id="swap">right panel: card chat</button>
+  <button class="act" id="theme">theme</button>
+</div>
+
+<script>
+// This is what ~/.config/floe/projects/<dir>/colony.toml looks like: the order
+// is the file's order, the name is free text, each stage names the skill that
+// runs in it and may lower the default cap. `inbox` and `done` are the two
+// fixed ones — backlog and exit.
+// Which card the cursor is on.
+const CURSOR = 'entity-identity'
+const CAP = 5
+const STAGES = [
+  { name: 'inbox' },
+  { name: 'specifier', skill: 'colony-specify',      model: 'opus' },
+  { name: 'coder',     skill: 'colony-implement',    model: 'opus' },
+  { name: 'cleaner',   skill: 'colony-refactor',     model: 'opus', cap: 1 },
+  { name: 'architect', skill: 'colony-architecture', model: 'sonnet' },
+  { name: 'hardener',  skill: 'colony-review',       model: 'opus' },
+  { name: 'qa',        skill: 'colony-verify',       model: 'haiku' },
+  { name: 'done' }
+]
+const COLS = STAGES.map((s) => s.name)
+const CAPPED = (c) => c !== 'inbox' && c !== 'done'
+
+// A task's status IN the column it currently sits in:
+//   working  — the profile's agent is on it
+//   blocked  — it ran and stopped on a question for you
+//   holding  — waiting for a spot in THIS column, whether an earlier stage
+//              signed it off or it was just released from the backlog
+const CARDS = [
+  { col:'inbox', st:'holding', kind:'feat',  name:'geometry-epoch-pipeline', pass:0 },
+  { col:'inbox', st:'holding', kind:'chore', name:'static-spatial-index',    pass:0 },
+
+  { col:'specifier', st:'working', kind:'feat', name:'shot-acquisition', line:'reading the project spec, proposing the cut',
+    pass:0, ms:64000, tokens:12000 },
+  { col:'specifier', st:'working', kind:'feat', name:'adaptive-polling', line:'writing the acceptance criteria',
+    pass:0, ms:31000, tokens:7000 },
+  { col:'specifier', st:'blocked', kind:'fix',  name:'tactical-persistence', line:'asks whether the old format still has to be read',
+    pass:0, ms:120000, tokens:19000 },
+  { col:'specifier', st:'working', kind:'chore', name:'inbox-digest', line:'surveying what already exists',
+    pass:0, ms:12000, tokens:3000 },
+  { col:'specifier', st:'working', kind:'feat', name:'orbit-cache', line:'first read of the repo',
+    pass:0, ms:5000, tokens:1000 },
+  { col:'specifier', st:'holding', kind:'feat', name:'signal-rollup', pass:0 },
+
+  { col:'coder', st:'working', kind:'feat', name:'entity-identity', line:'reading the store before touching the reducer; test first',
+    pass:1, ms:773000, tokens:107000, dirt:{a:4,m:9,d:1} },
+  { col:'coder', st:'holding', kind:'feat', name:'epoch-distance-memo', pass:1 },
+
+  { col:'cleaner', st:'working', kind:'chore', name:'targeting-policy', line:'second pass: CRAP, DRY, coverage',
+    pass:2, ms:214000, tokens:54000, dirt:{a:0,m:6,d:2} },
+  { col:'cleaner', st:'holding', kind:'fix', name:'thrust-clamp', pass:1, dirt:{a:2,m:4,d:0} },
+
+  { col:'qa', st:'blocked', kind:'fix', name:'distance-instrumentation', line:'suite green, the web typecheck is still red',
+    pass:2, ms:96000, tokens:31000, dirt:{a:1,m:3,d:0} },
+
+  { col:'done', st:'working', kind:'feat', name:'static-orbit-index', line:'merged into master 20m ago', pass:3 }
+]
+
+const fmt = (ms) => { const t=Math.floor(ms/1000), s=t%60, m=Math.floor(t/60)
+  return m ? `${m}m ${String(s).padStart(2,'0')}s` : `${s}s` }
+const k = (n) => `${(n/1000).toFixed(0)}k`
+
+function dirt(d) {
+  if (!d) return ''
+  const p = []
+  if (d.a) p.push(`<span class="dirt-a">+${d.a}</span>`)
+  if (d.m) p.push(`<span class="dirt-m">~${d.m}</span>`)
+  if (d.d) p.push(`<span class="dirt-d">−${d.d}</span>`)
+  return p.join(' ')
+}
+
+function card(c, cursor) {
+  const foot = c.ms
+    ? `<div class="fcard-foot"><span>${fmt(c.ms)}</span><span>↓${k(c.tokens)}</span><span class="grow">${dirt(c.dirt)}</span></div>`
+    : ''
+  return `<article class="fcard" data-st="${c.st}"${cursor?' data-cursor':''}>
+    <div class="fcard-top">${c.st === 'blocked' ? '<span class="hmark">?</span>' : ''}<span class="fkind">${c.kind}</span><span class="fpass">✓${c.pass}</span></div>
+    <div class="fcard-name">${c.name}</div>
+    ${c.line ? `<div class="fcard-line">${c.line}</div>` : ''}
+    ${foot}
+  </article>`
+}
+
+// Holding shrinks to one line: no agent is on it, so there is no elapsed and no
+// tokens to show. It keeps its diff, which is what separates a task an earlier
+// stage already worked from one straight out of the backlog.
+const held = (c, i) => `<div class="fq"><span class="fkind">${c.kind}</span><span class="fq-name">${c.name}</span>
+  ${c.dirt ? `<span class="fq-dirt">${dirt(c.dirt)}</span>` : ''}<span class="fq-pos">#${i+1}</span></div>`
+
+function draw(collapse) {
+  document.getElementById('board').innerHTML = STAGES.map((stage, i) => {
+    const col = stage.name
+    const mine = CARDS.filter((c) => c.col === col)
+    // Only what an agent is actually on takes a spot. Holding is parked in this
+    // column waiting for one, so it costs nothing.
+    const working = mine.filter((c) => c.st === 'working')
+    const blocked = mine.filter((c) => c.st === 'blocked')
+    const holding = mine.filter((c) => c.st === 'holding')
+    const busy = working.concat(blocked)
+    const cap = stage.cap ?? CAP
+    const full = CAPPED(col) && busy.length >= cap
+    const capTag = CAPPED(col) ? `<span class="fcol-cap"${full?' data-full':''}>${busy.length}/${cap}</span>` : ''
+    const empty = mine.length === 0
+    return `<section class="fcol"${empty?' data-empty':''}${busy.some(c=>c.st==='working')?' data-live':''}${mine.some(c=>c.name===CURSOR)?' data-here':''}${empty && collapse ? ' data-collapsed' : ''}>
+      <header class="fcol-head"><span class="fcol-name">${col}</span><span class="fcol-n">${mine.length||''}</span>${capTag}
+        ${stage.skill ? `<div class="fcol-def"><span class="fcol-skill">${stage.skill}</span>
+          <span class="fcol-model"${stage.harness?' data-alt':''}>${stage.harness ? `${stage.harness}:` : ''}${stage.model}</span></div>` : ''}</header>
+      <div class="fcol-body">
+        ${blocked.length ? `<div class="fband"><span class="fband-tag" data-tone="ask">needs you ${blocked.length}</span>
+          ${blocked.map((c) => card(c)).join('')}</div>` : ''}
+        ${working.map((c) => card(c, c.name === CURSOR)).join('')}
+        ${holding.length ? `<div class="fband" data-hold><span class="fband-tag">${col === 'inbox' ? `backlog ${holding.length}` : `holding ${holding.length}${full ? ' · no spot' : ''}`}</span>
+          ${holding.map(held).join('')}</div>` : ''}
+      </div>
+    </section>`
+  }).join('')
+}
+
+let collapse = true
+draw(collapse)
+document.getElementById('collapse').onclick = (e) => {
+  collapse = !collapse
+  e.target.toggleAttribute('data-on', collapse)
+  e.target.textContent = collapse ? 'empty columns: spine' : 'empty columns: open'
+  draw(collapse)
+}
+// ESC in the real panel; a button here, so both states are visible in the mock.
+document.getElementById('swap').onclick = (e) => {
+  const nanny = document.getElementById('p-nanny').hasAttribute('hidden')
+  document.getElementById('p-nanny').toggleAttribute('hidden', !nanny)
+  document.getElementById('p-chat').toggleAttribute('hidden', nanny)
+  e.target.textContent = nanny ? 'right panel: nanny' : 'right panel: card chat'
+}
+document.getElementById('focus').onclick = (e) => {
+  const p = document.querySelector('.lane-col[data-grow] .panel')
+  const on = !p.hasAttribute('data-focused')
+  p.toggleAttribute('data-focused', on)
+  e.target.toggleAttribute('data-on', on)
+  e.target.textContent = on ? 'board focused' : 'board not focused'
+}
+document.getElementById('theme').onclick = () => {
+  const h = document.documentElement
+  h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — colony: four ways to say "this needs you"</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; padding: 14px; }
+  .row { display: flex; gap: 14px; align-items: flex-start; }
+  .opt { flex: 0 0 250px; }
+  .opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .opt-id { color: var(--text-strong); font-size: 11px; }
+  .opt-name { color: var(--dimmer); font-size: 11px; }
+  .opt-note { color: var(--faint); font-size: 10px; margin: 6px 0 10px; min-height: 58px; }
+  .sub { color: var(--faint); font-size: 10px; margin: 8px 0 4px; letter-spacing: .06em; }
+
+  .panel { background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .fcol { display: flex; flex-direction: column; border: 1px dashed var(--line); border-radius: var(--radius); background: var(--wash-1); }
+  .fcol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 5px 8px; border-bottom: 1px solid var(--line-soft); }
+  .fcol-name { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+  .fcol-n { color: var(--faint); font-size: 10px; }
+  .fcol-cap { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcol-body { padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+  .fband-tag { color: var(--faint); font-size: 10px; letter-spacing: .06em; padding-inline: 6px; }
+
+  .fcard { position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
+           padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .fcard::before { display: none; }
+  .fcard[data-cursor] { border-color: #55688f; background: var(--panel-focused); }
+  .fcard-top { display: flex; align-items: center; gap: 6px; }
+  .fkind { border: 1px solid var(--line); border-radius: 1px; color: var(--dimmer); font-size: 10px; padding: 0 5px; }
+  .fpass { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcard-name { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fcard-line { color: var(--dim); font-size: 11px; }
+  .fcard-foot { display: flex; gap: 8px; color: var(--time-dim); font-size: 10px; }
+  .ask { color: var(--accent); }
+
+  /* --- H1: the colour shrinks to a badge --------------------------------- */
+  .h1 .fband-tag { color: var(--accent); }
+  .h1 [data-ask] .hmark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 50%;
+    color: var(--accent); font-size: 9px; flex: none; }
+
+  /* --- H2: the question IS the card's line -------------------------------- */
+  .h2 .fband-tag { color: var(--faint); }
+  .h2 [data-ask] .fcard-line { color: var(--accent); }
+  .h2 [data-ask] .hmark { display: none; }
+
+  /* --- H3: no colour at all ---------------------------------------------- */
+  .h3 [data-ask] .hmark { display: inline; color: var(--dimmer); font-size: 11px; }
+  .h3 [data-ask] { border-style: dashed; border-color: var(--edge); }
+
+  /* --- H4: one amber edge, the border left free --------------------------- */
+  .h4 .fband-tag { color: var(--accent); }
+  .h4 [data-ask] { border-left: 3px solid var(--accent); padding-left: 6px; }
+  .h4 [data-ask] .hmark { display: none; }
+</style>
+</head>
+<body>
+<div class="row" id="row"></div>
+
+<script>
+const OPTS = [
+  ['H1', 'a badge, not a border',
+   'The amber survives but shrinks to a 13px ringed "?" beside the kind chip. The card border stays neutral, so the cursor and the question never fight for the same edge. Reads at a glance; costs nothing when a card is both.'],
+  ['H2', 'the question is the line',
+   'No mark at all — the card\'s status line becomes the actual question, in amber. You read what it wants without opening it, which is the only option here that answers "so what does it need?".'],
+  ['H3', 'no colour, shape only',
+   'A dashed border and a dim "?" glyph. Nothing competes with anything, and it survives any future palette. But on a board of 12 cards a dashed edge is easy to walk past — the band label is doing most of the work.'],
+  ['H4', 'one amber edge',
+   'A 3px amber left edge, the border free for the cursor. Same idea as the slate cursor edge, which is also the problem: two 3px coloured edges that mean different things, and only the hue tells them apart.']
+]
+
+const CARDS = [
+  { kind:'fix', name:'tactical-persistence', pass:0, ask:true,
+    line:'is the old format still read anywhere?', plain:'asked about the legacy format', foot:'2m 00s ↓19k' },
+  { kind:'feat', name:'shot-acquisition', pass:0, line:'reading the project spec', foot:'1m 04s ↓12k' }
+]
+
+const card = (c, opt, cursor) => `<article class="fcard"${c.ask ? ' data-ask' : ''}${cursor ? ' data-cursor' : ''}>
+  <div class="fcard-top">${c.ask ? '<span class="hmark">?</span>' : ''}<span class="fkind">${c.kind}</span><span class="fpass">✓${c.pass}</span></div>
+  <div class="fcard-name">${c.name}</div>
+  <div class="fcard-line">${c.ask ? (opt === 'h2' ? c.line : c.plain) : c.line}</div>
+  <div class="fcard-foot"><span>${c.foot}</span></div>
+</article>`
+
+const col = (opt, cursorOnAsk) => `<div class="panel"><div class="fcol">
+  <header class="fcol-head"><span class="fcol-name">specifier</span><span class="fcol-n">2</span><span class="fcol-cap">2/5</span></header>
+  <div class="fcol-body">
+    <span class="fband-tag">needs you 1</span>
+    ${card(CARDS[0], opt, cursorOnAsk)}
+    ${card(CARDS[1], opt, false)}
+  </div></div></div>`
+
+document.getElementById('row').innerHTML = OPTS.map(([id, name, note], i) => `
+  <div class="opt h${i + 1}">
+    <div class="opt-head"><span class="opt-id">${id}</span><span class="opt-name">${name}</span></div>
+    ${col('h' + (i + 1), false)}
+    <p class="opt-note">${note}</p>
+    <div class="sub">AND THE CURSOR IS ON IT</div>
+    ${col('h' + (i + 1), true)}
+  </div>`).join('')
+</script>
+</body>
+</html>

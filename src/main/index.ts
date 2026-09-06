@@ -136,7 +136,7 @@ import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
 import { createSkill, deleteSkill, listSkills, readSkill, renameSkill } from './config/skills'
-import { projectFor } from './config/projectStore'
+import { projectFor, projectScan } from './config/projectStore'
 import {
   addMcpServer,
   listMcpServers,
@@ -177,6 +177,8 @@ import {
 import { applyFileOps, listDir, readFileContent, renderDocument, resolveWikiLink, searchableFiles } from './files'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
+import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTask, tick } from './colony/runner'
+import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
 import { provisionWorktree, dropWorktreeDatabase, ensureContainerUp, getAppUrl } from './provision'
@@ -723,6 +725,35 @@ function registerIpc(): void {
   handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )
+
+  // The colony board. `colony:board` is the only read — the panel repaints from
+  // one shape, so a card and the column counting it can never disagree.
+  handle('colony:board', (_event, project: string) => boardFor(project))
+  handle('colony:add', (event, task: NewTask) => {
+    const created = addTask(task)
+    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, task.project)
+    return created
+  })
+  // Releasing cuts the worktree, which is why this one is async and `add` is not:
+  // a backlog card costs nothing until somebody starts it.
+  handle('colony:release', async (event, id: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) throw new Error('No window to run the lane in.')
+    const task = await releaseTask(win, id)
+    pushBoard(win, task.project)
+    return task
+  })
+  handle('colony:remove', (event, id: string, project: string) => {
+    removeTask(id)
+    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+  })
+  handle('colony:nanny', (_event, project: string) => ({
+    ...nannyFor(project),
+    // The renderer sends it as the chat's opening message rather than main
+    // firing a turn here: a fresh nanny must not start talking to a panel that
+    // is not on screen yet.
+    opener: nannyOpener(project)
+  }))
   handle('terminal:write', (_event, id: string, data: string) => writeTerminal(id, data))
   handle('terminal:resize', (_event, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows)
@@ -1080,6 +1111,18 @@ function registerIpc(): void {
   watchConfig((file) => {
     setSandboxEnabled(floeConfig().sandbox.enabled)
     const keymap = file.endsWith('keybindings.toml')
+    // A board is its config file, so editing one is a move on the board: raising
+    // a cap frees a spot, and nothing else would notice. The stages are read
+    // fresh on every tick, so this only has to say "look again".
+    if (!keymap) {
+      const win = localWindow ?? BrowserWindow.getAllWindows()[0]
+      if (win && !win.isDestroyed()) {
+        for (const project of projectScan().projects) {
+          tick(win, project.path)
+          pushBoard(win, project.path)
+        }
+      }
+    }
     for (const win of BrowserWindow.getAllWindows()) {
       if (win.isDestroyed()) continue
       if (!keymap) applyZoom(win)
@@ -1341,6 +1384,11 @@ void app.whenReady().then(async () => {
   // Watchdog: log any turn that gets stuck "Thinking…" (never emits done) so a
   // 40-min hang can be diagnosed from <userData>/logs/agent.log after the fact.
   startAgentWatchdog()
+  // A colony task that was mid-lane when the app went away has nobody left to
+  // read its hand-off line. Put it back at its stage's door so the scheduler
+  // runs it again — see reconcileColony.
+  const colonyWin = localWindow ?? BrowserWindow.getAllWindows()[0]
+  if (colonyWin) reconcileColony(colonyWin)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

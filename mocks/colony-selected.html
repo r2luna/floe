@@ -1,0 +1,122 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — colony: the selected card, every scenario</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; padding: 14px; }
+  .row { display: flex; gap: 14px; align-items: flex-start; }
+  .opt { flex: 0 0 240px; }
+  .opt-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .opt-id { color: var(--accent); font-size: 11px; }
+  .opt-name { color: var(--text-strong); font-size: 11px; }
+  .opt-note { color: var(--faint); font-size: 10px; margin: 6px 0 10px; min-height: 56px; }
+  .sub { color: var(--faint); font-size: 10px; margin: 10px 0 4px; letter-spacing: .06em; }
+  .fband-tag { color: var(--accent); font-size: 10px; letter-spacing: .06em; padding-inline: 6px; }
+  .fband-tag[data-q] { color: var(--faint); }
+  /* Needs you, as a badge — never as a border. The border belongs to the
+     cursor, and a card can be selected AND asking at the same time; a mark that
+     borrowed the border would simply vanish in that case. In the app this is a
+     tabler icon; here a glyph. */
+  .hmark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; flex: none;
+           border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 50%;
+           color: var(--accent); font-size: 9px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .fcol { display: flex; flex-direction: column; border: 1px dashed var(--line); border-radius: var(--radius);
+          background: var(--wash-1); }
+  .fcol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 5px 8px;
+               border-bottom: 1px solid var(--line-soft); }
+  .fcol-name { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+  .fcol-n { color: var(--faint); font-size: 10px; }
+  .fcol-cap { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcol-def { flex-basis: 100%; display: flex; gap: 6px; color: var(--faint); font-size: 10px; }
+  .fcol-skill { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fcol-body { padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+
+  .fcard { position: relative; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
+           padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .fcard::before { display: none; }
+  .fcard-top { display: flex; align-items: center; gap: 6px; }
+  .fkind { border: 1px solid var(--line); border-radius: 1px; color: var(--dimmer); font-size: 10px; padding: 0 5px; }
+  .fpass { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcard-name { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fcard-line { color: var(--dim); font-size: 11px; }
+  .fcard-foot { display: flex; gap: 8px; color: var(--time-dim); font-size: 10px; }
+
+  /* --- O1: border + surface + text ------------------------------------- */
+  .o1 [data-cursor] { border-color: #55688f; background: var(--panel-focused); }
+  .o1 [data-cursor] .fcard-line { color: var(--text); }
+  .o1 [data-cursor] .fcard-foot { color: var(--dimmer); }
+  .o1 [data-cursor] .fkind { color: var(--text); border-color: var(--edge); }
+  .o1 [data-here] .fcol-name { color: var(--text-strong); }
+
+  /* --- O2: Floe's own row mark, kept -------------------------------------- */
+  .o2 [data-cursor] { background: var(--wash-2); }
+  .o2 [data-cursor]::before { display: block; content: ""; position: absolute; inset-block: 2px; left: 0;
+                              width: 2px; border-radius: var(--radius-sm); background: #55688f; }
+
+  /* --- O3: one thick accent edge ----------------------------------------- */
+  .o3 [data-cursor] { border-left: 3px solid #55688f; padding-left: 6px; }
+
+  /* --- O4: the field dims, the card does not ----------------------------- */
+  .o4 .fcol-body:has([data-cursor]) .fcard:not([data-cursor]) { opacity: .45; }
+  .o4 [data-cursor] { border-color: var(--edge); background: var(--panel-focused); }
+</style>
+</head>
+<body>
+<div class="row" id="row"></div>
+
+<script>
+// Every state a card can be in, in one column — plain, selected, asking, and
+// asking WHILE selected, which is the case that breaks a mark that reuses a
+// colour it does not own.
+const CARDS = [
+  { kind:'chore', name:'targeting-policy', line:'second pass: CRAP, DRY, coverage', pass:2, foot:'3m 34s ↓54k' },
+  { kind:'feat',  name:'entity-identity', line:'reading the store before the reducer', pass:1, foot:'12m 53s ↓107k', cursor:true },
+  { kind:'fix',   name:'tactical-persistence', line:'asked about the legacy format', pass:0, foot:'2m 00s ↓19k', ask:true },
+  { kind:'feat',  name:'signal-rollup', line:'asked which base branch to fork', pass:0, foot:'40s ↓6k', ask:true, cursor:true }
+]
+
+const OPTS = [
+  ['O1', 'border + surface + text',
+   'Three things move at once: the cursor slate on the border, the surface lifts off the column, and the card\'s own text comes up a step. Findable across eight columns.'],
+  ['O2', "Floe's row mark, kept",
+   'The 2px bar and wash every list in the app already uses. Nothing new to learn and it matches the worktrees panel exactly — but on a bordered box the bar reads as decoration, not as selection.'],
+  ['O3', 'one thick accent edge',
+   'A 3px slate edge, everything else untouched. Quiet, and it is the kanban convention. Costs 3px of the card\'s width and can be missed at a glance.'],
+  ['O4', 'the field dims',
+   'The selected card stays normal; every other card in its column drops to 45%. Impossible to miss, but it makes a working board look half-asleep and hides the other cards\' status.']
+]
+
+const card = (c) => `<article class="fcard"${c.cursor ? ' data-cursor' : ''}${c.ask ? ' data-ask' : ''}>
+  <div class="fcard-top">${c.ask ? '<span class="hmark">?</span>' : ''}<span class="fkind">${c.kind}</span><span class="fpass">✓${c.pass}</span></div>
+  <div class="fcard-name">${c.name}</div>
+  <div class="fcard-line">${c.line}</div>
+  <div class="fcard-foot"><span>${c.foot}</span></div>
+</article>`
+
+const board = (i, focused) => `<div class="panel"${focused ? ' data-focused' : ''}>
+  <div class="fcol"${i === 0 && focused ? ' data-here' : ''}>
+    <header class="fcol-head"><span class="fcol-name">coder</span><span class="fcol-n">4</span><span class="fcol-cap">4/5</span>
+      <div class="fcol-def"><span class="fcol-skill">colony-implement</span><span>opus</span></div></header>
+    <div class="fcol-body">
+      ${CARDS.slice(0, 2).map(card).join('')}
+      <span class="fband-tag">needs you 2</span>
+      ${CARDS.slice(2).map(card).join('')}
+    </div>
+  </div></div>`
+
+document.getElementById('row').innerHTML = OPTS.map(([id, name, note], i) => `
+  <div class="opt o${i + 1}">
+    <div class="opt-head"><span class="opt-id">${id}</span><span class="opt-name">${name}</span></div>
+    ${board(i, true)}
+    <p class="opt-note">${note}</p>
+    <div class="sub">BOARD NOT FOCUSED</div>
+    ${board(i, false)}
+  </div>`).join('')
+</script>
+</body>
+</html>
