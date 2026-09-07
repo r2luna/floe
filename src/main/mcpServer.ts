@@ -36,7 +36,7 @@ import { listPlans, readPlan } from './plans'
 // `node --test`, whose loader hook resolves a file specifier, not a directory.
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, summarize } from './draw/index'
 import { eraseElements, expandSkeletons, moveElements } from './draw/skeleton'
-import { loadClaudeTranscript, sessionHasUnansweredQuestion } from './claudeSessions'
+import { loadClaudeTranscript, sessionHasUnansweredQuestion, type TranscriptItem } from './claudeSessions'
 // Circular with codex (it emits through agent, which imports this file) — safe:
 // every side only calls the others' functions at runtime, never at module top.
 import { askCodex, MAX_EXCHANGES } from './codex'
@@ -75,6 +75,7 @@ import { projectFor } from './config/projectStore'
 import { defineCommand, projectCommands } from './commands'
 import { NOTIFY_LEVELS } from './config/commandStore'
 import { pluginTools } from './plugins/host'
+import type { PluginToolParam } from './plugins/types'
 import {
   addMcpServer,
   listMcpServers,
@@ -186,7 +187,7 @@ function findSessionAny(id: string): CreatedSession | undefined {
 // renderer keys panels by `claudeId ?? id` for resumed sessions and by the Floe
 // id for freshly-created ones, so prefer whichever key has a live conn and fall
 // back to the resume convention.
-function connKeyFor(s: CreatedSession): string {
+export function connKeyFor(s: CreatedSession): string {
   for (const k of [s.id, s.claudeId, ...(s.pastClaudeIds ?? [])]) {
     if (k && sessionRuntime(k).live) return k
   }
@@ -217,26 +218,35 @@ function runOptionsFor(s: CreatedSession): AgentRunOptions {
  * have given. Neither changes what the session answers as afterwards — one
  * message is not a switch, the same as in the UI.
  */
-function sendOptions(
-  target: CreatedSession,
-  prompt: string,
-  named: { harness?: string; model?: string; effort?: Effort; mode?: PermissionMode }
-): { prompt: string; options: AgentRunOptions; route: Route | null } {
-  const handle = named.harness ? null : routeOf(prompt)
-  const harness = named.harness ?? handle?.harness
-  if (!harness) {
-    const options = runOptionsFor(target)
-    return {
-      prompt,
-      route: null,
-      options: {
-        ...options,
-        model: named.model ?? options.model,
-        effort: named.effort ?? options.effort,
-        permissionMode: named.mode ?? options.permissionMode
-      }
+interface NamedOptions {
+  harness?: string
+  model?: string
+  effort?: Effort
+  mode?: PermissionMode
+}
+
+type Sent = { prompt: string; options: AgentRunOptions; route: Route | null }
+
+// Nobody named a harness: the session answers as itself, with whatever the
+// caller overrode on top.
+function unroutedSend(target: CreatedSession, prompt: string, named: NamedOptions): Sent {
+  const options = runOptionsFor(target)
+  return {
+    prompt,
+    route: null,
+    options: {
+      ...options,
+      model: named.model ?? options.model,
+      effort: named.effort ?? options.effort,
+      permissionMode: named.mode ?? options.permissionMode
     }
   }
+}
+
+// A harness WAS named, by argument or by handle: this is a ROUTE, and it opens a
+// query exactly as the composer's would (D7). Handed back rather than consumed
+// here — the decision is turn.ts's, for all five doors at once.
+function routedSend(target: CreatedSession, prompt: string, named: NamedOptions, harness: string, handle: Route | null): Sent {
   const route = {
     harness,
     model: named.model ?? handle?.model,
@@ -245,9 +255,6 @@ function sendOptions(
   }
   const options = optionsForRoute(route, target.id)
   return {
-    // Named a harness, by argument or by handle: this is a ROUTE, and it opens
-    // a query exactly as the composer's would (D7). Handed back rather than
-    // consumed here — the decision is turn.ts's, for all five doors at once.
     route,
     // Sent without the handle, shown with it — the same split the composer
     // makes, so a transcript read back says who the message was for.
@@ -258,6 +265,12 @@ function sendOptions(
       shown: handle ? prompt : undefined
     }
   }
+}
+
+export function sendOptions(target: CreatedSession, prompt: string, named: NamedOptions): Sent {
+  const handle = named.harness ? null : routeOf(prompt)
+  const harness = named.harness ?? handle?.harness
+  return harness ? routedSend(target, prompt, named, harness, handle) : unroutedSend(target, prompt, named)
 }
 
 // --- Followups: delegate a delayed send_message to Floe ---------------------
@@ -331,6 +344,15 @@ function textResult(value: unknown): { content: Array<{ type: 'text'; text: stri
   return { content: [{ type: 'text' as const, text }] }
 }
 
+// What every tool answers with — tools never throw, they answer `{ error }`.
+type ToolResult = ReturnType<typeof textResult>
+
+// A project path, or a worktree inside one — callers pass either. Omitted means
+// "global only", which is not the same as "this project".
+function rootFor(project?: string): string | undefined {
+  return project ? (projectFor(project) ?? project) : undefined
+}
+
 const sessionSummary = (s: CreatedSession): Record<string, unknown> => ({
   id: s.id,
   title: s.title,
@@ -341,7 +363,84 @@ const sessionSummary = (s: CreatedSession): Record<string, unknown> => ({
 
 // Register every floe tool on a fresh McpServer, with `token` (the caller's
 // Floe session key) captured in each closure so a tool knows who called it.
+// One registrar per domain below — a single function registering all ~57 tools
+// is unreadable and untestable. See docs/mcp.md before adding a tool anywhere.
 function registerTools(server: McpServer, token: string): void {
+  registerWorktreeTools(server, token)
+  registerSessionTools(server, token)
+  registerQueryTools(server)
+  registerSessionControlTools(server, token)
+  registerPlanTools(server, token)
+  registerDrawingTools(server, token)
+  registerDecisionTools(server)
+  registerColonyTools(server)
+  registerSkillTools(server)
+  registerMcpRegistryTools(server)
+  registerCommandTools(server, token)
+  registerPluginToolsOn(server)
+}
+
+// Which of the worktrees `createWorktree` reports back is the one just made:
+// the branch it was asked for, else a path ending in it, else the newest.
+export function createdWorktree(worktrees: Worktree[], branch: string): Worktree | undefined {
+  return worktrees.find((w) => w.branch === branch || w.path.endsWith(branch)) ?? worktrees[worktrees.length - 1]
+}
+
+async function createWorktreeTool(
+  project: string,
+  branch: string,
+  base?: string,
+  note?: string
+): Promise<ToolResult> {
+  try {
+    const worktrees = await createWorktree(project, branch, { base, note })
+    pushWorktrees(project, worktrees)
+    const created = createdWorktree(worktrees, branch)
+    // Run the per-stack setup the same way the in-app create flow does —
+    // otherwise an MCP-created worktree lands with no environment.
+    // Fire-and-forget; progress streams to the setup checklist.
+    const win = getWindow()
+    if (win && created) void provisionWorktree(win, project, created.path, created.branch)
+    return textResult({ created, worktrees })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+async function mergeWorktreeTool(project: string, worktree: string): Promise<ToolResult> {
+  try {
+    const result = await mergeWorktree(project, worktree)
+    if (result.ok) pushWorktrees(project, await listWorktrees(project))
+    return textResult(result)
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+async function startMergeTool(token: string, worktree: string): Promise<ToolResult> {
+  try {
+    const projectPath = projectFor(worktree)
+    if (!projectPath) return textResult({ error: `No Floe project contains this worktree: ${worktree}` })
+    const result = await awaitCommand({
+      kind: 'start_merge',
+      callerKey: token,
+      requestId: randomUUID(),
+      worktreePath: worktree,
+      projectPath
+    })
+    if (!result.ok) return textResult({ error: result.error ?? 'The merge did not start.' })
+    return textResult({
+      ok: true,
+      note: 'Guided merge panel is up. It pauses at the review checkpoint — the user approves with ⏎ (or via run_command merge.confirm). Track progress with worktree_status.'
+    })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+// Projects, worktrees and the review pair: everything that runs straight
+// against git in main.
+function registerWorktreeTools(server: McpServer, token: string): void {
   // --- Projects & worktrees (run directly in main) --------------------------
 
   server.tool('list_projects', 'List the git projects registered in Floe.', {}, async () => {
@@ -387,22 +486,7 @@ function registerTools(server: McpServer, token: string): void {
       base: z.string().optional().describe('The base branch to fork from (defaults to the main branch).'),
       note: z.string().optional().describe('An optional short note/label for the worktree.')
     },
-    async ({ project, branch, base, note }) => {
-      try {
-        const worktrees = await createWorktree(project, branch, { base, note })
-        pushWorktrees(project, worktrees)
-        const created =
-          worktrees.find((w) => w.branch === branch || w.path.endsWith(branch)) ?? worktrees[worktrees.length - 1]
-        // Run the per-stack setup the same way the in-app create flow does —
-        // otherwise an MCP-created worktree lands with no environment.
-        // Fire-and-forget; progress streams to the setup checklist.
-        const win = getWindow()
-        if (win && created) void provisionWorktree(win, project, created.path, created.branch)
-        return textResult({ created, worktrees })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => createWorktreeTool(a.project, a.branch, a.base, a.note)
   )
 
   server.tool(
@@ -430,41 +514,14 @@ function registerTools(server: McpServer, token: string): void {
       project: z.string().describe('The repo root path of the project.'),
       worktree: z.string().describe('The worktree path to merge.')
     },
-    async ({ project, worktree }) => {
-      try {
-        const result = await mergeWorktree(project, worktree)
-        if (result.ok) pushWorktrees(project, await listWorktrees(project))
-        return textResult(result)
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => mergeWorktreeTool(a.project, a.worktree)
   )
 
   server.tool(
     'start_merge',
     "Open Floe's GUIDED merge for a worktree: the step-by-step checklist panel (preflight → merge → resolve → review → commit → fast-forward → teardown) that pauses at the review checkpoint for the user to approve. Prefer this over merge_worktree when a human is around — merge_worktree is the headless one-shot with no review stop. Navigates the UI to the worktree's project if needed.",
     { worktree: z.string().describe('The worktree path to merge into its base.') },
-    async ({ worktree }) => {
-      try {
-        const projectPath = projectFor(worktree)
-        if (!projectPath) return textResult({ error: `No Floe project contains this worktree: ${worktree}` })
-        const result = await awaitCommand({
-          kind: 'start_merge',
-          callerKey: token,
-          requestId: randomUUID(),
-          worktreePath: worktree,
-          projectPath
-        })
-        if (!result.ok) return textResult({ error: result.error ?? 'The merge did not start.' })
-        return textResult({
-          ok: true,
-          note: 'Guided merge panel is up. It pauses at the review checkpoint — the user approves with ⏎ (or via run_command merge.confirm). Track progress with worktree_status.'
-        })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => startMergeTool(token, a.worktree)
   )
 
   server.tool(
@@ -511,37 +568,212 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function listSessionsTool(worktree?: string): ToolResult {
+  try {
+    // needsYou reads each session's on-disk JSONL — fine for one worktree,
+    // too hot for a store-wide walk, so the unfiltered list skips it.
+    if (worktree) {
+      return textResult(
+        getCreatedSessions(worktree).map((s) => ({
+          ...sessionSummary(s),
+          // Two authorities, because neither sees the whole thing: the
+          // live conn knows about a prompt the CLI has not written to the
+          // JSONL yet (and about permission prompts, which never land
+          // there), the transcript knows about one raised before this app
+          // run.
+          needsYou:
+            sessionRuntime(connKeyFor(s)).waiting ||
+            (s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false)
+        }))
+      )
+    }
+    return textResult(getAllCreatedSessions().map(sessionSummary))
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+interface CreateSessionArgs {
+  worktree: string
+  prompt?: string
+  title?: string
+  select?: boolean
+  model?: string
+  mode?: PermissionMode
+}
+
+// A new session's first prompt, sent through the same door as send_message
+// rather than straight at Claude. It is a prompt like any other: it can open
+// with `@codex`, and before it went through here that handle was read by nobody
+// — the session opened, Claude answered a message addressed to codex, and codex
+// never heard of it. See turn.ts: both doors, one behaviour.
+function openingTurn(win: BrowserWindow, id: string, a: CreateSessionArgs, prompt: string): void {
+  const stored = findSessionAny(id)
+  // `a.model` is a CLAUDE alias for the session to run on, which is not a thing
+  // to hand another harness as its own slug — `opus` means nothing to codex. A
+  // prompt that opens with a handle names its model in the handle, or takes
+  // that harness's default.
+  const named = routeOf(prompt) ? { mode: a.mode } : { model: a.model, mode: a.mode }
+  const sent = stored
+    ? sendOptions(stored, prompt, named)
+    : { prompt, route: routeOf(prompt), options: { permissionMode: a.mode ?? 'skip', model: a.model } }
+  dispatchTurn({
+    win,
+    parentKey: id,
+    worktreePath: a.worktree,
+    prompt,
+    route: sent.route,
+    origin: 'mcp',
+    options: sent.options
+  })
+}
+
+function createSessionTool(token: string, a: CreateSessionArgs): ToolResult {
+  try {
+    const id = randomUUID()
+    const storedTitle = addCreatedSession({ id, worktreePath: a.worktree, title: a.title ?? a.prompt?.slice(0, 60) })
+    // No human sits in front of a session an agent opened: mark it so the
+    // parent (not the user) is responsible for its questions.
+    setCreatedSessionSpawnedBy(id, token)
+    if (a.prompt) {
+      const win = getWindow()
+      if (!win) return textResult({ error: 'No window available to run the session.' })
+      openingTurn(win, id, a, a.prompt)
+    }
+    if (a.select === true) {
+      pushCommand({
+        kind: 'select_session',
+        callerKey: token,
+        sessionId: id,
+        title: storedTitle,
+        worktreePath: a.worktree,
+        projectPath: projectFor(a.worktree) ?? undefined
+      })
+    }
+    return textResult({ sessionId: id, title: storedTitle })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+interface SendMessageArgs {
+  session_id: string
+  prompt: string
+  wait?: boolean
+  harness?: string
+  model?: string
+  effort?: Effort
+  mode?: PermissionMode
+}
+
+// What send_message answers once the turn is under way. `wait` is the only fork:
+// the reply, or the ack that the turn started.
+async function sendResult(
+  target: CreatedSession,
+  sent: { options: AgentRunOptions },
+  ran: { key: string; query?: unknown },
+  wait?: boolean
+): Promise<Record<string, unknown>> {
+  const sessionId = target.id
+  const queryKey = ran.query ? ran.key : undefined
+  const answeredBy = sent.options.provider ?? 'claude'
+  // The key the turn actually started under — the QUERY's when one opened, or
+  // waiting would park on a session that is not answering.
+  if (wait) return { sessionId, queryKey, reply: await waitForTurn(ran.key), answeredBy }
+  return { sessionId, queryKey, ack: true, answeredBy }
+}
+
+async function sendMessageTool(a: SendMessageArgs): Promise<ToolResult> {
+  try {
+    const target = findSessionAny(a.session_id)
+    if (!target) return textResult({ error: `Unknown session: ${a.session_id}` })
+    const win = getWindow()
+    if (!win) return textResult({ error: 'No window available to run the session.' })
+    const sent = sendOptions(target, a.prompt, a)
+    // Spawn the conn (if needed) BEFORE waiting, so a brand-new session has a
+    // live process for waitForTurn to resolve against.
+    //
+    // Through dispatchTurn, so `@codex …` sent by an agent opens the very same
+    // query the composer's would. If the two doors diverge here, "could an agent
+    // do this without the UI?" stops being answerable.
+    const ran = dispatchTurn({
+      win,
+      parentKey: connKeyFor(target),
+      worktreePath: target.worktreePath,
+      prompt: a.prompt,
+      route: sent.route,
+      origin: 'mcp',
+      options: sent.options
+    })
+    if (ran.error) return textResult({ error: ran.error })
+    return textResult(await sendResult(target, sent, ran, a.wait))
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+async function askCodexTool(token: string, prompt: string, newTopic: boolean): Promise<ToolResult> {
+  try {
+    // The caller's own session: Codex answers into THIS chat (that is what
+    // makes it a participant), and runs in the worktree being talked about.
+    const caller = findSessionAny(token)
+    if (!caller) return textResult({ error: 'ask_codex must be called from a Floe session.' })
+    const win = getWindow()
+    if (!win) return textResult({ error: 'No window available to run Codex.' })
+    const result = await askCodex(win, connKeyFor(caller), caller.worktreePath, prompt, newTopic)
+    if (result.capped)
+      return textResult({
+        capped: true,
+        note: `${MAX_EXCHANGES} exchanges used — check in with your user before continuing this thread.`
+      })
+    if (result.error) return textResult({ error: result.error })
+    return textResult({ reply: result.reply, exchange: result.exchange })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+/**
+ * One transcript entry as a line of text.
+ *
+ * A line another session or a subagent said is labelled with who said it.
+ * Reading it back as `user:`/`assistant:` is how an agent watching this session
+ * ends up quoting a peer's words as its user's instructions.
+ */
+export function transcriptLine(it: TranscriptItem): string {
+  if (it.role === 'image') return '[image]'
+  if (it.role === 'tool') return `[tool ${it.name ?? ''}] ${it.summary ?? ''}`.trim()
+  return `${it.from ?? it.role}: ${it.text ?? ''}`
+}
+
+function readSessionOutputTool(sessionId: string, limit?: number): ToolResult {
+  try {
+    const target = findSessionAny(sessionId)
+    const cap = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 50
+    const live = target ? readSessionBuffer(connKeyFor(target)) : readSessionBuffer(sessionId)
+    let disk = ''
+    if (target?.claudeId) {
+      const lines = loadClaudeTranscript(target.worktreePath, target.claudeId).map(transcriptLine).filter(Boolean)
+      disk = lines.slice(-cap).join('\n')
+    }
+    const combined = [disk, live].filter(Boolean).join('\n').trim()
+    if (!combined) return textResult({ output: '', note: 'No output yet for this session.' })
+    return textResult({ output: combined })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+function registerSessionTools(server: McpServer, token: string): void {
   // --- Sessions + communication --------------------------------------------
 
   server.tool(
     'list_sessions',
     'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given) means the session is blocked on you — an unanswered question or a tool-permission prompt.',
     { worktree: z.string().optional().describe('Limit to sessions in this worktree path.') },
-    async ({ worktree }) => {
-      try {
-        // needsYou reads each session's on-disk JSONL — fine for one worktree,
-        // too hot for a store-wide walk, so the unfiltered list skips it.
-        if (worktree) {
-          return textResult(
-            getCreatedSessions(worktree).map((s) => ({
-              ...sessionSummary(s),
-              // Two authorities, because neither sees the whole thing: the
-              // live conn knows about a prompt the CLI has not written to the
-              // JSONL yet (and about permission prompts, which never land
-              // there), the transcript knows about one raised before this app
-              // run.
-              needsYou:
-                sessionRuntime(connKeyFor(s)).waiting ||
-                (s.claudeId ? sessionHasUnansweredQuestion(s.worktreePath, s.claudeId) : false)
-            }))
-          )
-        }
-        return textResult(getAllCreatedSessions().map(sessionSummary))
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => listSessionsTool(a.worktree)
   )
 
   server.tool(
@@ -563,59 +795,7 @@ function registerTools(server: McpServer, token: string): void {
         .optional()
         .describe('Permission mode for the session. Defaults to skip — an agent-driven session has no human to answer prompts.')
     },
-    async ({ worktree, prompt, title, select, model, mode }) => {
-      try {
-        const id = randomUUID()
-        const storedTitle = addCreatedSession({ id, worktreePath: worktree, title: title ?? prompt?.slice(0, 60) })
-        // No human sits in front of a session an agent opened: mark it so the
-        // parent (not the user) is responsible for its questions.
-        setCreatedSessionSpawnedBy(id, token)
-        if (prompt) {
-          const win = getWindow()
-          if (!win) return textResult({ error: 'No window available to run the session.' })
-          // Through the same door as send_message, not straight at Claude. This
-          // prompt is a prompt like any other: it can open with `@codex`, and
-          // before it went through here that handle was read by nobody — the
-          // session opened, Claude answered a message addressed to codex, and
-          // codex never heard of it. See turn.ts: both doors, one behaviour.
-          const stored = findSessionAny(id)
-          // `model` here is a CLAUDE alias for the session to run on, which is
-          // not a thing to hand another harness as its own slug — `opus` means
-          // nothing to codex. A prompt that opens with a handle names its model
-          // in the handle, or takes that harness's default.
-          const named = routeOf(prompt) ? { mode: mode as PermissionMode } : { model, mode: mode as PermissionMode }
-          const sent = stored
-            ? sendOptions(stored, prompt, named)
-            : {
-                prompt,
-                route: routeOf(prompt),
-                options: { permissionMode: (mode as PermissionMode) ?? 'skip', model }
-              }
-          dispatchTurn({
-            win,
-            parentKey: id,
-            worktreePath: worktree,
-            prompt,
-            route: sent.route,
-            origin: 'mcp',
-            options: sent.options
-          })
-        }
-        if (select === true) {
-          pushCommand({
-            kind: 'select_session',
-            callerKey: token,
-            sessionId: id,
-            title: storedTitle,
-            worktreePath: worktree,
-            projectPath: projectFor(worktree) ?? undefined
-          })
-        }
-        return textResult({ sessionId: id, title: storedTitle })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => createSessionTool(token, a)
   )
 
   server.tool(
@@ -640,50 +820,7 @@ function registerTools(server: McpServer, token: string): void {
         .optional()
         .describe('How much it may do: plan, default (ask), acceptEdits (auto) or skip (bypass).')
     },
-    async ({ session_id, prompt, wait, harness, model, effort, mode }) => {
-      try {
-        const target = findSessionAny(session_id)
-        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
-        const win = getWindow()
-        if (!win) return textResult({ error: 'No window available to run the session.' })
-        const sent = sendOptions(target, prompt, { harness, model, effort, mode })
-        // Spawn the conn (if needed) BEFORE waiting, so a brand-new session has a
-        // live process for waitForTurn to resolve against.
-        //
-        // Through dispatchTurn, so `@codex …` sent by an agent opens the very
-        // same query the composer's would. If the two doors diverge here, "could
-        // an agent do this without the UI?" stops being answerable.
-        const ran = dispatchTurn({
-          win,
-          parentKey: connKeyFor(target),
-          worktreePath: target.worktreePath,
-          prompt,
-          route: sent.route,
-          origin: 'mcp',
-          options: sent.options
-        })
-        if (ran.error) return textResult({ error: ran.error })
-        if (wait) {
-          // The key the turn actually started under — the QUERY's when one
-          // opened, or waiting would park on a session that is not answering.
-          const text = await waitForTurn(ran.key)
-          return textResult({
-            sessionId: target.id,
-            queryKey: ran.query ? ran.key : undefined,
-            reply: text,
-            answeredBy: sent.options.provider ?? 'claude'
-          })
-        }
-        return textResult({
-          sessionId: target.id,
-          queryKey: ran.query ? ran.key : undefined,
-          ack: true,
-          answeredBy: sent.options.provider ?? 'claude'
-        })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => sendMessageTool(a)
   )
 
   server.tool(
@@ -693,26 +830,7 @@ function registerTools(server: McpServer, token: string): void {
       prompt: z.string().describe('What to ask Codex. It is another model, not a human: lead with the delta, use file:line, skip the pleasantries.'),
       new_topic: z.boolean().optional().describe('Start a fresh Codex thread instead of continuing the current one.')
     },
-    async ({ prompt, new_topic }) => {
-      try {
-        // The caller's own session: Codex answers into THIS chat (that is what
-        // makes it a participant), and runs in the worktree being talked about.
-        const caller = findSessionAny(token)
-        if (!caller) return textResult({ error: 'ask_codex must be called from a Floe session.' })
-        const win = getWindow()
-        if (!win) return textResult({ error: 'No window available to run Codex.' })
-        const result = await askCodex(win, connKeyFor(caller), caller.worktreePath, prompt, new_topic === true)
-        if (result.capped)
-          return textResult({
-            capped: true,
-            note: `${MAX_EXCHANGES} exchanges used — check in with your user before continuing this thread.`
-          })
-        if (result.error) return textResult({ error: result.error })
-        return textResult({ reply: result.reply, exchange: result.exchange })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => askCodexTool(token, a.prompt, a.new_topic === true)
   )
 
   server.tool(
@@ -722,36 +840,74 @@ function registerTools(server: McpServer, token: string): void {
       session_id: z.string().describe('The Floe session id to read.'),
       limit: z.number().optional().describe('Max number of transcript lines to include (default 50).')
     },
-    async ({ session_id, limit }) => {
-      try {
-        const target = findSessionAny(session_id)
-        const cap = typeof limit === 'number' && limit > 0 ? Math.floor(limit) : 50
-        const live = target ? readSessionBuffer(connKeyFor(target)) : readSessionBuffer(session_id)
-        let disk = ''
-        if (target?.claudeId) {
-          const items = loadClaudeTranscript(target.worktreePath, target.claudeId)
-          const lines = items
-            .map((it) => {
-              if (it.role === 'image') return '[image]'
-              if (it.role === 'tool') return `[tool ${it.name ?? ''}] ${it.summary ?? ''}`.trim()
-              // A line another session or a subagent said is labelled with who
-              // said it. Reading it back as `user:`/`assistant:` is how an agent
-              // watching this session ends up quoting a peer's words as its
-              // user's instructions.
-              return `${it.from ?? it.role}: ${it.text ?? ''}`
-            })
-            .filter(Boolean)
-          disk = lines.slice(-cap).join('\n')
-        }
-        const combined = [disk, live].filter(Boolean).join('\n').trim()
-        if (!combined) return textResult({ output: '', note: 'No output yet for this session.' })
-        return textResult({ output: combined })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => readSessionOutputTool(a.session_id, a.limit)
   )
+}
 
+interface OpenQueryArgs {
+  session_id: string
+  harness: string
+  prompt?: string
+  model?: string
+  effort?: Effort
+}
+
+function openQueryTool(a: OpenQueryArgs): ToolResult {
+  try {
+    const target = findSessionAny(a.session_id)
+    if (!target) return textResult({ error: `Unknown session: ${a.session_id}` })
+    const win = getWindow()
+    if (!win) return textResult({ error: 'No window available.' })
+    const { harness, model, effort, prompt } = a
+    // Through dispatchTurn when there is something to say, so an agent's query
+    // is opened by exactly the code the composer's is. Without a prompt there is
+    // no turn to dispatch, only a panel to raise.
+    if (prompt) {
+      const ran = dispatchTurn({
+        win,
+        parentKey: connKeyFor(target),
+        worktreePath: target.worktreePath,
+        prompt,
+        route: { harness, model, effort, prompt },
+        origin: 'mcp'
+      })
+      return ran.error ? textResult({ error: ran.error }) : textResult({ queryKey: ran.key })
+    }
+    const opened = openQueryFor(win, connKeyFor(target), target.worktreePath, {
+      harness,
+      model,
+      effort,
+      openedBy: 'agent'
+    })
+    return opened ? textResult({ queryKey: opened.key }) : textResult({ error: refuseReason(harness) })
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+function askAllTool(sessionId: string, harnesses: string[], prompt: string, effort?: Effort): ToolResult {
+  try {
+    const target = findSessionAny(sessionId)
+    if (!target) return textResult({ error: `Unknown session: ${sessionId}` })
+    const win = getWindow()
+    if (!win) return textResult({ error: 'No window available.' })
+    return textResult(fanOut(win, connKeyFor(target), target.worktreePath, { harnesses, prompt, effort, openedBy: 'agent' }))
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+function listQueriesTool(sessionId: string): ToolResult {
+  try {
+    const target = findSessionAny(sessionId)
+    if (!target) return textResult({ error: `Unknown session: ${sessionId}` })
+    return textResult(queriesFor(target.id))
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+function registerQueryTools(server: McpServer): void {
   // --- Queries -------------------------------------------------------------
   // A query is a side conversation running beside a session, read-only, in its
   // own panel. An agent gets the same five verbs a person does — see
@@ -769,39 +925,7 @@ function registerTools(server: McpServer, token: string): void {
       model: z.string().optional().describe("That harness's own slug."),
       effort: z.enum(EFFORTS).optional().describe('How hard to think.')
     },
-    async ({ session_id, harness, prompt, model, effort }) => {
-      try {
-        const target = findSessionAny(session_id)
-        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
-        const win = getWindow()
-        if (!win) return textResult({ error: 'No window available.' })
-        // Through dispatchTurn when there is something to say, so an agent's
-        // query is opened by exactly the code the composer's is. Without a
-        // prompt there is no turn to dispatch, only a panel to raise.
-        if (prompt) {
-          const ran = dispatchTurn({
-            win,
-            parentKey: connKeyFor(target),
-            worktreePath: target.worktreePath,
-            prompt,
-            route: { harness, model, effort, prompt },
-            origin: 'mcp'
-          })
-          return ran.error ? textResult({ error: ran.error }) : textResult({ queryKey: ran.key })
-        }
-        const opened = openQueryFor(win, connKeyFor(target), target.worktreePath, {
-          harness,
-          model,
-          effort,
-          openedBy: 'agent'
-        })
-        return opened
-          ? textResult({ queryKey: opened.key })
-          : textResult({ error: refuseReason(harness) })
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => openQueryTool(a)
   )
 
   server.tool(
@@ -816,38 +940,14 @@ function registerTools(server: McpServer, token: string): void {
       prompt: z.string().describe('The message every one of them gets.'),
       effort: z.enum(EFFORTS).optional().describe('One effort for all of them.')
     },
-    async ({ session_id, harnesses, prompt, effort }) => {
-      try {
-        const target = findSessionAny(session_id)
-        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
-        const win = getWindow()
-        if (!win) return textResult({ error: 'No window available.' })
-        const out = fanOut(win, connKeyFor(target), target.worktreePath, {
-          harnesses,
-          prompt,
-          effort,
-          openedBy: 'agent'
-        })
-        return textResult(out)
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => askAllTool(a.session_id, a.harnesses, a.prompt, a.effort)
   )
 
   server.tool(
     'list_queries',
     "List a session's side conversations — open ones and the ones already merged or discarded.",
     { session_id: z.string().describe('The Floe session id.') },
-    async ({ session_id }) => {
-      try {
-        const target = findSessionAny(session_id)
-        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
-        return textResult(queriesFor(target.id))
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    async (a) => listQueriesTool(a.session_id)
   )
 
   server.tool(
@@ -879,7 +979,11 @@ function registerTools(server: McpServer, token: string): void {
       return textResult(out.error ? { error: out.error } : { discarded: true })
     }
   )
+}
 
+// Driving a session from outside it: stop its turn, put it on screen, or hand
+// Floe a message to deliver later.
+function registerSessionControlTools(server: McpServer, token: string): void {
   server.tool(
     'stop_session',
     "Stop a session's in-flight turn (the composer's stop button).",
@@ -948,7 +1052,9 @@ function registerTools(server: McpServer, token: string): void {
       return textResult({ cancelled: cancelFollowupById(id) })
     }
   )
+}
 
+function registerPlanTools(server: McpServer, token: string): void {
   // --- Plans ----------------------------------------------------------------
 
   server.tool(
@@ -999,7 +1105,9 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function registerDrawingTools(server: McpServer, token: string): void {
   // --- Drawings -------------------------------------------------------------
   //
   // Every one of these writes THROUGH applyDelta, which merges by element
@@ -1243,7 +1351,9 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function registerDecisionTools(server: McpServer): void {
   // --- Decision artifacts ---------------------------------------------------
 
   server.tool(
@@ -1304,7 +1414,9 @@ function registerTools(server: McpServer, token: string): void {
       })
     }
   )
+}
 
+function registerColonyTools(server: McpServer): void {
   // --- Colony (the agent board — one column per profile, one worktree per card)
 
   server.tool(
@@ -1383,7 +1495,9 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function registerSkillTools(server: McpServer): void {
   // --- Skills (Floe-owned, global or per project — config/skills.ts) --------
   // Administration only. To USE a skill, put `/name` in a send_message /
   // create_session prompt — expansion happens on send, same as the composer.
@@ -1399,7 +1513,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         return textResult(listSkills(root).map(({ name, description, scope, file }) => ({ name, description, scope, file })))
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -1416,7 +1530,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         const { skill, raw } = readSkillFile(name, root)
         return textResult({ name: skill.name, scope: skill.scope, file: skill.file, content: raw })
       } catch (e) {
@@ -1435,7 +1549,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, scope, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         const skill = createSkill(name, scope, root)
         return textResult({ name: skill.name, scope: skill.scope, file: skill.file })
       } catch (e) {
@@ -1454,7 +1568,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, content, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         const skill = updateSkill(name, content, root)
         return textResult({ ok: true, name: skill.name, file: skill.file })
       } catch (e) {
@@ -1473,7 +1587,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, to, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         const skill = renameSkill(name, to, root)
         return textResult({ ok: true, name: skill.name, file: skill.file })
       } catch (e) {
@@ -1491,7 +1605,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         deleteSkill(name, root)
         return textResult({ ok: true })
       } catch (e) {
@@ -1499,7 +1613,9 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function registerMcpRegistryTools(server: McpServer): void {
   // --- MCP registry (Floe-owned third-party servers — config/mcpServers.ts) -
   // Floe projects these into every spawned session's --mcp-config, so an entry
   // registered here reaches whichever harness answers the turn. Changes apply
@@ -1516,7 +1632,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         return textResult(listMcpServers(root))
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -1539,7 +1655,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, scope, transport, url, command, args, enabled, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         const server_ = addMcpServer(scope, { name, transport, url, command, args, enabled } as NewMcpServer, root)
         return textResult(server_)
       } catch (e) {
@@ -1563,7 +1679,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, new_name, transport, url, command, args, enabled, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         return textResult(updateMcpServer(name, { name: new_name, transport, url, command, args, enabled }, root))
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -1580,7 +1696,7 @@ function registerTools(server: McpServer, token: string): void {
     },
     async ({ name, project }) => {
       try {
-        const root = project ? (projectFor(project) ?? project) : undefined
+        const root = rootFor(project)
         removeMcpServer(name, root)
         return textResult({ ok: true })
       } catch (e) {
@@ -1588,7 +1704,9 @@ function registerTools(server: McpServer, token: string): void {
       }
     }
   )
+}
 
+function registerCommandTools(server: McpServer, token: string): void {
   // --- UI commands (the renderer's registry) --------------------------------
 
   // --- Project commands (a project's named processes — commands.ts) ---------
@@ -1678,20 +1796,27 @@ function registerTools(server: McpServer, token: string): void {
       return textResult({ ok: true })
     }
   )
+}
 
+/** A plugin's declared params as the zod raw shape `server.tool` wants. */
+export function pluginShape(params?: Record<string, PluginToolParam>): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {}
+  for (const [key, p] of Object.entries(params ?? {})) {
+    let s: z.ZodTypeAny = p.type === 'number' ? z.number() : p.type === 'boolean' ? z.boolean() : z.string()
+    if (p.description) s = s.describe(p.description)
+    if (p.optional) s = s.optional()
+    shape[key] = s
+  }
+  return shape
+}
+
+function registerPluginToolsOn(server: McpServer): void {
   // --- Plugin tools (plugins/host.ts) ---------------------------------------
   // Registered after the built-ins so a plugin can never shadow one: a name
   // collision throws inside server.tool and costs only that plugin's tool.
   for (const t of pluginTools()) {
-    const shape: Record<string, z.ZodTypeAny> = {}
-    for (const [key, p] of Object.entries(t.params ?? {})) {
-      let s: z.ZodTypeAny = p.type === 'number' ? z.number() : p.type === 'boolean' ? z.boolean() : z.string()
-      if (p.description) s = s.describe(p.description)
-      if (p.optional) s = s.optional()
-      shape[key] = s
-    }
     try {
-      server.tool(t.name, t.description, shape, async (args: Record<string, unknown>) => {
+      server.tool(t.name, t.description, pluginShape(t.params), async (args: Record<string, unknown>) => {
         try {
           return textResult(await t.run(args))
         } catch (e) {
@@ -1703,6 +1828,7 @@ function registerTools(server: McpServer, token: string): void {
     }
   }
 }
+
 
 // Parse the caller token out of a /mcp/<token> path. Returns '' if it doesn't match.
 function tokenFromUrl(url: string | undefined): string {
@@ -1805,31 +1931,40 @@ export function startMcpServer(getWindow: () => BrowserWindow | undefined): void
 // Register Floe's MCP server in the user's GLOBAL Claude config (`-s user`),
 // so any `claude` session — inside Floe or in a plain terminal — gets the floe
 // tools. Replaces any prior entry first so re-running is idempotent.
-export function installGlobal(): Promise<{ ok: boolean; message: string }> {
-  const url = `http://127.0.0.1:${serverPort}/mcp/${GLOBAL_TOKEN}`
-  const run = (args: string[]): Promise<{ code: number; out: string }> =>
-    new Promise((resolve) => {
-      execFile('claude', args, { timeout: 15_000 }, (err, stdout, stderr) => {
-        resolve({
-          code: err ? (((err as NodeJS.ErrnoException & { code?: number }).code ?? 1) as number) : 0,
-          out: `${stdout}${stderr}`.trim()
-        })
+function runClaude(args: string[]): Promise<{ code: number; out: string }> {
+  return new Promise((resolve) => {
+    execFile('claude', args, { timeout: 15_000 }, (err, stdout, stderr) => {
+      resolve({
+        code: err ? (((err as NodeJS.ErrnoException & { code?: number }).code ?? 1) as number) : 0,
+        out: `${stdout}${stderr}`.trim()
       })
     })
-  return (async () => {
-    if (!serverPort) return { ok: false, message: 'The MCP server is not running yet — try again in a moment.' }
-    // Best-effort remove of a stale entry; ignore "not found".
-    await run(['mcp', 'remove', '-s', 'user', 'floe'])
-    const add = await run(['mcp', 'add', '-s', 'user', '-t', 'http', 'floe', url])
-    if (add.code !== 0) {
-      const hint = /ENOENT|not found/i.test(add.out) ? ' (is the `claude` CLI on PATH?)' : ''
-      return { ok: false, message: `Failed to register Floe MCP${hint}: ${add.out || 'unknown error'}` }
-    }
-    const warn = boundPreferred
-      ? ''
-      : ' Note: Floe is on a fallback port this run, so restart it once to make the registration durable.'
-    return { ok: true, message: `Floe MCP registered globally at ${url}. Any claude session can now drive Floe.${warn}` }
-  })()
+  })
+}
+
+// `claude mcp add` failed. The one thing worth guessing at is the common cause:
+// the CLI is not on the PATH Electron inherited.
+export function installFailure(out: string): { ok: false; message: string } {
+  const hint = /ENOENT|not found/i.test(out) ? ' (is the `claude` CLI on PATH?)' : ''
+  return { ok: false, message: `Failed to register Floe MCP${hint}: ${out || 'unknown error'}` }
+}
+
+// A registration written to a fallback port dies with this app run, so say so
+// rather than letting the user find out at the next launch.
+export function installSuccess(url: string, durable: boolean): { ok: true; message: string } {
+  const warn = durable
+    ? ''
+    : ' Note: Floe is on a fallback port this run, so restart it once to make the registration durable.'
+  return { ok: true, message: `Floe MCP registered globally at ${url}. Any claude session can now drive Floe.${warn}` }
+}
+
+export async function installGlobal(): Promise<{ ok: boolean; message: string }> {
+  if (!serverPort) return { ok: false, message: 'The MCP server is not running yet — try again in a moment.' }
+  const url = `http://127.0.0.1:${serverPort}/mcp/${GLOBAL_TOKEN}`
+  // Best-effort remove of a stale entry; ignore "not found".
+  await runClaude(['mcp', 'remove', '-s', 'user', 'floe'])
+  const add = await runClaude(['mcp', 'add', '-s', 'user', '-t', 'http', 'floe', url])
+  return add.code === 0 ? installSuccess(url, boundPreferred) : installFailure(add.out)
 }
 
 // Boot-time idempotent wrapper around installGlobal(): if Claude already has the
