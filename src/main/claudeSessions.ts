@@ -40,6 +40,12 @@ export interface ClaudeSessionMeta {
   permissionMode?: PermissionMode
   model?: string
   effort?: Effort
+  // The session that opened this one over MCP create_session — a subagent's
+  // parent. Carried to the renderer so the sidebar can nest the row under the
+  // chat that spawned it instead of listing seventeen flat siblings. Holds
+  // whichever id the parent called in with (Floe's or the claudeId), so a
+  // lookup has to try both — see namesOf in panels.tsx.
+  spawnedBy?: string
 }
 
 export interface TranscriptItem {
@@ -357,7 +363,8 @@ export function listClaudeSessions(worktreePath: string): ClaudeSessionMeta[] {
       active,
       permissionMode: c.permissionMode,
       model: c.model,
-      effort: c.effort
+      effort: c.effort,
+      spawnedBy: c.spawnedBy
     }
   })
   return sessions

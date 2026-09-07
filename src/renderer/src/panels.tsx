@@ -50,6 +50,8 @@ import {
   type ReactNode
 } from 'react'
 import { QueryPanel } from './QueryPanel'
+import { LanePanel } from './LanePanel'
+import { DOCK_TOGGLE, useSubagents } from './useSubagents'
 import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
@@ -234,6 +236,24 @@ export const KINDS = {
     icon: IconMessage2,
     title: 'query',
     width: 330,
+    // `grow` on a side conversation is not a bid for the chat's width: leftover
+    // lane is split in proportion to base width, so 330 next to the chat's 600
+    // keeps this the narrower panel. It only stops the lane ending in a strip
+    // of empty background.
+    grow: true,
+    min: 260,
+    order: 35,
+    needsProject: true
+  },
+  // One subagent, watched. Same slot rank as a query — both are a side
+  // conversation opened out of the chat — and the same width, so the chat keeps
+  // the room. Opening a second lane replaces the first: you watch one at a time,
+  // and the dock is how you switch.
+  lane: {
+    icon: IconMessage2,
+    title: 'lane',
+    width: 330,
+    grow: true,
     min: 260,
     order: 35,
     needsProject: true
@@ -744,6 +764,16 @@ export function PanelBody({
         harness={sub ?? ''}
         menuItems={menuItems}
         onCommand={onCommand}
+      />
+    ) : null
+  // A subagent's own chat, read-only, opened from the dock. `sub` is the lane's
+  // name — what its parent handed it to do.
+  if (kind === 'lane')
+    return session ? (
+      <LanePanel
+        session={session}
+        title={sub ?? 'subagent'}
+        onOpen={() => onOpen({ kind: 'chat', sub, session })}
       />
     ) : null
   if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
@@ -1602,6 +1632,7 @@ function ChatPanel({
 
   return (
     <div className="chat-panel" ref={rootRef}>
+      <SubagentDock session={session} onOpen={onOpen} />
       <div className="chat" ref={chatRef} onScroll={syncPinned}>
         {loading && <div className="irc-sys">Reading the session…</div>}
         {error && (
@@ -4708,6 +4739,154 @@ function namesOf(s: ClaudeSessionMeta): string[] {
 }
 
 /**
+ * The lanes this chat has working, in the corner of the chat it started them
+ * from.
+ *
+ * The sidebar already lists them (nested, see nestSpawned), and that is the
+ * wrong place to WATCH them: it answers "what sessions exist", it is sorted by
+ * creation, and it is a column you have to look away from the conversation to
+ * read. This answers one question — what is moving right now — and it does it
+ * where the answer matters, next to the chat that is waiting on it.
+ *
+ * Empty is invisible: a chat with no subagents has no dock at all, not an empty
+ * one. And a lane that finishes leaves on its own, because its report arrives in
+ * the transcript directly above (main/spawned.ts) — the dock never shows a row
+ * the conversation has already moved past.
+ */
+function SubagentDock({
+  session,
+  onOpen
+}: {
+  session?: { id: string; worktreePath: string }
+  onOpen?: OpenFn
+}): ReactNode {
+  const lanes = useSubagents(session)
+  const [open, setOpen] = useState(true)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // Folded by `subagents.toggle` — the command, never the key. ⌥A resolves to
+  // that id like every other binding, so the palette and an agent's
+  // `run_command` reach the same fold.
+  useEffect(() => {
+    const onToggle = (): void => setOpen((v) => !v)
+    window.addEventListener(DOCK_TOGGLE, onToggle)
+    return () => window.removeEventListener(DOCK_TOGGLE, onToggle)
+  }, [])
+
+  if (!lanes.length || !session) return null
+
+  const openLane = (lane: { key: string; title: string; worktreePath: string }): void =>
+    onOpen?.({
+      kind: 'lane',
+      sub: lane.title,
+      session: { id: lane.key, worktreePath: lane.worktreePath }
+    })
+
+  if (!open)
+    return (
+      <button className="dock-pill" onClick={() => setOpen(true)}>
+        <Spinner />
+        {lanes.length} subagent{lanes.length === 1 ? '' : 's'}
+        <span className="dock-key">⌥A</span>
+      </button>
+    )
+
+  return (
+    <div className="dock">
+      <div className="dock-head">
+        <Spinner />
+        <span className="dock-count">
+          {lanes.length} subagent{lanes.length === 1 ? '' : 's'} working
+        </span>
+        <button className="dock-key" onClick={() => setOpen(false)} title="Fold the dock">
+          ⌥A
+        </button>
+      </div>
+      {/* Arrow keys walk it and ⏎ opens, so a lane is reachable without the
+          pointer — the rows are buttons in DOM order, which is all the roving
+          focus below needs. */}
+      <div
+        className="dock-list"
+        ref={listRef}
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+          const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('.dock-row') ?? [])]
+          const at = rows.indexOf(document.activeElement as HTMLButtonElement)
+          const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)]
+          if (!next) return
+          e.preventDefault()
+          next.focus()
+        }}
+      >
+        {lanes.map((lane) => (
+          <button className="dock-row" key={lane.id} title={lane.title} onClick={() => openLane(lane)}>
+            <Spinner />
+            <span className="dock-name">
+              <span className="ag-type">{lane.title}</span>
+              {lane.tool && (
+                <>
+                  {' · '}
+                  <span className="ag-tool">{lane.tool}</span>
+                </>
+              )}
+            </span>
+            <span className="sub-note">{ago(lane.since)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Creation order, with every subagent pulled in under the chat that spawned it.
+ *
+ * `create_session` records the caller on `spawnedBy` (mcpServer.ts), so a chat
+ * that fans out into sixteen lanes knows which sixteen rows are its own. Listed
+ * flat they read as sixteen unrelated sessions that happen to share a branch —
+ * which is exactly what they are not.
+ *
+ * The parent calls MCP in with whichever of its two ids it holds, so the index
+ * is built over BOTH of a row's names (see namesOf). `under` is only true when
+ * the parent is a row in THIS list: `create_session` takes any worktree, so a
+ * child can outlive the view its parent sits in, and indenting it beneath
+ * nothing would be a claim the list cannot back up. Such a row keeps its own
+ * place and still wears the mark, because `spawnedBy` is on it either way.
+ */
+function nestSpawned(sessions: ClaudeSessionMeta[]): Array<{ s: ClaudeSessionMeta; under: boolean }> {
+  const byName = new Map<string, ClaudeSessionMeta>()
+  for (const s of sessions) for (const n of namesOf(s)) byName.set(n, s)
+  const parentOf = (s: ClaudeSessionMeta): ClaudeSessionMeta | undefined => {
+    const p = s.spawnedBy ? byName.get(s.spawnedBy) : undefined
+    return p && p !== s ? p : undefined
+  }
+  const kids = new Map<string, ClaudeSessionMeta[]>()
+  for (const s of sessions) {
+    const p = parentOf(s)
+    if (!p) continue
+    const list = kids.get(p.id)
+    if (list) list.push(s)
+    else kids.set(p.id, [s])
+  }
+  const out: Array<{ s: ClaudeSessionMeta; under: boolean }> = []
+  const placed = new Set<string>()
+  // Guards a cycle as much as a double-emit: two sessions naming each other is
+  // not a tree, and the list still has to render.
+  const emit = (s: ClaudeSessionMeta, under: boolean): void => {
+    if (placed.has(s.id)) return
+    placed.add(s.id)
+    out.push({ s, under })
+    // One indent, however deep the spawning went: a grandchild is still work
+    // this chat set running, and a staircase in a 240px column is unreadable.
+    for (const k of kids.get(s.id) ?? []) emit(k, true)
+  }
+  for (const s of sessions) if (!parentOf(s)) emit(s, false)
+  // Whatever a cycle left behind, at its own place rather than dropped.
+  for (const s of sessions) emit(s, false)
+  return out
+}
+
+/**
  * A project's worktrees, each with its sessions underneath.
  *
  * The branch row is where you pick a worktree; a session row opens that
@@ -4878,7 +5057,7 @@ function WorktreesList({
             <GitDirt status={worktrees.status[worktree.path]} />
           </button>
 
-          {(collapsed.has(worktree.path) ? [] : sessions).map((s) => {
+          {(collapsed.has(worktree.path) ? [] : nestSpawned(sessions)).map(({ s, under }) => {
             // Both names, everywhere: the agent conn is filed under whichever
             // the session last spawned with, so its events arrive tagged with
             // one or the other and a lookup on a single id misses half of them.
@@ -4907,6 +5086,11 @@ function WorktreesList({
               // which a folded branch would throw off.
               data-session={s.id}
               data-worktree={worktree.path}
+              // Work another chat set running, not a session of its own. The
+              // mark is on every spawned row; the indent only on one whose
+              // parent is actually above it (see nestSpawned).
+              data-spawned={s.spawnedBy ? true : undefined}
+              data-under={under || undefined}
               // Ticked for deletion, which is a different question from every
               // other state this row carries: unread is about the conversation,
               // active is about what you are looking at, and this is about what
@@ -4951,6 +5135,15 @@ function WorktreesList({
                 waiting={marked(waiting)}
                 seen={!working && marked(unread)}
               />
+              {/* Says whose work this is before the title does. A subagent's
+                  title is the deliverable it was handed ("crap: agent.ts"),
+                  which reads as a session someone opened — this is the only
+                  thing on the row that says another chat opened it. */}
+              {s.spawnedBy && (
+                <span className="row-spawn" aria-hidden>
+                  ↳
+                </span>
+              )}
               <span className="row-name">{markAll(s.title, find)}</span>
               <span className="sub-note">{ago(s.mtime)}</span>
             </button>

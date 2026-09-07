@@ -27,6 +27,7 @@ import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
 import { startSkillDraft } from './skillDraft.ts'
+import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import type { FileOp } from '../../shared/types.ts'
@@ -1662,6 +1663,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         keys: '⌘⇧D',
         enabled: (c) => !!queryPanel(c),
         run: (c) => runQuery(c, 'discard')
+      },
+      {
+        // The dock draws itself only when this chat has lanes running, so the
+        // command is enabled unconditionally: there is nothing to check that the
+        // dock has not already decided, and a greyed-out row would be answering
+        // a question about a panel the user cannot see.
+        id: 'subagents.toggle',
+        title: 'Fold / unfold the subagent dock',
+        group: 'Queries',
+        keys: '⌥A',
+        run: () => toggleSubagentDock()
       },
       {
         // The way back from a discard. The conversation is still on disk under

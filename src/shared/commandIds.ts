@@ -121,6 +121,8 @@ export const COMMAND_IDS: string[] = [
   'query.merge',
   'query.discard',
   'query.reopen',
+  // The subagent dock (the lanes this chat has working, in its corner)
+  'subagents.toggle',
   'chat.all',
   'worktree.new',
   'worktree.merge',

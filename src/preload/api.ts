@@ -567,6 +567,20 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('sessions:link', id, claudeId),
       closeSession: (opts: { id: string; worktreePath: string; claudeId?: string }): Promise<void> =>
         ipcRenderer.invoke('sessions:close', opts),
+      /**
+       * The session list changed behind the renderer's back.
+       *
+       * The sidebar rebuilds itself 500ms after every `done`, which covers a
+       * session that was added or renamed by its own turn. It does not cover a
+       * subagent closing itself a minute after its last turn (see
+       * main/spawned.ts): by then the reload has long since run, and nothing
+       * else would tell the list its row is gone.
+       */
+      onSessionsChanged: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('sessions:changed', listener)
+        return () => ipcRenderer.removeListener('sessions:changed', listener)
+      },
       // Probe Claude Code's built-in /usage, /mcp, /skills, /plugins for this worktree.
       info: (worktreePath: string): Promise<ClaudeInfo> => ipcRenderer.invoke('claude:info', worktreePath),
       contextUsage: (worktreePath: string, claudeId?: string): Promise<ContextUsage> =>

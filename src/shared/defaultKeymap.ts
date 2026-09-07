@@ -456,6 +456,7 @@ what it deletes is Floe's record — the transcript stays on disk.`,
       { key: 'ctrl+i', command: 'session.prev' },
       { key: 'ctrl+o', command: 'session.next' },
       { key: 'ctrl+w', command: 'session.alternate' },
+      { key: 'alt+a', command: 'subagents.toggle' },
       { key: 'super+n', command: 'worktree.new' }
     ]
   },

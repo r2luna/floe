@@ -311,11 +311,14 @@ button {
   min-width: var(--panel-w);
 }
 
-/* Takes the lane's leftover width, never shrinking below its own base. Two of
-   these open at once simply split what is left. */
+/* Takes the lane's leftover width. Several open at once split what is left in
+   proportion to their base widths (`--panel-grow`, written by App): the chat is
+   the widest kind, so it stays the widest panel after the split instead of
+   ending up the same size as the query beside it. The floor is the kind's own
+   `min`, same as any column — a grow panel that could not shrink would push its
+   neighbour off the lane the moment the window got small. */
 .lane-col[data-grow] {
-  flex: 1 1 var(--panel-w, 380px);
-  min-width: var(--panel-w, 380px);
+  flex: var(--panel-grow, 1) 1 var(--panel-w, 380px);
 }
 
 .panel {
@@ -792,6 +795,22 @@ button {
 
 .row-session {
   padding-left: 24px;
+}
+
+/* A subagent: a session another chat opened over create_session. Indented only
+   when its parent is the row above it — a child whose parent lives in another
+   worktree gets the glyph and nothing else, because there is nothing here for
+   it to sit under. */
+.row-session[data-under] {
+  padding-left: 36px;
+}
+
+/* Dimmer than the title it precedes: it answers "whose", and the row is still
+   about what the session is doing. */
+.row-spawn {
+  flex: none;
+  margin-right: -4px;
+  color: var(--dimmest);
 }
 
 .dot {
@@ -1977,12 +1996,136 @@ button {
 
 /* --- chat ---------------------------------------------------------------- */
 
-/* Transcript scrolls, composer stays pinned at the bottom of the panel. */
+/* Transcript scrolls, composer stays pinned at the bottom of the panel.
+   `relative` is what the subagent dock anchors to — it sits in the chat's own
+   bottom-right corner, not the window's, so it follows the panel when the lane
+   is resized. */
 .chat-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   height: 100%;
+}
+
+/* --- the subagent dock ----------------------------------------------------
+   What this chat has working, in the corner it started them from. Bordered
+   rather than shadowed (the app separates with edges), and parked ABOVE the
+   composer: the one thing that must never be covered is the thing you type
+   into. Theme variables only — there is no tint here to need a light variant. */
+.dock {
+  position: absolute;
+  right: 12px;
+  bottom: 62px;
+  z-index: 2;
+  width: 300px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.dock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.dock-count {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The fold, as the key that does it. An outline chip like every other control
+   in the app — never a solid fill. */
+.dock-key {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--dimmest);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.dock-list {
+  padding: 2px 0;
+}
+
+/* One lane. Deliberately the transcript's own subagent row minus the meter —
+   same glyph, same `.ag-type`/`.ag-tool` vocabulary — so the dock and the chat
+   are not two designs for one thing. */
+.dock-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 8px;
+  border-radius: 0;
+  text-align: left;
+}
+
+/* Focus, not hover: the rows are walked with the arrow keys, and a highlight
+   that followed the pointer would light up half the list on every pass. */
+.dock-row:focus-visible {
+  background: var(--wash-1);
+  color: var(--text-strong);
+  outline: none;
+}
+
+.dock-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Folded: one pill that still says how many, and that they are moving. */
+.dock-pill {
+  position: absolute;
+  right: 12px;
+  bottom: 62px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+/* --- one lane, watched ----------------------------------------------------
+   The panel a dock row opens. It borrows `.query-panel` wholesale — same frame,
+   same body — so only what is genuinely different lives here: a head that says
+   whether the lane is still moving, and no composer. */
+.lane-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.lane-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-strong);
 }
 
 /* A query's panel — the chat's shape at a third the width. It shares `.chat`
