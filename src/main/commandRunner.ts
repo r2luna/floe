@@ -530,5 +530,6 @@ export function killAllCommands(): void {
 // Stop every command belonging to one worktree (keys are `<worktreePath>#<id>`).
 export function killCommandsForWorktree(worktreePath: string): void {
   const prefix = worktreePath + '#'
-  for (const key of [...runs.keys()]) if (key.startsWith(prefix)) stopCommand(undefined, key)
+  // A snapshot, not a view: stopCommand deletes from `runs` as we go.
+  for (const key of Array.from(runs.keys())) if (key.startsWith(prefix)) stopCommand(undefined, key)
 }

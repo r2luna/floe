@@ -277,7 +277,7 @@ function useAppFont(api: ExcalidrawImperativeAPI | null): void {
         // Every subset first: Excalidraw registers the family as a run of faces
         // split by unicode-range, and leaving them would let the originals keep
         // covering the Latin range this is meant to replace.
-        for (const f of [...document.fonts]) if (f.family === CANVAS_FONT) document.fonts.delete(f)
+        for (const f of Array.from(document.fonts)) if (f.family === CANVAS_FONT) document.fonts.delete(f)
         document.fonts.add(face)
         // Nothing redraws on its own — the scene has not changed, only how it
         // would be painted.

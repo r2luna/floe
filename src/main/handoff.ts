@@ -66,7 +66,8 @@ const processKey = (key: string, harness: string): string => `${key}|${harness}`
 
 /** Drop a closed session's watermarks, next to the threads they belong to. */
 export function forgetSeen(key: string): void {
-  for (const k of [...processSeen.keys()]) if (k.startsWith(`${key}|`)) processSeen.delete(k)
+  // A snapshot, not a view: the loop deletes from the map it walks.
+  for (const k of Array.from(processSeen.keys())) if (k.startsWith(`${key}|`)) processSeen.delete(k)
 }
 
 /** True when this entry was written by a harness answering, not by the user. */
@@ -130,7 +131,8 @@ const readKey = (fromKey: string, toKey: string): string => `${fromKey}»${toKey
 
 /** Drop a closed query's read marks, next to the watermarks they sit beside. */
 export function forgetRead(fromKey: string): void {
-  for (const k of [...readInto.keys()]) if (k.startsWith(`${fromKey}»`)) readInto.delete(k)
+  // A snapshot, not a view: the loop deletes from the map it walks.
+  for (const k of Array.from(readInto.keys())) if (k.startsWith(`${fromKey}»`)) readInto.delete(k)
 }
 
 /**

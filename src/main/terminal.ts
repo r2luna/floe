@@ -378,7 +378,8 @@ export function killAllTerminals(): void {
 // Kill every terminal opened in one worktree (ids are `term:<worktreePath>#<n>`).
 export function killTerminalsForWorktree(worktreePath: string): void {
   const prefix = `term:${worktreePath}#`
-  for (const id of [...terms.keys()]) if (id.startsWith(prefix)) killTerminal(id)
+  // A snapshot, not a view: killTerminal deletes from `terms` as we go.
+  for (const id of Array.from(terms.keys())) if (id.startsWith(prefix)) killTerminal(id)
 }
 
 // Which terminal PTYs for a worktree are still alive in this process. Used on

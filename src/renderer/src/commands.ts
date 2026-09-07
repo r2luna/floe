@@ -302,7 +302,8 @@ export function installPluginCommands(
   commands: { id: string; title: string; group: string; panel?: string }[],
   run: (id: string, arg?: string) => void
 ): void {
-  for (const id of [...registry.keys()]) if (id.startsWith('plugin:')) registry.delete(id)
+  // A snapshot, not a view: the loop deletes from the registry it walks.
+  for (const id of Array.from(registry.keys())) if (id.startsWith('plugin:')) registry.delete(id)
   for (const c of commands) {
     registry.set(c.id, {
       id: c.id,
