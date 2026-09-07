@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
+import { settle, waitFor } from './watch.test-helper.ts'
 
 // configDir() is XDG-aware, so the watcher tests below work on a throwaway dir
 // instead of the developer's real ~/.config/floe.
@@ -101,13 +102,16 @@ test('watchKeybindings collapses an edit into one debounced call, and stops when
     // A save is several fs events (truncate, write, close); the panel must
     // reload once, not three times.
     writeFileSync(path, generateKeybindings() + '\n# edited\n')
-    await wait(400)
+    // Wait for the reload, then for the event stream to go quiet: counting at
+    // the first callback would miss a second one still in the debounce.
+    await waitFor(() => fired > 0, 5000, 'the debounced reload')
+    await settle(() => fired)
     assert.equal(fired, 1)
   } finally {
     stop()
   }
   writeFileSync(path, generateKeybindings() + '\n# edited again\n')
-  await wait(400)
+  await settle(() => fired)
   assert.equal(fired, 1) // disposed: nothing more arrives
 })
 
@@ -123,7 +127,7 @@ test('watchKeybindings ignores a sibling file in the same config dir', async () 
     // before the only write this test cares about.
     await wait(200)
     writeFileSync(join(configDir(), 'floe.toml'), '[projects]\ngroups = []\n')
-    await wait(400)
+    await settle(() => fired)
     assert.equal(fired, 0)
   } finally {
     stop()

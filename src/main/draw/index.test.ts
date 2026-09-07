@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { applyDelta, createDrawing, listDrawings, mergeElements, promoteDrawing, readDrawing, watchDraw } from './index.ts'
 import type { DrawElement, DrawScene } from '../../shared/types.ts'
+import { settle, waitFor } from '../watch.test-helper.ts'
 
 const el = (id: string, version: number, extra: Partial<DrawElement> = {}): DrawElement => ({
   id,
@@ -207,17 +208,6 @@ test('promoting onto a name already taken refuses rather than overwrites', () =>
 
 // --- watching --------------------------------------------------------------
 
-// Longer than the 150ms debounce, so "nothing arrived" really means nothing.
-const settle = (ms = 300): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-async function waitFor(ready: () => boolean, ms = 4000): Promise<void> {
-  const until = Date.now() + ms
-  while (!ready()) {
-    if (Date.now() > until) throw new Error('timed out waiting for draw:changed')
-    await settle(20)
-  }
-}
-
 test('watchDraw follows the active worktree and drops the one it left', async () => {
   const sent: Array<{ worktreePath: string }> = []
   const wc = {
@@ -227,6 +217,11 @@ test('watchDraw follows the active worktree and drops the one it left', async ()
       sent.push(payload)
     }
   } as unknown as Parameters<typeof watchDraw>[0]
+  // Quiet for longer than the 150ms debounce, so "nothing arrived" really means
+  // nothing — and a send that does arrive extends the window rather than
+  // slipping in behind the assertion.
+  const quiet = (): Promise<number> => settle(() => sent.length, 300)
+  const arrived = (): Promise<void> => waitFor(() => sent.length > 0, 5000, 'draw:changed')
 
   const a = mkdtempSync(join(tmpdir(), 'floe-watch-a-'))
   const b = mkdtempSync(join(tmpdir(), 'floe-watch-b-'))
@@ -242,42 +237,42 @@ test('watchDraw follows the active worktree and drops the one it left', async ()
     watchDraw(wc, a)
     // Creating the draft dir is itself a filesystem event; drop whatever it
     // produced so every assertion below is caused by a write we made.
-    await settle()
+    await quiet()
     sent.length = 0
 
     // The draft dir is watched even though it did not exist when we asked —
     // watchDraw creates it, which is what makes the first drawing show up.
     writeFileSync(join(a, '.floe/draw/one.excalidraw'), '{}')
-    await waitFor(() => sent.length > 0)
+    await arrived()
     assert.deepEqual(sent[0], { worktreePath: a }, 'the renderer is told which worktree changed')
 
     // specs/ is watched recursively: a drawing filed beside its spec counts too.
     sent.length = 0
     writeFileSync(join(a, 'specs/draw/flow.excalidraw'), '{}')
-    await waitFor(() => sent.length > 0)
+    await arrived()
     assert.deepEqual(sent[0], { worktreePath: a })
 
     // Switching worktree retargets the one live watcher. b has no specs/ yet, so
     // that watcher is skipped and the draft one still covers it.
     watchDraw(wc, b)
-    await settle()
+    await quiet()
     sent.length = 0
     writeFileSync(join(a, '.floe/draw/two.excalidraw'), '{}')
-    await settle()
+    await quiet()
     assert.deepEqual(sent, [], 'the worktree we left is no longer watched')
     writeFileSync(join(b, '.floe/draw/one.excalidraw'), '{}')
-    await waitFor(() => sent.length > 0)
+    await arrived()
     assert.deepEqual(sent[0], { worktreePath: b })
 
     sent.length = 0
     watchDraw(wc, notADir)
     writeFileSync(join(b, '.floe/draw/two.excalidraw'), '{}')
-    await settle()
+    await quiet()
     assert.deepEqual(sent, [], 'the previous watchers were closed before it gave up')
   } finally {
     // Whatever failed above, nothing may still be watching when the test ends.
     watchDraw(wc, notADir)
-    await settle()
+    await quiet()
     rmSync(a, { recursive: true, force: true })
     rmSync(b, { recursive: true, force: true })
   }

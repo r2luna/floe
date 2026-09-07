@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './hook.test-helper.ts'
+import { settle, waitFor } from '../watch.test-helper.ts'
 
 // configDir() is XDG-aware, so a temp XDG_CONFIG_HOME gives the real module
 // graph a real directory to watch. The hook stubs `electron`, which this graph
@@ -19,13 +20,21 @@ const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms)
 // Collect what the watcher reports, with the watcher already settled — macOS
 // delivers FSEvents with enough latency that a write issued immediately after
 // `watch()` can be missed.
-async function watching(body: (dir: string) => void, ms = 500): Promise<string[]> {
+//
+// `want` is how a test that expects a report waits for it; the tests that expect
+// silence pass nothing and rely on `settle` alone, which returns once the
+// callbacks stop arriving instead of after a fixed guess.
+async function watching(
+  body: (dir: string) => void,
+  want?: (seen: string[]) => boolean
+): Promise<string[]> {
   const seen: string[] = []
   const stop = config.watchConfig((file) => seen.push(file))
   try {
     await wait(200)
     body(configDir())
-    await wait(ms)
+    if (want) await waitFor(() => want(seen), 5000, 'the config change to be reported')
+    await settle(() => seen.length)
   } finally {
     stop()
   }
@@ -36,7 +45,7 @@ test('a config file written anywhere under the dir is reported, nested ones incl
   const seen = await watching((dir) => {
     mkdirSync(join(dir, 'projects', 'hln-web'), { recursive: true })
     writeFileSync(join(dir, 'projects', 'hln-web', 'config.toml'), 'path = "/code/hln-web"\n')
-  })
+  }, (seen) => seen.some((f) => f.endsWith(join('hln-web', 'config.toml'))))
   // Recursive, because a project's config.toml is two levels down and an agent
   // writing one has to reach the sidebar without a restart.
   assert.ok(
@@ -71,7 +80,7 @@ test('the dispose function stops the callbacks', async () => {
   await wait(200)
   stop()
   writeFileSync(join(configDir(), 'floe.toml'), '[projects]\ngroups = []\n')
-  await wait(500)
+  await settle(() => seen.length)
   assert.deepEqual(seen, [])
 })
 

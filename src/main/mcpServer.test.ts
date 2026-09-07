@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
 import type { Worktree } from '../shared/types'
+import { waitFor } from './watch.test-helper.ts'
 
 // Hermetic boot of the real server: the loader hook stubs `electron` and
 // rewrites extensionless imports so the whole main-process graph loads under
@@ -49,8 +50,7 @@ before(async () => {
   startMcpServer(() => undefined) // no window — the tools exercised here don't need one
   // Wait for the port: the preferred one, or the ephemeral fallback when a real
   // Floe instance is running on this machine.
-  for (let i = 0; i < 50 && port() === 0; i++) await new Promise((r) => setTimeout(r, 10))
-  assert.ok(port() > 0, 'server should bind a port')
+  await waitFor(() => port() > 0, 5000, 'the server to bind a port')
 })
 
 after(() => {

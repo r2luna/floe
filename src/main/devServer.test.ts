@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { detectDevCommand, detectPackageManager, startDev, stopDev } from './devServer.ts'
 import type { DevEvent } from './devServer.ts'
+import { settle } from './watch.test-helper.ts'
 
 // The dev runner spawns whatever `detectDevCommand` names. A bin dir of tiny
 // scripts at the front of PATH makes that a real spawn of a fake npm, so the
@@ -188,7 +189,7 @@ test('a destroyed window is never sent to', async () => {
     webContents: { send: () => sends++ }
   } as unknown as BrowserWindow
   startDev(win, dir, 'feat/x')
-  await new Promise((r) => setTimeout(r, 150))
+  await settle(() => sends, 150)
   stopDev(dir)
   assert.equal(sends, 0)
 })

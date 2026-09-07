@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { WebContents } from 'electron'
 import { installHook } from './config/hook.test-helper.ts'
 import { makeGitRepo, type GitFixture } from './gitFixture.test-helper.ts'
+import { settle, waitFor } from './watch.test-helper.ts'
 
 // `watchChanges` shells out to `git rev-parse --git-dir` with the ambient
 // environment, and this suite can run from the pre-commit hook, which exports
@@ -51,7 +52,6 @@ test('an unnamed event refreshes both rather than being dropped', () => {
 // that the stub was called. Every test tears its watchers down through the
 // public API (see the last one) so `node --test` can exit.
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 interface Recorder {
   wc: WebContents
@@ -81,16 +81,15 @@ function repo(name: string): string {
 // in the assertion for whatever the test does next.
 async function arm(rec: Recorder, path: string): Promise<void> {
   await watchChanges(rec.wc, path)
-  await sleep(400)
+  await settle(() => rec.sent.length)
   rec.sent.length = 0
 }
 
 // Wait until `want` many sends have landed, then one more debounce window so a
 // send we did NOT want still has time to show up and fail the assertion.
 async function expectSends(rec: Recorder, want: string[]): Promise<Recorder['sent']> {
-  const deadline = Date.now() + 4000
-  while (Date.now() < deadline && rec.sent.length < want.length) await sleep(20)
-  await sleep(400)
+  await waitFor(() => rec.sent.length >= want.length, 8000, `${want.length} sends: ${want.join(', ')}`)
+  await settle(() => rec.sent.length)
   assert.deepEqual(
     rec.sent.map((s) => s.channel).sort(),
     [...want].sort(),
@@ -100,7 +99,9 @@ async function expectSends(rec: Recorder, want: string[]): Promise<Recorder['sen
 }
 
 async function expectQuiet(rec: Recorder): Promise<void> {
-  await sleep(900)
+  // A wide quiet window: nothing should arrive, so the only way to be wrong is
+  // to stop watching too soon. Any send that does land restarts it and fails.
+  await settle(() => rec.sent.length, 900)
   assert.deepEqual(rec.sent, [])
 }
 

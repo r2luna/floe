@@ -43,6 +43,19 @@ way down is always one of two moves: split the function, or cover it.
 - **Coverage** is per-line, from `node --test --experimental-test-coverage`, restricted to
   the unit's line range. A file no test ever loads counts as 0%.
 
+## Tests that touch git
+
+Use `makeGitRepo()` from `src/main/gitFixture.test-helper.ts`. Never spawn `git`
+directly from a test.
+
+`spawnSync('git', ...)` inherits the caller's cwd and any `GIT_DIR` / `GIT_INDEX_FILE`
+in the environment — the pre-commit hook exports both — and git walks *up* out of a
+directory to find an enclosing repository. A test that gets this wrong does not fail. It
+commits into Floe's own history: one did, and it deleted all 503 tracked files on the
+working branch. `makeGitRepo()` pins cwd, strips every inherited `GIT_*`, sets
+`GIT_CEILING_DIRECTORIES`, and asserts the repository git resolved to is the one it
+created before handing it back.
+
 ## Gated vs report-only
 
 The limit of 30 is hard across `src/main`, `src/preload`, `src/shared` and `src/web`. No

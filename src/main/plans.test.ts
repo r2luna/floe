@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { WebContents } from 'electron'
 import { listPlans, readImplementPhases, findSpecSummarySource, watchPlans } from './plans.ts'
+import { settle, waitFor } from './watch.test-helper.ts'
 
 // Build a throwaway worktree with `specs/<dir>/tasks.md` files, run the body,
 // then clean up. Keeps each case isolated from the real filesystem.
@@ -168,22 +169,26 @@ test('watchPlans pre-creates the plans dir and reports writes on the active work
     isDestroyed: () => false,
     send: (channel: string, payload: { worktreePath: string }) => sent.push({ channel, payload })
   } as unknown as WebContents
+  // fs watchers deliver late and duplicate events, and more so under load, so
+  // the counting assertions below wait for quiet rather than for a fixed delay.
+  const quiet = (): Promise<number> => settle(() => sent.length)
+
   try {
     watchPlans(wc, root)
     await wait(200)
     // The directory exists because watchPlans made it, before any plan was written.
     writeFileSync(join(root, '.floe/plans/a.md'), '# a')
-    await wait(500)
+    await waitFor(() => sent.length > 0)
     assert.ok(sent.length > 0, 'a plan written should reach the panel')
     assert.ok(sent.every((s) => s.channel === 'plans:event' && s.payload.worktreePath === root))
 
     // One watcher, retargeted: switching worktree has to drop the old one, or the
     // panel would keep repainting for a worktree nobody is looking at.
     watchPlans(wc, other)
-    await wait(200)
+    await quiet()
     const before = sent.length
     writeFileSync(join(root, '.floe/plans/b.md'), '# b')
-    await wait(500)
+    await quiet()
     assert.equal(sent.length, before)
   } finally {
     // A path that cannot hold a plans dir closes the live watcher and opens none,

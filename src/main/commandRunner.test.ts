@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
+import { settle, waitFor as until } from './watch.test-helper.ts'
 
 // node-pty is a native addon built for Electron's ABI, so `node --test` cannot
 // load it. The stub runs the command for real — `/bin/sh -c`, detached, so the
@@ -116,15 +117,9 @@ const of = <K extends CommandEvent['kind']>(
 ): Array<Extract<CommandEvent, { kind: K }>> =>
   events.filter((e): e is Extract<CommandEvent, { kind: K }> => e.kind === kind)
 
-async function waitFor(what: string, ok: () => boolean, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms
-  while (!ok()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+// The shared poller, with the label first — it reads better at the call sites
+// below, where the thing being waited for is the point.
+const waitFor = (what: string, ok: () => boolean, ms = 4000): Promise<void> => until(ok, ms, what)
 
 const MEM_TICK = 2100 // one poll interval, to prove the timer is gone
 
@@ -263,7 +258,7 @@ test('memory is sampled at once, and stops being sampled when the run does', asy
   runner.stopCommand(win, key)
   await waitFor('exit', () => of(events, 'exit').length > 0)
   const samples = of(events, 'mem').length
-  await sleep(MEM_TICK)
+  await settle(() => of(events, 'mem').length, MEM_TICK)
   assert.equal(of(events, 'mem').length, samples)
 })
 test('a crash with auto-restart waits out the backoff, then comes back', async () => {
@@ -288,7 +283,8 @@ test('a stop during the backoff cancels the respawn', async () => {
 
   runner.stopCommand(win, key)
   assert.equal(of(events, 'state').at(-1)?.state, 'exited')
-  await sleep(1400) // past the 1s backoff the stop was meant to cancel
+  // Quiet for longer than the 1s backoff the stop was meant to cancel.
+  await settle(() => of(events, 'started').length, 1400)
   assert.equal(of(events, 'started').length, 1)
 })
 
@@ -304,7 +300,7 @@ test('a re-run supersedes the old process without reporting its exit', async () 
   runner.restartCommand(win, key, dir, 'feat', 'sleep 30', 80, 24)
   await waitFor('the second spawn', () => globalThis.__ptySpawns.length === 2)
   assert.notEqual(runner.getCommandPids()[0], firstPid)
-  await sleep(200)
+  await settle(() => events.length)
   assert.equal(of(events, 'exit').length, 0) // the superseded proc's exit is swallowed
   assert.equal(of(events, 'started').length, 2)
 })
@@ -341,7 +337,8 @@ test('a write under a watch root re-runs the command after the debounce', async 
 
   runner.stopCommand(win, key) // closes the watch
   writeFileSync(join(watched, '0002_create.php'), '<?php')
-  await sleep(500) // longer than the 300ms debounce
+  // Quiet for longer than the 300ms debounce a re-run would have gone through.
+  await settle(() => of(events, 'started').length, 500)
   assert.equal(of(events, 'started').length, 2)
 })
 
@@ -354,7 +351,7 @@ test('no watch globs means no watcher at all', async () => {
   await waitFor('exit', () => of(events, 'exit').length > 0)
 
   writeFileSync(join(dir, 'whatever.txt'), 'x')
-  await sleep(500)
+  await settle(() => of(events, 'started').length, 500)
   assert.equal(of(events, 'started').length, 1)
 })
 

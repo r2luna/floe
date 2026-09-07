@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import type { AgentEvent, AgentRunOptions } from '../shared/types'
 import type { Conn } from './agent.ts'
+import { settle, waitFor } from './watch.test-helper.ts'
 
 // Every path agent.ts reads out of the machine is redirected into a throwaway
 // dir first: `$HOME` (the CLI transcript ensureTaskWatcher tails) and the
@@ -334,7 +335,10 @@ test('handleLine: buffered deltas flush on the timer without another message', a
   const { win, events } = fakeWin()
   handleLine(win, 'k', conn, JSON.stringify(textDelta('tick')))
   assert.deepEqual(events, [])
-  await new Promise((r) => setTimeout(r, 80))
+  // The flush is a real timer, so wait for it to fire and then for the queue to
+  // stop moving — one flush, not one flush plus whatever followed it.
+  await waitFor(() => events.length > 0, 5000, 'the delta flush')
+  await settle(() => events.length, 100)
   assert.deepEqual(events, [{ kind: 'text', text: 'tick' }])
 })
 
@@ -1129,14 +1133,6 @@ test('spawnConn: a replaced child\'s late close cannot delete the conn that repl
 
 // ── ensureTaskWatcher ───────────────────────────────────────────────────────
 
-async function until(cond: () => boolean, ms = 5_000): Promise<void> {
-  const deadline = Date.now() + ms
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error('timed out waiting for the transcript watcher')
-    await new Promise((r) => setTimeout(r, 10))
-  }
-}
-
 test('ensureTaskWatcher: an async agent\'s completion is read off the CLI transcript', async () => {
   // The stuck-session bug in full. Under --output-format stream-json the CLI
   // processes the queued `<task-notification>` internally and never echoes it on
@@ -1171,7 +1167,7 @@ test('ensureTaskWatcher: an async agent\'s completion is read off the CLI transc
       message: { content: '<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n<result>found it</result>\n</task-notification>' }
     }) + '\n'
   )
-  await until(() => only(events, 'done').length > 0)
+  await waitFor(() => only(events, 'done').length > 0, 5000, 'the transcript watcher')
 
   // The agent reports back in its own voice, and the turn closes here — the
   // stdout `result` that would normally do it is never coming.

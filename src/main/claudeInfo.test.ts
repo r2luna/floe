@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { register } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { waitFor } from './watch.test-helper.ts'
 
 // The probe spawns `claude` and deletes a session file under ~/.claude. Both are
 // faked: a module hook swaps `node:child_process` for a stub that hands back the
@@ -74,8 +75,10 @@ let spawnThrows: Error | null = null
 
 const { getClaudeInfo, getContextUsage, parseContextUsage, parseTokenCount } = await import('./claudeInfo.ts')
 
-/** The cleanup unlink is callback-based; give the loop a turn to run it. */
-const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 10))
+/** The cleanup unlink is callback-based, so poll for the file rather than
+ *  guessing how long the loop needs to get to it. */
+const unlinked = (file: string): Promise<void> =>
+  waitFor(() => !existsSync(file), 5000, `${file} to be cleaned up`)
 
 const send = (...lines: string[]): void => {
   child.stdout.emit('data', lines.map((l) => l + '\n').join(''))
@@ -177,7 +180,7 @@ test('getClaudeInfo: the probe session file is deleted, not left in the Resume p
   send(JSON.stringify(INIT))
   child.emit('close')
   await p
-  await settle()
+  await unlinked(file)
   assert.equal(existsSync(file), false)
 })
 
@@ -225,7 +228,7 @@ test('getContextUsage: the /context report is parsed off the result event', asyn
   assert.deepEqual(child.signals, ['SIGTERM'])
 
   child.emit('close')
-  await settle()
+  await unlinked(fork)
   assert.equal(existsSync(fork), false)
 })
 
