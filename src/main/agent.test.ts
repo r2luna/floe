@@ -1,12 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { EventEmitter } from 'node:events'
 import { register } from 'node:module'
-import { mkdtempSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import type { AgentEvent, AgentRunOptions } from '../shared/types'
 import type { Conn } from './agent.ts'
+
+// Every path agent.ts reads out of the machine is redirected into a throwaway
+// dir first: `$HOME` (the CLI transcript ensureTaskWatcher tails) and the
+// electron stub's `app.getPath` (where the per-session MCP config is written).
+// Set before the first import, so nothing can cache the real one.
+const HOME = mkdtempSync(join(tmpdir(), 'floe-agent-home-'))
+process.env.HOME = HOME
+process.env.FLOE_TEST_TMP = HOME
 
 // agent.ts imports sessionStore (which import `electron`) and value
 // imports from ../shared/types — none resolvable by raw Node ESM. Register the
@@ -18,6 +27,9 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 export async function resolve(specifier, context, next) {
   if (specifier === 'electron') return { url: 'stub:electron', shortCircuit: true, format: 'module' }
+  // Only agent.ts's spawn is faked: every other module keeps the real one.
+  if (specifier === 'node:child_process' && (context.parentURL ?? '').endsWith('/agent.ts'))
+    return { url: 'stub:child_process', shortCircuit: true, format: 'module' }
   if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\\.[a-z]+$/i.test(specifier)) {
     try {
       const base = context.parentURL ? new URL(specifier, context.parentURL) : pathToFileURL(specifier)
@@ -28,9 +40,11 @@ export async function resolve(specifier, context, next) {
   return next(specifier, context)
 }
 export async function load(url, context, next) {
+  if (url === 'stub:child_process')
+    return { format: 'module', shortCircuit: true, source: 'export function spawn(...a) { return globalThis.__spawn(...a) }' }
   if (url === 'stub:electron') {
     const src = [
-      "export const app = { getPath: () => '/tmp' };",
+      "export const app = { getPath: () => process.env.FLOE_TEST_TMP || '/tmp' };",
       'export class BrowserWindow {}',
       'export const Menu = { setApplicationMenu(){}, buildFromTemplate: () => ({}) };',
       'export class Notification {}',
@@ -65,7 +79,12 @@ const {
   replaySnapshot,
   replayInFlight,
   activeTurnKeys,
-  dropSettled
+  dropSettled,
+  waitForTurn,
+  sendToAgent,
+  stopAgent,
+  hasActiveTurn,
+  readSessionBuffer
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
 const { addCreatedSession, setCreatedSessionSpawnedBy, linkCreatedSession } = await import(
@@ -111,6 +130,103 @@ function run(msg: unknown, conn = fakeConn()): { events: AgentEvent[]; conn: Con
 
 const kinds = (events: AgentEvent[]): string[] => events.map((e) => e.kind)
 const only = (events: AgentEvent[], kind: string): AgentEvent[] => events.filter((e) => e.kind === kind)
+
+// ── the faked CLI ───────────────────────────────────────────────────────────
+// A `claude` child that never runs. spawnConn only writes JSON to its stdin,
+// listens on the three streams and kills it, so an EventEmitter with those
+// pieces is the whole contract — and a test can drive stdout/close/error by
+// hand, which is the only way to reach spawnConn's callbacks at all.
+
+interface FakeChild extends EventEmitter {
+  pid: number
+  exitCode: number | null
+  signalCode: string | null
+  killed: boolean
+  stdin: EventEmitter & { destroyed: boolean; writableEnded: boolean; write: (s: string) => boolean }
+  stdout: EventEmitter & { setEncoding: () => void }
+  stderr: EventEmitter & { setEncoding: () => void }
+  kill: (signal?: string) => boolean
+  /** Every stream-json payload agent.ts wrote to this child. */
+  writes: string[]
+  /** The signals `kill()` was called with, so a reap/respawn is observable. */
+  signals: string[]
+}
+
+function fakeChildProcess(): FakeChild {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 4242,
+    exitCode: null as number | null,
+    signalCode: null as string | null,
+    killed: false,
+    stdin: Object.assign(new EventEmitter(), {
+      destroyed: false,
+      writableEnded: false,
+      write: (s: string) => {
+        child.writes.push(s)
+        return true
+      }
+    }),
+    stdout: Object.assign(new EventEmitter(), { setEncoding: () => {} }),
+    stderr: Object.assign(new EventEmitter(), { setEncoding: () => {} }),
+    kill: (signal?: string) => {
+      child.signals.push(signal ?? 'SIGTERM')
+      child.killed = true
+      return true
+    },
+    writes: [] as string[],
+    signals: [] as string[]
+  })
+  return child as unknown as FakeChild
+}
+
+interface Spawned {
+  args: string[]
+  opts: { cwd?: string }
+  child: FakeChild
+}
+const spawned: Spawned[] = []
+declare global {
+  // eslint-disable-next-line no-var
+  var __spawn: (cmd: string, args: string[], opts: { cwd?: string }) => FakeChild
+}
+globalThis.__spawn = (_cmd, args, opts) => {
+  const child = fakeChildProcess()
+  spawned.push({ args, opts, child })
+  return child
+}
+
+// A real directory: spawnConn's ENOENT handler asks whether the cwd still
+// exists to tell "no claude on PATH" from "this session is another machine's".
+const WT = join(HOME, 'wt')
+mkdirSync(WT, { recursive: true })
+const DEFAULT_OPTS: AgentRunOptions = { permissionMode: 'default' }
+
+/** One turn through the real sendToAgent, against the faked CLI. */
+function startSession(
+  key: string,
+  prompt = 'hello',
+  opts: AgentRunOptions = DEFAULT_OPTS
+): { win: BrowserWindow; events: AgentEvent[]; spawn: Spawned } {
+  const { win, events } = fakeWin()
+  const at = spawned.length
+  sendToAgent(win, key, WT, prompt, opts)
+  assert.equal(spawned.length, at + 1, 'sendToAgent spawned exactly one child')
+  return { win, events, spawn: spawned[at] }
+}
+
+/** Deregister the conn and clear spawnConn's kill timer — no strays after a test. */
+function endSession(win: BrowserWindow, key: string, child: FakeChild): void {
+  stopAgent(win, key)
+  child.emit('close', 0)
+}
+
+/** One stream-json line, as the CLI would deliver it on stdout. */
+function emit(child: FakeChild, msg: unknown): void {
+  child.stdout.emit('data', JSON.stringify(msg) + '\n')
+}
+
+const wrote = (child: FakeChild, n = 0): { type: string; message: { content: unknown } } =>
+  JSON.parse(child.writes[n])
 
 test('optionsKeyFor: identical options → identical key (no drift)', () => {
   const opts: AgentRunOptions = { permissionMode: 'plan', model: 'opus', effort: 'high' }
@@ -746,4 +862,454 @@ test('a replay says who is answering, not just what model', () => {
   // A panel opening onto this turn has no other way to know: the picker in the
   // chat still says whatever the SESSION is set to.
   assert.deepEqual(snap.choice, { provider: 'codex', effort: 'high', mode: 'plan' })
+})
+
+// ── waitForTurn ─────────────────────────────────────────────────────────────
+
+test('waitForTurn: a parked caller is released with the turn\'s final text', async () => {
+  // The MCP send_message(wait) seam: one session asks another a question and
+  // blocks on the answer. It is the turn's `done` that hands it over.
+  const { win } = fakeWin()
+  const conn = fakeConn({ lastAssistantText: 'forty-seven' })
+  const parked = waitForTurn('wait-1', 60_000)
+  handleLine(win, 'wait-1', conn, JSON.stringify({ type: 'result', is_error: false }))
+  assert.equal(await parked, 'forty-seven')
+})
+
+test('waitForTurn: a timeout resolves with what exists so far, and stops waiting', async () => {
+  // Never resolving would block the caller forever; resolving and then leaving
+  // the waiter parked would hand the NEXT turn's `done` to a caller long gone.
+  assert.equal(await waitForTurn('wait-2', 5), '', 'no conn, nothing said: empty, not a hang')
+  const { win } = fakeWin()
+  const conn = fakeConn({ lastAssistantText: 'late' })
+  handleLine(win, 'wait-2', conn, JSON.stringify({ type: 'result', is_error: false }))
+  // A second wait proves the timed-out one was removed: if it were still parked
+  // it would have taken that `done` and this one would never see the next.
+  const parked = waitForTurn('wait-2', 60_000)
+  handleLine(win, 'wait-2', fakeConn({ lastAssistantText: 'later' }), JSON.stringify({ type: 'result', is_error: false }))
+  assert.equal(await parked, 'later')
+})
+
+// ── the watchdog's other shapes ─────────────────────────────────────────────
+
+test('runWatchdogTick: logs the two soft shapes and only recovers the wedged one', () => {
+  const now = 10_000_000
+  const { win, events } = fakeWin()
+  // Held on a subagent past HELD_STUCK_MS but still streaming inline activity:
+  // shout once, never kill — a live async agent is doing exactly this.
+  const held = fakeConn({
+    win, child: fakeChild(), turnActive: true, subagents: new Set(['t1']),
+    heldForSubagentsAt: now - 120_000, lastActivityAt: now - 1_000, stuckLogged: false
+  })
+  // Talked, then quiet past SILENT_STUCK_MS but not past recovery: soft signal.
+  const quiet = fakeConn({
+    win, child: fakeChild(), turnActive: true, pendingPerms: new Map(), turnHadMeaningfulOutput: true,
+    turnStartedAt: now - 400_000, lastActivityAt: now - 200_000, stuckLogged: false
+  })
+  // A fresh spawn that never produced real output: wedged at init, recover.
+  const wedged = fakeConn({
+    win, child: fakeChild(), turnActive: true, pendingPerms: new Map(), turnStartedOnFreshConn: true,
+    turnHadMeaningfulOutput: false, turnStartedAt: now - 400_000, lastActivityAt: now - 1_000
+  })
+
+  runWatchdogTick([['held', held], ['quiet', quiet], ['wedged', wedged]], now)
+
+  assert.equal(held.stuckLogged, true)
+  assert.equal(held.turnActive, true, 'a held turn that is still talking is left alone')
+  assert.equal(quiet.stuckLogged, true)
+  assert.equal(quiet.turnActive, true)
+  // Only the wedge is surfaced, and as an error — not a silent empty success.
+  assert.deepEqual(kinds(events), ['error'])
+  assert.match((events[0] as { message: string }).message, /stopped responding/i)
+})
+
+test('runWatchdogTick: a second tick does not shout about the same stuck turn twice', () => {
+  const now = 10_000_000
+  const { win } = fakeWin()
+  const conn = fakeConn({
+    win, child: fakeChild(), turnActive: true, pendingPerms: new Map(), turnHadMeaningfulOutput: true,
+    turnStartedAt: now - 400_000, lastActivityAt: now - 200_000, stuckLogged: false
+  })
+  runWatchdogTick([['k', conn]], now)
+  assert.equal(conn.stuckLogged, true)
+  assert.equal(watchdogAction(conn, now, true), 'none', 'already logged — nothing left to say')
+})
+
+// ── spawnConn / sendToAgent, against the faked CLI ──────────────────────────
+
+test('sendToAgent: the first send spawns a stream-json CLI and writes the prompt', () => {
+  const { win, events, spawn } = startSession('spawn-1', 'do the thing', {
+    permissionMode: 'skip', model: 'opus', effort: 'high'
+  })
+  const args = spawn.args
+  assert.equal(spawn.opts.cwd, WT)
+  assert.deepEqual(args.slice(0, 7), [
+    '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--include-partial-messages', '--verbose'
+  ])
+  assert.ok(args.includes('--dangerously-skip-permissions'), 'skip mode bypasses the prompts')
+  // …but the control channel stays attached even in skip mode, or the CLI
+  // auto-dismisses AskUserQuestion within seconds and the model reads it as
+  // "the user ignored the question".
+  assert.equal(args[args.indexOf('--permission-prompt-tool') + 1], 'stdio')
+  assert.equal(args[args.indexOf('--model') + 1], 'opus')
+  assert.equal(args[args.indexOf('--effort') + 1], 'high')
+  assert.equal(args[args.indexOf('--allowedTools') + 1], 'mcp__floe')
+  assert.ok(!args.includes('--resume'), 'a brand-new session has nothing to resume')
+
+  const sent = wrote(spawn.child)
+  assert.equal(sent.type, 'user')
+  assert.equal(sent.message.content, 'do the thing', 'no attachments → a plain string, not blocks')
+  assert.equal(hasActiveTurn('spawn-1'), true)
+  assert.equal(readSessionBuffer('spawn-1'), 'user: do the thing')
+
+  endSession(win, 'spawn-1', spawn.child)
+  assert.equal(hasActiveTurn('spawn-1'), false)
+  assert.deepEqual(kinds(events).slice(-1), ['done'], 'a stop always closes the turn in the UI')
+})
+
+test('sendToAgent: attachments travel as content blocks, prompt last', () => {
+  const { win, events } = fakeWin()
+  const at = spawned.length
+  sendToAgent(
+    win, 'spawn-att', WT, 'look at these', DEFAULT_OPTS,
+    [{ id: 'i1', mediaType: 'image/png', data: 'AAAA' }],
+    [
+      { id: 'f1', kind: 'pdf', mediaType: 'application/pdf', data: 'JVBERi0=', name: 'spec.pdf' },
+      { id: 'f2', kind: 'text', mediaType: 'text/markdown', data: Buffer.from('hi there').toString('base64'), name: 'notes.md' }
+    ]
+  )
+  const blocks = wrote(spawned[at].child).message.content as Array<Record<string, { type?: string; data?: string; media_type?: string }> & { type: string; text?: string }>
+  assert.deepEqual(blocks.map((b) => b.type), ['image', 'document', 'document', 'text'])
+  assert.equal(blocks[1].source.media_type, 'application/pdf')
+  // The API's base64 document source only accepts PDFs, so a text file is
+  // decoded on the way out — send it as base64 and the model reads gibberish.
+  assert.equal(blocks[2].source.type, 'text')
+  assert.equal(blocks[2].source.data, 'hi there')
+  assert.equal(blocks[3].text, 'look at these', 'the prompt comes after its attachments')
+  assert.deepEqual(kinds(events), ['turn'])
+  endSession(win, 'spawn-att', spawned[at].child)
+})
+
+test('sendToAgent: a send during a live turn steers it instead of spawning a second CLI', () => {
+  const { win, spawn } = startSession('steer-1')
+  const at = spawned.length
+  sendToAgent(win, 'steer-1', WT, 'actually, stop', DEFAULT_OPTS)
+  assert.equal(spawned.length, at, 'one session, one claude — a second would strand the first')
+  assert.equal(wrote(spawn.child, 1).message.content, 'actually, stop')
+  assert.equal(hasActiveTurn('steer-1'), true, 'the running turn continues; it is not reset')
+  // Into the replay, not onto the wire: the panel that typed it already shows
+  // it, and until the CLI absorbs it the replay is the only place a panel
+  // mounting mid-turn can read what was said.
+  assert.deepEqual(kinds(replaySnapshot('steer-1').events), ['steer'])
+  assert.equal(readSessionBuffer('steer-1'), 'user: hello\nuser: actually, stop')
+  endSession(win, 'steer-1', spawn.child)
+})
+
+test('sendToAgent: changing the model retires the child and respawns', () => {
+  const { win, spawn } = startSession('opts-1', 'first', { permissionMode: 'default', model: 'sonnet' })
+  emit(spawn.child, { type: 'result', is_error: false }) // turn over, so this is not a steer
+  const at = spawned.length
+  sendToAgent(win, 'opts-1', WT, 'second', { permissionMode: 'default', model: 'opus' })
+  assert.deepEqual(spawn.child.signals, ['SIGTERM'], 'the child cannot change its own flags')
+  assert.equal(spawned.length, at + 1)
+  assert.equal(spawned[at].args[spawned[at].args.indexOf('--model') + 1], 'opus')
+  endSession(win, 'opts-1', spawned[at].child)
+})
+
+test('sendToAgent: a child that died while idle is dropped, never written to', () => {
+  const { win, spawn } = startSession('dead-1')
+  emit(spawn.child, { type: 'result', is_error: false })
+  // The zombie shape from the spawn-hang report: reaped by the OS, exitCode
+  // still null, but the pipe is gone. Writing here hangs the turn forever.
+  spawn.child.stdin.destroyed = true
+  const at = spawned.length
+  sendToAgent(win, 'dead-1', WT, 'again', DEFAULT_OPTS)
+  assert.equal(spawned.length, at + 1, 'respawned instead of writing into a dead pipe')
+  assert.equal(spawn.child.writes.length, 1, 'and the corpse heard nothing more')
+  endSession(win, 'dead-1', spawned[at].child)
+})
+
+test('sendToAgent: spawning under a new name retires the child the session ran under', () => {
+  // The renderer switches its key from the Floe id to the claudeId the moment
+  // the CLI reports it. Without the reap the first child is left alive forever:
+  // two claudes for one session, and two conns whose `turnActive` disagree.
+  addCreatedSession({ id: 'reap-old', worktreePath: WT })
+  const old = startSession('reap-old')
+  emit(old.spawn.child, { type: 'system', subtype: 'init', session_id: 'reap-cid' })
+  emit(old.spawn.child, { type: 'result', is_error: false })
+  addCreatedSession({ id: 'reap-new', worktreePath: WT })
+  linkCreatedSession('reap-new', 'reap-cid')
+
+  const next = startSession('reap-new', 'carry on')
+  assert.deepEqual(old.spawn.child.signals, ['SIGTERM'])
+  assert.equal(hasActiveTurn('reap-old'), false, 'the stale name holds no conn at all now')
+  // And the history is not lost — the replacement resumes the CLI's own session.
+  assert.equal(next.spawn.args[next.spawn.args.indexOf('--resume') + 1], 'reap-cid')
+  endSession(next.win, 'reap-new', next.spawn.child)
+})
+
+test('sendToAgent: an answer arriving under an alias reaches the one live conn', () => {
+  // A conn stays filed under whatever key spawned it while the panel keys itself
+  // by `claudeId ?? id`, so the name a send arrives under is not always the name
+  // the child runs under. Missing that spawned a second claude (see the reap).
+  addCreatedSession({ id: 'alias-1', worktreePath: WT })
+  const { win, spawn } = startSession('alias-1')
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'alias-cid' })
+  const at = spawned.length
+  sendToAgent(win, 'alias-cid', WT, 'under the CLI\'s own name', DEFAULT_OPTS)
+  assert.equal(spawned.length, at, 'resolved to the existing conn, not a new child')
+  assert.equal(wrote(spawn.child, 1).message.content, 'under the CLI\'s own name')
+  endSession(win, 'alias-1', spawn.child)
+})
+
+test('sendToAgent: a query gets an empty, strict MCP config — never the global one', () => {
+  // A query's key is not a session id, so the token it would carry resolves to
+  // nothing; and leaving the token out would let the CLI inherit the globally
+  // registered Floe server and come back as `/mcp/global` — the same tools
+  // under the wrong identity. It takes both halves to be safe.
+  const { win, spawn } = startSession('qparent~codex')
+  const args = spawn.args
+  assert.ok(args.includes('--strict-mcp-config'), 'the global and project servers must not leak in')
+  assert.ok(!args.includes('--allowedTools'), 'nothing to auto-permit: a query holds no floe token')
+  assert.deepEqual(JSON.parse(readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')), { mcpServers: {} })
+  endSession(win, 'qparent~codex', spawn.child)
+})
+
+test('spawnConn: a missing claude CLI closes the turn with a legible error', () => {
+  const { events, spawn } = startSession('err-1')
+  spawn.child.emit('error', new Error('spawn claude ENOENT'))
+  assert.deepEqual(only(events, 'error'), [{ kind: 'error', message: 'claude CLI not found' }])
+  assert.deepEqual(only(events, 'done'), [{ kind: 'done', ok: false }])
+  assert.equal(hasActiveTurn('err-1'), false, 'deregistered, so the next send respawns')
+})
+
+test('spawnConn: ENOENT with a missing cwd blames the worktree, not the CLI', () => {
+  // The real case is a session routed here from another machine. Blaming the
+  // CLI sends the user hunting for a PATH problem that does not exist.
+  const { win, events } = fakeWin()
+  const at = spawned.length
+  const gone = join(HOME, 'not-on-this-machine')
+  sendToAgent(win, 'err-2', gone, 'hi', DEFAULT_OPTS)
+  spawned[at].child.emit('error', new Error('spawn claude ENOENT'))
+  assert.match((only(events, 'error')[0] as { message: string }).message, /belongs to another backend/)
+  assert.match((only(events, 'error')[0] as { message: string }).message, /not-on-this-machine/)
+})
+
+test('spawnConn: a non-zero close surfaces stderr and ends the turn', () => {
+  const { events, spawn } = startSession('close-1')
+  spawn.child.stderr.emit('data', 'error: unknown option --effort\n')
+  spawn.child.emit('close', 2)
+  assert.deepEqual(only(events, 'error'), [{ kind: 'error', message: 'error: unknown option --effort' }])
+  assert.deepEqual(only(events, 'done'), [{ kind: 'done', ok: false }])
+  assert.equal(hasActiveTurn('close-1'), false)
+})
+
+test('spawnConn: a broken stdin pipe is fatal for the conn, never for main', () => {
+  // Swallowed, this left the turn "running" forever with no log line and no UI
+  // signal — the `close` that was supposed to clean up never came.
+  const { events, spawn } = startSession('pipe-1')
+  spawn.child.stdin.emit('error', new Error('write EPIPE'))
+  assert.match((only(events, 'error')[0] as { message: string }).message, /Send your message again/)
+  assert.deepEqual(only(events, 'done'), [{ kind: 'done', ok: false }])
+  assert.equal(hasActiveTurn('pipe-1'), false)
+})
+
+test('spawnConn: a replaced child\'s late close cannot delete the conn that replaced it', () => {
+  // Stop-then-drain: the old process is killed and a new conn spawns at the same
+  // key. The old one's late close used to delete that new conn and fire a stale
+  // `done`, orphaning the queued turn — "nothing happens".
+  const { win, spawn } = startSession('late-1')
+  emit(spawn.child, { type: 'result', is_error: false })
+  const at = spawned.length
+  sendToAgent(win, 'late-1', WT, 'next', { permissionMode: 'plan' }) // options change → respawn
+  spawn.child.emit('close', 0) // the retired child, arriving late
+  assert.equal(hasActiveTurn('late-1'), true, 'the replacement still owns the key')
+  endSession(win, 'late-1', spawned[at].child)
+})
+
+// ── ensureTaskWatcher ───────────────────────────────────────────────────────
+
+async function until(cond: () => boolean, ms = 5_000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error('timed out waiting for the transcript watcher')
+    await new Promise((r) => setTimeout(r, 10))
+  }
+}
+
+test('ensureTaskWatcher: an async agent\'s completion is read off the CLI transcript', async () => {
+  // The stuck-session bug in full. Under --output-format stream-json the CLI
+  // processes the queued `<task-notification>` internally and never echoes it on
+  // our stdout, so the launching id is never cleared and the held `result`
+  // strands the turn "Thinking…". The notification IS written to the transcript.
+  const { win, events, spawn } = startSession('watch-1')
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'watch-cid' })
+
+  const dir = join(HOME, '.claude', 'projects', WT.replace(/[^a-zA-Z0-9]/g, '-'))
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, 'watch-cid.jsonl')
+  // A resumed session's file already holds old, done notifications. Reprocessing
+  // them would close a row that only just opened, so the watcher starts at EOF.
+  const stale = '<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n</task-notification>'
+  writeFileSync(file, JSON.stringify({ type: 'user', message: { content: stale } }) + '\n')
+
+  emit(spawn.child, {
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'Agent', id: 'a1', input: { subagent_type: 'Explore', description: 'dig' } }] }
+  })
+  emit(spawn.child, { type: 'result', is_error: false })
+  assert.deepEqual(only(events, 'subagent-start').length, 1)
+  assert.deepEqual(only(events, 'subagent-done'), [], 'the notification already on disk is not this launch\'s')
+  assert.deepEqual(only(events, 'done'), [], 'the turn is held for the async agent')
+
+  // fs.watch needs a turn of the loop to arm before it reports anything.
+  await new Promise((r) => setTimeout(r, 100))
+  appendFileSync(
+    file,
+    JSON.stringify({
+      type: 'user',
+      message: { content: '<task-notification>\n<tool-use-id>a1</tool-use-id>\n<status>completed</status>\n<result>found it</result>\n</task-notification>' }
+    }) + '\n'
+  )
+  await until(() => only(events, 'done').length > 0)
+
+  // The agent reports back in its own voice, and the turn closes here — the
+  // stdout `result` that would normally do it is never coming.
+  assert.deepEqual(only(events, 'subagent-done'), [{ kind: 'subagent-done', toolUseId: 'a1', reply: 'found it' }])
+  assert.deepEqual(only(events, 'done'), [{ kind: 'done', ok: true }])
+  assert.equal(hasActiveTurn('watch-1'), false)
+  assert.match(readSessionBuffer('watch-1'), /agent: found it/)
+  endSession(win, 'watch-1', spawn.child)
+})
+
+test('ensureTaskWatcher: no transcript on disk yet is survivable, not a throw', () => {
+  // The dir only appears once the CLI writes its first turn. The watchdog is the
+  // safety net until then; launching an agent must not take the session down.
+  const { win, events, spawn } = startSession('watch-2')
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'no-such-transcript' })
+  emit(spawn.child, {
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'Task', id: 'b1', input: { description: 'dig' } }] }
+  })
+  assert.deepEqual(only(events, 'subagent-start').length, 1, 'the row still opens')
+  endSession(win, 'watch-2', spawn.child)
+})
+
+// ── handleLine dispatch, after the split ────────────────────────────────────
+
+test('handleLine: present_decision renders as an artifact, not a tool card', () => {
+  const conn = fakeConn()
+  const { win, events } = fakeWin()
+  handleLine(win, 'k', conn, JSON.stringify(textDelta('picking… ')))
+  handleLine(win, 'k', conn, JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: [{
+        type: 'tool_use',
+        name: 'mcp__floe__present_decision',
+        id: 'd1',
+        input: {
+          title: 'Pick one',
+          groups: [{ id: 'g1', label: 'Storage', select: 'single', options: [{ id: 'a', label: 'SQLite' }] }]
+        }
+      }]
+    }
+  }))
+  // The streamed text is flushed first, so the panel lands in order.
+  assert.deepEqual(kinds(events), ['text', 'artifact'])
+  assert.deepEqual(only(events, 'tool'), [], 'no duplicate tool chip')
+})
+
+test('handleLine: a malformed decision spec falls back to the plain tool card', () => {
+  // Nothing may silently disappear: a spec the validator rejects is still a tool
+  // the model ran, and the transcript has to say so.
+  const { events } = run({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'mcp__floe__present_decision', id: 'd2', input: { nope: true } }] }
+  })
+  assert.deepEqual(only(events, 'artifact'), [])
+  assert.equal((only(events, 'tool')[0] as { name: string }).name, 'mcp__floe__present_decision')
+})
+
+test('handleLine: an AskUserQuestion tool_use renders nothing — the control request owns it', () => {
+  // It is delivered (and paused on) over the control channel in every mode now,
+  // so a card here would be a second, non-interactive copy of the same question.
+  const { events } = run({
+    type: 'assistant',
+    message: { content: [{ type: 'tool_use', name: 'AskUserQuestion', id: 'q1', input: { questions: [] } }] }
+  })
+  assert.deepEqual(kinds(events), [])
+})
+
+test('handleLine: an AskUserQuestion with no parsable questions falls back to a permission card', () => {
+  // Better a card the user can deny than a CLI blocked on a request with no way
+  // to answer it.
+  const conn = fakeConn()
+  const { events } = run({
+    type: 'control_request',
+    request_id: 'r9',
+    request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions: [] } }
+  }, conn)
+  assert.deepEqual(kinds(events), ['permission'])
+  assert.ok(conn.pendingPerms.has('r9'))
+})
+
+test('handleLine: the CLI\'s own description wins over the guessed tool summary', () => {
+  const { events } = run({
+    type: 'control_request',
+    request_id: 'r10',
+    request: { subtype: 'can_use_tool', tool_name: 'Bash', description: 'Delete the build output', input: { command: 'rm -rf out' } }
+  })
+  const perm = only(events, 'permission')[0] as { permission: { summary?: string } }
+  assert.equal(perm.permission.summary, 'Delete the build output')
+})
+
+test('handleLine: a control_request with no id or wrong subtype is ignored', () => {
+  assert.deepEqual(kinds(run({ type: 'control_request', request: { subtype: 'interrupt' } }).events), [])
+  assert.deepEqual(kinds(run({ type: 'control_request', request_id: '', request: { subtype: 'can_use_tool' } }).events), [])
+})
+
+test('handleLine: an error result surfaces the CLI\'s message once, not twice', () => {
+  // "Usage credits are required for this model." arrives as an error result. But
+  // when it IS the streamed assistant text it must not render a second time.
+  const shown = run({ type: 'result', is_error: true, result: 'Usage credits are required.' }, fakeConn())
+  assert.deepEqual(shown.events, [
+    { kind: 'error', message: 'Usage credits are required.' },
+    { kind: 'done', ok: false }
+  ])
+  const already = run(
+    { type: 'result', is_error: true, result: 'Usage credits are required.' },
+    fakeConn({ lastAssistantText: 'Usage credits are required.' })
+  )
+  assert.deepEqual(already.events, [{ kind: 'done', ok: false }])
+})
+
+test('handleLine: an unrecognised task-notification id is logged, never guessed at', () => {
+  // A notification that clears no row is exactly how a turn strands "Thinking…".
+  const conn = fakeConn({ subagents: new Set(['t1']) })
+  const { events } = run(
+    { type: 'user', message: { content: '<task-notification>\n<tool-use-id>ghost</tool-use-id>\n<status>completed</status>\n</task-notification>' } },
+    conn
+  )
+  assert.deepEqual(kinds(events), [])
+  assert.ok(conn.subagents.has('t1'), 'and it did not close somebody else\'s row')
+})
+
+test('handleLine: two agents finishing together both close', () => {
+  // Delivered as adjacent blocks in one message. Stopping at the first strands
+  // the rest — tracked, running, holding the turn open.
+  const conn = fakeConn({ subagents: new Set(['t1', 't2']) })
+  const { events } = run({
+    type: 'user',
+    message: {
+      content:
+        '<task-notification>\n<tool-use-id>t1</tool-use-id>\n<result>one</result>\n</task-notification>\n' +
+        '<task-notification>\n<tool-use-id>t2</tool-use-id>\n<result>two</result>\n</task-notification>'
+    }
+  }, conn)
+  assert.deepEqual(only(events, 'subagent-done'), [
+    { kind: 'subagent-done', toolUseId: 't1', reply: 'one' },
+    { kind: 'subagent-done', toolUseId: 't2', reply: 'two' }
+  ])
+  assert.equal(conn.subagents.size, 0)
 })

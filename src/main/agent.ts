@@ -1127,6 +1127,321 @@ export function drainLines(buffer: string, chunk: string): { lines: string[]; re
   return { lines, rest: buffer }
 }
 
+// The turn is alive as long as the CLI keeps talking. The watchdog reads these
+// to tell a genuinely-stuck turn from one that's still streaming.
+function noteLineActivity(conn: Conn, msg: Record<string, unknown>, type: string | undefined): void {
+  conn.lastActivityAt = Date.now()
+  if (type === undefined) return
+  conn.lastLineType = type
+  conn.lastLineSubtype = typeof msg.subtype === 'string' ? msg.subtype : ''
+  // Any non-`system` line proves real turn progress (assistant token, tool_use,
+  // tool_result, control_request, result). A turn wedged at startup emits only
+  // `system` lines (init/status/api_retry) — see SILENT_RECOVER_MS.
+  if (type !== 'system') conn.turnHadMeaningfulOutput = true
+}
+
+// A subagent's internal activity is streamed inline on the same stdout, tagged
+// with the parent Task's tool-use id. Route it to that subagent's nested row
+// (live tokens + current tool) — it must not land in the parent's transcript or
+// inflate the parent's token gauge. Answers whether the line is consumed here:
+// the Task's own tool_result (which ends the subagent) arrives WITHOUT the tag,
+// and a control_request must reach the handler below or the CLI blocks forever.
+// ponytail: known limitation — a subagent that itself launches a Task is invisible
+// after the first hint (the inner parent_tool_use_id never enters conn.subagents,
+// so it just routes away here). Harmless: it pollutes neither transcript nor gauge.
+// Only build a childId→rootTopLevelId alias if nested Tasks become common.
+function routeSubagentLine(
+  win: BrowserWindow,
+  key: string,
+  msg: Record<string, unknown>,
+  type: string | undefined,
+  parentToolUseId: string
+): boolean {
+  if (type === 'assistant' && msg.message && typeof msg.message === 'object') {
+    const inner = msg.message as { usage?: unknown; content?: unknown }
+    const tokens = contextTokens(inner.usage)
+    let tool: string | undefined
+    if (Array.isArray(inner.content)) {
+      for (const block of inner.content as Array<Record<string, unknown>>) {
+        if (block.type === 'tool_use' && typeof block.name === 'string') tool = block.name
+      }
+    }
+    send(win, key, { kind: 'subagent-progress', toolUseId: parentToolUseId, tokens, tool })
+  }
+  // A control_request (tool permission / AskUserQuestion) tagged to a subagent
+  // must still reach the handler: the CLI blocks on it, so swallowing it here
+  // would hang the whole session with nothing surfaced to answer.
+  return type !== 'control_request'
+}
+
+// AskUserQuestion arrives as a control_request too: the CLI blocks on it, so the
+// session genuinely pauses. Answers whether the question was dealt with here —
+// `false` falls through to the ordinary permission card, which is what a
+// malformed/empty question list deserves.
+function handleAskUserQuestion(
+  win: BrowserWindow,
+  key: string,
+  conn: Conn,
+  req: Record<string, unknown>,
+  requestId: string
+): boolean {
+  // A session an agent opened has no human in front of it: only the parent
+  // talks to the user. Answer the child's question here (same deny+message
+  // channel the user's answer uses) so it decides for itself and escalates
+  // through its parent — never a question card the user has to clear.
+  if (getCreatedSession(key)?.spawnedBy) {
+    log('child-question-answered', { key, requestId })
+    write(conn, {
+      type: 'control_response',
+      response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: CHILD_ANSWERS_ITSELF } }
+    })
+    return true
+  }
+  const questions = parseQuestions(req.input)
+  if (!questions.length) return false
+  conn.pendingPerms.set(requestId, req.input)
+  log('question-asked', { key, requestId })
+  send(win, key, { kind: 'question', toolUseId: requestId, questions })
+  return true
+}
+
+// What the permission card says the tool is about to do. The CLI's own
+// description wins; an empty summary is `undefined`, not a blank line.
+function permissionSummary(req: Record<string, unknown>): string | undefined {
+  if (typeof req.description === 'string' && req.description) return req.description
+  return summarizeTool({ input: req.input }) || undefined
+}
+
+// The CLI asks for tool permission over the control channel (we opted in with
+// `--permission-prompt-tool stdio`). Remember the input so we can echo it back
+// on allow, then surface an approve/deny prompt in the transcript.
+function handleControlRequest(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  if (!msg.request || typeof msg.request !== 'object') return
+  const req = msg.request as Record<string, unknown>
+  const requestId = String(msg.request_id ?? '')
+  if (req.subtype !== 'can_use_tool' || !requestId) return
+  if (req.tool_name === 'AskUserQuestion' && handleAskUserQuestion(win, key, conn, req, requestId)) return
+  conn.pendingPerms.set(requestId, req.input)
+  send(win, key, {
+    kind: 'permission',
+    permission: { requestId, toolName: String(req.tool_name ?? 'tool'), summary: permissionSummary(req) }
+  })
+}
+
+function handleSystemLine(win: BrowserWindow, key: string, msg: Record<string, unknown>): void {
+  if (msg.subtype !== 'init' || typeof msg.session_id !== 'string') return
+  send(win, key, {
+    kind: 'session',
+    sessionId: msg.session_id,
+    model: typeof msg.model === 'string' ? msg.model : undefined
+  })
+}
+
+function handleStreamEvent(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  if (!msg.event || typeof msg.event !== 'object') return
+  const ev = msg.event as {
+    type?: string
+    delta?: { type?: string; text?: string; thinking?: string }
+  }
+  if (ev.type !== 'content_block_delta') return
+  if (ev.delta?.type === 'text_delta') queueDelta(win, key, conn, 'text', ev.delta.text ?? '')
+  else if (ev.delta?.type === 'thinking_delta') queueDelta(win, key, conn, 'reasoning', ev.delta.thinking ?? '')
+}
+
+// Accumulate the assistant's text for this turn (used by send_message(wait)) and
+// mirror it into the live buffer (used by read_session_output). Answers whether
+// the block was text, so the caller can stop looking at it.
+function appendAssistantText(conn: Conn, block: Record<string, unknown>): boolean {
+  if (block.type !== 'text' || typeof block.text !== 'string' || !block.text.trim()) return false
+  conn.lastAssistantText += (conn.lastAssistantText ? '\n' : '') + block.text
+  pushTranscript(conn, `assistant: ${block.text.trim()}`)
+  return true
+}
+
+// The Task tool (named "Agent" on the wire) launches a subagent. Track its id so
+// we can match the inline progress + the closing tool_result, and surface a live
+// nested row — see routeSubagentLine.
+function startSubagent(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>, id: string): void {
+  const input = (block.input ?? {}) as Record<string, unknown>
+  conn.subagents.add(id)
+  // An async (background) agent's completion never reaches our stdout — watch
+  // the CLI transcript so its finish clears this row (see ensureTaskWatcher).
+  ensureTaskWatcher(win, key, conn)
+  log('subagent-start', { key, id, outstanding: conn.subagents.size })
+  send(win, key, {
+    kind: 'subagent-start',
+    toolUseId: id,
+    agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
+    description: typeof input.description === 'string' ? input.description : '',
+    harness: 'claude'
+  })
+}
+
+// The present_decision tool renders as an inline decision panel, not a tool
+// card. Emit the artifact (after flushing any streamed text so it lands in
+// order). Answers `false` on a malformed spec so the caller falls through to the
+// plain tool card and nothing silently disappears.
+function emitDecisionArtifact(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>): boolean {
+  // The tool's input carries title/groups/items only — the discriminant is
+  // implied by the tool name, so inject it before validating.
+  const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
+  if (!spec) return false
+  flushDeltas(win, key, conn)
+  send(win, key, { kind: 'artifact', spec })
+  return true
+}
+
+function handleAssistantBlock(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>): void {
+  if (appendAssistantText(conn, block)) return
+  if (block.type !== 'tool_use') return
+  if (block.name === 'mcp__floe__present_decision' && emitDecisionArtifact(win, key, conn, block)) return
+  // The question is delivered (and paused on) via the can_use_tool control
+  // request in every mode now — even skip, where the prompt tool stays
+  // attached so AskUserQuestion remains answerable — so skip it here to
+  // avoid rendering a duplicate, non-interactive tool card.
+  if (block.name === 'AskUserQuestion') return
+  if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string')
+    return startSubagent(win, key, conn, block, block.id)
+  const toolName = String(block.name ?? 'tool')
+  const toolSummary = summarizeTool(block)
+  pushTranscript(conn, `[tool ${toolName}]${toolSummary ? ` ${toolSummary}` : ''}`)
+  send(win, key, { kind: 'tool', name: toolName, summary: toolSummary })
+}
+
+function handleAssistantLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  if (!msg.message || typeof msg.message !== 'object') return
+  // Real context usage lives on each assistant message's `usage`. Summing
+  // input + cache + output gives how much of the context window this turn
+  // consumed — the right number for the Nk/1000k gauge.
+  const used = contextTokens((msg.message as { usage?: unknown }).usage)
+  if (used > 0) send(win, key, { kind: 'tokens', tokens: used })
+  const content = (msg.message as { content?: unknown }).content
+  if (!Array.isArray(content)) return
+  for (const block of content as Array<Record<string, unknown>>) handleAssistantBlock(win, key, conn, block)
+}
+
+// The Agent tool launches async agents by default: they run detached and report
+// completion via a top-level user message whose content is a plain
+// `<task-notification>` string carrying the launching tool_use id. THAT is when
+// the row is really done — the "Async agent launched" ack only acknowledges the
+// launch. One message can close several agents: two that finished together are
+// delivered as adjacent blocks, and stopping at the first strands the rest —
+// tracked, running, holding the turn open.
+function closeNotifiedSubagents(win: BrowserWindow, key: string, conn: Conn, content: string): void {
+  for (const notice of parseTaskNotifications(content)) {
+    const id = notice.toolUseId
+    if (!conn.subagents.has(id)) {
+      // A notification whose id we don't recognise can't clear its row —
+      // this is exactly how a turn strands "Thinking…" forever. Record it.
+      log('subagent-notify-unmatched', { key, id, outstanding: conn.subagents.size })
+      continue
+    }
+    conn.subagents.delete(id)
+    log('subagent-done', { key, id, via: 'notification', outstanding: conn.subagents.size })
+    // `reply` is the agent reporting back: it speaks in the channel under
+    // its own nick. For an async agent this notification is the ONLY place
+    // its answer exists — the tool_result was just the launch ack.
+    if (notice.result) pushTranscript(conn, `agent: ${notice.result}`)
+    send(win, key, notice.result ? { kind: 'subagent-done', toolUseId: id, reply: notice.result } : { kind: 'subagent-done', toolUseId: id })
+  }
+}
+
+// A tracked subagent's result returning marks it done — clear its row's running
+// state. (Its internal steps were routed away by parent id.) A blocking Task's
+// result IS the agent's answer to the session that launched it, so it says it
+// here in its own voice. Two results are not that: the async launch ack (the
+// agent has not started talking yet, so its row stays open for the
+// <task-notification>) and an errored result (nothing was said in its name).
+function closeBlockingSubagent(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>): void {
+  const resultFor = typeof block.tool_use_id === 'string' ? block.tool_use_id : ''
+  const reply = resultText(block.content)
+  if (!resultFor || !conn.subagents.has(resultFor) || isAsyncLaunchAck(reply)) return
+  conn.subagents.delete(resultFor)
+  log('subagent-done', { key, id: resultFor, via: 'tool_result', outstanding: conn.subagents.size })
+  const spoken = block.is_error === true ? undefined : reply
+  if (spoken) pushTranscript(conn, `agent: ${spoken}`)
+  send(win, key, spoken ? { kind: 'subagent-done', toolUseId: resultFor, reply: spoken } : { kind: 'subagent-done', toolUseId: resultFor })
+}
+
+function handleToolResultBlock(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>): void {
+  if (block.type !== 'tool_result') return
+  closeBlockingSubagent(win, key, conn, block)
+  if (!Array.isArray(block.content)) return
+  for (const part of block.content as Array<Record<string, unknown>>) {
+    if (part.type !== 'image') continue
+    const src = part.source as { type?: string; media_type?: string; data?: string } | undefined
+    if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
+      send(win, key, { kind: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })
+    }
+  }
+}
+
+// Tool results arrive as `user` messages. Surface any image they carry (e.g.
+// a Read of a PNG) so the transcript can show what Claude saw.
+function handleUserLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  if (!msg.message || typeof msg.message !== 'object') return
+  const content = (msg.message as { content?: unknown }).content
+  if (typeof content === 'string') {
+    if (isTaskNotification(content)) return closeNotifiedSubagents(win, key, conn, content)
+    // Another session messaging this one arrives the same way: injected as a
+    // plain user turn. It is someone else talking, so it joins the channel
+    // under their nick — live, not only when the transcript is read back.
+    const peer = parsePeerMessage(content)
+    if (peer && peer.body) {
+      pushTranscript(conn, `${peer.from}: ${peer.body}`)
+      send(win, key, { kind: 'peer', from: peer.from, text: peer.body })
+    }
+    return
+  }
+  if (!Array.isArray(content)) return
+  for (const block of content as Array<Record<string, unknown>>) handleToolResultBlock(win, key, conn, block)
+}
+
+function handleResultLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  // NB: the result's `usage` is cumulative across the whole session (it sums
+  // every API call), so it's NOT the context-window fill — feeding it to the
+  // gauge makes it climb past 100%. The latest `assistant` message above
+  // already reported this turn's actual context size, so don't touch the
+  // token count here.
+  // A still-tracked subagent here means an async Agent is running in the
+  // background: this turn ends, but the session ISN'T idle — the CLI resumes
+  // it when the agent's <task-notification> arrives (reliable: it fires even
+  // if the model never Monitors). Firing `done` now would wrongly flip the
+  // session to finished and ping a "session finished" notification while the
+  // agent is still working. Stay running; the resumed turn's result closes it.
+  // ponytail: assumes every async agent eventually notifies; it does (fires on
+  // every stop). If one could truly vanish, add a timeout sweep here.
+  if (conn.subagents.size > 0) {
+    // `done` withheld: the turn stays "running" until every async subagent
+    // reports back. If one never does, this is where the session gets stuck —
+    // record the hold so the watchdog/log can point straight at it.
+    conn.heldForSubagentsAt = Date.now()
+    log('result-held', { key, subagents: conn.subagents.size, ids: [...conn.subagents], turnMs: Date.now() - conn.turnStartedAt })
+    return
+  }
+  // A <task-notification> read from the transcript may have already closed this
+  // turn (its last async agent finished after the result was held, and the CLI
+  // never resumed to send its own closing result). Don't fire a second `done`.
+  if (conn.turnClosed) return
+  // Turn finished — but the process stays alive for the next message.
+  conn.turnClosed = true
+  conn.turnActive = false
+  conn.heldForSubagentsAt = null
+  // Surface CLI-level errors (e.g. "Usage credits are required for this model.")
+  // that arrive as an error result. The message lives in `msg.result`; skip it
+  // when it's already the streamed assistant text so it doesn't render twice.
+  if (msg.is_error === true && typeof msg.result === 'string' && msg.result.trim() && msg.result.trim() !== conn.lastAssistantText?.trim()) {
+    send(win, key, { kind: 'error', message: msg.result.trim() })
+  }
+  log('turn-done', { key, ok: msg.is_error !== true, turnMs: conn.turnStartedAt ? Date.now() - conn.turnStartedAt : 0 })
+  send(win, key, { kind: 'done', ok: msg.is_error !== true })
+  // Release any send_message(wait) callers with this turn's final assistant text.
+  resolveWaiters(key, conn.lastAssistantText)
+}
+
+// One stream-json line off the CLI's stdout. Past the bookkeeping this is only
+// dispatch: each message type owns a module-level handler, so no single unit
+// carries the whole protocol's branching (docs/crap.md).
 export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: string): void {
   let msg: Record<string, unknown>
   try {
@@ -1143,307 +1458,22 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
     linkAgentIdentity(key, msg.session_id)
   }
 
-  const type = msg.type
-  // The turn is alive as long as the CLI keeps talking. The watchdog reads these
-  // to tell a genuinely-stuck turn from one that's still streaming.
-  conn.lastActivityAt = Date.now()
-  if (typeof type === 'string') {
-    conn.lastLineType = type
-    conn.lastLineSubtype = typeof msg.subtype === 'string' ? msg.subtype : ''
-    // Any non-`system` line proves real turn progress (assistant token, tool_use,
-    // tool_result, control_request, result). A turn wedged at startup emits only
-    // `system` lines (init/status/api_retry) — see SILENT_RECOVER_MS.
-    if (type !== 'system') conn.turnHadMeaningfulOutput = true
-  }
+  const type = typeof msg.type === 'string' ? msg.type : undefined
+  noteLineActivity(conn, msg, type)
 
   // Anything that isn't a streaming delta drains the coalesced delta queue
   // first, so the renderer always sees text/tools/results in arrival order.
   if (type !== 'stream_event') flushDeltas(win, key, conn)
 
-  // A subagent's internal activity is streamed inline on the same stdout, tagged
-  // with the parent Task's tool-use id. Route it to that subagent's nested row
-  // (live tokens + current tool) and stop — it must not land in the parent's
-  // transcript or inflate the parent's token gauge. The Task's own tool_result
-  // (which ends the subagent) arrives WITHOUT this tag, so it falls through below.
-  // ponytail: known limitation — a subagent that itself launches a Task is invisible
-  // after the first hint (the inner parent_tool_use_id never enters conn.subagents,
-  // so it just routes away here). Harmless: it pollutes neither transcript nor gauge.
-  // Only build a childId→rootTopLevelId alias if nested Tasks become common.
   const parentToolUseId = typeof msg.parent_tool_use_id === 'string' ? msg.parent_tool_use_id : ''
-  if (parentToolUseId) {
-    if (type === 'assistant' && msg.message && typeof msg.message === 'object') {
-      const inner = msg.message as { usage?: unknown; content?: unknown }
-      const tokens = contextTokens(inner.usage)
-      let tool: string | undefined
-      if (Array.isArray(inner.content)) {
-        for (const block of inner.content as Array<Record<string, unknown>>) {
-          if (block.type === 'tool_use' && typeof block.name === 'string') tool = block.name
-        }
-      }
-      send(win, key, { kind: 'subagent-progress', toolUseId: parentToolUseId, tokens, tool })
-    }
-    // A control_request (tool permission / AskUserQuestion) tagged to a subagent
-    // must still reach the handler below: the CLI blocks on it, so swallowing it
-    // here would hang the whole session with nothing surfaced to answer. Only a
-    // subagent's own internal chatter (assistant/tool_result/…) is dropped.
-    if (type !== 'control_request') return
-  }
+  if (parentToolUseId && routeSubagentLine(win, key, msg, type, parentToolUseId)) return
 
-  // The CLI asks for tool permission over the control channel (we opted in with
-  // `--permission-prompt-tool stdio`). Remember the input so we can echo it back
-  // on allow, then surface an approve/deny prompt in the transcript.
-  if (type === 'control_request' && msg.request && typeof msg.request === 'object') {
-    const req = msg.request as Record<string, unknown>
-    const requestId = String(msg.request_id ?? '')
-    if (req.subtype === 'can_use_tool' && requestId) {
-      // AskUserQuestion arrives here too: the CLI blocks on this control_request,
-      // so the session genuinely pauses. Surface the question card and answer it
-      // by resolving this same request (see answerQuestion) — no auto-dismiss.
-      if (req.tool_name === 'AskUserQuestion') {
-        // A session an agent opened has no human in front of it: only the parent
-        // talks to the user. Answer the child's question here (same deny+message
-        // channel the user's answer uses) so it decides for itself and escalates
-        // through its parent — never a question card the user has to clear.
-        if (getCreatedSession(key)?.spawnedBy) {
-          log('child-question-answered', { key, requestId })
-          write(conn, {
-            type: 'control_response',
-            response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: CHILD_ANSWERS_ITSELF } }
-          })
-          return
-        }
-        const questions = parseQuestions(req.input)
-        if (questions.length) {
-          conn.pendingPerms.set(requestId, req.input)
-          log('question-asked', { key, requestId })
-          send(win, key, { kind: 'question', toolUseId: requestId, questions })
-          return
-        }
-      }
-      conn.pendingPerms.set(requestId, req.input)
-      send(win, key, {
-        kind: 'permission',
-        permission: {
-          requestId,
-          toolName: String(req.tool_name ?? 'tool'),
-          summary:
-            (typeof req.description === 'string' && req.description) ||
-            summarizeTool({ input: req.input }) ||
-            undefined
-        }
-      })
-    }
-    return
-  }
-
-  if (type === 'system') {
-    if (msg.subtype === 'init' && typeof msg.session_id === 'string') {
-      send(win, key, {
-        kind: 'session',
-        sessionId: msg.session_id,
-        model: typeof msg.model === 'string' ? msg.model : undefined
-      })
-    }
-    return
-  }
-
-  if (type === 'stream_event' && msg.event && typeof msg.event === 'object') {
-    const ev = msg.event as {
-      type?: string
-      delta?: { type?: string; text?: string; thinking?: string }
-    }
-    if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-      queueDelta(win, key, conn, 'text', ev.delta.text ?? '')
-    } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'thinking_delta') {
-      queueDelta(win, key, conn, 'reasoning', ev.delta.thinking ?? '')
-    }
-    return
-  }
-
-  if (type === 'assistant' && msg.message && typeof msg.message === 'object') {
-    // Real context usage lives on each assistant message's `usage`. Summing
-    // input + cache + output gives how much of the context window this turn
-    // consumed — the right number for the Nk/1000k gauge.
-    const used = contextTokens((msg.message as { usage?: unknown }).usage)
-    if (used > 0) send(win, key, { kind: 'tokens', tokens: used })
-    const content = (msg.message as { content?: unknown }).content
-    if (Array.isArray(content)) {
-      for (const block of content as Array<Record<string, unknown>>) {
-        // Accumulate the assistant's text for this turn (used by send_message(wait))
-        // and mirror it into the live buffer (used by read_session_output).
-        if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
-          conn.lastAssistantText += (conn.lastAssistantText ? '\n' : '') + block.text
-          pushTranscript(conn, `assistant: ${block.text.trim()}`)
-          continue
-        }
-        if (block.type !== 'tool_use') continue
-        // The present_decision tool renders as an inline decision panel, not a
-        // tool card. Emit the artifact (after flushing any streamed text so it
-        // lands in order) and skip the default tool chip. On a malformed spec,
-        // fall through to the plain tool card so nothing silently disappears.
-        if (block.name === 'mcp__floe__present_decision') {
-          // The tool's input carries title/groups/items only — the discriminant
-          // is implied by the tool name, so inject it before validating.
-          const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
-          if (spec) {
-            flushDeltas(win, key, conn)
-            send(win, key, { kind: 'artifact', spec })
-            continue
-          }
-        }
-        // The question is delivered (and paused on) via the can_use_tool control
-        // request in every mode now — even skip, where the prompt tool stays
-        // attached so AskUserQuestion remains answerable — so skip it here to
-        // avoid rendering a duplicate, non-interactive tool card.
-        if (block.name === 'AskUserQuestion') continue
-        // The Task tool (named "Agent" on the wire) launches a subagent. Track its
-        // id so we can match the inline progress + the closing tool_result, and
-        // surface a live nested row — see the subagent routing above.
-        if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string') {
-          const input = (block.input ?? {}) as Record<string, unknown>
-          conn.subagents.add(block.id)
-          // An async (background) agent's completion never reaches our stdout —
-          // watch the CLI transcript so its finish clears this row (see below).
-          ensureTaskWatcher(win, key, conn)
-          log('subagent-start', { key, id: block.id, outstanding: conn.subagents.size })
-          send(win, key, {
-            kind: 'subagent-start',
-            toolUseId: block.id,
-            agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
-            description: typeof input.description === 'string' ? input.description : '',
-            harness: 'claude'
-          })
-          continue
-        }
-        const toolName = String(block.name ?? 'tool')
-        const toolSummary = summarizeTool(block)
-        pushTranscript(conn, `[tool ${toolName}]${toolSummary ? ` ${toolSummary}` : ''}`)
-        send(win, key, { kind: 'tool', name: toolName, summary: toolSummary })
-      }
-    }
-    return
-  }
-
-  // Tool results arrive as `user` messages. Surface any image they carry (e.g.
-  // a Read of a PNG) so the transcript can show what Claude saw.
-  if (type === 'user' && msg.message && typeof msg.message === 'object') {
-    const content = (msg.message as { content?: unknown }).content
-    // The Agent tool now launches async agents by default: they run detached and
-    // report completion via a top-level user message whose content is a plain
-    // `<task-notification>` string carrying the launching tool_use id. THAT is
-    // when the row is really done — the immediate "Async agent launched" ack
-    // below only acknowledges the launch, it doesn't mean the work is finished.
-    if (typeof content === 'string' && isTaskNotification(content)) {
-      // One message can close several agents: two that finished together are
-      // delivered as adjacent blocks, and stopping at the first strands the
-      // rest — tracked, running, holding the turn open.
-      for (const notice of parseTaskNotifications(content)) {
-        const id = notice.toolUseId
-        if (!conn.subagents.has(id)) {
-          // A notification whose id we don't recognise can't clear its row —
-          // this is exactly how a turn strands "Thinking…" forever. Record it.
-          log('subagent-notify-unmatched', { key, id, outstanding: conn.subagents.size })
-          continue
-        }
-        conn.subagents.delete(id)
-        log('subagent-done', { key, id, via: 'notification', outstanding: conn.subagents.size })
-        // `reply` is the agent reporting back: it speaks in the channel under
-        // its own nick. For an async agent this notification is the ONLY place
-        // its answer exists — the tool_result was just the launch ack.
-        if (notice.result) pushTranscript(conn, `agent: ${notice.result}`)
-        send(win, key, notice.result ? { kind: 'subagent-done', toolUseId: id, reply: notice.result } : { kind: 'subagent-done', toolUseId: id })
-      }
-      return
-    }
-    // Another session messaging this one arrives the same way: injected as a
-    // plain user turn. It is someone else talking, so it joins the channel
-    // under their nick — live, not only when the transcript is read back.
-    if (typeof content === 'string') {
-      const peer = parsePeerMessage(content)
-      if (peer && peer.body) {
-        pushTranscript(conn, `${peer.from}: ${peer.body}`)
-        send(win, key, { kind: 'peer', from: peer.from, text: peer.body })
-        return
-      }
-    }
-    if (Array.isArray(content)) {
-      for (const block of content as Array<Record<string, unknown>>) {
-        if (block.type !== 'tool_result') continue
-        // A tracked subagent's result returning marks it done — clear its row's
-        // running state. (Its internal steps were routed away above by parent id.)
-        // But an async Agent returns an immediate "Async agent launched" ack while
-        // it keeps running in the background: keep the row alive until its
-        // <task-notification> completion above. Only a classic blocking Task's
-        // result (its real output) closes the row here.
-        const resultFor = typeof block.tool_use_id === 'string' ? block.tool_use_id : ''
-        // A blocking Task's result IS the agent's answer to the session that
-        // launched it — it says it here, in its own voice, instead of being
-        // folded silently into the parent's next paragraph. Two results are not
-        // that: the async launch ack (the agent has not started talking yet, so
-        // its row stays open for the <task-notification> above) and an errored
-        // result (the tool failed; nothing was said in the agent's name).
-        const reply = resultText(block.content)
-        if (resultFor && conn.subagents.has(resultFor) && !isAsyncLaunchAck(reply)) {
-          conn.subagents.delete(resultFor)
-          log('subagent-done', { key, id: resultFor, via: 'tool_result', outstanding: conn.subagents.size })
-          const spoken = block.is_error === true ? undefined : reply
-          if (spoken) pushTranscript(conn, `agent: ${spoken}`)
-          send(win, key, spoken ? { kind: 'subagent-done', toolUseId: resultFor, reply: spoken } : { kind: 'subagent-done', toolUseId: resultFor })
-        }
-        if (!Array.isArray(block.content)) continue
-        for (const part of block.content as Array<Record<string, unknown>>) {
-          if (part.type !== 'image') continue
-          const src = part.source as { type?: string; media_type?: string; data?: string } | undefined
-          if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
-            send(win, key, { kind: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })
-          }
-        }
-      }
-    }
-    return
-  }
-
-  if (type === 'result') {
-    // NB: the result's `usage` is cumulative across the whole session (it sums
-    // every API call), so it's NOT the context-window fill — feeding it to the
-    // gauge makes it climb past 100%. The latest `assistant` message above
-    // already reported this turn's actual context size, so don't touch the
-    // token count here.
-    // A still-tracked subagent here means an async Agent is running in the
-    // background: this turn ends, but the session ISN'T idle — the CLI resumes
-    // it when the agent's <task-notification> arrives (reliable: it fires even
-    // if the model never Monitors). Firing `done` now would wrongly flip the
-    // session to finished and ping a "session finished" notification while the
-    // agent is still working. Stay running; the resumed turn's result closes it.
-    // ponytail: assumes every async agent eventually notifies; it does (fires on
-    // every stop). If one could truly vanish, add a timeout sweep here.
-    if (conn.subagents.size > 0) {
-      // `done` withheld: the turn stays "running" until every async subagent
-      // reports back. If one never does, this is where the session gets stuck —
-      // record the hold so the watchdog/log can point straight at it.
-      conn.heldForSubagentsAt = Date.now()
-      log('result-held', { key, subagents: conn.subagents.size, ids: [...conn.subagents], turnMs: Date.now() - conn.turnStartedAt })
-      return
-    }
-    // A <task-notification> read from the transcript may have already closed this
-    // turn (its last async agent finished after the result was held, and the CLI
-    // never resumed to send its own closing result). Don't fire a second `done`.
-    if (conn.turnClosed) return
-    // Turn finished — but the process stays alive for the next message.
-    conn.turnClosed = true
-    conn.turnActive = false
-    conn.heldForSubagentsAt = null
-    // Surface CLI-level errors (e.g. "Usage credits are required for this model.")
-    // that arrive as an error result. The message lives in `msg.result`; skip it
-    // when it's already the streamed assistant text so it doesn't render twice.
-    if (msg.is_error === true && typeof msg.result === 'string' && msg.result.trim() && msg.result.trim() !== conn.lastAssistantText?.trim()) {
-      send(win, key, { kind: 'error', message: msg.result.trim() })
-    }
-    log('turn-done', { key, ok: msg.is_error !== true, turnMs: conn.turnStartedAt ? Date.now() - conn.turnStartedAt : 0 })
-    send(win, key, { kind: 'done', ok: msg.is_error !== true })
-    // Release any send_message(wait) callers with this turn's final assistant text.
-    resolveWaiters(key, conn.lastAssistantText)
-  }
+  if (type === 'control_request') return handleControlRequest(win, key, conn, msg)
+  if (type === 'system') return handleSystemLine(win, key, msg)
+  if (type === 'stream_event') return handleStreamEvent(win, key, conn, msg)
+  if (type === 'assistant') return handleAssistantLine(win, key, conn, msg)
+  if (type === 'user') return handleUserLine(win, key, conn, msg)
+  if (type === 'result') handleResultLine(win, key, conn, msg)
 }
 
 // The CLI records this session's turns at ~/.claude/projects/<slug>/<id>.jsonl,
