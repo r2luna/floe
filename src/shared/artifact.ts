@@ -47,6 +47,41 @@ const isStr = (v: unknown): v is string => typeof v === 'string'
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
+// One group of an untrusted spec, or null when any field is off-shape. Split out
+// of parseArtifactSpec so each half stays small enough to read (and to test).
+function parseGroup(g: unknown): ArtifactGroup | null {
+  if (!isObj(g) || !isStr(g.id) || !isStr(g.label)) return null
+  if (g.select !== 'single' && g.select !== 'multi') return null
+  if (!Array.isArray(g.options) || g.options.length === 0) return null
+  const options: ArtifactOption[] = []
+  for (const o of g.options) {
+    if (!isObj(o) || !isStr(o.id) || !isStr(o.label)) return null
+    options.push({ id: o.id, label: o.label })
+  }
+  const def = g.default
+  const okDefault =
+    def === undefined || isStr(def) || (Array.isArray(def) && def.every(isStr))
+  if (!okDefault) return null
+  return { id: g.id, label: g.label, select: g.select, options, default: def as ArtifactGroup['default'] }
+}
+
+// The optional shortlist. Null means "present but broken", which fails the whole
+// spec — absent items are the caller's `undefined`, never this.
+function parseItems(input: unknown): ArtifactItem[] | null {
+  if (!Array.isArray(input)) return null
+  const items: ArtifactItem[] = []
+  for (const it of input) {
+    if (!isObj(it) || !isStr(it.id) || !isStr(it.title)) return null
+    items.push({
+      id: it.id,
+      title: it.title,
+      note: isStr(it.note) ? it.note : undefined,
+      recommended: it.recommended === true
+    })
+  }
+  return items
+}
+
 // Shape-validate an untrusted spec (from a tool call / disk). Returns null on any
 // mismatch so callers can fall back gracefully rather than throw. Strict enough to
 // keep the renderer total — every field the UI reads is guaranteed here.
@@ -55,35 +90,17 @@ export function parseArtifactSpec(input: unknown): ArtifactSpec | null {
   if (!Array.isArray(input.groups)) return null
   const groups: ArtifactGroup[] = []
   for (const g of input.groups) {
-    if (!isObj(g) || !isStr(g.id) || !isStr(g.label)) return null
-    if (g.select !== 'single' && g.select !== 'multi') return null
-    if (!Array.isArray(g.options) || g.options.length === 0) return null
-    const options: ArtifactOption[] = []
-    for (const o of g.options) {
-      if (!isObj(o) || !isStr(o.id) || !isStr(o.label)) return null
-      options.push({ id: o.id, label: o.label })
-    }
-    const def = g.default
-    const okDefault =
-      def === undefined || isStr(def) || (Array.isArray(def) && def.every(isStr))
-    if (!okDefault) return null
-    groups.push({ id: g.id, label: g.label, select: g.select, options, default: def as ArtifactGroup['default'] })
+    const group = parseGroup(g)
+    if (!group) return null
+    groups.push(group)
   }
   if (groups.length === 0) return null
 
   let items: ArtifactItem[] | undefined
   if (input.items !== undefined) {
-    if (!Array.isArray(input.items)) return null
-    items = []
-    for (const it of input.items) {
-      if (!isObj(it) || !isStr(it.id) || !isStr(it.title)) return null
-      items.push({
-        id: it.id,
-        title: it.title,
-        note: isStr(it.note) ? it.note : undefined,
-        recommended: it.recommended === true
-      })
-    }
+    const parsed = parseItems(input.items)
+    if (!parsed) return null
+    items = parsed
   }
 
   return {

@@ -233,6 +233,170 @@ export class UnknownTargetError extends Error {
 }
 
 /**
+ * What one expansion is writing: the scene it writes into, and the elements it
+ * has written so far.
+ *
+ * Two maps rather than one because they answer two questions: `index` is what an
+ * arrow looks its endpoints up in (the scene plus everything written in this same
+ * call, so one `draw_elements` can lay out three boxes and the arrows between
+ * them), while `out` is only what comes back as upserts, in insertion order.
+ */
+interface Draft {
+  index: Index
+  out: Map<string, DrawElement>
+}
+
+const draftOf = (scene: DrawElement[]): Draft => ({
+  index: new Map(scene.map((el) => [el.id, el])),
+  out: new Map()
+})
+
+const put = (d: Draft, el: DrawElement): void => {
+  d.out.set(el.id, el)
+  d.index.set(el.id, el)
+}
+
+/** The current state of an element: freshly written, else on disk. */
+const look = (d: Draft, id: string): DrawElement | undefined => d.out.get(id) ?? d.index.get(id)
+
+/**
+ * Record that `child` is bound to `containerId`.
+ *
+ * An element already in the scene is re-emitted with a bumped `version`, since
+ * that is the only way a change reaches disk — see mergeElements.
+ */
+function bind(d: Draft, containerId: string, child: { id: string; type: 'arrow' | 'text' }, now: number): void {
+  const el = look(d, containerId)
+  if (!el) throw new UnknownTargetError(containerId)
+  const existing = (el.boundElements as Array<{ id: string; type: string }> | null) ?? []
+  if (existing.some((b) => b.id === child.id)) return
+  const touched = d.out.has(containerId)
+  put(d, {
+    ...el,
+    boundElements: [...existing, child],
+    // A brand-new element from this same call is still at version 1 and has
+    // not been written anywhere yet — bumping it would be counting an edit
+    // that never happened.
+    version: touched ? el.version : el.version + 1,
+    versionNonce: nonce(),
+    updated: now
+  })
+}
+
+/** The box a shape defaults to when the skeleton does not say. */
+function shapeBox(s: DrawSkeleton, content: string): { width: number; height: number } {
+  if (s.type === 'text') return { width: s.width ?? textWidth(content), height: s.height ?? textHeight(content) }
+  const [w, h] = s.type === 'frame' ? [400, 300] : [200, 100]
+  return { width: s.width ?? w, height: s.height ?? h }
+}
+
+/** The fields only a standalone text element carries. */
+function textFields(content: string): Record<string, unknown> {
+  return {
+    text: content,
+    originalText: content,
+    fontSize: FONT_SIZE,
+    fontFamily: FONT_FAMILY,
+    textAlign: 'left',
+    verticalAlign: 'top',
+    containerId: null,
+    autoResize: true,
+    lineHeight: LINE_HEIGHT
+  }
+}
+
+/** A shape skeleton as a complete element — everything except its bound caption. */
+function shapeElement(s: DrawSkeleton, id: string, now: number): DrawElement {
+  const content = s.text ?? s.label ?? ''
+  const { width, height } = shapeBox(s, content)
+  const el: DrawElement = {
+    ...base(id, s.type, now),
+    x: s.x ?? 0,
+    y: s.y ?? 0,
+    width,
+    height,
+    strokeColor: s.strokeColor ?? DEFAULT_STROKE,
+    backgroundColor: s.backgroundColor ?? DEFAULT_BG
+  }
+
+  if (s.type === 'text') Object.assign(el, textFields(content))
+  // A frame's caption is its `name`, not a bound text child.
+  else if (s.type === 'frame') Object.assign(el, { name: s.label ?? s.text ?? null, roundness: null })
+  // Rounded corners are the Excalidraw default for a rectangle-ish shape.
+  else Object.assign(el, { roundness: { type: 3 } })
+  return el
+}
+
+/**
+ * Grow a container DOWN to fit the caption that was wrapped into it.
+ *
+ * Growing sideways instead would break the columns the agent laid out, and
+ * leaving it short would clip the last line — same eaten text, one axis over.
+ * Excalidraw's own container does exactly this when you type past the bottom of
+ * a shape.
+ */
+function fitLabel(el: DrawElement, label: DrawElement): void {
+  const needed = fitHeight(el.type, Number(label.height))
+  if (needed > Number(el.height)) {
+    el.height = needed
+    label.y = Number(el.y) + (needed - Number(label.height)) / 2
+  }
+}
+
+/** Where a connector starts and ends: edge to edge when bound, its own geometry when loose. */
+function linkPoints(
+  s: DrawSkeleton,
+  from: DrawElement | undefined,
+  to: DrawElement | undefined
+): [[number, number], [number, number]] {
+  if (from && to) {
+    const a = boxOf(from)
+    const b = boxOf(to)
+    return [edgePoint(a, centerOf(b), ARROW_GAP), edgePoint(b, centerOf(a), ARROW_GAP)]
+  }
+  // A free-floating connector: the skeleton's own geometry is all there is.
+  const x = s.x ?? 0
+  const y = s.y ?? 0
+  return [
+    [x, y],
+    [x + (s.width ?? 100), y + (s.height ?? 0)]
+  ]
+}
+
+/** An arrow or line skeleton as a complete element, bound to whichever ends it named. */
+function linkElement(
+  s: DrawSkeleton,
+  id: string,
+  from: DrawElement | undefined,
+  to: DrawElement | undefined,
+  now: number
+): DrawElement {
+  const [start, end] = linkPoints(s, from, to)
+  const el: DrawElement = {
+    ...base(id, s.type, now),
+    x: start[0],
+    y: start[1],
+    width: Math.abs(end[0] - start[0]),
+    height: Math.abs(end[1] - start[1]),
+    strokeColor: s.strokeColor ?? DEFAULT_STROKE,
+    backgroundColor: s.backgroundColor ?? DEFAULT_BG,
+    // Points are LOCAL to x/y, which is why the first one is always the origin.
+    points: [
+      [0, 0],
+      [end[0] - start[0], end[1] - start[1]]
+    ],
+    lastCommittedPoint: null,
+    startBinding: from ? { elementId: from.id, focus: 0, gap: ARROW_GAP } : null,
+    endBinding: to ? { elementId: to.id, focus: 0, gap: ARROW_GAP } : null,
+    startArrowhead: null,
+    endArrowhead: s.type === 'arrow' ? 'arrow' : null,
+    roundness: { type: 2 }
+  }
+  if (s.type === 'arrow') el.elbowed = false
+  return el
+}
+
+/**
  * Expand skeletons into complete elements, ready to be merged into a scene.
  *
  * Returns EVERY element the write touches, which is more than one per skeleton:
@@ -249,161 +413,50 @@ export function expandSkeletons(
   scene: DrawElement[],
   now: number = Date.now()
 ): DrawElement[] {
-  const index: Index = new Map(scene.map((el) => [el.id, el]))
-  // Written elements, in insertion order, keyed so a second skeleton in the same
-  // call can amend one (an arrow adding itself to a shape's boundElements).
-  const out = new Map<string, DrawElement>()
-
-  const put = (el: DrawElement): void => {
-    out.set(el.id, el)
-    index.set(el.id, el)
-  }
-
-  /** The current state of an element: freshly written, else on disk. */
-  const look = (id: string): DrawElement | undefined => out.get(id) ?? index.get(id)
-
-  /**
-   * Record that `childId` is bound to `containerId`.
-   *
-   * An element already in the scene is re-emitted with a bumped `version`, since
-   * that is the only way a change reaches disk — see mergeElements.
-   */
-  const bind = (containerId: string, child: { id: string; type: 'arrow' | 'text' }): void => {
-    const el = look(containerId)
-    if (!el) throw new UnknownTargetError(containerId)
-    const existing = (el.boundElements as Array<{ id: string; type: string }> | null) ?? []
-    if (existing.some((b) => b.id === child.id)) return
-    const touched = out.has(containerId)
-    put({
-      ...el,
-      boundElements: [...existing, child],
-      // A brand-new element from this same call is still at version 1 and has
-      // not been written anywhere yet — bumping it would be counting an edit
-      // that never happened.
-      version: touched ? el.version : el.version + 1,
-      versionNonce: nonce(),
-      updated: now
-    })
-  }
-
+  const draft = draftOf(scene)
   const shapes = skeletons.filter((s) => s.type !== 'arrow' && s.type !== 'line')
   const links = skeletons.filter((s) => s.type === 'arrow' || s.type === 'line')
 
   // Shapes first, so the arrows in the same call can bind to them.
   for (const s of shapes) {
     const id = s.id ?? newId()
-    const isText = s.type === 'text'
-    const content = isText ? (s.text ?? s.label ?? '') : undefined
-    const width = s.width ?? (isText ? textWidth(content ?? '') : s.type === 'frame' ? 400 : 200)
-    const height = s.height ?? (isText ? textHeight(content ?? '') : s.type === 'frame' ? 300 : 100)
-
-    const el: DrawElement = {
-      ...base(id, s.type, now),
-      x: s.x ?? 0,
-      y: s.y ?? 0,
-      width,
-      height,
-      strokeColor: s.strokeColor ?? DEFAULT_STROKE,
-      backgroundColor: s.backgroundColor ?? DEFAULT_BG
-    }
-
-    if (isText) {
-      Object.assign(el, {
-        text: content,
-        originalText: content,
-        fontSize: FONT_SIZE,
-        fontFamily: FONT_FAMILY,
-        textAlign: 'left',
-        verticalAlign: 'top',
-        containerId: null,
-        autoResize: true,
-        lineHeight: LINE_HEIGHT
-      })
-    } else if (s.type === 'frame') {
-      // A frame's caption is its `name`, not a bound text child.
-      Object.assign(el, { name: s.label ?? s.text ?? null, roundness: null })
-    } else {
-      // Rounded corners are the Excalidraw default for a rectangle-ish shape.
-      Object.assign(el, { roundness: { type: 3 } })
-    }
+    const el = shapeElement(s, id, now)
     // A label on a shape is a text element bound INSIDE it — same as typing into
     // the shape on the canvas, so it moves and resizes with its container.
-    const label = !isText && s.type !== 'frame' && s.label ? labelFor(s.label, el, now) : undefined
+    const label = s.type !== 'text' && s.type !== 'frame' && s.label ? labelFor(s.label, el, now) : undefined
     if (label) {
-      // The caption wrapped to the width the skeleton asked for; the box grows
-      // DOWN to fit however many lines that took. Growing sideways instead would
-      // break the columns the agent laid out, and leaving it short would clip the
-      // last line — same eaten text, one axis over. Excalidraw's own container
-      // does exactly this when you type past the bottom of a shape.
-      const needed = fitHeight(el.type, Number(label.height))
-      if (needed > Number(el.height)) {
-        el.height = needed
-        label.y = Number(el.y) + (needed - Number(label.height)) / 2
-      }
-      put(el)
-      put(label)
-      bind(id, { id: label.id, type: 'text' })
+      fitLabel(el, label)
+      put(draft, el)
+      put(draft, label)
+      bind(draft, id, { id: label.id, type: 'text' }, now)
     } else {
-      put(el)
+      put(draft, el)
     }
   }
 
   // Then the connectors, which need both endpoints to exist.
   for (const s of links) {
     const id = s.id ?? newId()
-    const from = s.start ? look(s.start) : undefined
-    const to = s.end ? look(s.end) : undefined
+    const from = s.start ? look(draft, s.start) : undefined
+    const to = s.end ? look(draft, s.end) : undefined
     if (s.start && !from) throw new UnknownTargetError(s.start)
     if (s.end && !to) throw new UnknownTargetError(s.end)
 
-    let start: [number, number]
-    let end: [number, number]
-    if (from && to) {
-      const a = boxOf(from)
-      const b = boxOf(to)
-      start = edgePoint(a, centerOf(b), ARROW_GAP)
-      end = edgePoint(b, centerOf(a), ARROW_GAP)
-    } else {
-      // A free-floating connector: the skeleton's own geometry is all there is.
-      start = [s.x ?? 0, s.y ?? 0]
-      end = [(s.x ?? 0) + (s.width ?? 100), (s.y ?? 0) + (s.height ?? 0)]
-    }
-
-    const el: DrawElement = {
-      ...base(id, s.type, now),
-      x: start[0],
-      y: start[1],
-      width: Math.abs(end[0] - start[0]),
-      height: Math.abs(end[1] - start[1]),
-      strokeColor: s.strokeColor ?? DEFAULT_STROKE,
-      backgroundColor: s.backgroundColor ?? DEFAULT_BG,
-      // Points are LOCAL to x/y, which is why the first one is always the origin.
-      points: [
-        [0, 0],
-        [end[0] - start[0], end[1] - start[1]]
-      ],
-      lastCommittedPoint: null,
-      startBinding: from ? { elementId: from.id, focus: 0, gap: ARROW_GAP } : null,
-      endBinding: to ? { elementId: to.id, focus: 0, gap: ARROW_GAP } : null,
-      startArrowhead: null,
-      endArrowhead: s.type === 'arrow' ? 'arrow' : null,
-      roundness: { type: 2 }
-    }
-    if (s.type === 'arrow') el.elbowed = false
-    put(el)
+    const el = linkElement(s, id, from, to, now)
+    put(draft, el)
 
     // The binding is two-sided: without the entry on the shape, dragging the
     // shape leaves the arrow behind.
-    if (from) bind(from.id, { id, type: 'arrow' })
-    if (to) bind(to.id, { id, type: 'arrow' })
+    if (from) bind(draft, from.id, { id, type: 'arrow' }, now)
+    if (to) bind(draft, to.id, { id, type: 'arrow' }, now)
 
     if (s.label) {
-      put(labelFor(s.label, el, now))
-      bind(id, { id: labelIdOf(el), type: 'text' })
+      put(draft, labelFor(s.label, el, now))
+      bind(draft, id, { id: labelIdOf(el), type: 'text' }, now)
     }
   }
 
-  return [...out.values()]
+  return [...draft.out.values()]
 }
 
 // A container's label has a derived id so the second write of the same skeleton

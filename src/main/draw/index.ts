@@ -330,6 +330,109 @@ const SHORT: Record<string, string> = {
   magicframe: 'frame'
 }
 
+/** The caption an element prints on its row: a frame's name, else its bound text child. */
+function captionOf(el: DrawElement, byId: Map<string, DrawElement>): string {
+  if (el.type === 'frame') return String(el.name ?? '')
+  const bound = (el.boundElements as Array<{ id: string; type: string }> | null) ?? []
+  for (const b of bound) {
+    if (b.type !== 'text') continue
+    const text = byId.get(b.id)
+    // `originalText` is the caption as it was written; `text` carries the
+    // wrap Floe applied to fit the box, whose newlines would break this row.
+    if (text) return String(text.originalText ?? text.text ?? '').replace(/\n/g, ' ')
+  }
+  return ''
+}
+
+/**
+ * The connectors that hang off another element's row, and the ids that therefore
+ * get no row of their own: an arrow leaving a shape, and every bound caption.
+ */
+function linksOf(
+  live: DrawElement[],
+  byId: Map<string, DrawElement>
+): { outgoing: Map<string, DrawElement[]>; hidden: Set<string> } {
+  const outgoing = new Map<string, DrawElement[]>()
+  const hidden = new Set<string>()
+  for (const el of live) {
+    // A caption belongs to its container's line, not to one of its own.
+    if (el.type === 'text' && el.containerId) hidden.add(el.id)
+    if (el.type !== 'arrow' && el.type !== 'line') continue
+    const from = (el.startBinding as { elementId: string } | null)?.elementId
+    if (!from || !byId.has(from)) continue
+    const list = outgoing.get(from) ?? []
+    list.push(el)
+    outgoing.set(from, list)
+    hidden.add(el.id)
+  }
+  return { outgoing, hidden }
+}
+
+const num = (n: unknown): number => Math.round(Number(n ?? 0))
+
+/** One element's cells: kind, id, where it is, its caption, the arrows it sends. */
+function rowFor(el: DrawElement, byId: Map<string, DrawElement>, outgoing: Map<string, DrawElement[]>): string[] {
+  const kind = SHORT[el.type] ?? el.type
+  const size = el.type === 'text' ? '' : ` ${num(el.width)}×${num(el.height)}`
+  const where = `(${num(el.x)},${num(el.y)}${size})`
+  const caption = el.type === 'text' ? String(el.text ?? '').replace(/\n/g, ' ') : captionOf(el, byId)
+  const links = (outgoing.get(el.id) ?? [])
+    .map((a) => {
+      const to = (a.endBinding as { elementId: string } | null)?.elementId
+      const label = captionOf(a, byId)
+      return `→ ${a.id}${label ? ` "${label}"` : ''} → ${to ?? '(loose)'}`
+    })
+    .join('  ')
+  return [kind, el.id, where, caption ? `"${caption}"` : '', links]
+}
+
+/**
+ * The rows in print order: each frame heads the elements whose `frameId` names
+ * it, indented, and everything left over follows at depth 0.
+ */
+function layout(
+  live: DrawElement[],
+  hidden: Set<string>,
+  cellsFor: (el: DrawElement) => string[]
+): Array<{ cells: string[]; depth: number }> {
+  const frames = live.filter((el) => el.type === 'frame' || el.type === 'magicframe')
+  const rows: Array<{ cells: string[]; depth: number }> = []
+  const placed = new Set(hidden)
+  for (const frame of frames) {
+    rows.push({ cells: cellsFor(frame), depth: 0 })
+    placed.add(frame.id)
+    for (const el of live) {
+      if (placed.has(el.id) || el.frameId !== frame.id) continue
+      rows.push({ cells: cellsFor(el), depth: 1 })
+      placed.add(el.id)
+    }
+  }
+  for (const el of live) {
+    if (placed.has(el.id)) continue
+    rows.push({ cells: cellsFor(el), depth: 0 })
+  }
+  return rows
+}
+
+/**
+ * Pad the rows into columns, so ids and coordinates line up and the shape of the
+ * drawing reads off the left edge. The last cell is never padded — trailing
+ * spaces on the widest row are noise.
+ */
+function render(rows: Array<{ cells: string[]; depth: number }>): string {
+  const widths = [0, 1, 2, 3].map((i) => Math.max(...rows.map((r) => (r.depth ? 2 : 0) + r.cells[i].length)))
+  return rows
+    .map((r) => {
+      const indent = r.depth ? '  ' : ''
+      const cells = r.cells.map((cell, i) => (i === 0 ? indent + cell : cell))
+      return cells
+        .map((cell, i) => (i < 4 ? cell.padEnd(widths[i]) : cell))
+        .join('  ')
+        .trimEnd()
+    })
+    .join('\n')
+}
+
 /**
  * The scene, as an agent should read it.
  *
@@ -347,81 +450,8 @@ export function summarize(scene: DrawScene): string {
   if (live.length === 0) return '(empty drawing)'
 
   const byId = new Map(live.map((el) => [el.id, el]))
-  const captionOf = (el: DrawElement): string => {
-    if (el.type === 'frame') return String(el.name ?? '')
-    const bound = (el.boundElements as Array<{ id: string; type: string }> | null) ?? []
-    for (const b of bound) {
-      if (b.type !== 'text') continue
-      const text = byId.get(b.id)
-      // `originalText` is the caption as it was written; `text` carries the
-      // wrap Floe applied to fit the box, whose newlines would break this row.
-      if (text) return String(text.originalText ?? text.text ?? '').replace(/\n/g, ' ')
-    }
-    return ''
-  }
-
-  // Arrows that leave a shape hang off that shape's row; the rest stand alone.
-  const outgoing = new Map<string, DrawElement[]>()
-  const hidden = new Set<string>()
-  for (const el of live) {
-    // A caption belongs to its container's line, not to one of its own.
-    if (el.type === 'text' && el.containerId) hidden.add(el.id)
-    if (el.type !== 'arrow' && el.type !== 'line') continue
-    const from = (el.startBinding as { elementId: string } | null)?.elementId
-    if (!from || !byId.has(from)) continue
-    const list = outgoing.get(from) ?? []
-    list.push(el)
-    outgoing.set(from, list)
-    hidden.add(el.id)
-  }
-
-  const num = (n: unknown): number => Math.round(Number(n ?? 0))
-  const rowFor = (el: DrawElement): string[] => {
-    const kind = SHORT[el.type] ?? el.type
-    const size = el.type === 'text' ? '' : ` ${num(el.width)}×${num(el.height)}`
-    const where = `(${num(el.x)},${num(el.y)}${size})`
-    const caption = el.type === 'text' ? String(el.text ?? '').replace(/\n/g, ' ') : captionOf(el)
-    const links = (outgoing.get(el.id) ?? [])
-      .map((a) => {
-        const to = (a.endBinding as { elementId: string } | null)?.elementId
-        const label = captionOf(a)
-        return `→ ${a.id}${label ? ` "${label}"` : ''} → ${to ?? '(loose)'}`
-      })
-      .join('  ')
-    return [kind, el.id, where, caption ? `"${caption}"` : '', links]
-  }
-
-  // Frames own the elements whose frameId names them, and print them indented.
-  const frames = live.filter((el) => el.type === 'frame' || el.type === 'magicframe')
-  const rows: Array<{ cells: string[]; depth: number }> = []
-  const placed = new Set(hidden)
-  for (const frame of frames) {
-    rows.push({ cells: rowFor(frame), depth: 0 })
-    placed.add(frame.id)
-    for (const el of live) {
-      if (placed.has(el.id) || el.frameId !== frame.id) continue
-      rows.push({ cells: rowFor(el), depth: 1 })
-      placed.add(el.id)
-    }
-  }
-  for (const el of live) {
-    if (placed.has(el.id)) continue
-    rows.push({ cells: rowFor(el), depth: 0 })
-  }
-
-  // Columns, so ids and coordinates line up and the shape of the drawing reads
-  // off the left edge.
-  const widths = [0, 1, 2, 3].map((i) => Math.max(...rows.map((r) => (r.depth ? 2 : 0) + r.cells[i].length)))
-  return rows
-    .map((r) => {
-      const indent = r.depth ? '  ' : ''
-      const cells = r.cells.map((cell, i) => (i === 0 ? indent + cell : cell))
-      return cells
-        .map((cell, i) => (i < 4 ? cell.padEnd(widths[i]) : cell))
-        .join('  ')
-        .trimEnd()
-    })
-    .join('\n')
+  const { outgoing, hidden } = linksOf(live, byId)
+  return render(layout(live, hidden, (el) => rowFor(el, byId, outgoing)))
 }
 
 // --- watching --------------------------------------------------------------
