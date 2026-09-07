@@ -12,6 +12,11 @@
 Every stage runs even after an earlier one fails, so one run shows the whole picture.
 The test stage writes the lcov the CRAP stage reads — the suite runs once.
 
+The suite builds its fixtures under `os.tmpdir()`, so the gate needs a writable
+temp directory. In a sandbox that denies `/tmp`, point `TMPDIR` at one you can
+write — everything, tests included, follows it. A gate that cannot write temp
+fails for a reason that has nothing to do with the code under review.
+
 ```bash
 pnpm gate                 # the gate
 pnpm gate --report        # same output, always exits 0
