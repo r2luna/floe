@@ -104,7 +104,6 @@ import {
   pruneMissingWorktrees,
   renameCreatedSession,
   linkCreatedSession,
-  getCreatedSessionClaudeId,
   resumeSession,
   closeSession,
   getViewState,
@@ -150,7 +149,7 @@ import {
 import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
-import { createSkill, deleteSkill, listSkills, readSkill, renameSkill } from './config/skills'
+import { createSkill, deleteSkill, listSkills, renameSkill } from './config/skills'
 import { projectFor, projectScan } from './config/projectStore'
 import {
   addMcpServer,
@@ -196,7 +195,7 @@ import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTas
 import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
-import { provisionWorktree, dropWorktreeDatabase, unlinkWorktreeSite, ensureContainerUp, getAppUrl } from './provision'
+import { provisionWorktree, dropWorktreeDatabase, unlinkWorktreeSite, ensureContainerUp } from './provision'
 import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm

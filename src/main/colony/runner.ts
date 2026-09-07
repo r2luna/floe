@@ -104,9 +104,6 @@ function nextStage(project: string, name: string): string | null {
   return stages[at + 1]?.name ?? DONE
 }
 
-const stageOf = (project: string, name: string): ColonyStage | undefined =>
-  colonyConfig(project).stages.find((s) => s.name === name)
-
 // ---------------------------------------------------------------------------
 // Releasing a task from the backlog
 // ---------------------------------------------------------------------------

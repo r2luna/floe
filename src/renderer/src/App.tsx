@@ -20,10 +20,9 @@ import {
   patchPanel,
   resizePanel,
   setCursor,
-  toggleDock,
-  toggleKind
+  toggleDock
 } from './lane'
-import { quoteSelection, parseUnifiedDiff, selRange } from './diff'
+import { selRange } from './diff'
 import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
