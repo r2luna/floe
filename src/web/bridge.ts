@@ -18,11 +18,14 @@
 //     the daemon shims it into a no-op and answering it there would be a lie, so
 //     the tab answers it itself, with a browser API when one exists.
 
-import { buildFloeApi, type BackendInfo, type FloeHost, type IpcLike } from '../preload/api'
-import { createSocketIpc, type SocketIpc } from '../preload/socketIpc'
-import { PINNED_CHANNELS } from '../shared/remoteProtocol'
-import { secureBackendUrl } from './backendUrl'
-import { rewriteProbe } from './mediaRewrite'
+// Explicit .ts extensions, for the same reason socketIpc.ts uses them: this
+// module is loaded by a plain `node --test` run as well as by Vite, and Node's
+// ESM resolver does not guess extensions.
+import { buildFloeApi, type BackendInfo, type FloeHost, type IpcLike } from '../preload/api.ts'
+import { createSocketIpc, type SocketIpc } from '../preload/socketIpc.ts'
+import { PINNED_CHANNELS } from '../shared/remoteProtocol.ts'
+import { secureBackendUrl } from './backendUrl.ts'
+import { rewriteProbe } from './mediaRewrite.ts'
 
 /** Written into the page by the server plugin's HTTP face, before this module loads. */
 export interface FloeBoot {
@@ -112,6 +115,172 @@ export interface WebBridge {
   socket: SocketIpc
 }
 
+/** One paired machine: the socket to it, and the row the rail shows for it. */
+interface Remote {
+  info: BackendInfo
+  ipc: SocketIpc
+}
+
+/**
+ * The multi-backend routing state, in one object.
+ *
+ * It lives out here rather than in `createWebBridge`'s closure so the three
+ * pieces below can be module-level functions: a nested arrow is scored as part
+ * of its parent, so only a real extraction lowers the parent's number
+ * (docs/crap.md).
+ */
+export interface BackendTable {
+  remotes: Map<string, Remote>
+  /** id → `url#token`, so a machine re-paired at a new address gets a new socket. */
+  urls: Map<string, string>
+  /** Every on() ever made, replayed onto a socket opened later. */
+  subscriptions: Array<{ channel: string; listener: Listener }>
+  /** Where workspace calls go: a remote id, or 'local' for the serving daemon. */
+  current: string
+}
+
+export function newBackendTable(): BackendTable {
+  return { remotes: new Map(), urls: new Map(), subscriptions: [], current: 'local' }
+}
+
+export interface BackendRow {
+  id: string
+  label: string
+  url: string
+  token: string
+}
+
+/**
+ * Bring `table` in line with the daemon's machine list: open sockets for what is
+ * new, replace the ones whose address or token changed, close what is gone.
+ *
+ * `open` is passed in rather than called directly so the app version it stamps
+ * on the handshake stays the page's, and so a test can watch the sockets.
+ */
+export function reconcileBackends(
+  table: BackendTable,
+  list: BackendRow[],
+  open: (url: string, token: string) => SocketIpc,
+  pageProtocol: string
+): void {
+  const wanted = new Set<string>()
+  for (const b of list) {
+    const secure = secureBackendUrl(b.url, pageProtocol)
+    // A machine this page cannot open safely is dropped rather than shown
+    // broken: see backendUrl.ts for why there is no downgrade path.
+    if (!secure) continue
+    wanted.add(b.id)
+    const key = `${secure}#${b.token}`
+    if (table.remotes.has(b.id)) {
+      if (table.urls.get(b.id) === key) continue
+      table.remotes.get(b.id)!.ipc.close()
+      table.remotes.delete(b.id)
+    }
+    const ipc = open(secure, b.token)
+    for (const s of table.subscriptions) ipc.on(s.channel, s.listener)
+    table.remotes.set(b.id, {
+      info: { id: b.id, label: b.label, homeDir: '', remote: true },
+      ipc
+    })
+    table.urls.set(b.id, key)
+  }
+  for (const [id, r] of table.remotes) {
+    if (wanted.has(id)) continue
+    r.ipc.close()
+    table.remotes.delete(id)
+    table.urls.delete(id)
+    if (table.current === id) table.current = 'local'
+  }
+}
+
+/**
+ * The api's transport: browser handlers first, then the pointer's socket.
+ *
+ * `local` holds the subscriptions the tab feeds itself (see `emit` below), and
+ * is the same set `on`/`removeListener` maintain for the socket — so a
+ * `theme:changed` synthesized here and a `session:output` arriving from the
+ * daemon reach the same subscription without either knowing about the other.
+ */
+export function webIpc(
+  socket: SocketIpc,
+  table: BackendTable,
+  handlers: Record<string, (...args: any[]) => Promise<any>>,
+  local: Map<string, Set<Listener>>
+): IpcLike {
+  const routeFor = (channel: string): IpcLike =>
+    table.current !== 'local' && !PINNED_CHANNELS.has(channel)
+      ? (table.remotes.get(table.current)?.ipc ?? socket)
+      : socket
+
+  return {
+    invoke: (channel, ...args) => {
+      const handler = handlers[channel]
+      if (handler) return handler(...args)
+      const answer = routeFor(channel).invoke(channel, ...args)
+      // The one answer whose CONTENT is host-specific: a `floe-media://` address
+      // means nothing to a tab. Rewritten here so the renderer never learns that
+      // a web build exists — see mediaRewrite.ts.
+      return channel === 'media:probe' ? answer.then(rewriteProbe) : answer
+    },
+    on: (channel, listener) => {
+      if (!local.has(channel)) local.set(channel, new Set())
+      local.get(channel)!.add(listener)
+      table.subscriptions.push({ channel, listener })
+      socket.on(channel, listener)
+      // Events fan IN from every machine at once, exactly as on the desktop.
+      for (const r of table.remotes.values()) r.ipc.on(channel, listener)
+    },
+    removeListener: (channel, listener) => {
+      local.get(channel)?.delete(listener)
+      const i = table.subscriptions.findIndex(
+        (s) => s.channel === channel && s.listener === listener
+      )
+      if (i >= 0) table.subscriptions.splice(i, 1)
+      socket.removeListener(channel, listener)
+      for (const r of table.remotes.values()) r.ipc.removeListener(channel, listener)
+    }
+  }
+}
+
+/** What the tab knows about itself, plus the controls the rail steers with. */
+export function webHost(boot: FloeBoot, table: BackendTable, socket: SocketIpc): FloeHost {
+  return {
+    // The browser's platform, not the daemon's: this only ever labels the
+    // machine the keys are pressed on.
+    platform: navigator.platform || 'web',
+    version: navigator.userAgent,
+    appVersion: boot.version,
+    homeDir: boot.homeDir,
+    // A tab is not launched from a worktree, so there is no tag to tell builds
+    // apart by.
+    worktreeTag: null,
+    backendsCtl: {
+      list: () => [
+        { id: 'local', label: boot.label, homeDir: boot.homeDir, remote: false },
+        ...[...table.remotes.values()].map((r) => r.info)
+      ],
+      current: () => table.current,
+      use: (id) => {
+        if (id !== 'local' && !table.remotes.has(id)) return false
+        table.current = id
+        return true
+      },
+      state: (id) =>
+        table.remotes.get(id)?.ipc.state() ?? (id === 'local' ? socket.state() : 'closed'),
+      invokeOn: (id, channel, ...args) => {
+        // Same rule as the router, enforced here so the escape hatch cannot go
+        // around it: a pinned channel is this page's own, whatever id it names.
+        if (id === 'local' || PINNED_CHANNELS.has(channel)) return socket.invoke(channel, ...args)
+        const remote = table.remotes.get(id)
+        // Refuse rather than fall back: rerouting to the serving daemon would
+        // check the named machine's path against the wrong disk.
+        if (!remote) return Promise.reject(new Error(`No such backend: ${id}`))
+        return remote.ipc.invoke(channel, ...args)
+      }
+    }
+  }
+}
+
 /** Wire the api's transport: browser handlers first, the socket for the rest. */
 export function createWebBridge(boot: FloeBoot): WebBridge {
   const url =
@@ -140,44 +309,16 @@ export function createWebBridge(boot: FloeBoot): WebBridge {
   // one pointer says where workspace calls go, PINNED channels ignore it, and
   // every subscription replays onto a socket opened later so a machine paired
   // mid-session still delivers its events.
-  const remotes = new Map<string, { info: BackendInfo; ipc: SocketIpc }>()
-  const urls = new Map<string, string>()
-  const subscriptions: Array<{ channel: string; listener: Listener }> = []
-  let current = 'local'
+  const table = newBackendTable()
+  const openSocket = (u: string, token: string): SocketIpc =>
+    createSocketIpc(u, token, boot.version)
 
   const syncBackends = (): void => {
     void socket
       .invoke('backends:get')
-      .then((list: Array<{ id: string; label: string; url: string; token: string }>) => {
-        const wanted = new Set<string>()
-        for (const b of list) {
-          const secure = secureBackendUrl(b.url, location.protocol)
-          // A machine this page cannot open safely is dropped rather than shown
-          // broken: see backendUrl.ts for why there is no downgrade path.
-          if (!secure) continue
-          wanted.add(b.id)
-          const key = `${secure}#${b.token}`
-          if (remotes.has(b.id)) {
-            if (urls.get(b.id) === key) continue
-            remotes.get(b.id)!.ipc.close()
-            remotes.delete(b.id)
-          }
-          const ipc = createSocketIpc(secure, b.token, boot.version)
-          for (const s of subscriptions) ipc.on(s.channel, s.listener)
-          remotes.set(b.id, {
-            info: { id: b.id, label: b.label, homeDir: '', remote: true },
-            ipc
-          })
-          urls.set(b.id, key)
-        }
-        for (const [id, r] of remotes) {
-          if (wanted.has(id)) continue
-          r.ipc.close()
-          remotes.delete(id)
-          urls.delete(id)
-          if (current === id) current = 'local'
-        }
-      })
+      .then((list: BackendRow[]) =>
+        reconcileBackends(table, list, openSocket, location.protocol)
+      )
       .catch(() => {
         // No backends handler on the daemon just means this machine only.
       })
@@ -185,74 +326,7 @@ export function createWebBridge(boot: FloeBoot): WebBridge {
   syncBackends()
   socket.on('backends:changed', syncBackends)
 
-  const routeFor = (channel: string): IpcLike =>
-    current !== 'local' && !PINNED_CHANNELS.has(channel)
-      ? (remotes.get(current)?.ipc ?? socket)
-      : socket
-
-  const ipc: IpcLike = {
-    invoke: (channel, ...args) => {
-      const handler = handlers[channel]
-      if (handler) return handler(...args)
-      const answer = routeFor(channel).invoke(channel, ...args)
-      // The one answer whose CONTENT is host-specific: a `floe-media://` address
-      // means nothing to a tab. Rewritten here so the renderer never learns that
-      // a web build exists — see mediaRewrite.ts.
-      return channel === 'media:probe' ? answer.then(rewriteProbe) : answer
-    },
-    on: (channel, listener) => {
-      if (!local.has(channel)) local.set(channel, new Set())
-      local.get(channel)!.add(listener)
-      subscriptions.push({ channel, listener })
-      socket.on(channel, listener)
-      // Events fan IN from every machine at once, exactly as on the desktop.
-      for (const r of remotes.values()) r.ipc.on(channel, listener)
-    },
-    removeListener: (channel, listener) => {
-      local.get(channel)?.delete(listener)
-      const i = subscriptions.findIndex((s) => s.channel === channel && s.listener === listener)
-      if (i >= 0) subscriptions.splice(i, 1)
-      socket.removeListener(channel, listener)
-      for (const r of remotes.values()) r.ipc.removeListener(channel, listener)
-    }
-  }
-
-  const host: FloeHost = {
-    // The browser's platform, not the daemon's: this only ever labels the
-    // machine the keys are pressed on.
-    platform: navigator.platform || 'web',
-    version: navigator.userAgent,
-    appVersion: boot.version,
-    homeDir: boot.homeDir,
-    // A tab is not launched from a worktree, so there is no tag to tell builds
-    // apart by.
-    worktreeTag: null,
-    backendsCtl: {
-      list: () => [
-        { id: 'local', label: boot.label, homeDir: boot.homeDir, remote: false },
-        ...[...remotes.values()].map((r) => r.info)
-      ],
-      current: () => current,
-      use: (id) => {
-        if (id !== 'local' && !remotes.has(id)) return false
-        current = id
-        return true
-      },
-      state: (id) => remotes.get(id)?.ipc.state() ?? (id === 'local' ? socket.state() : 'closed'),
-      invokeOn: (id, channel, ...args) => {
-        // Same rule as the router, enforced here so the escape hatch cannot go
-        // around it: a pinned channel is this page's own, whatever id it names.
-        if (id === 'local' || PINNED_CHANNELS.has(channel)) return socket.invoke(channel, ...args)
-        const remote = remotes.get(id)
-        // Refuse rather than fall back: rerouting to the serving daemon would
-        // check the named machine's path against the wrong disk.
-        if (!remote) return Promise.reject(new Error(`No such backend: ${id}`))
-        return remote.ipc.invoke(channel, ...args)
-      }
-    }
-  }
-
-  return { ipc, host, socket }
+  return { ipc: webIpc(socket, table, handlers, local), host: webHost(boot, table, socket), socket }
 }
 
 /** Install `window.floe`. Must run before the renderer's entry module. */
