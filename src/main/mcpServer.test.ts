@@ -157,7 +157,7 @@ test('rejects browser-shaped requests (Origin header) with 403', async () => {
 test('mcpConfigFor writes a config file pointing at the token url', () => {
   const path = mcpConfigFor('abc-123')
   assert.ok(existsSync(path), 'config file should be written')
-  assert.ok(/floe-mcp-abc-123\.json$/.test(path), 'file name is what hooks.ts DETECT_FLOE greps for')
+  assert.ok(path.endsWith('floe-mcp-abc-123.json'), 'file name is what hooks.ts DETECT_FLOE greps for')
   const cfg = JSON.parse(readFileSync(path, 'utf8'))
   assert.equal(cfg.mcpServers.floe.type, 'http')
   assert.match(cfg.mcpServers.floe.url, /\/mcp\/abc-123$/)
@@ -220,7 +220,8 @@ test('send_message can name the harness, and reads a handle when it does not', a
   try {
     const { tools } = await client.listTools()
     const send = tools.find((t) => t.name === 'send_message')
-    const props = (send?.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
+    assert.ok(send, 'send_message is registered')
+    const props = (send.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}
     // Everything the composer's picker can say, an agent can say too — that is
     // the agent-first rule, and the schema is where it is either true or not.
     for (const key of ['harness', 'model', 'effort', 'mode'])

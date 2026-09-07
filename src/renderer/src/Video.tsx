@@ -89,7 +89,8 @@ function VideoPlayer({ file }: { file: MediaFile }): React.ReactElement {
     switch (e.key) {
       case 'Enter':
       case ' ':
-        video.paused ? void video.play().catch(() => setFailed(true)) : video.pause()
+        if (video.paused) void video.play().catch(() => setFailed(true))
+        else video.pause()
         break
       case 'ArrowRight':
         seek(STEP)
