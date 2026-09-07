@@ -1,9 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { readImplementPhases, findSpecSummarySource } from './plans.ts'
+import type { WebContents } from 'electron'
+import { listPlans, readImplementPhases, findSpecSummarySource, watchPlans } from './plans.ts'
 
 // Build a throwaway worktree with `specs/<dir>/tasks.md` files, run the body,
 // then clean up. Keeps each case isolated from the real filesystem.
@@ -104,4 +105,93 @@ test('readImplementPhases fuzzy-matches the branch to its spec folder among seve
       assert.deepEqual(phases, [{ title: 'B', done: 0, total: 1 }])
     }
   )
+})
+
+// Stamp a fixed mtime so "newest first" is asserted on a known order rather than
+// on how fast the machine wrote three files.
+function stamp(path: string, seconds: number): void {
+  utimesSync(path, seconds, seconds)
+}
+
+test('listPlans returns the .floe/plans markdown, newest first', () => {
+  withWorktree(
+    {
+      '.floe/plans/old.md': '# old',
+      '.floe/plans/new.md': '# new',
+      '.floe/plans/notes.txt': 'not a plan',
+      '.floe/plans/drafts/nested.md': '# a directory, not a plan'
+    },
+    (root) => {
+      stamp(join(root, '.floe/plans/old.md'), 1_000)
+      stamp(join(root, '.floe/plans/new.md'), 2_000)
+      const plans = listPlans(root)
+      assert.deepEqual(plans.map((p) => p.name), ['new.md', 'old.md'])
+      assert.equal(plans[0].relPath, '.floe/plans/new.md')
+      assert.equal(plans[0].mtime, 2_000_000)
+    }
+  )
+})
+
+test('a worktree with no plans directory lists nothing rather than throwing', () => {
+  withWorktree({ 'README.md': '# hi' }, (root) => {
+    assert.deepEqual(listPlans(root), [])
+  })
+})
+
+// The panel shows the branch's spec docs above the gitignored scratch plans, so
+// the order of the two groups is part of the contract.
+test('listPlans puts the branch spec docs ahead of the .floe/plans ones', () => {
+  withWorktree(
+    {
+      'specs/002-dos-202-offboard/spec.md': '# spec',
+      '.floe/plans/scratch.md': '# scratch'
+    },
+    (root) => {
+      const plans = listPlans(root, 'feature/dos-202-offboard')
+      assert.deepEqual(plans.map((p) => p.relPath), [
+        'specs/002-dos-202-offboard/spec.md',
+        '.floe/plans/scratch.md'
+      ])
+      // Without a branch the caller only asked about the scratch plans.
+      assert.deepEqual(listPlans(root).map((p) => p.relPath), ['.floe/plans/scratch.md'])
+    }
+  )
+})
+
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+test('watchPlans pre-creates the plans dir and reports writes on the active worktree only', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-plans-'))
+  const other = mkdtempSync(join(tmpdir(), 'floe-plans-'))
+  const sent: Array<{ channel: string; payload: { worktreePath: string } }> = []
+  const wc = {
+    isDestroyed: () => false,
+    send: (channel: string, payload: { worktreePath: string }) => sent.push({ channel, payload })
+  } as unknown as WebContents
+  try {
+    watchPlans(wc, root)
+    await wait(200)
+    // The directory exists because watchPlans made it, before any plan was written.
+    writeFileSync(join(root, '.floe/plans/a.md'), '# a')
+    await wait(500)
+    assert.ok(sent.length > 0, 'a plan written should reach the panel')
+    assert.ok(sent.every((s) => s.channel === 'plans:event' && s.payload.worktreePath === root))
+
+    // One watcher, retargeted: switching worktree has to drop the old one, or the
+    // panel would keep repainting for a worktree nobody is looking at.
+    watchPlans(wc, other)
+    await wait(200)
+    const before = sent.length
+    writeFileSync(join(root, '.floe/plans/b.md'), '# b')
+    await wait(500)
+    assert.equal(sent.length, before)
+  } finally {
+    // A path that cannot hold a plans dir closes the live watcher and opens none,
+    // so nothing is left holding this process open.
+    const file = join(mkdtempSync(join(tmpdir(), 'floe-plans-')), 'a-file')
+    writeFileSync(file, '')
+    watchPlans(wc, file)
+    rmSync(root, { recursive: true, force: true })
+    rmSync(other, { recursive: true, force: true })
+  }
 })

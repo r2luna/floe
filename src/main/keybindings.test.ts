@@ -1,10 +1,19 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
 
+// configDir() is XDG-aware, so the watcher tests below work on a throwaway dir
+// instead of the developer's real ~/.config/floe.
+process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'floe-cfg-'))
 installHook()
 
-const { generateKeybindings, parseKeybindings } = await import('./keybindings.ts')
+const { generateKeybindings, keybindingsPath, parseKeybindings, watchKeybindings } = await import('./keybindings.ts')
+const { configDir } = await import('./dataDir.ts')
+
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const { DEFAULT_KEYMAP } = await import('../shared/defaultKeymap.ts')
 const { compileKeymap, resolveIn } = await import('../shared/keymap.ts')
 
@@ -78,5 +87,45 @@ test('every command id in the generated file is one the app can dispatch', async
   const { COMMAND_ID_SET } = await import('../shared/commandIds.ts')
   for (const bind of DEFAULT_KEYMAP) {
     assert.ok(COMMAND_ID_SET.has(bind.command), `${bind.command} is bound but not registered`)
+  }
+})
+
+test('watchKeybindings collapses an edit into one debounced call, and stops when disposed', async () => {
+  const path = keybindingsPath()
+  writeFileSync(path, generateKeybindings())
+  let fired = 0
+  const stop = watchKeybindings(() => {
+    fired++
+  })
+  try {
+    // A save is several fs events (truncate, write, close); the panel must
+    // reload once, not three times.
+    writeFileSync(path, generateKeybindings() + '\n# edited\n')
+    await wait(400)
+    assert.equal(fired, 1)
+  } finally {
+    stop()
+  }
+  writeFileSync(path, generateKeybindings() + '\n# edited again\n')
+  await wait(400)
+  assert.equal(fired, 1) // disposed: nothing more arrives
+})
+
+// The watch is on the directory (editors replace-on-save), so every other config
+// file in it shows up too — and must not be mistaken for a keybindings edit.
+test('watchKeybindings ignores a sibling file in the same config dir', async () => {
+  let fired = 0
+  const stop = watchKeybindings(() => {
+    fired++
+  })
+  try {
+    // macOS delivers FSEvents with a little latency, so let the watcher settle
+    // before the only write this test cares about.
+    await wait(200)
+    writeFileSync(join(configDir(), 'floe.toml'), '[projects]\ngroups = []\n')
+    await wait(400)
+    assert.equal(fired, 0)
+  } finally {
+    stop()
   }
 })

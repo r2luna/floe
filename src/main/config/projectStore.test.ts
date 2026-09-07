@@ -171,3 +171,24 @@ test('directoryNameFor never returns a name already taken', () => {
   const taken = new Set(['os', 'projects-os', 'projects-os-2'])
   assert.equal(store.directoryNameFor('/code/projects/os', taken), 'projects-os-3')
 })
+
+// A worktree can sit inside a project that sits inside another project (a repo
+// checked out under another repo's tree). The nearer one owns it, or "which
+// project is this session in?" answers with the wrong config.
+test('projectFor picks the nearest project a worktree sits under', () => {
+  reset()
+  project('outer', 'path = "/code/outer"\n')
+  project('inner', 'path = "/code/outer/inner"\n')
+  project('other', 'path = "/code/other"\n')
+
+  assert.equal(store.projectFor('/code/outer/inner/.worktrees/feat'), '/code/outer/inner')
+  assert.equal(store.projectFor('/code/outer/.worktrees/feat'), '/code/outer')
+  assert.equal(store.projectFor('/code/outer'), '/code/outer') // the root itself belongs to itself
+})
+
+test('projectFor matches whole path segments, not string prefixes', () => {
+  reset()
+  project('outer', 'path = "/code/outer"\n')
+  assert.equal(store.projectFor('/code/outer-sibling'), null)
+  assert.equal(store.projectFor('/tmp/somewhere-else'), null)
+})

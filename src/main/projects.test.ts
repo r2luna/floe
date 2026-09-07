@@ -1,9 +1,9 @@
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { makeGitRepo, type GitFixture } from './gitFixture.test-helper.ts'
 import { installHook } from './config/hook.test-helper.ts'
 
 // The store is XDG-aware, so a temp XDG_CONFIG_HOME gives the real module graph
@@ -24,14 +24,21 @@ function reset(): void {
 /**
  * A real repository, since addProjectByPath asks git whether it is one.
  *
- * Realpath'd because on macOS the temp dir is under the `/var` → `/private/var`
- * symlink, and `git rev-parse --show-toplevel` answers with the resolved path —
- * so the un-resolved one would never match what was stored.
+ * Through the shared fixture, never a bare `git init`: a git spawn inherits the
+ * caller's cwd and GIT_* environment, and one that escapes writes to Floe's own
+ * history. The fixture pins all three and verifies where git landed. Its path is
+ * already realpath'd, which matters because `git rev-parse --show-toplevel`
+ * answers with /private/var on macOS while mkdtemp returns /var.
  */
+const fixtures: GitFixture[] = []
+after(() => {
+  for (const f of fixtures) f.cleanup()
+})
+
 function repo(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'floe-repo-')))
-  execFileSync('git', ['init', '-q', dir])
-  return dir
+  const fixture = makeGitRepo('floe-repo-')
+  fixtures.push(fixture)
+  return fixture.dir
 }
 
 // `created` is what tells a fresh project from one Floe already had — the
@@ -131,4 +138,51 @@ test('probePath resolves a subdirectory to the repo root', async () => {
   const probe = await projects.probePath(sub)
   assert.equal(probe.root, dir)
   assert.equal(probe.path, sub, 'it still says which path was asked about')
+})
+
+// Groups have no directory of their own — the list lives in floe.toml and the
+// membership lives on each project — so a rename has to move both halves or the
+// sidebar shows a group nobody is in next to projects filed under a dead name.
+test('renameGroup moves the group and every project filed under it', () => {
+  reset()
+  projects.addGroup('Old')
+  store.createProject('/code/one', { group: 'Old' })
+  store.createProject('/code/two', { group: 'Projects' })
+  store.invalidateProjects()
+
+  const { groups, projects: after } = projects.renameGroup('Old', 'New')
+  assert.equal(groups.includes('New'), true)
+  assert.equal(groups.includes('Old'), false)
+  assert.equal(after.find((p) => p.path === '/code/one')?.group, 'New')
+  assert.equal(after.find((p) => p.path === '/code/two')?.group, 'Projects') // untouched
+})
+
+test('renaming onto an existing group merges into it rather than duplicating the name', () => {
+  reset()
+  projects.addGroup('A')
+  projects.addGroup('B')
+  store.createProject('/code/one', { group: 'A' })
+  store.createProject('/code/two', { group: 'B' })
+  store.invalidateProjects()
+
+  const { groups, projects: after } = projects.renameGroup('A', 'B')
+  assert.deepEqual(groups.filter((g) => g === 'B'), ['B']) // one B, not two
+  assert.equal(groups.includes('A'), false)
+  assert.equal(after.find((p) => p.path === '/code/one')?.group, 'B')
+})
+
+// The default is a fixed slot deleteGroup moves orphans into, and a rename to a
+// name nobody has is a no-op the UI must not act on.
+test('renameGroup refuses the default, a blank name, a no-op and an unknown group', () => {
+  reset()
+  projects.addGroup('Old')
+  store.createProject('/code/one', { group: 'Old' })
+  store.invalidateProjects()
+
+  for (const [from, to] of [['Projects', 'Anything'], ['Old', '  '], ['Old', 'Old'], ['Ghost', 'New']]) {
+    const { groups, projects: after } = projects.renameGroup(from, to)
+    assert.equal(groups.includes('Old'), true, `${from} -> ${to} should change nothing`)
+    assert.equal(groups.includes('Anything'), false)
+    assert.equal(after.find((p) => p.path === '/code/one')?.group, 'Old')
+  }
 })

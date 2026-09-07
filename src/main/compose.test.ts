@@ -1,6 +1,17 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { worktreeDockerfile, worktreePort, worktreeViteConfig, type SupportConfig } from './compose.ts'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { SupportConfig } from './compose.ts'
+
+// support.env's path is resolved off homedir() at module load, so HOME has to
+// point somewhere throwaway before the import — otherwise readSupportConfig
+// reads the developer's real ~/.floe.
+const home = mkdtempSync(join(tmpdir(), 'floe-home-'))
+process.env.HOME = home
+
+const { readSupportConfig, worktreeDockerfile, worktreePort, worktreeViteConfig } = await import('./compose.ts')
 
 const cfg: SupportConfig = {
   domain: 'pinguim.io',
@@ -68,4 +79,46 @@ test('vite wrapper overrides the project server block rather than being overridd
   const out = worktreeViteConfig('feat-x', 'https://feat-x.dev.pinguim.io', cfg, 'vite.config.ts')
   // Spread order decides the fix: Floe's `server` must come last.
   assert.match(out, /server: \{ \.\.\.resolved\?\.server, \.\.\.server \}/)
+})
+
+// Runs before the file below is written: no support.env is the normal state on a
+// dev machine that has never run `floe server support up`.
+test('readSupportConfig falls back to the shipped defaults when support.env is absent', () => {
+  assert.deepEqual(readSupportConfig(), {
+    domain: 'pinguim.io',
+    mysqlRootPassword: 'floe',
+    postgresPassword: 'floe',
+    edgeBind: '100.72.153.33'
+  })
+})
+
+test('readSupportConfig reads support.env, unquoting and ignoring non-assignments', () => {
+  mkdirSync(join(home, '.floe'), { recursive: true })
+  writeFileSync(
+    join(home, '.floe', 'support.env'),
+    [
+      '# written by `floe server support up`',
+      'DOMAIN="example.test"',
+      'MYSQL_ROOT_PASSWORD=s3cret  ',
+      "POSTGRES_PASSWORD='pg-pass'",
+      'EDGE_BIND=100.64.0.1',
+      'not an assignment at all',
+      ''
+    ].join('\n')
+  )
+  assert.deepEqual(readSupportConfig(), {
+    domain: 'example.test',
+    mysqlRootPassword: 's3cret',
+    postgresPassword: 'pg-pass',
+    edgeBind: '100.64.0.1'
+  })
+})
+
+test('a support.env missing a key keeps that one default rather than blanking it', () => {
+  mkdirSync(join(home, '.floe'), { recursive: true })
+  writeFileSync(join(home, '.floe', 'support.env'), 'DOMAIN=only.test\n')
+  const cfg = readSupportConfig()
+  assert.equal(cfg.domain, 'only.test')
+  assert.equal(cfg.mysqlRootPassword, 'floe')
+  assert.equal(cfg.edgeBind, '100.72.153.33')
 })
