@@ -8,7 +8,8 @@ import {
   Menu,
   clipboard,
   nativeImage,
-  protocol
+  protocol,
+  type IpcMainInvokeEvent
 } from 'electron'
 import { join, basename } from 'path'
 import { writeFileSync } from 'node:fs'
@@ -236,7 +237,7 @@ const descInFlight = new Set<string>()
 // ponytail: first load of a project with many un-described specs fires one Haiku
 // call per worktree at once — fine at real worktree counts; add a small pool if a
 // project ever has dozens of undescribed specs.
-async function refreshWorktreeDescs(win: BrowserWindow, repoPath: string, worktrees: Worktree[]): Promise<void> {
+export async function refreshWorktreeDescs(win: BrowserWindow, repoPath: string, worktrees: Worktree[]): Promise<void> {
   const targets = worktrees.filter((w) => !w.isMain && !w.home && !descInFlight.has(w.path))
   if (targets.length === 0) return
   targets.forEach((w) => descInFlight.add(w.path))
@@ -252,11 +253,399 @@ async function refreshWorktreeDescs(win: BrowserWindow, repoPath: string, worktr
   }
 }
 
-function registerIpc(): void {
+
+// The worktrees of a project that can run sessions. Home isn't a git repo and a
+// read-only project never runs one, so both come back empty — as does a project
+// whose repo has moved or been removed, which just leaves it off the rail.
+async function sessionWorktrees(project: { path: string; readOnly?: boolean; home?: boolean }): Promise<Worktree[]> {
+  if (project.readOnly || project.home) return []
+  try {
+    return await listWorktrees(project.path)
+  } catch {
+    return []
+  }
+}
+
+// Projects rail: a cross-project activity snapshot for every project worked
+// today (sessions touched since midnight), each with a single status glyph.
+export async function projectsActivity(): Promise<ProjectActivity[]> {
+  const out: ProjectActivity[] = []
+  for (const project of listProjects()) {
+    const worktrees = await sessionWorktrees(project)
+    const activity = computeProjectActivity(worktrees.map((w) => w.path), isClaudeIdConnected)
+    if (activity) out.push({ path: project.path, ...activity })
+  }
+  return out
+}
+
+// The sessions in one worktree that are blocked on an unanswered question.
+export function waitingSessions(worktreePath: string): ReturnType<typeof listClaudeSessions> {
+  return listClaudeSessions(worktreePath).filter(
+    (s) =>
+      s.claudeId &&
+      (s.active || isClaudeIdConnected(s.claudeId)) &&
+      sessionHasUnansweredQuestion(worktreePath, s.claudeId)
+  )
+}
+
+// Every session, across ALL projects, currently blocked on an unanswered
+// question — feeds the ⌘/ switcher's "NEEDS YOU" list and the Home strip. Same
+// on-disk scan as projectsActivity, but per-session and with the worktree's diff
+// stat attached. Only worktrees that actually have a waiting session pay for the
+// (cheap) `git diff --shortstat`.
+export async function needsYouSessions(): Promise<NeedsYouSession[]> {
+  const out: NeedsYouSession[] = []
+  for (const project of listProjects()) {
+    for (const wt of await sessionWorktrees(project)) {
+      const waiting = waitingSessions(wt.path)
+      if (!waiting.length) continue
+      const stat = await worktreeDiffStat(wt.path)
+      for (const s of waiting) {
+        out.push({
+          projectPath: project.path,
+          projectName: project.name,
+          worktreePath: wt.path,
+          branch: wt.branch,
+          sessionId: s.id,
+          title: s.title,
+          lastActivityAt: s.mtime,
+          additions: stat.additions,
+          deletions: stat.deletions
+        })
+      }
+    }
+  }
+  return out
+}
+
+// Every session on disk, across ALL projects — the ⌘J palette's index. Same walk
+// as needsYouSessions, without the question filter or the diff stat, so the
+// palette can pull it on open instead of paying for a poll.
+export async function allSessions(): Promise<JumpSession[]> {
+  const out: JumpSession[] = []
+  for (const project of listProjects()) {
+    for (const wt of await sessionWorktrees(project)) {
+      for (const s of listClaudeSessions(wt.path)) {
+        out.push({
+          projectPath: project.path,
+          projectName: project.name,
+          worktreePath: wt.path,
+          branch: wt.branch,
+          sessionId: s.id,
+          title: s.title,
+          lastActivityAt: s.mtime,
+          // A turn in flight — NOT "the child is alive", which a session that
+          // answered an hour ago still is: the CLI child is kept for the next
+          // --resume, so that read left every session it had ever run marked as
+          // working until the process was reaped.
+          running: anyActiveTurn([s.id, s.claudeId])
+        })
+      }
+    }
+  }
+  return out
+}
+
+// A worktree path resolved to the project it belongs to, for the config files
+// scoped per project (skills, MCP servers). No path — or one under no known
+// project — means global scope.
+export function projectScope(worktreePath?: string): string | undefined {
+  return worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined
+}
+
+// Write one value through the surgical TOML writer, then re-zoom every window
+// straight away rather than through the watcher: the font-size slider is
+// dragged, and 120ms of watcher debounce between the handle and the app resizing
+// is the difference between adjusting a size and guessing one. The watcher still
+// fires after, on the same value — setZoomFactor is idempotent.
+export function setConfigValue(table: string, key: string, value: TomlValue): ReturnType<typeof floeConfig> {
+  setFloeValue(table, key, value)
+  for (const win of BrowserWindow.getAllWindows()) applyZoom(win)
+  return floeConfig()
+}
+
+/** Persist the translucency preference and flip the live window to match. */
+export function toggleVibrancy(win: BrowserWindow | null, on: boolean): void {
+  setVibrancy(on)
+  if (win && !win.isDestroyed()) applyVibrancy(win, on)
+}
+
+// Who to greet on the launcher. `git config user.name` first — it's the name the
+// user already chose to be known by on this machine, and it's set on any box
+// that commits. `id -F` is the macOS full name; the login name is the last
+// resort because "r2luna" reads like a handle, not a greeting. Cached: it can't
+// change without a relaunch mattering, and the launcher asks on every mount.
+let userName: string | null = null
+
+export async function userDisplayName(): Promise<string> {
+  // The config wins outright — it is the user saying what to call them — and is
+  // read on every call rather than cached, so editing the file (or the Settings
+  // row) changes the greeting without a relaunch.
+  const chosen = floeConfig().user.name
+  if (chosen) return chosen
+  userName ??= firstName(await detectFullName())
+  return userName
+}
+
+/** `git config` first, then the macOS full name, then the login name. */
+async function detectFullName(): Promise<string> {
+  return (
+    (await runQuiet('git', ['config', '--global', 'user.name'])) ||
+    (await runQuiet('id', ['-F'])) ||
+    userInfo().username
+  )
+}
+
+/** "Good evening, Rafael Lunardelli" reads like a form letter — first name only. */
+export function firstName(full: string): string {
+  return full.split(/\s+/)[0] ?? ''
+}
+
+/** A probe command's trimmed stdout, or '' if it is not installed / fails. */
+async function runQuiet(cmd: string, args: string[]): Promise<string> {
+  try {
+    return (await promisify(execFile)(cmd, args)).stdout.trim()
+  } catch {
+    return ''
+  }
+}
+
+/** The Claude CLI this machine has, for Settings → Advanced. */
+export async function probeClaudeBinary(): Promise<{ claude: { path: string | null; version: string | null } }> {
+  const path = (await runQuiet('which', ['claude'])) || null
+  const version = path ? (await runQuiet('claude', ['--version'])) || null : null
+  return { claude: { path, version } }
+}
+
+// The window a handler's sender belongs to, or null once it has been closed —
+// every handler that needs one normalizes it the same way.
+export const winOf = (event: IpcMainInvokeEvent): BrowserWindow | null =>
+  BrowserWindow.fromWebContents(event.sender) ?? null
+
+// Open a side conversation off a session. A harness that cannot take one is
+// refused in the chat rather than thrown, so the composer stays usable.
+export function openQuery(
+  win: BrowserWindow | null,
+  sessionKey: string,
+  worktreePath: string,
+  harness: string,
+  model?: string,
+  effort?: Effort
+): { query: unknown } | { error: string } {
+  const opened = openQueryFor(win, sessionKey, worktreePath, { harness, model, effort, openedBy: 'user' })
+  if (opened) return { query: opened.query }
+  const error = refuseReason(harness)
+  refuse(win, sessionKey, error)
+  return { error }
+}
+
+/** `@all` — the target list comes from the caller and is never inferred. */
+export function openAllQueries(
+  win: BrowserWindow | null,
+  sessionKey: string,
+  worktreePath: string,
+  harnesses: string[],
+  prompt: string,
+  effort?: Effort
+): ReturnType<typeof fanOut> | { error: string } {
+  if (!Array.isArray(harnesses) || !harnesses.length) return { error: 'No harnesses given.' }
+  return fanOut(win, sessionKey, worktreePath, { harnesses, prompt, effort })
+}
+
+// What a merged or discarded query actually said, for the fold in the chat to
+// open. Read on demand rather than carried on the chip: a conversation is
+// thousands of characters, the fold is closed by default (merging is about the
+// model reading it, not you re-reading it), and most are never opened.
+export function queryTranscript(qkey: string): ReturnType<typeof sessionTranscript> {
+  const found = findQuery(qkey)
+  const parent = found ? getCreatedSession(found.sessionId) : undefined
+  if (!parent) return []
+  return sessionTranscript(parent.worktreePath, qkey)
+}
+
+/** The way back from a discard. An unknown key is reported, never thrown. */
+export function reopenQueryFor(win: BrowserWindow | null, qkey: string): { query: unknown } | { error: string } {
+  const opened = reopenQuery(win, qkey)
+  return opened ? { query: opened.query } : { error: `Unknown query: ${qkey}` }
+}
+
+export type NotifyPayload = { title: string; body: string; sessionId: string }
+
+/** Only safe schemes reach the OS shell — this list is the authority. */
+export function openExternalUrl(url: string): void {
+  if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url)
+}
+
+// Bring a window forward — even from behind other apps or minimized. On macOS
+// the app itself has to be raised too, or `show()` lands behind whatever is in
+// front. Returns whether a window was actually raised.
+export function raiseWindow(win: BrowserWindow | null): boolean {
+  if (!win || win.isDestroyed()) return false
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  if (process.platform === 'darwin') app.focus({ steal: true })
+  return true
+}
+
+// Clicking the notification surfaces Floe and tells the renderer which session
+// to open — a window that has since closed just gets the raise refused.
+export function showNotification(win: BrowserWindow | null, payload: NotifyPayload): void {
+  if (!Notification.isSupported()) return
+  const note = new Notification({ title: payload.title, body: payload.body })
+  note.on('click', () => {
+    if (raiseWindow(win)) win?.webContents.send('notification:click', payload.sessionId)
+  })
+  note.show()
+}
+
+/** ⌘H hides the whole app on macOS; elsewhere there is only this window. */
+export function hideWindow(win: BrowserWindow | null): void {
+  if (process.platform === 'darwin') return app.hide()
+  win?.hide()
+}
+
+export type CloseSessionOptions = { id: string; worktreePath: string; claudeId?: string }
+
+// Give a session a short, smart title after a turn, unless manually renamed.
+// Interactive sessions get Claude's own ai-title; the headless runs Floe drives
+// have none, so we generate one with Haiku from the opening request — but only
+// while the title is still an auto placeholder ("Session N" or the raw
+// first-message fallback), so it's one Haiku call per session, not every turn.
+// Returns the new title so the renderer can update in place, else null.
+export async function adoptAiTitle(id: string): Promise<string | null> {
+  const c = getCreatedSession(id)
+  if (!c?.claudeId) return null
+  const aiTitle = readAiTitle(c.worktreePath, c.claudeId)
+  if (aiTitle) return applyTitle(c.claudeId, aiTitle)
+  if (!isPlaceholderTitle(c.title, c.worktreePath, c.claudeId)) return null
+  return applyTitle(c.claudeId, await generateSessionTitle(c.worktreePath, c.claudeId))
+}
+
+/** The title, if it stuck — a manual rename landing first wins over it. */
+export function applyTitle(claudeId: string, title: string | null): string | null {
+  return title && applyAiTitle(claudeId, title) ? title : null
+}
+
+/** A title the user never chose: "Session 3", or the raw first message. */
+export function isPlaceholderTitle(title: string, worktreePath: string, claudeId: string): boolean {
+  return /^Session \d+$/.test(title) || title === firstUserTitle(worktreePath, claudeId)
+}
+
+// Its side conversations go first, while the store still says they exist:
+// `closeSession` drops the records, and after that there is nothing left to find
+// the running conns, threads and watermarks by. Each one is stopped and
+// forgotten outright — a query whose session is gone has no panel to reopen it
+// in and no chat to merge it into.
+export function closeSessionFully(win: BrowserWindow | null, opts: CloseSessionOptions): void {
+  forgetQueriesOf(win, opts.id)
+  // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
+  // history in memory, keyed by the session key the renderer used — either id. A
+  // closed session's history is unreachable, so drop it here. And with the
+  // thread goes the record of how much of the conversation each harness was
+  // holding — the two are the same fact from opposite ends.
+  for (const key of sessionKeys(opts)) {
+    forgetThread(key)
+    forgetSeen(key)
+  }
+  closeSession(opts)
+}
+
+/** Both names a session answers to — the created id and Claude's own. */
+export function sessionKeys(opts: CloseSessionOptions): string[] {
+  return opts.claudeId ? [opts.id, opts.claudeId] : [opts.id]
+}
+
+/** The message an unknown throw carries, for a log line or an IPC reply. */
+export function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+// The Home workspace isn't a git repo — hand back its single synthetic worktree
+// so the renderer can open a terminal in it like any worktree. Otherwise the
+// cached list comes straight back and the AI descriptions refresh behind it:
+// fire-and-forget, pushing an updated list once new descriptions land.
+export async function listWorktreesFor(win: BrowserWindow | null, repoPath: string): Promise<Worktree[]> {
+  if (isHomePath(repoPath)) return [homeWorktree()]
+  const worktrees = await listWorktrees(repoPath)
+  if (win) void refreshWorktreeDescs(win, repoPath, worktrees)
+  return worktrees
+}
+
+// The sidebar's git dirt, asked for AFTER the list is on screen so a slow `git
+// status` never delays landing on a session. One call for the whole project; the
+// worktrees run in parallel, and a clean one is left out entirely.
+export async function worktreeStatuses(paths: string[]): Promise<Record<string, unknown>> {
+  const entries = await Promise.all(
+    paths.filter((path) => !isHomePath(path)).map(async (path) => [path, await worktreeStatus(path)] as const)
+  )
+  return Object.fromEntries(entries.filter(([, status]) => status))
+}
+
+// Everything spawned inside a worktree, stopped — before it is removed. Agent
+// sessions are stopped by the renderer beforehand.
+export function stopWorktreeProcesses(target: string): void {
+  stopDev(target)
+  killCommandsForWorktree(target)
+  killTerminalsForWorktree(target)
+}
+
+// Undo the `herd link` the Laravel recipe made. Runs while the directory is
+// still there — `herd unlink` reads the site from the cwd it is called in.
+export async function unlinkSite(target: string): Promise<Record<string, unknown>> {
+  const lines: string[] = []
+  try {
+    const result = await unlinkWorktreeSite(target, (t) => lines.push(t))
+    return { ok: true, unlinked: result === 'unlinked', detail: lines[lines.length - 1] }
+  } catch (e) {
+    return { ok: false, unlinked: false, message: errorText(e) }
+  }
+}
+
+// Drop the worktree's per-branch database (MySQL/MariaDB/Postgres). Reads the
+// worktree's .env, so the renderer runs this step before the worktree is torn
+// down. Never touches the main checkout's database.
+export async function dropDatabase(root: string, target: string): Promise<Record<string, unknown>> {
+  const lines: string[] = []
+  try {
+    const result = await dropWorktreeDatabase(target, root, (t) => lines.push(t))
+    return { ok: true, dropped: result === 'dropped', detail: lines[lines.length - 1] }
+  } catch (e) {
+    return { ok: false, dropped: false, message: errorText(e) }
+  }
+}
+
+// The app's whole IPC surface. Every channel is registered by one of the domain
+// registrars below, in this order — the renderer's preload expects to find them
+// all after a single call.
+export function registerIpc(): void {
   // One-shot: heal any colliding "Session N" titles left by older builds.
   normalizeSessionTitles()
   // One-shot: drop sessions/view state left behind by worktrees that are gone.
   pruneMissingWorktrees()
+  registerProjectsIpc()
+  registerAgentIpc()
+  registerQueryIpc()
+  registerMcpIpc()
+  registerSessionIpc()
+  registerViewStateIpc()
+  registerStatusIpc()
+  registerCommandIpc()
+  registerEditorIpc()
+  registerFileIpc()
+  registerNotesIpc()
+  registerColonyIpc()
+  registerTerminalIpc()
+  registerWorktreeIpc()
+  registerWindowIpc()
+  registerSettingsIpc()
+  watchThemeChanges()
+  watchConfigReload()
+}
+
+
+// Projects, groups and the cross-project activity rails.
+export function registerProjectsIpc(): void {
   handle('projects:list', () => listProjects())
   handle('projects:groups', () => listGroups())
   handle('projects:addGroup', (_event, name: string) => addGroup(name))
@@ -289,101 +678,9 @@ function registerIpc(): void {
     setProjectPinned(path, value)
   )
 
-  // Projects rail: a cross-project activity snapshot for every project worked
-  // today (sessions touched since midnight), each with a single status glyph.
-  // Home isn't a git repo and read-only projects don't run sessions — both skip.
-  handle('projects:activity', async () => {
-    const out: ProjectActivity[] = []
-    for (const project of listProjects()) {
-      if (project.readOnly || project.home) continue
-      let worktrees
-      try {
-        worktrees = await listWorktrees(project.path)
-      } catch {
-        continue // a moved/removed repo — just leave it off the rail
-      }
-      const activity = computeProjectActivity(worktrees.map((w) => w.path), isClaudeIdConnected)
-      if (activity) out.push({ path: project.path, ...activity })
-    }
-    return out
-  })
-
-  // Every session, across ALL projects, currently blocked on an unanswered
-  // question — feeds the ⌘/ switcher's "NEEDS YOU" list and the Home strip. Same
-  // on-disk scan as projects:activity, but per-session and with the worktree's
-  // diff stat attached. Only worktrees that actually have a waiting session pay
-  // for the (cheap) `git diff --shortstat`.
-  handle('sessions:needsYou', async () => {
-    const out: NeedsYouSession[] = []
-    for (const project of listProjects()) {
-      if (project.readOnly || project.home) continue
-      let worktrees
-      try {
-        worktrees = await listWorktrees(project.path)
-      } catch {
-        continue
-      }
-      for (const wt of worktrees) {
-        const waiting = listClaudeSessions(wt.path).filter(
-          (s) =>
-            s.claudeId &&
-            (s.active || isClaudeIdConnected(s.claudeId)) &&
-            sessionHasUnansweredQuestion(wt.path, s.claudeId)
-        )
-        if (!waiting.length) continue
-        const stat = await worktreeDiffStat(wt.path)
-        for (const s of waiting) {
-          out.push({
-            projectPath: project.path,
-            projectName: project.name,
-            worktreePath: wt.path,
-            branch: wt.branch,
-            sessionId: s.id,
-            title: s.title,
-            lastActivityAt: s.mtime,
-            additions: stat.additions,
-            deletions: stat.deletions
-          })
-        }
-      }
-    }
-    return out
-  })
-
-  // Every session on disk, across ALL projects — the ⌘J palette's index. Same
-  // walk as sessions:needsYou, without the question filter or the diff stat, so
-  // the palette can pull it on open instead of paying for a poll.
-  handle('sessions:all', async () => {
-    const out: JumpSession[] = []
-    for (const project of listProjects()) {
-      if (project.readOnly || project.home) continue
-      let worktrees
-      try {
-        worktrees = await listWorktrees(project.path)
-      } catch {
-        continue
-      }
-      for (const wt of worktrees) {
-        for (const s of listClaudeSessions(wt.path)) {
-          out.push({
-            projectPath: project.path,
-            projectName: project.name,
-            worktreePath: wt.path,
-            branch: wt.branch,
-            sessionId: s.id,
-            title: s.title,
-            lastActivityAt: s.mtime,
-            // A turn in flight — NOT "the child is alive", which a session that
-            // answered an hour ago still is: the CLI child is kept for the next
-            // --resume, so that read left every session it had ever run marked
-            // as working until the process was reaped.
-            running: anyActiveTurn([s.id, s.claudeId])
-          })
-        }
-      }
-    }
-    return out
-  })
+  handle('projects:activity', () => projectsActivity())
+  handle('sessions:needsYou', () => needsYouSessions())
+  handle('sessions:all', () => allSessions())
 
   // Rail visibility + the per-project hide list (both persisted in prefs).
   handle('rail:get', () => getRailVisible())
@@ -391,7 +688,10 @@ function registerIpc(): void {
   handle('projects:getHidden', () => getHiddenProjects())
   handle('projects:setHidden', (_event, paths: string[]) => setHiddenProjects(paths))
   handle('codex:models', () => codexModels())
+}
 
+// Turns: starting, answering, stopping — plus the live-state reads.
+export function registerAgentIpc(): void {
   handle(
     'agent:start',
     (
@@ -454,78 +754,37 @@ function registerIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
   })
+}
 
-  // --- Queries: side conversations opened off a session -------------------
+// Queries: side conversations opened off a session.
+export function registerQueryIpc(): void {
   handle('query:list', (_event, sessionKey: string) => queriesFor(sessionKey))
   handle(
     'query:open',
-    (
-      event,
-      sessionKey: string,
-      worktreePath: string,
-      harness: string,
-      model?: string,
-      effort?: Effort
-    ) => {
-      const win = BrowserWindow.fromWebContents(event.sender) ?? null
-      const opened = openQueryFor(win, sessionKey, worktreePath, {
-        harness,
-        model,
-        effort,
-        openedBy: 'user'
-      })
-      if (opened) return { query: opened.query }
-      const error = refuseReason(harness)
-      refuse(win, sessionKey, error)
-      return { error }
-    }
+    (event, sessionKey: string, worktreePath: string, harness: string, model?: string, effort?: Effort) =>
+      openQuery(winOf(event), sessionKey, worktreePath, harness, model, effort)
   )
   // The three actions that close the cycle, plus the way back from a discard.
   // Every one of them is main's: a query's transcript, its conn and the
   // watermark between it and the chat all live here, and an action that ran in
   // the renderer would be doing it with none of them.
-  handle('query:peek', (event, qkey: string) =>
-    peekQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
-  )
-  handle('query:merge', (event, qkey: string) =>
-    mergeQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
-  )
-  handle('query:discard', (event, qkey: string) =>
-    discardQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
-  )
+  handle('query:peek', (event, qkey: string) => peekQuery(winOf(event), qkey))
+  handle('query:merge', (event, qkey: string) => mergeQuery(winOf(event), qkey))
+  handle('query:discard', (event, qkey: string) => discardQuery(winOf(event), qkey))
   // `@all`: one message to several, each in its own query, answers mirrored
   // back into the chat as a comparison. The TARGETS come from the caller and
   // are never inferred — see R7 in docs/queries.md.
   handle(
     'query:all',
-    (
-      event,
-      sessionKey: string,
-      worktreePath: string,
-      harnesses: string[],
-      prompt: string,
-      effort?: Effort
-    ) => {
-      const win = BrowserWindow.fromWebContents(event.sender) ?? null
-      if (!Array.isArray(harnesses) || !harnesses.length) return { error: 'No harnesses given.' }
-      return fanOut(win, sessionKey, worktreePath, { harnesses, prompt, effort })
-    }
+    (event, sessionKey: string, worktreePath: string, harnesses: string[], prompt: string, effort?: Effort) =>
+      openAllQueries(winOf(event), sessionKey, worktreePath, harnesses, prompt, effort)
   )
-  // What a merged or discarded query actually said, for the fold in the chat to
-  // open. Read on demand rather than carried on the chip: a conversation is
-  // thousands of characters, the fold is closed by default (merging is about
-  // the model reading it, not you re-reading it), and most are never opened.
-  handle('query:transcript', (_event, qkey: string) => {
-    const found = findQuery(qkey)
-    const parent = found ? getCreatedSession(found.sessionId) : undefined
-    if (!parent) return []
-    return sessionTranscript(parent.worktreePath, qkey)
-  })
-  handle('query:reopen', (event, qkey: string) => {
-    const opened = reopenQuery(BrowserWindow.fromWebContents(event.sender) ?? null, qkey)
-    return opened ? { query: opened.query } : { error: `Unknown query: ${qkey}` }
-  })
+  handle('query:transcript', (_event, qkey: string) => queryTranscript(qkey))
+  handle('query:reopen', (event, qkey: string) => reopenQueryFor(winOf(event), qkey))
+}
 
+// Floe's own MCP server and the registry panel's CRUD.
+export function registerMcpIpc(): void {
   // The renderer's reply to a run_command/list_commands pushed by the MCP
   // server; resolves the waiting tool with the outcome.
   handle('mcp:command-result', (_event, result: McpCommandResult) => resolveCommandResult(result))
@@ -536,19 +795,20 @@ function registerIpc(): void {
   // Floe's own MCP registry (config/mcpServers.ts) — the panel's CRUD. The
   // worktree path resolves to its project for the project-scope file, same as
   // skills.
-  handle('mcp:servers:list', (_event, worktreePath?: string) =>
-    listMcpServers(worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
-  )
+  handle('mcp:servers:list', (_event, worktreePath?: string) => listMcpServers(projectScope(worktreePath)))
   handle('mcp:servers:add', (_event, scope: 'global' | 'project', server: NewMcpServer, worktreePath?: string) =>
-    addMcpServer(scope, server, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+    addMcpServer(scope, server, projectScope(worktreePath))
   )
   handle('mcp:servers:update', (_event, name: string, patch: McpServerPatch, worktreePath?: string) =>
-    updateMcpServer(name, patch, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+    updateMcpServer(name, patch, projectScope(worktreePath))
   )
   handle('mcp:servers:remove', (_event, name: string, worktreePath?: string) =>
-    removeMcpServer(name, worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined)
+    removeMcpServer(name, projectScope(worktreePath))
   )
+}
 
+// Sessions on disk: listing, resuming, titling, closing.
+export function registerSessionIpc(): void {
   handle('claude:sessions', (_event, worktreePath: string) =>
     // Both names: the conn is filed under whichever the session last spawned
     // with, and `m.id` alone missed the turns that ran under the claudeId.
@@ -581,42 +841,13 @@ function registerIpc(): void {
     addCreatedSession(s)
   )
   handle('sessions:renameCreated', (_event, id: string, title: string) => renameCreatedSession(id, title))
-  // Give a session a short, smart title after a turn, unless manually renamed.
-  // Interactive sessions get Claude's own ai-title; the headless runs Floe
-  // drives have none, so we generate one with Haiku from the opening request —
-  // but only while the title is still an auto placeholder ("Session N" or the raw
-  // first-message fallback), so it's one Haiku call per session, not every turn.
-  // Returns the new title so the renderer can update in place, else null.
-  handle('sessions:adoptAiTitle', async (_event, id: string) => {
-    const c = getCreatedSession(id)
-    if (!c?.claudeId) return null
-    const aiTitle = readAiTitle(c.worktreePath, c.claudeId)
-    if (aiTitle) return applyAiTitle(c.claudeId, aiTitle) ? aiTitle : null
-    const isPlaceholder = /^Session \d+$/.test(c.title) || c.title === firstUserTitle(c.worktreePath, c.claudeId)
-    if (!isPlaceholder) return null
-    const title = await generateSessionTitle(c.worktreePath, c.claudeId)
-    return title && applyAiTitle(c.claudeId, title) ? title : null
-  })
+  handle('sessions:adoptAiTitle', (_event, id: string) => adoptAiTitle(id))
   handle('sessions:link', (_event, id: string, claudeId: string) => linkCreatedSession(id, claudeId))
-  handle('sessions:close', (event, opts: { id: string; worktreePath: string; claudeId?: string }) => {
-    // Its side conversations first, while the store still says they exist:
-    // `closeSession` below drops the records, and after that there is nothing
-    // left to find the running conns, threads and watermarks by. Each one is
-    // stopped and forgotten outright — a query whose session is gone has no
-    // panel to reopen it in and no chat to merge it into.
-    forgetQueriesOf(BrowserWindow.fromWebContents(event.sender) ?? null, opts.id)
-    // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
-    // history in memory, keyed by the session key the renderer used — either
-    // id. A closed session's history is unreachable, so drop it here.
-    forgetThread(opts.id)
-    if (opts.claudeId) forgetThread(opts.claudeId)
-    // And with the thread goes the record of how much of the conversation each
-    // harness was holding — the two are the same fact from opposite ends.
-    forgetSeen(opts.id)
-    if (opts.claudeId) forgetSeen(opts.claudeId)
-    closeSession(opts)
-  })
+  handle('sessions:close', (event, opts: CloseSessionOptions) => closeSessionFully(winOf(event), opts))
+}
 
+// Persisted view state — what was open where.
+export function registerViewStateIpc(): void {
   handle('viewState:get', () => getViewState())
   handle('viewState:setProjectWorktree', (_event, projectPath: string, worktreePath: string) =>
     setProjectWorktree(projectPath, worktreePath)
@@ -633,7 +864,10 @@ function registerIpc(): void {
   handle('viewState:setWorktreeUi', (_event, worktreePath: string, ui: WorktreeUiState) =>
     setWorktreeUi(worktreePath, ui)
   )
+}
 
+// Read-only probes: slash commands, usage, auth, local runtimes.
+export function registerStatusIpc(): void {
   handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
   handle('claude:info', async (_event, worktreePath: string) => {
     const [info, codexUsage] = await Promise.all([
@@ -681,7 +915,10 @@ function registerIpc(): void {
   handle('claude:auth:paste', (_event, code: string) => pasteCode(code))
   handle('claude:auth:cancel', () => cancelLogin())
   handle('claude:auth:logout', () => logout())
+}
 
+// Saved commands and the dev server.
+export function registerCommandIpc(): void {
   handle('commands:list', (_event, projectPath: string, worktreePath: string) =>
     listCommands(projectPath, worktreePath)
   )
@@ -710,7 +947,10 @@ function registerIpc(): void {
     return win ? startDev(win, worktreePath, branch) : null
   })
   handle('dev:stop', (_event, worktreePath: string) => stopDev(worktreePath))
+}
 
+// Terminal- and editor-backed panels.
+export function registerEditorIpc(): void {
   handle(
     'terminal:open',
     (event, id: string, cwd: string, branch: string, cols: number, rows: number) => {
@@ -740,6 +980,10 @@ function registerIpc(): void {
   handle('editor:launch', (_event, cwd: string, file: string, line?: number) =>
     launchEditor(cwd, file, line)
   )
+}
+
+// The file tree, media probes and the review diff.
+export function registerFileIpc(): void {
   handle('files:list', (_event, worktreePath: string, relPath?: string) =>
     // The Home workspace's path is the user's home directory — not a git repo,
     // and it is terminal-only, with no file tree to fill. Hand back nothing.
@@ -790,7 +1034,10 @@ function registerIpc(): void {
   handle('review:clear', (_event, worktreePath: string) => clearReview(worktreePath))
   handle('review:restore', (_event, worktreePath: string) => restoreReview(worktreePath))
   handle('review:isCleared', (_event, worktreePath: string) => hasReviewCheckpoint(worktreePath))
+}
 
+// Thread comments, plans and drawings.
+export function registerNotesIpc(): void {
   // Notes anchored to passages of a session's transcript.
   handle('threadComments:list', (_event, sessionKey: string) => getThreadComments(sessionKey))
   handle('threadComments:add', (_event, comment: ThreadComment) => addThreadComment(comment))
@@ -830,9 +1077,12 @@ function registerIpc(): void {
   handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )
+}
 
-  // The colony board. `colony:board` is the only read — the panel repaints from
-  // one shape, so a card and the column counting it can never disagree.
+// The colony board.
+export function registerColonyIpc(): void {
+  // `colony:board` is the only read — the panel repaints from one shape, so a
+  // card and the column counting it can never disagree.
   handle('colony:board', (_event, project: string) => boardFor(project))
   handle('colony:add', (event, task: NewTask) => {
     const created = addTask(task)
@@ -859,6 +1109,10 @@ function registerIpc(): void {
     // is not on screen yet.
     opener: nannyOpener(project)
   }))
+}
+
+// Live PTYs: terminals and command runs.
+export function registerTerminalIpc(): void {
   handle('terminal:write', (_event, id: string, data: string) => writeTerminal(id, data))
   handle('terminal:resize', (_event, id: string, cols: number, rows: number) =>
     resizeTerminal(id, cols, rows)
@@ -917,30 +1171,15 @@ function registerIpc(): void {
   handle('command:resize', (_event, key: string, cols: number, rows: number) =>
     resizeCommand(key, cols, rows)
   )
+}
 
-  handle('worktrees:list', async (event, repoPath: string) => {
-    // The Home workspace isn't a git repo — hand back its single synthetic
-    // worktree so the renderer can open a terminal in it like any worktree.
-    if (isHomePath(repoPath)) return [homeWorktree()]
-    const worktrees = await listWorktrees(repoPath)
-    // Fire-and-forget: refresh AI descriptions for any worktree whose spec.md has
-    // changed (or never had one). Returns immediately with the cached list; the
-    // Haiku pass pushes an updated list once new descriptions land.
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (win) void refreshWorktreeDescs(win, repoPath, worktrees)
-    return worktrees
-  })
+// Worktrees: list, create, provision, merge, remove.
+export function registerWorktreeIpc(): void {
+  handle('worktrees:list', (event, repoPath: string) => listWorktreesFor(winOf(event), repoPath))
   // The sidebar's git dirt, asked for AFTER the list is on screen so a slow
   // `git status` never delays landing on a session. One call for the whole
   // project; the worktrees run in parallel.
-  handle('worktrees:status', async (_event, paths: string[]) => {
-    const entries = await Promise.all(
-      paths
-        .filter((path) => !isHomePath(path))
-        .map(async (path) => [path, await worktreeStatus(path)] as const)
-    )
-    return Object.fromEntries(entries.filter(([, status]) => status))
-  })
+  handle('worktrees:status', (_event, paths: string[]) => worktreeStatuses(paths))
   handle('branches:list', (_event, repoPath: string) => listBranches(repoPath))
   handle('branches:listRemote', (_event, repoPath: string) => listRemoteBranches(repoPath))
   handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
@@ -960,16 +1199,14 @@ function registerIpc(): void {
   handle(
     'provision:run',
     (event, root: string, worktreePath: string, branch: string, opts?: { from?: string; skip?: string[] }) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
+      const win = winOf(event)
       if (win) void provisionWorktree(win, root, worktreePath, branch, opts)
     }
   )
   // Bring a container-mode worktree up (idempotent, no-op for host-native
   // projects). Fire-and-forget — the renderer doesn't wait.
   handle('provision:ensureUp', (_event, root: string, worktreePath: string, branch: string) => {
-    void ensureContainerUp(root, worktreePath, branch).catch((e) =>
-      console.error('[provision:ensureUp]', e instanceof Error ? e.message : e)
-    )
+    void ensureContainerUp(root, worktreePath, branch).catch((e) => console.error('[provision:ensureUp]', errorText(e)))
   })
 
   // Guided merge — granular steps the renderer orchestrates with the panel.
@@ -984,18 +1221,14 @@ function registerIpc(): void {
   // Stop every process tied to a worktree (commands, dev server, terminals) and
   // remove the worktree. Agent sessions are stopped by the renderer beforehand.
   handle('worktree:teardown', (_event, root: string, target: string) => {
-    stopDev(target)
-    killCommandsForWorktree(target)
-    killTerminalsForWorktree(target)
+    stopWorktreeProcesses(target)
     return removeWorktree(root, target)
   })
 
   // Guided remove — granular steps the renderer orchestrates with the panel.
   handle('remove:preflight', (_event, root: string, target: string) => removePreflight(root, target))
   handle('remove:worktree', (_event, root: string, target: string, force: boolean) => {
-    stopDev(target)
-    killCommandsForWorktree(target)
-    killTerminalsForWorktree(target)
+    stopWorktreeProcesses(target)
     return removeWorktreeGuided(root, target, force)
   })
   handle('remove:branch', (_event, root: string, branch: string, force: boolean) =>
@@ -1003,75 +1236,33 @@ function registerIpc(): void {
   )
   // Undo the `herd link` the Laravel recipe made. Runs while the directory is
   // still there — `herd unlink` reads the site from the cwd it is called in.
-  handle('remove:unlinkSite', async (_event, target: string) => {
-    const lines: string[] = []
-    try {
-      const result = await unlinkWorktreeSite(target, (t) => lines.push(t))
-      return { ok: true, unlinked: result === 'unlinked', detail: lines[lines.length - 1] }
-    } catch (e) {
-      return { ok: false, unlinked: false, message: e instanceof Error ? e.message : String(e) }
-    }
-  })
+  handle('remove:unlinkSite', (_event, target: string) => unlinkSite(target))
   // Drop the worktree's per-branch database (MySQL/MariaDB/Postgres). Reads the
   // worktree's .env, so the renderer runs this step before the worktree is torn
   // down. Never touches the main checkout's database.
-  handle('remove:dropDatabase', async (_event, root: string, target: string) => {
-    const lines: string[] = []
-    try {
-      const result = await dropWorktreeDatabase(target, root, (t) => lines.push(t))
-      return { ok: true, dropped: result === 'dropped', detail: lines[lines.length - 1] }
-    } catch (e) {
-      return { ok: false, dropped: false, message: e instanceof Error ? e.message : String(e) }
-    }
-  })
+  handle('remove:dropDatabase', (_event, root: string, target: string) => dropDatabase(root, target))
+}
 
+// The window itself: capture, focus, notifications, external links.
+export function registerWindowIpc(): void {
   // Dev aid: let the renderer ask for a fresh screenshot (e.g. when an overlay opens).
   handle('window:capture', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
+    const win = winOf(event)
     if (win) void captureWindow(win)
   })
-
-  handle('open:external', (_event, url: string) => {
-    // Authoritative allowlist — only safe schemes reach the OS shell.
-    if (/^(https?|mailto):/i.test(url)) void shell.openExternal(url)
-  })
-
+  handle('open:external', (_event, url: string) => openExternalUrl(url))
   // Fire a native OS notification (the renderer decides when, and owns the
-  // session metadata). Clicking it surfaces Floe — even from behind other
-  // apps or minimized — and tells the renderer which session to open.
-  handle('notify:show', (event, payload: { title: string; body: string; sessionId: string }) => {
-    if (!Notification.isSupported()) return
-    const win = BrowserWindow.fromWebContents(event.sender)
-    const note = new Notification({ title: payload.title, body: payload.body })
-    note.on('click', () => {
-      if (!win || win.isDestroyed()) return
-      if (win.isMinimized()) win.restore()
-      win.show()
-      win.focus()
-      if (process.platform === 'darwin') app.focus({ steal: true })
-      win.webContents.send('notification:click', payload.sessionId)
-    })
-    note.show()
-  })
-
+  // session metadata).
+  handle('notify:show', (event, payload: NotifyPayload) => showNotification(winOf(event), payload))
   // Bring this window forward. Returns whether a window was actually raised.
-  handle('window:focus', (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (!win || win.isDestroyed()) return false
-    if (win.isMinimized()) win.restore()
-    win.show()
-    win.focus()
-    if (process.platform === 'darwin') app.focus({ steal: true })
-    return true
-  })
-
+  handle('window:focus', (event) => raiseWindow(winOf(event)))
   // Send Floe to the background — mirrors the native ⌘H (role: 'hide') so the
   // command palette can do it too. A notification click brings it back.
-  handle('window:hide', (event) => {
-    if (process.platform === 'darwin') return app.hide()
-    BrowserWindow.fromWebContents(event.sender)?.hide()
-  })
+  handle('window:hide', (event) => hideWindow(winOf(event)))
+}
 
+// Keybindings, skills, config and the settings panel.
+export function registerSettingsIpc(): void {
   // The whole keymap, read from ~/.config/floe/keybindings.toml — which the app
   // generates with every default written out, so the file is the keymap rather
   // than a list of overrides on top of one. `reveal` opens it for editing
@@ -1091,32 +1282,24 @@ function registerIpc(): void {
   // comes back as one changed value in a file whose comments are all still there.
   // Skills the composer's `/` menu and the skills palette read. Scoped to the
   // worktree's project, so a project skill only shows up where it applies.
-  handle('skills:list', (_event, worktreePath?: string) =>
-    listSkills(worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
-  )
+  handle('skills:list', (_event, worktreePath?: string) => listSkills(projectScope(worktreePath)))
   // What the Skills panel writes through. A skill is addressed by NAME, never by
   // a path from the renderer: the name is what the row shows and what `/name`
   // sends, and resolving it here is what keeps the UI unable to write anywhere
   // but the two skills directories. Refusals throw, so the panel can say why.
   handle('skills:create', (_event, name: string, scope: 'global' | 'project', worktreePath?: string) =>
-    createSkill(name, scope, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+    createSkill(name, scope, projectScope(worktreePath))
   )
   handle('skills:rename', (_event, name: string, to: string, worktreePath?: string) =>
-    renameSkill(name, to, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+    renameSkill(name, to, projectScope(worktreePath))
   )
   handle('skills:delete', (_event, name: string, worktreePath?: string) =>
-    deleteSkill(name, worktreePath ? projectFor(worktreePath) ?? undefined : undefined)
+    deleteSkill(name, projectScope(worktreePath))
   )
   handle('config:get', () => floeConfig())
-  handle('config:set', (_event, table: string, key: string, value: TomlValue) => {
-    setFloeValue(table, key, value)
-    // Straight away rather than through the watcher: the font-size slider is
-    // dragged, and 120ms of watcher debounce between the handle and the app
-    // resizing is the difference between adjusting a size and guessing one. The
-    // watcher still fires after, on the same value — setZoomFactor is idempotent.
-    for (const win of BrowserWindow.getAllWindows()) applyZoom(win)
-    return floeConfig()
-  })
+  handle('config:set', (_event, table: string, key: string, value: TomlValue) =>
+    setConfigValue(table, key, value)
+  )
   // Every problem across every config file, so Settings has one place to show
   // them instead of each file failing quietly on its own.
   handle('config:errors', () => configErrors())
@@ -1131,11 +1314,7 @@ function registerIpc(): void {
   // to set the matching [data-vibrancy] CSS state, and calls `set` from the
   // "Toggle transparency" command to flip it live and persist the choice.
   handle('window:getVibrancy', () => getVibrancy())
-  handle('window:setVibrancy', (event, on: boolean) => {
-    setVibrancy(on)
-    const win = BrowserWindow.fromWebContents(event.sender)
-    if (win && !win.isDestroyed()) applyVibrancy(win, on)
-  })
+  handle('window:setVibrancy', (event, on: boolean) => toggleVibrancy(winOf(event), on))
 
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
@@ -1145,107 +1324,85 @@ function registerIpc(): void {
   })
 
   // Settings → Advanced/Integrations read-only detection: the Claude CLI binary +
-  // version and the current `gh` auth state. Best-effort; anything missing comes
-  // back null so the UI shows a "not detected / not connected" state.
-  // Who to greet on the launcher. `git config user.name` first — it's the name
-  // the user already chose to be known by on this machine, and it's set on any
-  // box that commits. `id -F` is the macOS full name; the login name is the
-  // last resort because "r2luna" reads like a handle, not a greeting. Cached:
-  // it can't change without a relaunch mattering, and the launcher asks on every
-  // mount.
-  let userName: string | null = null
-  handle('user:name', async () => {
-    // The config wins outright — it is the user saying what to call them — and
-    // is read on every call rather than cached, so editing the file (or the
-    // Settings row) changes the greeting without a relaunch.
-    const chosen = floeConfig().user.name
-    if (chosen) return chosen
-    if (userName !== null) return userName
-    const pexec = promisify(execFile)
-    const tryRun = async (cmd: string, args: string[]): Promise<string> => {
-      try {
-        return (await pexec(cmd, args)).stdout.trim()
-      } catch {
-        return ''
-      }
-    }
-    const full =
-      (await tryRun('git', ['config', '--global', 'user.name'])) ||
-      (await tryRun('id', ['-F'])) ||
-      userInfo().username
-    // First name only: "Good evening, Rafael Lunardelli" reads like a form letter.
-    userName = full.split(/\s+/)[0] ?? ''
-    return userName
-  })
-
-  handle('settings:probe', async () => {
-    const pexec = promisify(execFile)
-    let claude: { path: string | null; version: string | null } = { path: null, version: null }
-    try {
-      const path = (await pexec('which', ['claude'])).stdout.trim() || null
-      let version: string | null = null
-      try {
-        version = (await pexec('claude', ['--version'])).stdout.trim() || null
-      } catch {
-        version = null
-      }
-      claude = { path, version }
-    } catch {
-      claude = { path: null, version: null }
-    }
-    return { claude }
-  })
+  // version. Best-effort; anything missing comes back null so the UI shows a
+  // "not detected" state.
+  handle('user:name', () => userDisplayName())
+  handle('settings:probe', () => probeClaudeBinary())
 
   // Settings → Advanced: system prompt appended to every spawned Claude session
   // (agent.ts reads it directly at spawn time — this is just the read/write UI seam).
   handle('settings:getSystemPrompt', () => getSystemPrompt())
   handle('settings:setSystemPrompt', (_event, value: string) => setSystemPrompt(value))
-
-  // Drive live light/dark switches from the main process. The renderer's
-  // `matchMedia('(prefers-color-scheme: dark)')` `change` event is unreliable in
-  // Electron on macOS — it misses OS-driven appearance changes (e.g. the "Auto"
-  // schedule at sunrise/sunset). `nativeTheme` catches them, so we broadcast.
-  nativeTheme.on('updated', () => {
-    const vibrancy = getVibrancy()
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (win.isDestroyed()) continue
-      win.webContents.send('theme:changed', nativeTheme.shouldUseDarkColors)
-      // Re-assert the fill for the new appearance. With the preference on this is
-      // a no-op (the window stays non-opaque and the CSS body toggles the blur);
-      // with it off it just refreshes the solid color to the new theme's --bg.
-      applyVibrancy(win, vibrancy)
-    }
-  })
-
-  // Hot-reload the whole config directory. Saving keybindings.toml, editing a
-  // project's config.toml by hand, or an agent adding a command all land here:
-  // the caches are dropped and the renderer re-fetches, with no app restart.
-  //
-  // One channel for the keymap and one for everything else, because reloading
-  // bindings is cheap and constant while re-reading projects touches the
-  // sidebar — telling them apart keeps a keybinding save from repainting the app.
-  watchConfig((file) => {
-    setSandboxEnabled(floeConfig().sandbox.enabled)
-    const keymap = file.endsWith('keybindings.toml')
-    // A board is its config file, so editing one is a move on the board: raising
-    // a cap frees a spot, and nothing else would notice. The stages are read
-    // fresh on every tick, so this only has to say "look again".
-    if (!keymap) {
-      const win = localWindow ?? BrowserWindow.getAllWindows()[0]
-      if (win && !win.isDestroyed()) {
-        for (const project of projectScan().projects) {
-          tick(win, project.path)
-          pushBoard(win, project.path)
-        }
-      }
-    }
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (win.isDestroyed()) continue
-      if (!keymap) applyZoom(win)
-      win.webContents.send(keymap ? 'keybindings:changed' : 'config:changed')
-    }
-  })
 }
+
+// Drive live light/dark switches from the main process. The renderer's
+// `matchMedia('(prefers-color-scheme: dark)')` `change` event is unreliable in
+// Electron on macOS — it misses OS-driven appearance changes (e.g. the "Auto"
+// schedule at sunrise/sunset). `nativeTheme` catches them, so we broadcast.
+export function watchThemeChanges(): void {
+  nativeTheme.on('updated', () => broadcastTheme())
+}
+
+/** Tell every live window the OS appearance changed, and re-assert its fill. */
+export function broadcastTheme(): void {
+  const vibrancy = getVibrancy()
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    win.webContents.send('theme:changed', nativeTheme.shouldUseDarkColors)
+    // Re-assert the fill for the new appearance. With the preference on this is
+    // a no-op (the window stays non-opaque and the CSS body toggles the blur);
+    // with it off it just refreshes the solid color to the new theme's --bg.
+    applyVibrancy(win, vibrancy)
+  }
+}
+
+// Hot-reload the whole config directory. Saving keybindings.toml, editing a
+// project's config.toml by hand, or an agent adding a command all land here:
+// the caches are dropped and the renderer re-fetches, with no app restart.
+let stopConfigWatch: (() => void) | null = null
+
+export function watchConfigReload(): void {
+  stopConfigWatch?.()
+  stopConfigWatch = watchConfig((file) => onConfigChanged(file))
+}
+
+/** Close it — the one long-lived OS handle registerIpc opens. */
+export function stopConfigWatcher(): void {
+  stopConfigWatch?.()
+  stopConfigWatch = null
+}
+
+// One channel for the keymap and one for everything else, because reloading
+// bindings is cheap and constant while re-reading projects touches the
+// sidebar — telling them apart keeps a keybinding save from repainting the app.
+export function onConfigChanged(file: string): void {
+  setSandboxEnabled(floeConfig().sandbox.enabled)
+  const keymap = file.endsWith('keybindings.toml')
+  if (!keymap) reconcileBoards()
+  broadcastConfigChange(keymap)
+}
+
+// A board is its config file, so editing one is a move on the board: raising a
+// cap frees a spot, and nothing else would notice. The stages are read fresh on
+// every tick, so this only has to say "look again".
+export function reconcileBoards(): void {
+  const win = localWindow ?? BrowserWindow.getAllWindows()[0]
+  if (!win || win.isDestroyed()) return
+  for (const project of projectScan().projects) {
+    tick(win, project.path)
+    pushBoard(win, project.path)
+  }
+}
+
+/** Zoom is re-applied on every non-keymap reload; the keymap save is cheap. */
+export function broadcastConfigChange(keymap: boolean): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue
+    if (!keymap) applyZoom(win)
+    win.webContents.send(keymap ? 'keybindings:changed' : 'config:changed')
+  }
+}
+
 
 // Dev aid: save a screenshot of our own window so it can be inspected while
 // iterating on the layout. Captures on load and whenever the window is focused.
@@ -1253,7 +1410,7 @@ function registerIpc(): void {
 // layer, which on macOS knocks out the live blur (the window goes solid a beat
 // after load or after switching apps) — the classic "vibrancy stops working"
 // symptom. The dev screenshot isn't worth losing the effect.
-async function captureWindow(win: BrowserWindow): Promise<void> {
+export async function captureWindow(win: BrowserWindow): Promise<void> {
   if (app.isPackaged) return
   if (process.platform === 'darwin' && getVibrancy()) return
   try {
@@ -1327,20 +1484,16 @@ function applyZoom(win: BrowserWindow): void {
   win.webContents.setZoomFactor(floeConfig().appearance.fontSize / 13)
 }
 
-function createWindow(): void {
-  const darwin = process.platform === 'darwin'
-  // Non-opaque whenever the glass preference is on — NOT gated on the launch
-  // theme. Constructing opaque in light would relock the window so a later
-  // light→dark switch couldn't reveal the blur without a restart. Light still
-  // reads solid because its CSS surfaces are opaque and cover the blur.
-  const vibrancyOn = darwin && getVibrancy()
-  // Cascade a second window slightly so it doesn't stack invisibly on the first.
-  const cascade = BrowserWindow.getAllWindows().length * 28
-  const mainWindow = new BrowserWindow({
+// The BrowserWindow shape: no chrome at all (the window is driven from the
+// keyboard — ⌘W / ⌘M / ⌘Q still work through the app menu), and hidden until
+// ready-to-show so there is no flash before the renderer paints.
+export function windowOptions(darwin: boolean, vibrancyOn: boolean, cascade: number): Electron.BrowserWindowConstructorOptions {
+  return {
     width: 1400,
     height: 900,
     minWidth: 960,
     minHeight: 600,
+    // Cascade a second window slightly so it doesn't stack invisibly on the first.
     ...(cascade ? { x: 60 + cascade, y: 60 + cascade } : {}),
     show: false,
     // Match the OS appearance so there's no flash before the renderer paints.
@@ -1351,8 +1504,6 @@ function createWindow(): void {
     // live just by swapping the background fill. When off, the solid fill above
     // and the opaque [data-vibrancy='off'] surfaces keep it hidden.
     ...(darwin ? { vibrancy: 'fullscreen-ui' as const, visualEffectState: 'active' as const } : {}),
-    // No chrome at all. The window is driven from the keyboard (⌘W / ⌘M / ⌘Q
-    // still work through the app menu).
     frame: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -1361,10 +1512,86 @@ function createWindow(): void {
       // render PDFs inline in an <iframe>; off by default in Electron.
       plugins: true
     }
+  }
+}
+
+// A boot that lands on a broken/half-written bundle (see autoUpdate.ts) shows up
+// here first. Log it, and retry the load once before leaving a dead window.
+export function attachReloadRetry(win: BrowserWindow): void {
+  let reloadedOnce = false
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+    console.error(`[window] load failed ${code} ${desc} ${url}`)
+    if (!isMainFrame || reloadedOnce || code === -3) return // -3 = aborted (navigation superseded)
+    reloadedOnce = true
+    setTimeout(() => win.webContents.reload(), 500)
   })
+}
+
+// Right-click → native Copy/Paste. Electron ships no default context menu, so
+// without this there's no mouse way to copy a message out of the transcript.
+// Built from the click's own params, so only what applies shows up.
+export function contextMenuItems(win: BrowserWindow, params: Electron.ContextMenuParams): Electron.MenuItemConstructorOptions[] {
+  const items: Electron.MenuItemConstructorOptions[] = []
+  if (params.linkURL) items.push({ label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) })
+  // A screenshot in the transcript (or blown up in the lightbox) is a data URL,
+  // so there is nothing to save a link to: copyImageAt lifts the decoded bitmap
+  // straight off the page and onto the clipboard.
+  if (params.mediaType === 'image') {
+    items.push({ label: 'Copy Image', click: () => win.webContents.copyImageAt(params.x, params.y) })
+  }
+  if (params.selectionText) items.push({ role: 'copy' })
+  if (params.isEditable) {
+    if (params.selectionText) items.push({ role: 'cut' })
+    items.push({ role: 'paste' }, { type: 'separator' }, { role: 'selectAll' })
+  }
+  return items
+}
+
+/** A click nothing applies to gets no menu at all, rather than an empty one. */
+export function popupContextMenu(win: BrowserWindow, params: Electron.ContextMenuParams): void {
+  const items = contextMenuItems(win, params)
+  if (items.length) Menu.buildFromTemplate(items).popup({ window: win })
+}
+
+// Launching right after an update can catch the .app mid-copy: reads from a
+// half-written app.asar come back as another file's bytes, so the window paints
+// binary garbage (or some random chunk's source) instead of the UI — and only a
+// couple of relaunches later, once the copy finished, does it work. Wait for
+// index.html to read back intact before loading it.
+export async function waitForBundle(indexFile: string, attempts = 20): Promise<void> {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const html = await readFile(indexFile, 'utf8').catch(() => '')
+    if (html.includes('<div id="root">')) return
+    console.error(`[window] renderer index.html not readable yet (attempt ${attempt}) — bundle still being written?`)
+    await new Promise((r) => setTimeout(r, 500))
+  }
+}
+
+// electron-vite injects ELECTRON_RENDERER_URL in dev; load the built file otherwise.
+function loadRenderer(win: BrowserWindow): void {
+  const devUrl = process.env['ELECTRON_RENDERER_URL']
+  if (devUrl) {
+    void win.loadURL(devUrl)
+    return
+  }
+  const indexFile = join(__dirname, '../renderer/index.html')
+  void waitForBundle(indexFile).then(() => {
+    if (!win.isDestroyed()) win.loadFile(indexFile)
+  })
+}
+
+function createWindow(): void {
+  const darwin = process.platform === 'darwin'
+  // Non-opaque whenever the glass preference is on — NOT gated on the launch
+  // theme. Constructing opaque in light would relock the window so a later
+  // light→dark switch couldn't reveal the blur without a restart. Light still
+  // reads solid because its CSS surfaces are opaque and cover the blur.
+  const vibrancyOn = darwin && getVibrancy()
+  const cascade = BrowserWindow.getAllWindows().length * 28
+  const mainWindow = new BrowserWindow(windowOptions(darwin, vibrancyOn, cascade))
 
   // Hide the macOS traffic-light buttons — the app is keyboard-first.
-  if (process.platform === 'darwin') mainWindow.setWindowButtonVisibility(false)
+  if (darwin) mainWindow.setWindowButtonVisibility(false)
 
   mainWindow.on('ready-to-show', () => mainWindow.show())
 
@@ -1380,15 +1607,7 @@ function createWindow(): void {
     stopMemoryStats()
   })
 
-  // A boot that lands on a broken/half-written bundle (see autoUpdate.ts) shows
-  // up here first. Log it, and retry the load once before leaving a dead window.
-  let reloadedOnce = false
-  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-    console.error(`[window] load failed ${code} ${desc} ${url}`)
-    if (!isMainFrame || reloadedOnce || code === -3) return // -3 = aborted (navigation superseded)
-    reloadedOnce = true
-    setTimeout(() => mainWindow.webContents.reload(), 500)
-  })
+  attachReloadRetry(mainWindow)
 
   mainWindow.webContents.on('did-finish-load', () => {
     applyZoom(mainWindow)
@@ -1398,31 +1617,7 @@ function createWindow(): void {
     setTimeout(() => void captureWindow(mainWindow), 200)
   })
 
-  // Right-click → native Copy/Paste. Electron ships no default context menu, so
-  // without this there's no mouse way to copy a message out of the transcript.
-  // Built from the click's own params, so only what applies shows up.
-  mainWindow.webContents.on('context-menu', (_e, params) => {
-    const items: Electron.MenuItemConstructorOptions[] = []
-    if (params.linkURL) {
-      items.push({ label: 'Copy Link', click: () => clipboard.writeText(params.linkURL) })
-    }
-    // A screenshot in the transcript (or blown up in the lightbox) is a data
-    // URL, so there is nothing to save a link to: copyImageAt lifts the decoded
-    // bitmap straight off the page and onto the clipboard.
-    if (params.mediaType === 'image') {
-      items.push({
-        label: 'Copy Image',
-        click: () => mainWindow.webContents.copyImageAt(params.x, params.y)
-      })
-    }
-    if (params.selectionText) items.push({ role: 'copy' })
-    if (params.isEditable) {
-      if (params.selectionText) items.push({ role: 'cut' })
-      items.push({ role: 'paste' }, { type: 'separator' }, { role: 'selectAll' })
-    }
-    if (!items.length) return
-    Menu.buildFromTemplate(items).popup({ window: mainWindow })
-  })
+  mainWindow.webContents.on('context-menu', (_e, params) => popupContextMenu(mainWindow, params))
 
   // Open external links in the user's browser, not inside the app.
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -1430,26 +1625,7 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // electron-vite injects ELECTRON_RENDERER_URL in dev; load the built file otherwise.
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    // Launching right after an update can catch the .app mid-copy: reads from a
-    // half-written app.asar come back as another file's bytes, so the window
-    // paints binary garbage (or some random chunk's source) instead of the UI —
-    // and only a couple of relaunches later, once the copy finished, does it
-    // work. Wait for index.html to read back intact before loading it.
-    const indexFile = join(__dirname, '../renderer/index.html')
-    void (async () => {
-      for (let attempt = 1; attempt <= 20; attempt++) {
-        const html = await readFile(indexFile, 'utf8').catch(() => '')
-        if (html.includes('<div id="root">')) break
-        console.error(`[window] renderer index.html not readable yet (attempt ${attempt}) — bundle still being written?`)
-        await new Promise((r) => setTimeout(r, 500))
-      }
-      if (!mainWindow.isDestroyed()) mainWindow.loadFile(indexFile)
-    })()
-  }
+  loadRenderer(mainWindow)
 }
 
 isolateUserDataPerWorktree()
