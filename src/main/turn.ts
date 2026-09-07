@@ -20,6 +20,7 @@ import { sendToAgent } from './agent'
 // Circular with relay.ts (it starts the turns it relays) — safe: neither side
 // touches the other at module top level.
 import { armAddress, armRelay } from './relay'
+import { armSpawnedClose } from './spawned'
 import { runRuntime } from './runtimes'
 import { expandSkills } from '../shared/skills'
 import { readSkill } from './config/skills'
@@ -139,6 +140,11 @@ export function startTurn(
   if (!isQueryKey(key)) {
     if (provider !== (own.provider ?? 'claude')) armRelay(win, key, worktreePath, provider, own)
     else armAddress(win, key, worktreePath, own)
+    // And, for a session an agent opened, the one that hands the work back and
+    // takes the row off the screen. Armed here rather than beside the relay's
+    // own waiter because it is not about who answered: a lane finishing is a
+    // lane finishing whichever harness ran it.
+    armSpawnedClose(win, key)
   }
   if (provider !== 'claude') {
     void runRuntime(

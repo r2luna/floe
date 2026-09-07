@@ -471,6 +471,10 @@ export default function App() {
       off()
     }
   }, [worktrees.reload])
+  // A row that left without a turn of its own ending: a subagent closing itself
+  // once its work is done (main/spawned.ts). The `done` reload above already
+  // ran a minute earlier, on the turn that finished the work.
+  useEffect(() => window.floe.claude.onSessionsChanged(() => worktrees.reload()), [worktrees.reload])
   // The find bar: the query being typed, or null when it is closed. The query
   // survives closing (`n` repeats the last search, vim's way), which is why the
   // bar's visibility is `null` rather than a second boolean.
@@ -2228,13 +2232,15 @@ export default function App() {
           {/* Columns, not panels: a docked panel shares its neighbour's column
               instead of taking one of its own. The column carries the width and
               the pinning, so a stacked pair is sized and pinned as one thing. */}
-          {columns.map((column, c) => {
+          {columns.map((column) => {
             const [{ panel: head }] = column
             const headSpec = KINDS[head.kind as PanelKind]
-            // A growing column only grows while nothing follows it. Once it has
-            // a neighbour, stretching would come out of that neighbour's width
-            // — and a pinned chat would swallow the whole lane.
-            const lastColumn = c === columns.length - 1
+            // A growing column grows wherever it sits, not only at the lane's
+            // end: with a query or a lane panel open beside the chat, stopping
+            // the chat from growing left a strip of empty lane on the right.
+            // Growing only spends what is LEFT OVER, so the neighbour keeps its
+            // own width either way — and the split is weighted by base width
+            // below, so the chat stays the widest thing on screen.
             return (
               <div
                 key={head.id}
@@ -2256,18 +2262,19 @@ export default function App() {
                         : 'min' in headSpec
                           ? headSpec.min
                           : headSpec.width
-                    }px`
+                    }px`,
+                    // Leftover lane width is split in proportion to base width,
+                    // not evenly: a chat and a query sharing the room evenly
+                    // would end up nearly the same size, and the chat is the
+                    // panel the extra pixels are for.
+                    '--panel-grow': `${headSpec.width / 100}`
                   } as React.CSSProperties
                 }
                 // A width you dragged to is a width you asked for: it wins over
                 // growing, or the lane would take it straight back.
                 data-sized={head.width !== undefined || undefined}
                 data-grow={
-                  (head.width === undefined &&
-                    'grow' in headSpec &&
-                    headSpec.grow &&
-                    lastColumn) ||
-                  undefined
+                  (head.width === undefined && 'grow' in headSpec && headSpec.grow) || undefined
                 }
                 data-sticky={('sticky' in headSpec && headSpec.sticky) || undefined}
               >

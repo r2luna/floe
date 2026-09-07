@@ -1,0 +1,89 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><title>Floe — subagents: sidebar nesting + in-chat dock</title>
+<!-- The app's real stylesheet. Everything not inside the PROPOSED block below is
+     an existing Floe rule: if it looks wrong here it is wrong in the app. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { padding: 22px 26px 60px; }
+  .lbl { margin: 22px 0 8px; color: var(--dim); font-size: 11px; }
+  .lbl b { color: var(--text-strong); font-weight: 700; }
+  .lbl:first-child { margin-top: 0; }
+  .side { width: 260px; padding: 6px 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .stage { position: relative; display: flex; flex-direction: column; width: 820px; height: 340px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .stage .grow { flex: 1; }
+  .fakecomposer { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: var(--radius); color: var(--dimmest); }
+  .two { display: flex; gap: 16px; align-items: flex-start; }
+  .theme { position: fixed; top: 14px; right: 18px; padding: 4px 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+
+  /* The dock, the pill and the lane head are now REAL rules in index.css —
+     this page only supplies the stage they sit on. */
+  .lane-panel { width: 320px; height: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .lane-body { flex: 1; padding: 9px 10px; }
+  .lane-act { padding: 1px 0; color: var(--dim); }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+
+<p class="lbl"><b>1 · sidebar</b> — BUILT. Subagents nest under the chat that spawned them, with the ↳ mark.</p>
+<div class="side">
+  <button class="row row-branch" data-active><span class="row-name">feat</span></button>
+  <button class="row row-session"><span class="dot"></span><span class="row-name">eu quero usar o conceito do unc…</span><span class="sub-note">1m</span></button>
+  <button class="row row-session" data-spawned data-under><span class="spin">⠹</span><span class="row-spawn">↳</span><span class="row-name">crap: agent.ts</span><span class="sub-note">1m</span></button>
+  <button class="row row-session" data-spawned data-under><span class="spin">⠹</span><span class="row-spawn">↳</span><span class="row-name">crap: claudeSessions.ts</span><span class="sub-note">1m</span></button>
+  <button class="row row-session" data-spawned data-under><span class="spin">⠹</span><span class="row-spawn">↳</span><span class="row-name">crap: git.ts</span><span class="sub-note">now</span></button>
+  <button class="row row-session" data-spawned data-under><span class="dot"></span><span class="row-spawn">↳</span><span class="row-name">crap: mcpServer.ts</span><span class="sub-note">3m</span></button>
+  <button class="row row-session"><span class="dot"></span><span class="row-name">merge review</span><span class="sub-note">2h</span></button>
+</div>
+
+<p class="lbl"><b>2 · the dock</b> — BUILT. Bottom-right of the chat, above the composer. Only lanes that are WORKING; a lane that finishes reports to the parent and leaves.</p>
+<div class="stage">
+  <div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>quebra o refactor em lanes por arquivo</div>
+  <div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude<span class="irc-host">@opus-5</span></span></span>Abrindo 16 lanes, uma por arquivo, na mesma worktree.</div>
+  <div class="grow"></div>
+  <div class="dock">
+    <div class="dock-head"><span class="spin">⠹</span><span class="dock-count">4 subagents working</span><button class="dock-key">⌥A</button></div>
+    <div class="dock-list">
+      <button class="dock-row" data-cursor><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">agent.ts</span> · <span class="ag-tool">edit</span></span><span class="sub-note">1m</span></button>
+      <button class="dock-row"><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">claudeSessions.ts</span> · <span class="ag-tool">grep</span></span><span class="sub-note">1m</span></button>
+      <button class="dock-row"><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">git.ts</span> · <span class="ag-tool">read</span></span><span class="sub-note">18s</span></button>
+      <button class="dock-row"><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">provision.ts</span> · <span class="ag-tool">bash</span></span><span class="sub-note">4s</span></button>
+    </div>
+  </div>
+  <div class="fakecomposer">message…</div>
+</div>
+
+<p class="lbl"><b>3 · collapsed</b> — BUILT. ⌥A folds it to one pill, so a long fan-out is never in the way.</p>
+<div class="stage">
+  <div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span>Abrindo 16 lanes, uma por arquivo, na mesma worktree.</div>
+  <div class="grow"></div>
+  <button class="dock-pill"><span class="spin">⠹</span>4 subagents<span class="dock-key">⌥A</span></button>
+  <div class="fakecomposer">message…</div>
+</div>
+
+<p class="lbl"><b>4 · one lane open</b> — BUILT. ⏎ on a dock row opens the lane beside the chat, in the slot a query already uses.</p>
+<div class="two">
+  <div class="stage" style="width:480px">
+    <div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span>Abrindo 16 lanes.</div>
+    <div class="grow"></div>
+    <div class="dock" style="right:14px">
+      <div class="dock-head"><span class="spin">⠹</span><span class="dock-count">4 subagents working</span><button class="dock-key">⌥A</button></div>
+      <div class="dock-list">
+        <button class="dock-row" data-cursor><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">agent.ts</span> · <span class="ag-tool">edit</span></span><span class="sub-note">1m</span></button>
+        <button class="dock-row"><span class="spin">⠹</span><span class="dock-name"><span class="ag-type">git.ts</span> · <span class="ag-tool">read</span></span><span class="sub-note">18s</span></button>
+      </div>
+    </div>
+    <div class="fakecomposer">message…</div>
+  </div>
+  <div class="query-panel lane-panel" style="display:flex;flex-direction:column">
+    <div class="lane-head"><span class="spin">⠹</span><span class="lane-title">crap: agent.ts</span><span class="sub-note">1m 04s</span></div>
+    <div class="lane-body">
+      <div class="irc-body"><div class="md"><p>Movendo o handler de <code class="md-code">stream_event</code> para fora do switch.</p></div></div>
+      <div class="irc-body irc-act lane-act"><span class="irc-star">*</span> read src/main/<span class="tool-base">agent.ts</span></div>
+      <div class="irc-body irc-act lane-act"><span class="irc-star">*</span> grep <span class="tool-base">flushDeltas</span> <span class="sh-num">×3</span></div>
+      <div class="irc-body irc-act lane-act"><span class="irc-star">*</span> edit src/main/<span class="tool-base">agent.ts</span></div>
+      <div class="irc-body"><span class="irc-dim">is typing (1m 04s · ↓ 9.1k tokens)</span></div>
+    </div>
+  </div>
+</div>
+
+</div></body></html>
