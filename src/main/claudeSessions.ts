@@ -688,59 +688,295 @@ function closeAgentRows(
   return mine.length > 0
 }
 
-export function loadClaudeTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
-  const file = join(projectsDir(), encode(worktreePath), `${sessionId}.jsonl`)
-  if (!existsSync(file)) return []
-  const items: TranscriptItem[] = []
+// --- the JSONL walk ---------------------------------------------------------
+// One line of a transcript can produce several transcript items, and the blocks
+// inside it need the same three pieces of state: what has been pushed so far,
+// which AskUserQuestion ids are still open, and which subagent rows are still
+// running. They travel together as a context rather than as four parameters.
+interface TranscriptCtx {
+  items: TranscriptItem[]
   // AskUserQuestion tool_use ids: their tool_result carries the user's answer,
   // which reloads as a user line so the exchange survives — a bare tool chip
   // would strand tomorrow's reader with an answer to an invisible question.
-  const askIds = new Set<string>()
+  askIds: Set<string>
   // Task/Agent tool_use id → the index of the subagent row it opened, so its
   // tool_result (arriving lines later) can close the row it belongs to.
-  const agentRows = new Map<string, number>()
-  // When the turn being read started, so an assistant message can carry how
-  // long it took. Set by a REAL user message only — a tool_result also arrives
-  // as `user` and would restart the clock in the middle of the turn it is part of.
-  let turnStartedAt: number | undefined
+  agentRows: Map<string, number>
+}
+
+// The claude CLI stamps each line with an ISO `timestamp`; carry it onto every
+// item the line produces so the transcript can show a "time ago" per message.
+function lineAt(m: Record<string, unknown>): number | undefined {
+  return typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || undefined : undefined
+}
+
+function parseLine(line: string): Record<string, unknown> | null {
+  const s = line.trim()
+  if (!s) return null
+  try {
+    return JSON.parse(s) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+// What the whole LINE says about the items it produces, as opposed to what the
+// message says: the model that answered, how hard it was told to think (recorded
+// on the line, not inside the message) and how full the window was.
+interface LineMeta {
+  at?: number
+  model?: string
+  effort?: string
+  used: number
+}
+
+function readLineMeta(m: Record<string, unknown>, role: 'user' | 'assistant'): LineMeta {
+  const rawModel = (m.message as { model?: unknown } | null)?.model
+  const rawEffort = (m as { effort?: unknown }).effort
+  return {
+    at: lineAt(m),
+    model: role === 'assistant' && typeof rawModel === 'string' ? rawModel : undefined,
+    effort: role === 'assistant' && typeof rawEffort === 'string' ? rawEffort : undefined,
+    // The same arithmetic the live stream uses, so a reopened chat and a
+    // running one never disagree about how full the window is.
+    used: role === 'assistant' ? contextTokens((m.message as { usage?: unknown } | null)?.usage) : 0
+  }
+}
+
+// A turn is started by a REAL user message only — a tool_result also arrives as
+// `user` and would restart the clock in the middle of the turn it is part of,
+// and so would a resumed turn's notification, which nobody sent.
+function startsTurn(role: 'user' | 'assistant', at: number | undefined, content: unknown): boolean {
+  if (role !== 'user' || !at) return false
+  if (typeof content === 'string') return !isTaskNotification(content)
+  return Array.isArray(content) && (content as Array<Record<string, unknown>>).some((b) => b.type === 'text')
+}
+
+// Stamped on every assistant message of the turn; the LAST one is the one the
+// footer prints, and it is the one that holds the full elapsed.
+function turnMs(
+  role: 'user' | 'assistant',
+  at: number | undefined,
+  turnStartedAt: number | undefined
+): number | undefined {
+  return role === 'assistant' && at && turnStartedAt !== undefined && at >= turnStartedAt
+    ? at - turnStartedAt
+    : undefined
+}
+
+// Carry the line's numbers onto everything it pushed. A subagent row is skipped:
+// it keeps its own clock and its own fill, and the turn's numbers belong to the
+// parent that launched it.
+function stampItems(items: TranscriptItem[], from: number, meta: LineMeta, ms: number | undefined): void {
+  for (let i = from; i < items.length; i++) {
+    if (items[i].role === 'subagent') continue
+    items[i].at = meta.at
+    if (meta.model) items[i].model = meta.model
+    if (meta.effort) items[i].effort = meta.effort
+    if (meta.used > 0) items[i].contextTokens = meta.used
+    if (ms !== undefined) items[i].ms = ms
+  }
+}
+
+// A message typed while the turn was running. The CLI does NOT echo it as a user
+// line — it queues it, folds it into the turn in flight, and records what it
+// absorbed as this one `attachment` line. Skipping it is how a steer vanished
+// from the chat the moment the panel was reopened: the only copy was the one the
+// renderer had pushed locally.
+function handleAttachment(ctx: TranscriptCtx, m: Record<string, unknown>): void {
+  const a = m.attachment as { type?: string; prompt?: string } | undefined
+  if (a?.type !== 'queued_command' || typeof a.prompt !== 'string' || !a.prompt.trim()) return
+  // `at` is the line's own timestamp — when it was TYPED, not when the turn got
+  // round to it. It also must not move `turnStartedAt`: a steer joins the turn
+  // in flight rather than starting one.
+  const at = lineAt(m)
+  const prompt = a.prompt.trim()
+  // A task that finishes while the turn is running is QUEUED, and the queued
+  // copy is the ONLY one the transcript keeps — no `user` line ever follows it.
+  // Reloading it verbatim pasted the notification into the chat under your nick;
+  // it still has to close the row it belongs to.
+  if (isTaskNotification(prompt)) {
+    closeAgentRows(ctx.items, ctx.agentRows, parseTaskNotifications(prompt), at)
+    return
+  }
+  ctx.items.push({ role: 'user', text: prompt, at })
+}
+
+// A whole message written as one string rather than as blocks.
+function pushStringContent(
+  ctx: TranscriptCtx,
+  role: 'user' | 'assistant',
+  content: string,
+  at: number | undefined
+): void {
+  // An async agent finishing: the CLI injects the notification as a user
+  // message, and its <result> is the agent's report — the only copy of it.
+  // Everything else about the notification is plumbing (see expandUserText,
+  // which drops it).
+  const notices = role === 'user' && isTaskNotification(content) ? parseTaskNotifications(content) : []
+  if (closeAgentRows(ctx.items, ctx.agentRows, notices, at)) return // the rows spoke for themselves
+  if (role === 'user') ctx.items.push(...expandUserText(content))
+  else if (content.trim()) ctx.items.push({ role, text: content })
+}
+
+// The base64 payload of an `image` block, in the shape the transcript renders.
+function base64Image(source: unknown): TranscriptItem | undefined {
+  const src = source as { type?: string; media_type?: string; data?: string } | undefined
+  if (src?.type !== 'base64' || typeof src.data !== 'string' || !src.data) return undefined
+  return { role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data }
+}
+
+function pushTextBlock(ctx: TranscriptCtx, block: Record<string, unknown>, role: 'user' | 'assistant'): void {
+  const text = block.text
+  if (typeof text !== 'string' || !text.trim()) return
+  if (role === 'user') ctx.items.push(...expandUserText(text))
+  else ctx.items.push({ role, text })
+}
+
+// A Task/Agent call rebuilds as the subagent's own line in the channel, the same
+// shape the live stream pushes — so a reopened chat still shows who was called
+// and what for. What cannot come back is the live part (tokens, the tool it was
+// on): those existed only while it ran.
+function openAgentRow(ctx: TranscriptCtx, block: Record<string, unknown>, at: number | undefined): void {
+  const id = block.id as string
+  const input = (block.input ?? {}) as Record<string, unknown>
+  ctx.agentRows.set(id, ctx.items.length)
+  ctx.items.push({
+    role: 'subagent',
+    toolUseId: id,
+    agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
+    summary: typeof input.description === 'string' ? input.description : '',
+    harness: 'claude',
+    // Still open until its tool_result shows up below. A session that was killed
+    // mid-Task keeps a running row, which is the truth: it never finished.
+    running: true,
+    at
+  })
+}
+
+function pushToolUse(ctx: TranscriptCtx, block: Record<string, unknown>, at: number | undefined): void {
+  // A present_decision call rebuilds as the inline artifact panel (not a tool
+  // row), mirroring the live stream — so reload round-trips it.
+  if (block.name === 'mcp__floe__present_decision') {
+    // Same injection as the live stream (agent.ts): the tool input has no `type`
+    // field — the tool name is the discriminant.
+    const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
+    if (spec) {
+      ctx.items.push({ role: 'artifact', spec })
+      return
+    }
+  }
+  // A question round-trips as the conversation it was: the questions as the
+  // model's line, the tool_result (the user's answer) as theirs.
+  if (block.name === 'AskUserQuestion') {
+    const text = questionText(block.input)
+    if (text) {
+      if (typeof block.id === 'string') ctx.askIds.add(block.id)
+      ctx.items.push({ role: 'assistant', text })
+      return
+    }
+  }
+  if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string') {
+    openAgentRow(ctx, block, at)
+    return
+  }
+  ctx.items.push({ role: 'tool', name: String(block.name ?? 'tool'), summary: summarizeTool(block.input) })
+}
+
+// The tool_result of a Task/Agent call: it closes the row that call opened.
+function closeAgentRowFromResult(
+  ctx: TranscriptCtx,
+  block: Record<string, unknown>,
+  id: string,
+  at: number | undefined
+): void {
+  const row = ctx.items[ctx.agentRows.get(id) as number]
+  const reply = resultText(block.content)
+  // An async agent answers this call immediately with a launch ack and keeps
+  // working: the row stays open, and its real report arrives later as a
+  // <task-notification> (handled elsewhere, by the same id).
+  if (isAsyncLaunchAck(reply)) return
+  // A result the harness marked as an error is the tool failing, not the agent
+  // talking: the row closes, but nothing is said in its name.
+  const spoke = block.is_error !== true
+  row.running = false
+  if (at && row.at && at >= row.at) row.ms = at - row.at
+  ctx.agentRows.delete(id)
+  // What it came back to say, as its own line in the channel — the same shape
+  // the live stream pushes.
+  if (reply && spoke) ctx.items.push(agentReply(row, reply))
+}
+
+function pushToolResult(ctx: TranscriptCtx, block: Record<string, unknown>, at: number | undefined): void {
+  const id = block.tool_use_id
+  if (typeof id === 'string' && ctx.askIds.has(id)) {
+    const text = resultText(block.content)
+    if (text) ctx.items.push({ role: 'user', text })
+    return
+  }
+  if (typeof id === 'string' && ctx.agentRows.has(id)) {
+    closeAgentRowFromResult(ctx, block, id, at)
+    return
+  }
+  // Images returned by a tool (e.g. Read of a PNG) — show what Claude saw.
+  if (!Array.isArray(block.content)) return
+  for (const part of block.content as Array<Record<string, unknown>>) {
+    if (part.type !== 'image') continue
+    const img = base64Image(part.source)
+    if (img) ctx.items.push(img)
+  }
+}
+
+function pushBlock(
+  ctx: TranscriptCtx,
+  block: Record<string, unknown>,
+  role: 'user' | 'assistant',
+  at: number | undefined,
+  attached: TranscriptItem[]
+): void {
+  if (block.type === 'text') return pushTextBlock(ctx, block, role)
+  if (block.type === 'tool_use') return pushToolUse(ctx, block, at)
+  if (block.type === 'tool_result') return pushToolResult(ctx, block, at)
+  // An image you attached, echoed back into the JSONL by the CLI. Without this
+  // it reloads as a bare "image 01" pointing at nothing.
+  if (block.type !== 'image' || role !== 'user') return
+  const img = base64Image(block.source)
+  if (img) attached.push(img)
+}
+
+function pushBlocks(
+  ctx: TranscriptCtx,
+  content: unknown[],
+  role: 'user' | 'assistant',
+  at: number | undefined
+): void {
+  // Images you attached ride in the same message as the text, but ahead of it
+  // (see buildContent in agent.ts). Held back and appended after the blocks so a
+  // reopened chat shows what the live stream showed: your line, then the
+  // thumbnails under it — instead of the picture floating above the sentence.
+  const attached: TranscriptItem[] = []
+  for (const block of content as Array<Record<string, unknown>>) pushBlock(ctx, block, role, at, attached)
+  ctx.items.push(...attached)
+}
+
+export function loadClaudeTranscript(worktreePath: string, sessionId: string): TranscriptItem[] {
+  const file = join(projectsDir(), encode(worktreePath), `${sessionId}.jsonl`)
+  if (!existsSync(file)) return []
   let raw: string
   try {
     raw = readFileSync(file, 'utf8')
   } catch {
     return []
   }
+  const ctx: TranscriptCtx = { items: [], askIds: new Set<string>(), agentRows: new Map<string, number>() }
+  // When the turn being read started, so an assistant message can carry how long
+  // it took.
+  let turnStartedAt: number | undefined
   for (const line of raw.split('\n')) {
-    const s = line.trim()
-    if (!s) continue
-    let m: Record<string, unknown>
-    try {
-      m = JSON.parse(s)
-    } catch {
-      continue
-    }
-    // A message typed while the turn was running. The CLI does NOT echo it as
-    // a user line — it queues it, folds it into the turn in flight, and records
-    // what it absorbed as this one `attachment` line. Skipping it is how a
-    // steer vanished from the chat the moment the panel was reopened: the only
-    // copy was the one the renderer had pushed locally.
+    const m = parseLine(line)
+    if (!m) continue
     if (m.type === 'attachment') {
-      const a = m.attachment as { type?: string; prompt?: string } | undefined
-      if (a?.type === 'queued_command' && typeof a.prompt === 'string' && a.prompt.trim()) {
-        // `at` is the line's own timestamp — when it was TYPED, not when the
-        // turn got round to it. It also must not move `turnStartedAt`: a steer
-        // joins the turn in flight rather than starting one.
-        const at = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || undefined : undefined
-        const prompt = a.prompt.trim()
-        // A task that finishes while the turn is running is QUEUED, and the
-        // queued copy is the ONLY one the transcript keeps — no `user` line
-        // ever follows it. Reloading it verbatim pasted the notification into
-        // the chat under your nick; it still has to close the row it belongs to.
-        if (isTaskNotification(prompt)) {
-          closeAgentRows(items, agentRows, parseTaskNotifications(prompt), at)
-          continue
-        }
-        items.push({ role: 'user', text: prompt, at })
-      }
+      handleAttachment(ctx, m)
       continue
     }
     if (m.type !== 'user' && m.type !== 'assistant') continue
@@ -749,173 +985,15 @@ export function loadClaudeTranscript(worktreePath: string, sessionId: string): T
     // them here would paste another agent's whole session into this one.
     if (m.isSidechain === true) continue
     const role = m.type as 'user' | 'assistant'
-    // The claude CLI stamps each line with an ISO `timestamp`; carry it onto every
-    // item this line produces so the transcript can show a "time ago" per message.
-    const at = typeof m.timestamp === 'string' ? Date.parse(m.timestamp) || undefined : undefined
-    // The API stamps the answering model on the assistant message itself.
-    const rawModel = (m.message as { model?: unknown } | null)?.model
-    const model = role === 'assistant' && typeof rawModel === 'string' ? rawModel : undefined
-    const effort =
-      role === 'assistant' && typeof (m as { effort?: unknown }).effort === 'string'
-        ? ((m as { effort: string }).effort)
-        : undefined
-    // The same arithmetic the live stream uses, so a reopened chat and a
-    // running one never disagree about how full the window is.
-    const used =
-      role === 'assistant'
-        ? contextTokens((m.message as { usage?: unknown } | null)?.usage)
-        : 0
-    const before = items.length
+    const meta = readLineMeta(m, role)
     const content = (m.message as { content?: unknown } | null)?.content
-    if (
-      role === 'user' &&
-      at &&
-      (typeof content === 'string'
-        ? // …and a resumed turn's notification is not a message you sent, so it
-          // must not restart the clock either.
-          !isTaskNotification(content)
-        : Array.isArray(content) &&
-          (content as Array<Record<string, unknown>>).some((b) => b.type === 'text'))
-    ) {
-      turnStartedAt = at
-    }
-    // Stamped on every assistant message of the turn; the LAST one is the one
-    // the footer prints, and it is the one that holds the full elapsed.
-    const ms =
-      role === 'assistant' && at && turnStartedAt !== undefined && at >= turnStartedAt
-        ? at - turnStartedAt
-        : undefined
-    if (typeof content === 'string') {
-      // An async agent finishing: the CLI injects the notification as a user
-      // message, and its <result> is the agent's report — the only copy of it.
-      // Everything else about the notification is plumbing (see expandUserText,
-      // which drops it).
-      const notices =
-        role === 'user' && isTaskNotification(content) ? parseTaskNotifications(content) : []
-      if (closeAgentRows(items, agentRows, notices, at)) {
-        // Handled: the rows spoke for themselves.
-      } else if (role === 'user') items.push(...expandUserText(content))
-      else if (content.trim()) items.push({ role, text: content })
-      for (let i = before; i < items.length; i++) {
-        items[i].at = at
-        if (model) items[i].model = model
-        if (effort) items[i].effort = effort
-        if (used > 0) items[i].contextTokens = used
-        if (ms !== undefined) items[i].ms = ms
-      }
-      continue
-    }
-    if (!Array.isArray(content)) continue
-    // Images you attached ride in the same message as the text, but ahead of it
-    // (see buildContent in agent.ts). Held back and appended after the blocks so
-    // a reopened chat shows what the live stream showed: your line, then the
-    // thumbnails under it — instead of the picture floating above the sentence.
-    const attached: TranscriptItem[] = []
-    for (const block of content as Array<Record<string, unknown>>) {
-      if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
-        if (role === 'user') items.push(...expandUserText(block.text))
-        else items.push({ role, text: block.text })
-      } else if (block.type === 'tool_use') {
-        // A present_decision call rebuilds as the inline artifact panel (not a
-        // tool row), mirroring the live stream — so reload round-trips it.
-        if (block.name === 'mcp__floe__present_decision') {
-          // Same injection as the live stream (agent.ts): the tool input has no
-          // `type` field — the tool name is the discriminant.
-          const spec = parseArtifactSpec({ type: 'decision', ...(block.input as Record<string, unknown>) })
-          if (spec) {
-            items.push({ role: 'artifact', spec })
-            continue
-          }
-        }
-        // A question round-trips as the conversation it was: the questions as
-        // the model's line, the tool_result (the user's answer) as theirs.
-        if (block.name === 'AskUserQuestion') {
-          const text = questionText(block.input)
-          if (text) {
-            if (typeof block.id === 'string') askIds.add(block.id)
-            items.push({ role: 'assistant', text })
-            continue
-          }
-        }
-        // A Task/Agent call rebuilds as the subagent's own line in the channel,
-        // the same shape the live stream pushes — so a reopened chat still shows
-        // who was called and what for. What cannot come back is the live part
-        // (tokens, the tool it was on): those existed only while it ran.
-        if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string') {
-          const input = (block.input ?? {}) as Record<string, unknown>
-          agentRows.set(block.id, items.length)
-          items.push({
-            role: 'subagent',
-            toolUseId: block.id,
-            agentType: typeof input.subagent_type === 'string' ? input.subagent_type : 'agent',
-            summary: typeof input.description === 'string' ? input.description : '',
-            harness: 'claude',
-            // Still open until its tool_result shows up below. A session that
-            // was killed mid-Task keeps a running row, which is the truth: it
-            // never finished.
-            running: true,
-            at
-          })
-          continue
-        }
-        items.push({ role: 'tool', name: String(block.name ?? 'tool'), summary: summarizeTool(block.input) })
-      } else if (
-        block.type === 'tool_result' &&
-        typeof block.tool_use_id === 'string' &&
-        askIds.has(block.tool_use_id)
-      ) {
-        const text = resultText(block.content)
-        if (text) items.push({ role: 'user', text })
-      } else if (
-        block.type === 'tool_result' &&
-        typeof block.tool_use_id === 'string' &&
-        agentRows.has(block.tool_use_id)
-      ) {
-        const at_ = agentRows.get(block.tool_use_id) as number
-        const row = items[at_]
-        const reply = resultText(block.content)
-        // An async agent answers this call immediately with a launch ack and
-        // keeps working: the row stays open, and its real report arrives later
-        // as a <task-notification> (handled above, by the same id).
-        if (isAsyncLaunchAck(reply)) continue
-        // A result the harness marked as an error is the tool failing, not the
-        // agent talking: the row closes, but nothing is said in its name.
-        const spoke = block.is_error !== true
-        row.running = false
-        if (at && row.at && at >= row.at) row.ms = at - row.at
-        agentRows.delete(block.tool_use_id)
-        // What it came back to say, as its own line in the channel — the same
-        // shape the live stream pushes.
-        if (reply && spoke) items.push(agentReply(row, reply))
-      } else if (block.type === 'image' && role === 'user') {
-        // An image you attached, echoed back into the JSONL by the CLI. Without
-        // this it reloads as a bare "image 01" pointing at nothing.
-        const src = block.source as { type?: string; media_type?: string; data?: string } | undefined
-        if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
-          attached.push({ role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })
-        }
-      } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
-        // Images returned by a tool (e.g. Read of a PNG) — show what Claude saw.
-        for (const part of block.content as Array<Record<string, unknown>>) {
-          if (part.type !== 'image') continue
-          const src = part.source as { type?: string; media_type?: string; data?: string } | undefined
-          if (src?.type === 'base64' && typeof src.data === 'string' && src.data) {
-            items.push({ role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data })
-          }
-        }
-      }
-    }
-    items.push(...attached)
-    for (let i = before; i < items.length; i++) {
-      // A subagent row carries its own clock and its own fill; the turn's
-      // numbers belong to the parent that launched it.
-      if (items[i].role === 'subagent') continue
-      items[i].at = at
-      if (model) items[i].model = model
-      if (effort) items[i].effort = effort
-      if (used > 0) items[i].contextTokens = used
-      if (ms !== undefined) items[i].ms = ms
-    }
+    if (startsTurn(role, meta.at, content)) turnStartedAt = meta.at
+    const ms = turnMs(role, meta.at, turnStartedAt)
+    const before = ctx.items.length
+    if (typeof content === 'string') pushStringContent(ctx, role, content, meta.at)
+    else if (Array.isArray(content)) pushBlocks(ctx, content, role, meta.at)
+    else continue
+    stampItems(ctx.items, before, meta, ms)
   }
-  return items
+  return ctx.items
 }

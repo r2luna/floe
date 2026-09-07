@@ -1,14 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { register } from 'node:module'
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 // claudeSessions.ts uses extensionless relative imports (./plans, ./sessionStore,
 // …) — resolved by electron-vite at build time, not by raw Node ESM. Register the
 // same in-memory hook the other main-process tests use to rewrite `./x` → `./x.ts`
-// before importing the module. (No electron in this graph, so no stub needed.)
+// before importing the module. The `electron` stub reads FLOE_TEST_USERDATA so the
+// session store (via ./dataDir) can be pointed at a tmpdir per test.
 const hookSource = `
 import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -25,7 +26,7 @@ export async function resolve(specifier, context, next) {
 }
 export async function load(url, context, next) {
   if (url === 'stub:electron') {
-    const src = "export const app = { getPath: () => '/tmp' }; export class BrowserWindow {}; export const ipcMain = { handle(){}, on(){} }; export default {};"
+    const src = "export const app = { getPath: () => process.env.FLOE_TEST_USERDATA || '/tmp' }; export class BrowserWindow {}; export const ipcMain = { handle(){}, on(){} }; export default {};"
     return { format: 'module', shortCircuit: true, source: src }
   }
   return next(url, context)
@@ -512,5 +513,424 @@ test('a QUEUED task-notification does not reload as a user message', () => {
   } finally {
     process.env.HOME = home
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// --- questions, asked and answered -----------------------------------------
+
+test('an AskUserQuestion round-trips as the question asked and the answer given', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-ask'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-04T10:00:00.000Z', message: { content: 'escolhe por mim' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-04T10:00:05.000Z',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'q1',
+            name: 'AskUserQuestion',
+            input: {
+              questions: [
+                { header: 'Auth method', question: 'Which auth flow?' },
+                // header === question: printing it twice would just be noise.
+                { header: 'Library', question: 'Library' },
+                { question: 'Ship it?' },
+                { header: '', question: '' }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      type: 'user',
+      timestamp: '2026-09-04T10:01:00.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: [{ type: 'text', text: 'OAuth' }] }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.text]),
+      [
+        ['user', 'escolhe por mim'],
+        ['assistant', 'Auth method — Which auth flow?\nLibrary\nShip it?'],
+        // The answer is the user's line, not a bare tool chip pointing nowhere.
+        ['user', 'OAuth']
+      ]
+    )
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// Nothing readable to ask → it is just a tool call, and reloads as the chip any
+// other tool gets. A blank "assistant said nothing" line would be worse.
+test('an AskUserQuestion with no questions falls back to a tool row', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-ask-empty'
+  const dir = seedSession(worktree, 'sess', [
+    {
+      type: 'assistant',
+      timestamp: '2026-09-04T10:00:05.000Z',
+      message: {
+        content: [
+          { type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: { questions: [] } },
+          { type: 'tool_use', id: 'q2', name: 'AskUserQuestion', input: { description: 'malformed' } }
+        ]
+      }
+    },
+    // Its "answer" has no question to belong to, so it stays out of the chat.
+    {
+      type: 'user',
+      timestamp: '2026-09-04T10:01:00.000Z',
+      message: { content: [{ type: 'tool_result', tool_use_id: 'q1', content: 'whatever' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.name, i.summary]),
+      [
+        ['tool', 'AskUserQuestion', undefined],
+        ['tool', 'AskUserQuestion', 'malformed']
+      ]
+    )
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// --- the store-backed lists -------------------------------------------------
+// listClaudeSessions / listResumableSessions / computeProjectActivity read both
+// `~/.claude/projects` (HOME) and Floe's own sessions.json (the electron stub's
+// userData). A world is one tmpdir for each, torn down after the test.
+
+const { listClaudeSessions, listResumableSessions, computeProjectActivity, sessionHasUnansweredQuestion, readAiTitle, firstUserTitle } =
+  await import('./claudeSessions.ts')
+
+interface World {
+  home: string
+  data: string
+}
+
+function projectDirOf(w: World, worktree: string): string {
+  return join(w.home, '.claude', 'projects', worktree.replace(/[/.]/g, '-'))
+}
+
+function writeTranscript(w: World, worktree: string, id: string, lines: unknown[] | string): string {
+  const dir = projectDirOf(w, worktree)
+  mkdirSync(dir, { recursive: true })
+  const file = join(dir, `${id}.jsonl`)
+  writeFileSync(file, typeof lines === 'string' ? lines : lines.map((l) => JSON.stringify(l)).join('\n'))
+  return file
+}
+
+function writeStore(w: World, store: unknown): void {
+  writeFileSync(join(w.data, 'sessions.json'), JSON.stringify(store))
+}
+
+async function inWorld(body: (w: World) => void | Promise<void>): Promise<void> {
+  const prevHome = process.env.HOME
+  const prevData = process.env.FLOE_TEST_USERDATA
+  const w: World = { home: mkdtempSync(join(tmpdir(), 'floe-home-')), data: mkdtempSync(join(tmpdir(), 'floe-data-')) }
+  process.env.HOME = w.home
+  process.env.FLOE_TEST_USERDATA = w.data
+  try {
+    await body(w)
+  } finally {
+    process.env.HOME = prevHome
+    if (prevData === undefined) delete process.env.FLOE_TEST_USERDATA
+    else process.env.FLOE_TEST_USERDATA = prevData
+    rmSync(w.home, { recursive: true, force: true })
+    rmSync(w.data, { recursive: true, force: true })
+  }
+}
+
+// The sidebar lists only what Floe knows about, in creation order, with each
+// row's recency taken from the best source it has.
+test('listClaudeSessions: creation order, transcript mtime, stored rename', () =>
+  inWorld((w) => {
+    const wt = '/tmp/wt-list'
+    const linked = writeTranscript(w, wt, 'c1', [{ type: 'user', message: { content: 'oi' } }])
+    // Newest transcript on the FIRST-created session: the list must not reorder.
+    utimesSync(linked, Date.now() / 1000, Date.now() / 1000)
+    writeStore(w, {
+      meta: { c1: { title: 'Renamed by hand' } },
+      created: [
+        { id: 's1', worktreePath: wt, title: 'Placeholder', createdAt: 1000, claudeId: 'c1', model: 'opus', effort: 'high' },
+        { id: 's2', worktreePath: wt, title: '', createdAt: 2000 },
+        { id: 's3', worktreePath: wt, title: '', createdAt: 3000, claudeId: 'c3-abcdefgh', usedAt: 4000 },
+        { id: 'other', worktreePath: '/tmp/elsewhere', title: 'Not here', createdAt: 500 }
+      ]
+    })
+
+    const rows = listClaudeSessions(wt)
+    assert.deepEqual(
+      rows.map((r) => [r.id, r.title]),
+      [
+        // The rename wins over the created-session title…
+        ['s1', 'Renamed by hand'],
+        // …an untitled, unlinked session falls back to a constant…
+        ['s2', 'Session'],
+        // …and a linked one to the head of its Claude id.
+        ['s3', 'c3-abcde']
+      ],
+      'creation order, never mtime order — a busy session must not jump'
+    )
+    assert.equal(rows[0].mtime, statSync(linked).mtimeMs)
+    assert.equal(rows[0].active, true)
+    assert.deepEqual([rows[0].model, rows[0].effort], ['opus', 'high'])
+    // No transcript on disk: `usedAt` is the fallback, and nothing that old is active.
+    assert.deepEqual(
+      [rows[1].mtime, rows[1].active, rows[2].mtime, rows[2].active],
+      [2000, false, 4000, false]
+    )
+  }))
+
+// The Resume picker offers every real session on disk except the ones already in
+// the app — and reads each one's title (and TUI-vs-headless) off its head.
+test('listResumableSessions: drops adopted/empty/untitled files, newest first', () =>
+  inWorld((w) => {
+    const wt = '/tmp/wt-resume'
+    const files: Record<string, string> = {
+      // Interactive: opens with a setup entry, and Claude wrote it a title.
+      a: [
+        JSON.stringify({ type: 'mode', mode: 'default' }),
+        JSON.stringify({ type: 'ai-title', title: '# Rewrite the JSONL parser' }),
+        JSON.stringify({ type: 'user', message: { content: 'parser please' } }),
+        '{"type":"user","message":{"cont' // a truncated tail line must not throw
+      ].join('\n'),
+      // Headless/SDK: opens with queue-operation and has no ai-title.
+      b: [
+        JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
+        JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'headless run' }] } })
+      ].join('\n'),
+      // Headless-looking, but bridged — the marker makes it interactive.
+      c: [
+        JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
+        JSON.stringify({ type: 'bridge-session', id: 'x' }),
+        JSON.stringify({ type: 'user', message: { content: 'bridged' } })
+      ].join('\n'),
+      d: JSON.stringify({ type: 'user', message: { content: 'already in the app' } }),
+      // No user message anywhere → subagent/system noise, not a session.
+      e: JSON.stringify({ type: 'summary', summary: 'nope' }),
+      f: '' // never written to
+    }
+    for (const [id, body] of Object.entries(files)) writeTranscript(w, wt, id, body)
+    writeFileSync(join(projectDirOf(w, wt), 'notes.txt'), 'not a transcript')
+    const base = Date.now() / 1000 - 3600
+    utimesSync(join(projectDirOf(w, wt), 'a.jsonl'), base + 1, base + 1)
+    utimesSync(join(projectDirOf(w, wt), 'b.jsonl'), base + 3, base + 3)
+    utimesSync(join(projectDirOf(w, wt), 'c.jsonl'), base + 2, base + 2)
+    writeStore(w, {
+      meta: { c: { title: 'Renamed bridge' } },
+      created: [{ id: 's1', worktreePath: wt, title: 't', createdAt: 1, claudeId: 'd' }]
+    })
+
+    assert.deepEqual(
+      listResumableSessions(wt).map((r) => [r.claudeId, r.title, r.interactive, r.active]),
+      [
+        ['b', 'headless run', false, false],
+        ['c', 'Renamed bridge', true, false],
+        // The ai-title wins over the first message, cleaned of its markdown.
+        ['a', 'Rewrite the JSONL parser', true, false]
+      ],
+      'newest first; d is adopted, e has no title, f is empty, notes.txt is not a session'
+    )
+    // The same head, read through the two title accessors.
+    assert.equal(readAiTitle(wt, 'a'), 'Rewrite the JSONL parser')
+    assert.equal(firstUserTitle(wt, 'a'), 'parser please')
+    assert.equal(readAiTitle(wt, 'b'), '')
+    // A file that isn't there reads as no title rather than throwing.
+    assert.equal(firstUserTitle(wt, 'missing'), '')
+    assert.deepEqual(listResumableSessions('/tmp/never-used'), [])
+  }))
+
+// --- the "needs you" scan ---------------------------------------------------
+
+const askLine = (id: string): unknown => ({
+  type: 'assistant',
+  message: { content: [{ type: 'tool_use', id, name: 'AskUserQuestion', input: { questions: [{ header: 'Go?', question: 'Go?' }] } }] }
+})
+const answerLine = (id: string): unknown => ({
+  type: 'user',
+  message: { content: [{ type: 'tool_result', tool_use_id: id, content: 'yes' }] }
+})
+
+test('sessionHasUnansweredQuestion: only an ask with no matching result counts', () =>
+  inWorld((w) => {
+    const wt = '/tmp/wt-ask-scan'
+    writeTranscript(w, wt, 'open', [{ type: 'user', message: { content: 'vai' } }, askLine('a1')])
+    writeTranscript(w, wt, 'closed', [askLine('a1'), answerLine('a1')])
+    // Answered, then asked again: the last one is still open.
+    writeTranscript(w, wt, 'again', [askLine('a1'), answerLine('a1'), askLine('a2')])
+    writeTranscript(w, wt, 'other-tool', [
+      { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'ls' } }] } }
+    ])
+    // Only the tail is read, so a huge transcript still answers: the padding
+    // pushes the cut into the middle of a line, which must be skipped, not throw.
+    const pad = Array.from({ length: 900 }, (_, i) => JSON.stringify({ type: 'user', message: { content: 'x'.repeat(80) + i } }))
+    writeTranscript(w, wt, 'huge', [...pad, JSON.stringify(askLine('z9'))].join('\n'))
+
+    assert.equal(sessionHasUnansweredQuestion(wt, 'open'), true)
+    assert.equal(sessionHasUnansweredQuestion(wt, 'closed'), false)
+    assert.equal(sessionHasUnansweredQuestion(wt, 'again'), true)
+    assert.equal(sessionHasUnansweredQuestion(wt, 'other-tool'), false)
+    assert.equal(sessionHasUnansweredQuestion(wt, 'huge'), true)
+    assert.equal(sessionHasUnansweredQuestion(wt, 'gone'), false)
+  }))
+
+// --- the projects rail ------------------------------------------------------
+
+test('computeProjectActivity: nothing worked today drops the project', () =>
+  inWorld((w) => {
+    const wt = '/tmp/wt-rail-old'
+    const yesterday = new Date()
+    yesterday.setHours(0, 0, 0, 0)
+    const stamp = (yesterday.getTime() - 3_600_000) / 1000
+    const file = writeTranscript(w, wt, 'c1', [askLine('a1')])
+    utimesSync(file, stamp, stamp)
+    writeStore(w, { meta: {}, created: [{ id: 's1', worktreePath: wt, title: 't', createdAt: 1000, claudeId: 'c1' }] })
+
+    assert.equal(computeProjectActivity([wt]), null)
+  }))
+
+test('computeProjectActivity: the worst status across the worktrees wins', () =>
+  inWorld((w) => {
+    const busy = '/tmp/wt-rail-a'
+    const quiet = '/tmp/wt-rail-b'
+    const asking = writeTranscript(w, busy, 'c1', [{ type: 'user', message: { content: 'vai' } }, askLine('a1')])
+    const working = writeTranscript(w, quiet, 'c2', [askLine('a1'), answerLine('a1')])
+    const now = Date.now()
+    writeStore(w, {
+      meta: {},
+      created: [
+        { id: 's1', worktreePath: busy, title: 't', createdAt: 1000, claudeId: 'c1' },
+        { id: 's2', worktreePath: quiet, title: 't', createdAt: 1000, claudeId: 'c2' },
+        // No claudeId → nothing on disk to scan, and it is not today's work.
+        { id: 's3', worktreePath: quiet, title: 't', createdAt: 1000 }
+      ]
+    })
+
+    // Both touched right now, so both are inside the 2-minute active window.
+    const a = computeProjectActivity([busy, quiet], () => false)
+    assert.deepEqual(a, {
+      status: 'ask',
+      sessionsToday: 2,
+      activeCount: 2,
+      askCount: 1,
+      lastActivityAt: Math.max(statSync(asking).mtimeMs, statSync(working).mtimeMs)
+    })
+    // `isConnected` false did not clear it: a session touched seconds ago is
+    // trusted even when its conn already dropped — the kill races the poll.
+    assert.ok(a && a.lastActivityAt >= now - 60_000)
+
+    // With no open question anywhere, an active project is merely 'pending'.
+    writeTranscript(w, busy, 'c1', [askLine('a1'), answerLine('a1')])
+    assert.equal(computeProjectActivity([busy, quiet])?.status, 'pending')
+  }))
+
+// --- the worktree description, with a stand-in for the CLI -------------------
+// `claude` is resolved off PATH, so a two-line shell script in a tmpdir is a
+// complete stand-in: it exercises the real execFile path without a real model.
+
+function fakeClaude(body: string): string {
+  const bin = mkdtempSync(join(tmpdir(), 'floe-bin-'))
+  const file = join(bin, 'claude')
+  writeFileSync(file, `#!/bin/sh\n${body}\n`)
+  chmodSync(file, 0o755)
+  process.env.PATH = `${bin}:${process.env.PATH}`
+  return bin
+}
+
+async function withFakeClaude(body: string, run: () => Promise<void>): Promise<void> {
+  const prevPath = process.env.PATH
+  const bin = fakeClaude(body)
+  try {
+    await run()
+  } finally {
+    process.env.PATH = prevPath
+    rmSync(bin, { recursive: true, force: true })
+  }
+}
+
+/** A worktree whose spec.md is older than any marker written from now on. */
+function seedSpec(root: string, branch: string, text: string): void {
+  const dir = join(root, 'specs', branch)
+  mkdirSync(dir, { recursive: true })
+  const spec = join(dir, 'spec.md')
+  writeFileSync(spec, text)
+  const old = Date.now() / 1000 - 600
+  utimesSync(spec, old, old)
+}
+
+test('generateWorktreeDesc: writes the marker, collapses the CLI output, then goes quiet', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-desc-'))
+  try {
+    seedSpec(root, 'feat-y', '# Draw\nAn Excalidraw panel.\n')
+    await withFakeClaude("printf 'Adds a  draw\\n  panel to the sidebar.\\n'", async () => {
+      const desc = await generateWorktreeDesc(root, 'feat-y')
+      assert.equal(desc, 'Adds a draw panel to the sidebar.')
+      assert.equal(readFileSync(join(root, '.gw-desc'), 'utf8'), 'Adds a draw panel to the sidebar.\n')
+      // The marker it just wrote is now newer than the spec, so the next sidebar
+      // refresh must not spawn the CLI again.
+      assert.equal(await generateWorktreeDesc(root, 'feat-y'), null)
+    })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('generateWorktreeDesc: a failed or silent CLI leaves no marker', async () => {
+  const failed = mkdtempSync(join(tmpdir(), 'floe-desc-'))
+  const silent = mkdtempSync(join(tmpdir(), 'floe-desc-'))
+  try {
+    seedSpec(failed, 'feat-z', '# Z\nSomething.\n')
+    seedSpec(silent, 'feat-z', '# Z\nSomething.\n')
+    await withFakeClaude('exit 1', async () => {
+      assert.equal(await generateWorktreeDesc(failed, 'feat-z'), null)
+    })
+    await withFakeClaude('exit 0', async () => {
+      assert.equal(await generateWorktreeDesc(silent, 'feat-z'), null)
+    })
+    // Nothing was cached, so the next call still gets a chance to generate.
+    assert.equal(existsSync(join(failed, '.gw-desc')), false)
+    assert.equal(existsSync(join(silent, '.gw-desc')), false)
+  } finally {
+    rmSync(failed, { recursive: true, force: true })
+    rmSync(silent, { recursive: true, force: true })
+  }
+})
+
+// A `.gw-desc` with no spec behind it was borrowed from another worktree by the
+// old fallback: it describes somebody else's feature, so it has to go.
+test('generateWorktreeDesc: a marker with no matching spec is deleted', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-desc-'))
+  try {
+    const marker = join(root, '.gw-desc')
+    writeFileSync(marker, 'Borrowed from another branch.\n')
+    assert.equal(await generateWorktreeDesc(root, 'feat-none'), null)
+    assert.equal(existsSync(marker), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// An empty spec says nothing worth summarising — and must not burn a CLI call.
+test('generateWorktreeDesc: an empty spec returns null', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-desc-'))
+  try {
+    seedSpec(root, 'feat-blank', '   \n\n')
+    const started = Date.now()
+    assert.equal(await generateWorktreeDesc(root, 'feat-blank'), null)
+    assert.ok(Date.now() - started < 2000)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
   }
 })
