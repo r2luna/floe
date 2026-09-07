@@ -1,8 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
 import { readZip } from './zip.ts'
-import { decodeXml, findSoffice, pptxSlides } from './office.ts'
+import { convertToPdf, decodeXml, findSoffice, pptxSlides } from './office.ts'
 
 // A zip, built here rather than checked in as a binary fixture: the point of
 // zip.ts is that the format is a fixed-width record, and a test that writes one
@@ -167,4 +171,43 @@ test('soffice: the env override wins, and a path that is not there is ignored', 
   // whether the search finds LibreOffice depends on the machine, so only the
   // "did not return the bad path" half is asserted.
   assert.notEqual(findSoffice({ PATH: '', FLOE_SOFFICE: '/nope/soffice' }), '/nope/soffice')
+})
+
+// --- convertToPdf ----------------------------------------------------------
+//
+// LibreOffice is never run here: a conversion takes seconds, needs the app
+// installed, and the point of these two cases is the half of convertToPdf that
+// decides whether to run it at all. FLOE_SOFFICE points at a binary that
+// exists (this node) so "is LibreOffice installed?" stops being a property of
+// the machine running the test.
+
+// The same key convertToPdf derives — path, size and mtime, so an edited deck
+// misses the cache instead of showing yesterday's slides.
+function cachedPdf(abs: string): string {
+  const stat = statSync(abs)
+  const key = createHash('sha256').update(`${abs}:${stat.size}:${stat.mtimeMs}`).digest('hex').slice(0, 16)
+  return join(tmpdir(), 'floe-preview', key, basename(abs).replace(/\.[^.]*$/, '') + '.pdf')
+}
+
+test('a file that is gone is null, not a throw', async () => {
+  process.env.FLOE_SOFFICE = process.execPath
+
+  // The text preview is already on screen when this runs, so nothing here is
+  // allowed to reject.
+  assert.equal(await convertToPdf(join(tmpdir(), 'floe-no-such-deck.pptx')), null)
+})
+
+test('an already converted deck comes back from the cache, unconverted', async () => {
+  process.env.FLOE_SOFFICE = process.execPath
+  const dir = mkdtempSync(join(tmpdir(), 'floe-office-'))
+  const deck = join(dir, 'quarterly.pptx')
+  writeFileSync(deck, 'not really a deck')
+
+  const pdf = cachedPdf(deck)
+  mkdirSync(dirname(pdf), { recursive: true })
+  writeFileSync(pdf, '%PDF-1.4 fake')
+
+  // A conversion would have taken seconds and overwritten this content.
+  assert.equal(await convertToPdf(deck), pdf)
+  assert.equal(readFileSync(pdf, 'utf8'), '%PDF-1.4 fake')
 })
