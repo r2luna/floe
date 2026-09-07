@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { unlink } from 'node:fs'
@@ -17,41 +18,157 @@ import type { ClaudeInfo, ClaudeMcpServer, ClaudePlugin, ContextUsage } from '..
 
 const PROBE_TIMEOUT_MS = 20_000
 
+// What every probe runs with. /usage and /context are synthetic and use no
+// tools, so default mode never prompts.
+const PROBE_ARGS = [
+  '-p',
+  '--input-format',
+  'stream-json',
+  '--output-format',
+  'stream-json',
+  '--verbose',
+  '--permission-mode',
+  'default'
+]
+
 // Mirror claudeSessions.ts: sessions live at ~/.claude/projects/<encoded-cwd>/.
 const projectsDir = (): string => join(homedir(), '.claude', 'projects')
 const encode = (p: string): string => p.replace(/[/.]/g, '-')
 
+// Best-effort: drop a probe's throwaway session file so it never shows up in the
+// Resume picker. Called after the process exits, so the file is fully flushed.
+const removeSessionFile = (worktreePath: string, id: string): void => {
+  unlink(join(projectsDir(), encode(worktreePath), `${id}.jsonl`), () => {})
+}
+
+type Spawned = { child: ChildProcess; error?: never } | { child?: never; error: string }
+
+// spawn throws synchronously on a bad cwd, so both failure modes (throw here,
+// 'error' event later) have to be handled; this is the first one.
+function spawnProbe(args: string[], cwd: string): Spawned {
+  try {
+    return { child: spawn('claude', args, { cwd, env: process.env }) }
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+const spawnError = (e: Error): string => (e.message.includes('ENOENT') ? 'claude CLI not found' : e.message)
+
+const killQuiet = (child: ChildProcess): void => {
+  try {
+    child.kill('SIGTERM')
+  } catch {
+    /* already gone */
+  }
+}
+
+/** stream-json is newline-delimited, and a chunk can split a line in half. */
+function pipeLines(child: ChildProcess, onLine: (line: string) => void): void {
+  let buffer = ''
+  child.stdout?.setEncoding('utf8')
+  child.stdout?.on('data', (chunk: string) => {
+    buffer += chunk
+    let nl: number
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).trim()
+      buffer = buffer.slice(nl + 1)
+      if (line) onLine(line)
+    }
+  })
+}
+
+/** The CLI's own failure text, read only when nothing better came back. */
+function collectStderr(child: ChildProcess): () => string {
+  let stderr = ''
+  child.stderr?.setEncoding('utf8')
+  child.stderr?.on('data', (c: string) => {
+    stderr += c
+  })
+  return () => stderr
+}
+
+function parseJson(line: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(line) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+const ask = (child: ChildProcess, command: string): void => {
+  child.stdin?.write(JSON.stringify({ type: 'user', message: { role: 'user', content: command } }) + '\n')
+}
+
+/** The init event carries everything the four panels show. */
+function applyInit(info: ClaudeInfo, msg: Record<string, unknown>, sessionId?: string): void {
+  if (typeof msg.model === 'string') info.model = msg.model
+  if (typeof msg.claude_code_version === 'string') info.version = msg.claude_code_version
+  if (typeof msg.cwd === 'string') info.cwd = msg.cwd
+  if (typeof msg.permissionMode === 'string') info.permissionMode = msg.permissionMode
+  if (typeof msg.apiKeySource === 'string') info.apiKeySource = msg.apiKeySource
+  info.sessionId = sessionId
+  info.mcpServers = parseMcp(msg.mcp_servers)
+  info.skills = parseStrings(msg.skills)
+  info.plugins = parsePlugins(msg.plugins)
+}
+
+/** The first text block of an assistant message — the /usage reply. */
+function firstText(msg: Record<string, unknown>): string | undefined {
+  const content = (msg.message as { content?: unknown } | undefined)?.content
+  if (!Array.isArray(content)) return undefined
+  for (const block of content as Array<Record<string, unknown>>) {
+    if (block.type === 'text' && typeof block.text === 'string') return block.text
+  }
+  return undefined
+}
+
+interface Probe {
+  info: ClaudeInfo
+  sessionId?: string
+}
+
+/** Fold one stream-json line into the probe. True means the run is over. */
+function foldLine(probe: Probe, line: string): boolean {
+  const msg = parseJson(line)
+  if (!msg) return false
+  if (typeof msg.session_id === 'string') probe.sessionId = msg.session_id
+
+  if (msg.type === 'system' && msg.subtype === 'init') {
+    applyInit(probe.info, msg, probe.sessionId)
+    return false
+  }
+  if (msg.type === 'assistant') {
+    const text = firstText(msg)
+    if (text !== undefined && !probe.info.usageText) probe.info.usageText = text
+    return false
+  }
+  if (msg.type === 'result') {
+    if (!probe.info.usageText && typeof msg.result === 'string') probe.info.usageText = msg.result
+    return true
+  }
+  return false
+}
+
 export function getClaudeInfo(worktreePath: string, mcpConfig?: string): Promise<ClaudeInfo> {
   return new Promise((resolve) => {
-    const info: ClaudeInfo = { mcpServers: [], skills: [], plugins: [] }
-    let sessionId: string | undefined
+    const probe: Probe = { info: { mcpServers: [], skills: [], plugins: [] } }
+    const info = probe.info
     let settled = false
 
-    const args = [
-      '-p',
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      // /usage is synthetic and uses no tools, so default mode never prompts.
-      '--permission-mode',
-      'default'
-    ]
     // The same merged config a real session gets (Floe's server + the registry,
     // mcpServer.ts mcpConfigFor) — passed in by the caller so this module stays
     // free of the mcpServer graph. Without it /mcp only reports the servers in
     // Claude's own config, and the MCP panel could not show the connection
     // state of anything registered in Floe.
-    if (mcpConfig) args.push('--mcp-config', mcpConfig)
+    const args = mcpConfig ? [...PROBE_ARGS, '--mcp-config', mcpConfig] : [...PROBE_ARGS]
 
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn('claude', args, { cwd: worktreePath, env: process.env })
-    } catch (e) {
-      resolve({ ...info, error: e instanceof Error ? e.message : String(e) })
+    const spawned = spawnProbe(args, worktreePath)
+    if (!spawned.child) {
+      resolve({ ...info, error: spawned.error })
       return
     }
+    const child = spawned.child
 
     const timer = setTimeout(() => finish(), PROBE_TIMEOUT_MS)
 
@@ -59,90 +176,30 @@ export function getClaudeInfo(worktreePath: string, mcpConfig?: string): Promise
       if (settled) return
       settled = true
       clearTimeout(timer)
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        /* already gone */
-      }
+      killQuiet(child)
       resolve(info)
     }
 
-    // Best-effort: remove the probe's throwaway session file so it doesn't show
-    // up in the Resume picker. Runs after the process exits (file fully flushed).
-    function cleanup(): void {
-      if (!sessionId) return
-      unlink(join(projectsDir(), encode(worktreePath), `${sessionId}.jsonl`), () => {})
-    }
-
-    let buffer = ''
-    child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => {
-      buffer += chunk
-      let nl: number
-      while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).trim()
-        buffer = buffer.slice(nl + 1)
-        if (line) handleLine(line)
-      }
-    })
-
-    let stderr = ''
-    child.stderr?.setEncoding('utf8')
-    child.stderr?.on('data', (c: string) => {
-      stderr += c
+    const stderr = collectStderr(child)
+    pipeLines(child, (line) => {
+      if (foldLine(probe, line)) finish()
     })
 
     child.on('error', (e) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      resolve({ ...info, error: e.message.includes('ENOENT') ? 'claude CLI not found' : e.message })
+      resolve({ ...info, error: spawnError(e) })
     })
     child.on('close', () => {
-      if (!settled && !info.error && stderr.trim()) info.error = stderr.trim()
+      if (!settled && !info.error && stderr().trim()) info.error = stderr().trim()
       finish()
-      cleanup()
+      if (probe.sessionId) removeSessionFile(worktreePath, probe.sessionId)
     })
-
-    function handleLine(line: string): void {
-      let msg: Record<string, unknown>
-      try {
-        msg = JSON.parse(line)
-      } catch {
-        return
-      }
-      if (typeof msg.session_id === 'string') sessionId = msg.session_id
-
-      if (msg.type === 'system' && msg.subtype === 'init') {
-        if (typeof msg.model === 'string') info.model = msg.model
-        if (typeof msg.claude_code_version === 'string') info.version = msg.claude_code_version
-        if (typeof msg.cwd === 'string') info.cwd = msg.cwd
-        if (typeof msg.permissionMode === 'string') info.permissionMode = msg.permissionMode
-        if (typeof msg.apiKeySource === 'string') info.apiKeySource = msg.apiKeySource
-        info.sessionId = sessionId
-        info.mcpServers = parseMcp(msg.mcp_servers)
-        info.skills = parseStrings(msg.skills)
-        info.plugins = parsePlugins(msg.plugins)
-        return
-      }
-      if (msg.type === 'assistant' && msg.message && typeof msg.message === 'object') {
-        const content = (msg.message as { content?: unknown }).content
-        if (Array.isArray(content)) {
-          for (const block of content as Array<Record<string, unknown>>) {
-            if (block.type === 'text' && typeof block.text === 'string' && !info.usageText) info.usageText = block.text
-          }
-        }
-        return
-      }
-      if (msg.type === 'result') {
-        if (!info.usageText && typeof msg.result === 'string') info.usageText = msg.result
-        finish()
-      }
-    }
 
     // Trigger a turn: /usage returns text, and the init event (which carries the
     // mcp/skills/plugins data) is emitted regardless.
-    child.stdin?.write(JSON.stringify({ type: 'user', message: { role: 'user', content: '/usage' } }) + '\n')
+    ask(child, '/usage')
   })
 }
 
@@ -213,23 +270,11 @@ export function parseContextUsage(text: string): ContextUsage {
 
 export function getContextUsage(worktreePath: string, claudeId?: string): Promise<ContextUsage> {
   return new Promise((resolve) => {
-    const args = [
-      '-p',
-      '--input-format',
-      'stream-json',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--permission-mode',
-      'default'
-    ]
-    if (claudeId) args.push('--resume', claudeId, '--fork-session')
+    const args = claudeId ? [...PROBE_ARGS, '--resume', claudeId, '--fork-session'] : [...PROBE_ARGS]
 
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn('claude', args, { cwd: worktreePath, env: process.env })
-    } catch (e) {
-      resolve({ categories: [], error: e instanceof Error ? e.message : String(e) })
+    const { child, error } = spawnProbe(args, worktreePath)
+    if (!child) {
+      resolve({ categories: [], error })
       return
     }
 
@@ -239,48 +284,25 @@ export function getContextUsage(worktreePath: string, claudeId?: string): Promis
       if (settled) return
       settled = true
       clearTimeout(timer)
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        /* already gone */
-      }
+      killQuiet(child)
       resolve(result)
     }
     const timer = setTimeout(() => finish({ categories: [], error: 'timed out' }), PROBE_TIMEOUT_MS)
 
-    let buffer = ''
-    let stderr = ''
-    child.stdout?.setEncoding('utf8')
-    child.stdout?.on('data', (chunk: string) => {
-      buffer += chunk
-      let nl: number
-      while ((nl = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, nl).trim()
-        buffer = buffer.slice(nl + 1)
-        if (!line) continue
-        let msg: Record<string, unknown>
-        try {
-          msg = JSON.parse(line)
-        } catch {
-          continue
-        }
-        // The fork's own id — its session file is ours to clean up.
-        if (claudeId && typeof msg.session_id === 'string') forkId = msg.session_id
-        if (msg.type === 'result' && typeof msg.result === 'string') finish(parseContextUsage(msg.result))
-      }
+    const stderr = collectStderr(child)
+    pipeLines(child, (line) => {
+      const msg = parseJson(line)
+      if (!msg) return
+      // The fork's own id — its session file is ours to clean up.
+      if (claudeId && typeof msg.session_id === 'string') forkId = msg.session_id
+      if (msg.type === 'result' && typeof msg.result === 'string') finish(parseContextUsage(msg.result))
     })
-    child.stderr?.setEncoding('utf8')
-    child.stderr?.on('data', (c: string) => {
-      stderr += c
-    })
-    child.on('error', (e) =>
-      finish({ categories: [], error: e.message.includes('ENOENT') ? 'claude CLI not found' : e.message })
-    )
+    child.on('error', (e) => finish({ categories: [], error: spawnError(e) }))
     child.on('close', () => {
-      finish({ categories: [], error: stderr.trim() || 'no context report' })
-      if (forkId) unlink(join(projectsDir(), encode(worktreePath), `${forkId}.jsonl`), () => {})
+      finish({ categories: [], error: stderr().trim() || 'no context report' })
+      if (forkId) removeSessionFile(worktreePath, forkId)
     })
 
-    child.stdin?.write(JSON.stringify({ type: 'user', message: { role: 'user', content: '/context' } }) + '\n')
+    ask(child, '/context')
   })
 }

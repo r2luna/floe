@@ -1,7 +1,15 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { streaks, summarize, summarizeTranscripts } from './claudeStats.ts'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { TranscriptLine } from './claudeStats.ts'
+
+// The module resolves ~/.claude at import time, so HOME has to point at a
+// tmpdir before the import runs — hence the dynamic import.
+const HOME = mkdtempSync(join(tmpdir(), 'floe-claudestats-'))
+process.env.HOME = HOME
+const { claudeStats, streaks, summarize, summarizeTranscripts } = await import('./claudeStats.ts')
 
 test('a streak that runs up to today is the current one', () => {
   const r = streaks(['2026-08-23', '2026-08-24', '2026-08-25'], '2026-08-25')
@@ -148,4 +156,88 @@ test('nothing at all rolls up to zeros, not a crash', () => {
   assert.equal(stats.spanDays, 0)
   assert.equal(stats.tokens.total, 0)
   assert.equal(stats.favoriteModel, undefined)
+})
+
+/* --- reading ~/.claude ----------------------------------------------------- */
+
+const write = (rel: string, body: string): void => {
+  const path = join(HOME, '.claude', rel)
+  mkdirSync(join(path, '..'), { recursive: true })
+  writeFileSync(path, body)
+}
+
+const jsonl = (...lines: object[]): string => lines.map((l) => JSON.stringify(l)).join('\n') + '\n'
+
+test('a fresh install says so instead of drawing a heatmap of zeros', async () => {
+  const stats = await claudeStats()
+  assert.equal(stats.error, 'No stats yet')
+  assert.deepEqual(stats.days, [])
+  assert.equal(stats.sessions, 0)
+})
+
+test('with no cache the transcripts are counted, across projects and files', async () => {
+  write(
+    'projects/-Users-r-floe/a.jsonl',
+    jsonl(
+      { type: 'user', timestamp: '2026-08-24T12:00:00.000Z', sessionId: 's1', uuid: 'u1' },
+      {
+        type: 'assistant',
+        timestamp: '2026-08-24T12:00:01.000Z',
+        sessionId: 's1',
+        requestId: 'req_1',
+        message: { model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 7 } }
+      },
+      // The same request written again as it streamed — must not double count.
+      {
+        type: 'assistant',
+        timestamp: '2026-08-24T12:00:02.000Z',
+        sessionId: 's1',
+        requestId: 'req_1',
+        message: { model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 7 } }
+      }
+    ) + '{"type":"assistant","timestamp":' // a live session's half-written tail
+  )
+  write(
+    'projects/-Users-r-other/b.jsonl',
+    jsonl({
+      type: 'assistant',
+      timestamp: '2026-08-25T12:00:00.000Z',
+      sessionId: 's2',
+      uuid: 'u9',
+      message: { model: 'claude-fable-5', usage: { input_tokens: 1, output_tokens: 1 } }
+    })
+  )
+  // Not a transcript, and not a project directory: both are skipped.
+  write('projects/-Users-r-other/notes.md', 'hello')
+  write('projects/stray.txt', 'hello')
+
+  const stats = await claudeStats()
+  assert.equal(stats.error, undefined)
+  assert.equal(stats.messages, 4)
+  assert.equal(stats.sessions, 2)
+  assert.equal(stats.activeDays, 2)
+  assert.equal(stats.tokens.total, 14) // 5 + 7 once, plus 1 + 1
+  assert.equal(stats.favoriteModel, 'claude-opus-5')
+  assert.equal(stats.busiestDay?.messages, 3)
+})
+
+test('the cache the CLI writes wins over the transcripts', async () => {
+  write(
+    'stats-cache.json',
+    JSON.stringify({
+      dailyActivity: [{ date: '2026-08-24', messageCount: 999, sessionCount: 1 }],
+      totalSessions: 42,
+      totalMessages: 999
+    })
+  )
+  const stats = await claudeStats()
+  assert.equal(stats.sessions, 42)
+  assert.equal(stats.messages, 999)
+})
+
+test('an unreadable cache falls through to the transcripts', async () => {
+  write('stats-cache.json', 'not json')
+  const stats = await claudeStats()
+  assert.equal(stats.sessions, 2)
+  assert.equal(stats.messages, 4)
 })
