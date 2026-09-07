@@ -1,0 +1,11 @@
+#!/bin/sh
+# Installed by `pnpm hooks:install` (git config core.hooksPath .githooks).
+# Bypass a single commit with `git commit --no-verify`.
+#
+# git exports GIT_DIR, GIT_INDEX_FILE and friends to hooks. Left in place they
+# leak into the tests, so any `git` a test runs inside a temp fixture answers
+# for this repository instead. Scrub them: the gate must see what `pnpm gate`
+# sees from a plain shell.
+exec env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_PREFIX \
+  -u GIT_COMMON_DIR -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  node "$(git rev-parse --show-toplevel)/scripts/gate.mjs"
