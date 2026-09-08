@@ -46,20 +46,29 @@ function refs(text: string, out: Token[], isRef: (token: string) => boolean): vo
 }
 
 /** The token an attached image writes into the message — see attachments.ts. */
-const ATTACH = /\[[Ii]mage #?\d+\]|\bimage \d\d+\b/g
+const ATTACH = /\[[Ii]mage #?(\d+)\]|\bimage (\d\d+)\b/g
 
-function inline(text: string, out: Token[], isRef?: (token: string) => boolean): void {
+function inline(
+  text: string,
+  out: Token[],
+  isRef?: (token: string) => boolean,
+  attached?: number
+): void {
   const rest = (slice: string): void => {
     if (!slice) return
     if (isRef) refs(slice, out, isRef)
     else out.push({ text: slice, cls: '' })
   }
   // An image reference is a chip wherever it appears — in the composer while it
-  // is being written, and in the message once it is sent.
+  // is being written, and in the message once it is sent. Only when it names an
+  // image that is actually there: with `attached` given, `image 02` typed next
+  // to a single attachment is prose, and reads like prose.
   const plain = (slice: string): void => {
     if (!slice) return
     let last = 0
     for (const m of slice.matchAll(ATTACH)) {
+      const n = Number(m[1] ?? m[2])
+      if (attached !== undefined && (n < 1 || n > attached)) continue
       rest(slice.slice(last, m.index))
       // One token, brackets and all. The mirror unpaints them inside a single
       // chip — three spans would each cast their own shadow into the next and
@@ -89,8 +98,16 @@ function inline(text: string, out: Token[], isRef?: (token: string) => boolean):
  * composer. It is passed in rather than decided here: the file panel highlights
  * the same markdown and has no references to draw, and the composer's answer
  * depends on the sessions this project has and the files in its worktree.
+ *
+ * `attached` is how many images are on the message, and it is what keeps
+ * `image 02` from colouring itself when there is no second image to point at.
+ * Left out, every well-formed token is taken at its word.
  */
-export function tokenizeMarkdown(text: string, isRef?: (token: string) => boolean): Token[] {
+export function tokenizeMarkdown(
+  text: string,
+  isRef?: (token: string) => boolean,
+  attached?: number
+): Token[] {
   const out: Token[] = []
   const lines = text.split('\n')
   let fence: string | null = null
@@ -134,11 +151,11 @@ export function tokenizeMarkdown(text: string, isRef?: (token: string) => boolea
     if (list) {
       if (list[1]) out.push({ text: list[1], cls: '' })
       out.push({ text: list[2] + list[3], cls: 'md-marker' })
-      inline(list[4], out, isRef)
+      inline(list[4], out, isRef, attached)
       return
     }
 
-    inline(line, out, isRef)
+    inline(line, out, isRef, attached)
   })
 
   return out
