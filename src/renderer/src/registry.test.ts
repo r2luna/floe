@@ -2,10 +2,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { COMMAND_IDS } from '../../shared/commandIds.ts'
 import { listCommands, runCommand, type CommandContext } from './commands.ts'
-import { laneOf, type Lane, type Panel } from './lane.ts'
+import { laneOf, slotOf, type Lane, type Panel } from './lane.ts'
 import { REGISTRY } from './registry.ts'
 
-const panel = (kind: string, sub?: string): Panel => ({ id: `${kind}:${sub ?? ''}`, kind, title: kind, sub })
+// The same shape App's `panelOf` builds, slot rule included — which is why that
+// rule lives in lane.ts and not in a .tsx no plain test can import.
+const panel = (kind: string, sub?: string): Panel => ({
+  id: `${kind}:${sub ?? ''}`,
+  kind,
+  title: kind,
+  sub,
+  slot: slotOf(kind, sub)
+})
 
 function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lane: Lane } {
   const ctx = {
@@ -173,4 +181,70 @@ test('panel.goto is judged per argument, not per command', () => {
   const ctx = { ...context(), canOpen: (kind: string) => kind !== 'files' }
   assert.equal(runCommand(REGISTRY, ctx, 'panel.goto', 'worktrees').ok, true)
   assert.equal(runCommand(REGISTRY, ctx, 'panel.goto', 'files').ok, false)
+})
+
+/* --- queries side by side -------------------------------------------------- */
+
+const query = (harness: string): Panel => ({
+  ...panel('query', harness),
+  title: harness,
+  session: { id: `s1~${harness}`, worktreePath: '/w' }
+})
+
+const twoQueries = (): Lane => ({
+  panels: [{ ...panel('chat'), session: { id: 's1', worktreePath: '/w' } }, query('codex'), query('claude')],
+  focus: 0
+})
+
+test('go to the query walks the queries when several are open', () => {
+  const ctx = context(twoQueries())
+  runCommand(REGISTRY, ctx, 'query.focus')
+  assert.equal(ctx.lane.focus, 1, 'from the chat, the leftmost')
+  runCommand(REGISTRY, ctx, 'query.focus')
+  assert.equal(ctx.lane.focus, 2, 'again, the next one')
+  runCommand(REGISTRY, ctx, 'query.focus')
+  assert.equal(ctx.lane.focus, 1, 'and it wraps')
+})
+
+test('merging from the chat with two queries open asks which, instead of guessing', () => {
+  // Two panels on screen and no reason to prefer either: merging the one the
+  // lane happens to list first would end a conversation on a coin toss.
+  const said: string[] = []
+  const ctx = { ...context(twoQueries()), say: (t: string) => said.push(t) }
+  const res = runCommand(REGISTRY, ctx, 'query.merge')
+  assert.equal(res.ok, true, 'the command is available — a query IS open')
+  assert.match(said[0] ?? '', /Several queries open/)
+})
+
+test('“show every open query” puts a panel back for each one', async () => {
+  // ⌘W closes a panel, not the query. Without this (and the dock row that does
+  // the same for one), a query left running had no way back on screen.
+  const listed = [
+    { id: 's1~codex', harness: 'codex' },
+    { id: 's1~claude', harness: 'claude' },
+    { id: 's1~opencode', harness: 'opencode', outcome: 'merged' }
+  ]
+  const said: string[] = []
+  const ctx = context({
+    panels: [{ ...panel('chat'), session: { id: 's1', worktreePath: '/w' } }],
+    focus: 0
+  })
+  ctx.say = (t: string) => said.push(t)
+  const before = globalThis.window
+  // @ts-expect-error — the registry reaches for the preload bridge; a plain
+  // node run has none, and this command is exactly the seam that needs one.
+  globalThis.window = { floe: { query: { list: async () => listed } } }
+  try {
+    assert.equal(runCommand(REGISTRY, ctx, 'query.showAll').ok, true)
+    await new Promise((r) => setTimeout(r, 0))
+  } finally {
+    globalThis.window = before
+  }
+  assert.deepEqual(ctx.lane.panels.map((p) => p.kind), ['chat', 'query', 'query'])
+  assert.deepEqual(
+    ctx.lane.panels.slice(1).map((p) => p.session?.id),
+    ['s1~codex', 's1~claude'],
+    'the merged one stays closed — reopen is its door'
+  )
+  assert.deepEqual(said, [])
 })

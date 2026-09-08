@@ -52,6 +52,7 @@ import {
 import { QueryPanel } from './QueryPanel'
 import { LanePanel } from './LanePanel'
 import { DOCK_TOGGLE, useSubagents } from './useSubagents'
+import { useQueries } from './useQueries'
 import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
@@ -498,7 +499,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup', 'provision']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup', 'provision', 'query', 'lane']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -1552,7 +1553,7 @@ function ChatPanel({
 
   return (
     <div className="chat-panel" ref={rootRef}>
-      <SubagentDock session={session} onOpen={onOpen} />
+      <ChatDock session={session} onOpen={onOpen} />
       <div className="chat" ref={chatRef} onScroll={syncPinned}>
         {loading && <div className="irc-sys">Reading the session…</div>}
         {error && (
@@ -4677,6 +4678,143 @@ function namesOf(s: ClaudeSessionMeta): string[] {
  * the transcript directly above (main/spawned.ts) — the dock never shows a row
  * the conversation has already moved past.
  */
+/**
+ * The corner of the chat: the queries it has open, and the lanes it has
+ * working. Two boxes, one column, because they answer two different questions
+ * and only one of them is about a panel you can close.
+ *
+ * Nothing draws when both are empty — the stack is a bounding box for the two
+ * docks, and it takes no clicks of its own so an empty corner never swallows a
+ * press meant for the transcript underneath (see `.dock-stack` in index.css).
+ */
+function ChatDock({
+  session,
+  onOpen
+}: {
+  session?: { id: string; worktreePath: string }
+  onOpen?: OpenFn
+}): ReactNode {
+  return (
+    <div className="dock-stack">
+      <QueryDock session={session} onOpen={onOpen} />
+      <SubagentDock session={session} onOpen={onOpen} />
+    </div>
+  )
+}
+
+/**
+ * Arrow keys walk a dock's rows, ⏎ opens the one you land on.
+ *
+ * The rows are buttons in DOM order, which is all this needs — and it is what
+ * makes a dock reachable with the mouse unplugged, which both of them have to
+ * be. Shared rather than written twice: two docks disagreeing about which key
+ * moves down would be two designs for one thing.
+ */
+function dockRoving(listRef: { current: HTMLDivElement | null }) {
+  return (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('.dock-row') ?? [])]
+    const at = rows.indexOf(document.activeElement as HTMLButtonElement)
+    const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)]
+    if (!next) return
+    e.preventDefault()
+    next.focus()
+  }
+}
+
+/**
+ * The queries open on this chat, whether or not their panels are on screen.
+ *
+ * ⌘W closes a panel and deliberately does not discard the query — that is the
+ * whole reason the two keys are different (docs/queries.md) — but until this
+ * existed, closing one was still a one-way door: the conversation went on
+ * running with nothing on screen naming it. So this lists what is OPEN, not
+ * what is visible, and a row puts the panel back. An idle query is a row like
+ * any other: the reason to close a panel is usually that the answer has not
+ * arrived yet.
+ *
+ * The subagent dock below it is the other half of the same corner and reads
+ * the other way round — a lane leaves the list when it stops, because its
+ * report lands in the transcript directly above.
+ */
+function QueryDock({
+  session,
+  onOpen
+}: {
+  session?: { id: string; worktreePath: string }
+  onOpen?: OpenFn
+}): ReactNode {
+  const rows = useQueries(session)
+  const [open, setOpen] = useState(true)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // Folded by the same command the subagent dock listens for: ⌥A means "get
+  // the corner out of the way", and one key for one corner is the whole of it.
+  useEffect(() => {
+    const onToggle = (): void => setOpen((v) => !v)
+    window.addEventListener(DOCK_TOGGLE, onToggle)
+    return () => window.removeEventListener(DOCK_TOGGLE, onToggle)
+  }, [])
+
+  if (!rows.length || !session) return null
+
+  const working = rows.filter((r) => r.running).length
+  const label = `${rows.length} quer${rows.length === 1 ? 'y' : 'ies'}`
+
+  if (!open)
+    return (
+      <button className="dock-pill" onClick={() => setOpen(true)}>
+        {working > 0 ? <Spinner /> : <IconMessage2 size={11} />}
+        {label}
+        <span className="dock-key">⌥A</span>
+      </button>
+    )
+
+  return (
+    <div className="dock">
+      <div className="dock-head">
+        {working > 0 ? <Spinner /> : <IconMessage2 size={11} />}
+        <span className="dock-count">
+          {label} open{working > 0 ? `, ${working} working` : ''}
+        </span>
+        <button className="dock-key" onClick={() => setOpen(false)} title="Fold the dock">
+          ⌥A
+        </button>
+      </div>
+      <div className="dock-list" ref={listRef} onKeyDown={dockRoving(listRef)}>
+        {rows.map((row) => (
+          <button
+            className="dock-row"
+            key={row.key}
+            title={`Open the ${row.harness} query`}
+            onClick={() =>
+              onOpen?.({
+                kind: 'query',
+                sub: row.harness,
+                session: { id: row.key, worktreePath: session.worktreePath }
+              })
+            }
+          >
+            {row.running ? <Spinner /> : <IconMessage2 size={11} className="tool-mark" />}
+            <span className="dock-name">
+              {/* The harness in its own nick colour, the same way the panel
+                  head and the chat's mentions name it. */}
+              <span style={{ color: nickColor(row.harness) }}>{row.harness}</span>
+              {row.tool && (
+                <>
+                  {' · '}
+                  <span className="ag-tool">{row.tool}</span>
+                </>
+              )}
+            </span>
+            <span className="sub-note">{ago(row.since)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function SubagentDock({
   session,
   onOpen
@@ -4726,22 +4864,7 @@ function SubagentDock({
           ⌥A
         </button>
       </div>
-      {/* Arrow keys walk it and ⏎ opens, so a lane is reachable without the
-          pointer — the rows are buttons in DOM order, which is all the roving
-          focus below needs. */}
-      <div
-        className="dock-list"
-        ref={listRef}
-        onKeyDown={(e) => {
-          if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
-          const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('.dock-row') ?? [])]
-          const at = rows.indexOf(document.activeElement as HTMLButtonElement)
-          const next = rows[at + (e.key === 'ArrowDown' ? 1 : -1)]
-          if (!next) return
-          e.preventDefault()
-          next.focus()
-        }}
-      >
+      <div className="dock-list" ref={listRef} onKeyDown={dockRoving(listRef)}>
         {lanes.map((lane) => (
           <button className="dock-row" key={lane.id} title={lane.title} onClick={() => openLane(lane)}>
             <Spinner />

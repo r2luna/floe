@@ -46,6 +46,44 @@ one would split in two the next time the CLI restarted.
 | **discard** (`⌘⇧D`) | The query closes and the chat never sees a word. The transcript stays — the dead line offers `reopen`. |
 | **reopen** | A discarded or merged query comes back — its transcript is still its own, under its own key. |
 
+## Two open at once
+
+Each query takes a slot of its own in the lane (`query:codex` beside
+`query:claude`), so asking a second harness puts a second panel up instead of
+replacing the first. Asking one of them a second thing still focuses its panel —
+that is idempotence by key, and it is a different question from how many
+conversations are on screen. Beyond the lane's width the columns shrink to their
+floor and the lane scrolls, like any other panel.
+
+What that costs is the fallback in peek, merge and discard. They act on the
+focused panel, or on the only query open; with two up and the chat focused there
+is no "the query", so they say so rather than ending whichever one the lane
+lists first. `⌘K` "Go to the query" walks them.
+
+## The dock in the corner
+
+`⌘W` closes a panel and deliberately does not discard the query. That was still
+a one-way door while nothing on screen named a query without a panel: the
+conversation went on running, and the way back was the palette or asking the
+harness a second thing.
+
+So the corner of the chat lists what is OPEN rather than what is visible
+(`QueryDock`, `renderer/src/queryDock.ts` for the rows). A row per live query,
+idle ones included — the reason to close a panel is usually that the answer has
+not arrived yet — with the harness in its own nick colour, what it is running
+right now, and its clock. Clicking one puts its panel back; `query.showAll`
+puts back all of them at once.
+
+It shares the corner, and `⌥A`, with the subagent dock below it, which reads the
+other way round: a lane leaves that list the moment it stops, because its report
+lands in the transcript directly above. A query has no such report — merge and
+peek are how its words reach the chat, and both are yours to press — so it stays
+listed until one of the three actions ends it.
+
+Running is read from `agent.active()` as well as from the event stream: a panel
+mounts onto turns that started before it existed, and a stream only ever tells
+you what has happened since you subscribed.
+
 `⌘W` deliberately does not discard. Closing a panel and throwing a conversation
 away are different things, and one key for both would make the safe habit
 destructive.
@@ -250,5 +288,7 @@ panel says who opened it.
 | `main/turn.ts` | `dispatchTurn` — the one place a destination is decided |
 | `main/handoff.ts` | `packetFrom` and the read watermark |
 | `renderer/src/QueryPanel.tsx` | the panel |
+| `renderer/src/queryDock.ts` | the dock's rows: what is open, and what is running in it |
+| `renderer/src/useQueries.ts` | the dock's live wiring — the list, the active keys, the events |
 | `renderer/src/AllPicker.tsx` | who `@all` goes to, when nothing is open to answer that |
 | `shared/mentions.ts` | `routeAt` (a handle) and `routeAll` (`@all`) |

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, closePanel, columnsOf, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -388,4 +388,31 @@ test('closing a query leaves nothing behind, not a second launcher', () => {
   const lane: Lane = { panels: [chat('c1'), query], focus: 1 }
   const after = closePanel(lane, 1, launcher)
   assert.deepEqual(after.panels.map((p) => p.kind), ['chat'])
+})
+
+test('two queries stand side by side, in the order they were asked', () => {
+  // Slots of their own (`query:codex`, `query:claude`), because asking two
+  // harnesses is asking to compare them. Sharing the kind's slot, the second
+  // panel replaced the first while its query went on running underneath.
+  const query = (harness: string): Panel => ({
+    id: `query:${harness}`,
+    kind: 'query',
+    title: harness,
+    slot: `query:${harness}`,
+    order: 35,
+    session: { id: `s1~${harness}`, worktreePath: '/w' }
+  })
+  let lane: Lane = laneOf(chat('c1'))
+  lane = open(lane, query('codex'))
+  lane = open(lane, query('claude'))
+  assert.deepEqual(ids(lane), ['c1', 'query:codex', 'query:claude'])
+  assert.equal(lane.focus, 2, 'the newest is the one you are reading')
+  assert.equal(open(lane, query('codex')).panels.length, 3, 'asking codex again focuses its panel')
+})
+
+test('slotOf gives a query its own slot and leaves every other kind alone', () => {
+  assert.equal(slotOf('query', 'codex'), 'query:codex')
+  assert.equal(slotOf('query', 'claude'), 'query:claude')
+  assert.equal(slotOf('chat', 'x', 'session'), 'session', 'the kind table still decides')
+  assert.equal(slotOf('files'), undefined, 'and most kinds name none at all')
 })

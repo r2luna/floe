@@ -36,31 +36,50 @@ import type { FileOp } from '../../shared/types.ts'
 const chatOf = (c: CommandContext): Panel | undefined =>
   c.lane.panels.find((p) => p.kind === 'chat' && p.session)
 
+/** Every query panel in the lane, left to right. */
+const queryPanels = (c: CommandContext): number[] =>
+  c.lane.panels.flatMap((p, i) => (p.kind === 'query' ? [i] : []))
+
 /**
- * The query these commands act on: the focused panel if it is one, else the
- * only one open.
+ * Where "go to the query" lands: the next one along, wrapping.
+ *
+ * Several can be on screen at once — asking two harnesses opens two panels —
+ * so the binding walks them rather than naming one. From anywhere else it is
+ * the leftmost, which with a single query open is the only behaviour there was.
+ */
+function queryIndex(c: CommandContext): number {
+  const all = queryPanels(c)
+  if (!all.length) return -1
+  const at = all.indexOf(c.lane.focus)
+  return at === -1 ? all[0] : all[(at + 1) % all.length]
+}
+
+/**
+ * The query peek, merge and discard act on: the focused panel if it is one,
+ * else the only one open.
  *
  * Both, because both are where you press the key from. You read the query in
  * its own panel and merge it from there; you also watch it from the chat and
  * merge it without moving. Falling back to "the only one open" is unambiguous
- * exactly when there is nothing to be ambiguous about.
+ * exactly when there is nothing to be ambiguous about — with two panels up,
+ * merging whichever the lane lists first would be a coin toss that ends a
+ * conversation.
  */
-function queryIndex(c: CommandContext): number {
-  const focused = c.lane.panels[c.lane.focus]
-  if (focused?.kind === 'query') return c.lane.focus
-  const found = c.lane.panels.findIndex((p) => p.kind === 'query')
-  return found
-}
-
-const queryPanel = (c: CommandContext): Panel | undefined => {
-  const at = queryIndex(c)
-  return at === -1 ? undefined : c.lane.panels[at]
+function queryTarget(c: CommandContext): Panel | undefined {
+  const all = queryPanels(c)
+  if (all.includes(c.lane.focus)) return c.lane.panels[c.lane.focus]
+  return all.length === 1 ? c.lane.panels[all[0]] : undefined
 }
 
 /** Peek, merge or discard — one call, because they differ only in the verb. */
 function runQuery(c: CommandContext, action: 'peek' | 'merge' | 'discard'): void {
-  const key = queryPanel(c)?.session?.id
-  if (!key) return
+  const key = queryTarget(c)?.session?.id
+  // Enabled means a query is open, so no key here means more than one is and
+  // none is focused. Say which key answers that rather than picking for them.
+  if (!key)
+    return queryPanels(c).length > 1
+      ? c.say(`Several queries open — go to one first (⌘K “Go to the query”) to ${action} it.`)
+      : undefined
   // The panel comes down (or stays up) on main's `query:closed` announcement,
   // never from here: an agent can merge a query too, and the panel must behave
   // the same way whoever asked.
@@ -1644,7 +1663,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Peek: let the chat read the query',
         group: 'Queries',
         keys: '⌘⇧G',
-        enabled: (c) => !!queryPanel(c),
+        enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'peek')
       },
       {
@@ -1652,7 +1671,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Merge the query into the chat',
         group: 'Queries',
         keys: '⌘⇧M',
-        enabled: (c) => !!queryPanel(c),
+        enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'merge')
       },
       {
@@ -1663,16 +1682,53 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Discard the query',
         group: 'Queries',
         keys: '⌘⇧D',
-        enabled: (c) => !!queryPanel(c),
+        enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'discard')
       },
       {
-        // The dock draws itself only when this chat has lanes running, so the
-        // command is enabled unconditionally: there is nothing to check that the
-        // dock has not already decided, and a greyed-out row would be answering
-        // a question about a panel the user cannot see.
+        // The way back from ⌘W, for all of them at once — the dock row is the
+        // same move for one. Closing a query's panel does not end the query
+        // (that is what merge and discard are for), so a conversation can be
+        // running with nothing on screen naming it; this puts every one of them
+        // back beside the chat.
+        id: 'query.showAll',
+        title: 'Show every open query',
+        group: 'Queries',
+        enabled: (c) => !!chatOf(c),
+        run: (c) => {
+          const chat = chatOf(c)
+          if (!chat?.session) return
+          const { id, worktreePath } = chat.session
+          void window.floe.query
+            .list(id)
+            .then((all) => {
+              // Open ones only: a merged or discarded query is over, and
+              // `reopen` is the door back to one of those.
+              const live = all.filter((q) => !q.outcome)
+              if (!live.length) return c.say('No queries open here.')
+              c.setLane((l) =>
+                live.reduce(
+                  (lane, q) =>
+                    open(lane, {
+                      ...c.makePanel('query', q.harness),
+                      session: { id: q.id, worktreePath }
+                    }),
+                  l
+                )
+              )
+            })
+            .catch((e) => c.say(reason(e)))
+        }
+      },
+      {
+        // Both docks in the corner — the queries and the lanes — because ⌥A
+        // means "get the corner out of the way" and one key for one corner is
+        // the whole of it. Enabled unconditionally: each dock draws itself only
+        // when it has rows, so there is nothing to check that it has not
+        // already decided, and a greyed-out row would be answering a question
+        // about a panel the user cannot see.
         id: 'subagents.toggle',
-        title: 'Fold / unfold the subagent dock',
+        title: 'Fold / unfold the dock',
         group: 'Queries',
         keys: '⌥A',
         run: () => toggleSubagentDock()

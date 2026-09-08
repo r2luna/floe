@@ -2013,11 +2013,27 @@ button {
    rather than shadowed (the app separates with edges), and parked ABOVE the
    composer: the one thing that must never be covered is the thing you type
    into. Theme variables only — there is no tint here to need a light variant. */
-.dock {
+/* The corner itself: the queries dock stacked over the subagents dock, above
+   the composer. A bounding box only — it takes no clicks of its own, or an
+   empty (or half-empty) corner would swallow presses meant for the transcript
+   it floats over. The boxes inside take theirs back. */
+.dock-stack {
   position: absolute;
   right: 12px;
   bottom: 62px;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dock-stack > * {
+  pointer-events: auto;
+}
+
+.dock {
   width: 300px;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -2091,10 +2107,6 @@ button {
 
 /* Folded: one pill that still says how many, and that they are moving. */
 .dock-pill {
-  position: absolute;
-  right: 12px;
-  bottom: 62px;
-  z-index: 2;
   display: flex;
   align-items: center;
   gap: 7px;

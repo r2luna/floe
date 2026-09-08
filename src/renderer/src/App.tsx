@@ -20,6 +20,7 @@ import {
   patchPanel,
   resizePanel,
   setCursor,
+  slotOf,
   toggleDock
 } from './lane'
 import { selRange } from './diff'
@@ -120,7 +121,9 @@ const panelOf = (
   firstPrompt,
   firstChoice,
   order: KINDS[kind].order,
-  slot: 'slot' in KINDS[kind] ? (KINDS[kind] as { slot?: string }).slot : undefined
+  // Which panels replace which — see slotOf. A query takes one of its own, so
+  // two harnesses stand side by side instead of one swapping out the other.
+  slot: slotOf(kind, sub, 'slot' in KINDS[kind] ? (KINDS[kind] as { slot?: string }).slot : undefined)
 })
 
 const compact = (n: number) =>

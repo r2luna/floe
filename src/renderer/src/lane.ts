@@ -90,6 +90,23 @@ export type Panel = {
   view?: 'prose' | 'code'
 }
 
+/**
+ * The slot a panel takes, when its kind does not name one.
+ *
+ * Only queries need this, and they need it here rather than in the kind table:
+ * a query takes a slot of its OWN (`query:codex` beside `query:claude`) because
+ * two side conversations opened out of one chat are two conversations, and
+ * asking two harnesses is asking to compare them. Sharing the kind's slot, the
+ * second panel replaced the first while its query went on running underneath.
+ *
+ * In `lane.ts` because `open` is the only reader of a slot and because the rule
+ * has to be the same for every door that builds a panel — the chat, the dock in
+ * the corner, and `query.showAll` all put the same panel in the same place.
+ */
+export function slotOf(kind: string, sub?: string, kindSlot?: string): string | undefined {
+  return kind === 'query' ? `${kind}:${sub ?? ''}` : kindSlot
+}
+
 export type Lane = {
   panels: Panel[]
   focus: number
