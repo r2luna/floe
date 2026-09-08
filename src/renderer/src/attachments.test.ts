@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { classify, insertImageRef, renumberImageRefs } from './attachments.ts'
+import {
+  classify,
+  imageRefBefore,
+  insertImageRef,
+  renumberImageRefs
+} from './attachments.ts'
 
 const f = (name: string, type = '') => ({ name, type })
 
@@ -71,4 +76,27 @@ test('prose that merely says "image" is not a reference', () => {
 
 test('text with no reference to the removed image is untouched', () => {
   assert.equal(renumberImageRefs('nothing here', 1), 'nothing here')
+})
+
+test('the reference ending at the caret is the one Backspace takes', () => {
+  const text = 'crop image 01 please'
+  assert.deepEqual(imageRefBefore(text, 13), { start: 5, end: 13, n: 1 })
+
+  // Only at its end: inside the token you are editing text.
+  assert.equal(imageRefBefore(text, 12), null)
+  assert.equal(imageRefBefore(text, text.length), null)
+
+  // The older spelling erases as one thing too.
+  assert.deepEqual(imageRefBefore('crop [Image #2]', 15), { start: 5, end: 15, n: 2 })
+})
+
+test('prose ending in a number is not a reference to erase', () => {
+  assert.equal(imageRefBefore('see image 2', 11), null)
+  assert.equal(imageRefBefore('reimage 01', 10), null)
+  assert.equal(imageRefBefore('', 0), null)
+})
+
+test('a number past the last attachment is prose, and stays as written', () => {
+  // One image attached: `image 02` is something the user typed, not a token.
+  assert.equal(renumberImageRefs('a image 01 b image 02', 1, 1), 'a b image 02')
 })
