@@ -89,6 +89,22 @@ test('capGroups keeps at most n rows of each group', () => {
   )
 })
 
+test('capGroups caps each group at its own number', () => {
+  const rows = [
+    { id: 'a', title: 'a', group: 'chats' },
+    { id: 'b', title: 'b', group: 'chats' },
+    { id: 'c', title: 'c', group: 'chats' },
+    { id: 'd', title: 'd', group: 'files' },
+    { id: 'e', title: 'e', group: 'files' },
+    { id: 'f', title: 'f', group: 'files' }
+  ].map((item) => ({ item, hits: [], score: 0 }))
+  assert.deepEqual(
+    capGroups(rows, { chats: 2 }).map((r) => r.item.id),
+    ['a', 'b', 'd', 'e', 'f'],
+    '⌘P: the chats have a ceiling and the files, which the map does not name, have none'
+  )
+})
+
 test('splitTitle keeps the highlight on both halves of a path', () => {
   // "srcweb" matches across the split: three characters in the directory, three
   // in the file name.

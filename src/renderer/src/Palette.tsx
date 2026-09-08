@@ -1,6 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { filterItems, splitTitle, type PaletteItem } from './fuzzy'
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { capGroups, filterItems, splitTitle, type PaletteItem } from './fuzzy'
 import { chordFor } from '../../shared/keymap'
+
+/** One position of the head's filter — a kind of row, or all of them. */
+export interface PaletteScope {
+  /** `all`, or the `group` of the items this narrows the list to. */
+  id: string
+  label: string
+}
+
+/** The scope that hides nothing. Named, because three rules test for it. */
+export const ALL = 'all'
 
 /**
  * The command palette: a filtered list you drive entirely from the keyboard.
@@ -14,6 +24,12 @@ import { chordFor } from '../../shared/keymap'
  * With a `preview` the body splits: the list keeps the left, and the right side
  * explains the row under the cursor. Without one it is a plain list at the
  * narrow width, because half a box of empty space is worse than no pane.
+ *
+ * With `scopes` the list answers two questions at once — ⌘P holds the chats and
+ * the files — so it grows a filter in the top right and section headers between
+ * the blocks. The filter carries a count per kind, which is the reason it is
+ * there: you can see the thirty files exist while you are reading the four
+ * chats, and ⇥ narrows to them without touching the query.
  *
  * It renders into the app root rather than inside a panel on purpose — a
  * `position: fixed` overlay inside a panel would be clipped and sized by that
@@ -29,6 +45,9 @@ export function Palette({
   sigil,
   hints,
   preview,
+  scopes,
+  sections,
+  caps,
   onPick,
   onClose,
   onRebind
@@ -61,6 +80,20 @@ export function Palette({
   hints?: string
   /** The right-hand pane, drawn for the row under the cursor. */
   preview?: (item: PaletteItem) => ReactNode
+  /**
+   * The kinds this palette can narrow to, drawn as one segmented control in the
+   * head and cycled with ⇥. An id is `all` or the name of a group in `items`.
+   * The first is where the palette opens.
+   */
+  scopes?: PaletteScope[]
+  /** Head the blocks with their group name, in the order `items` gives them. */
+  sections?: boolean
+  /**
+   * A ceiling per group, applied only while every kind is on screen: five chats
+   * above thousands of files means the files are always in view, and narrowing
+   * to one kind lifts its ceiling because there is nothing left to make room for.
+   */
+  caps?: Record<string, number>
   onPick: (id: string) => void
   onClose: () => void
   /**
@@ -72,23 +105,53 @@ export function Palette({
 }) {
   const [query, setQuery] = useState(value ?? '')
   const [at, setAt] = useState(0)
+  // Which kind the list is narrowed to. The first scope given is where you
+  // land, so the palette opens on the answer its caller expects to be wanted —
+  // ⌘P opens on the chats.
+  const [scope, setScope] = useState(scopes?.[0]?.id ?? ALL)
   // Recording swallows the whole keyboard: the next chord is the new binding,
   // not a command. Holds the id being rebound so the list can stay on screen.
   const [recording, setRecording] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const results = useMemo(() => {
+  // Everything the query matched, whatever kind it is. The scope narrows what
+  // is DRAWN from here rather than what is searched, because the counts on the
+  // filter have to keep answering for the kinds you are not looking at.
+  const matched = useMemo(() => {
     const found = filterItems(items, query)
     const made = dynamic?.(query)
     // Built from the query, so it is never filtered — and first, because when
     // you are typing a new name that is what you meant.
-    const rows = made ? [{ item: made, hits: [], score: -1 }, ...found] : found
+    return made ? [{ item: made, hits: [], score: -1 }, ...found] : found
+  }, [items, query, dynamic])
+
+  // How many of each kind matched — the number on each chip, and the one after
+  // each section header.
+  const counts = useMemo(() => {
+    const out = new Map<string | undefined, number>()
+    for (const row of matched) out.set(row.item.group, (out.get(row.item.group) ?? 0) + 1)
+    return out
+  }, [matched])
+
+  // The order the groups were given in, which is the order the sections are
+  // drawn in: scoring alone would interleave the chats and the files.
+  const order = useMemo(() => [...new Set(items.map((i) => i.group))], [items])
+
+  const results = useMemo(() => {
+    let rows = scope === ALL ? matched : matched.filter((r) => r.item.group === scope)
+    if (sections) {
+      rows = [...rows].sort((a, b) => order.indexOf(a.item.group) - order.indexOf(b.item.group))
+    }
+    // Only while everything is on screen: a cap inside a narrowed list would
+    // hide rows with nothing left to make room for.
+    if (caps && scope === ALL) rows = capGroups(rows, caps)
     return limit ? rows.slice(0, limit) : rows
-  }, [items, query, dynamic, limit])
+  }, [matched, scope, sections, caps, order, limit])
   // Typing changes the list under the cursor, so it goes back to the top: the
-  // best match for what you have typed so far is the one you meant.
-  useEffect(() => setAt(0), [query])
+  // best match for what you have typed so far is the one you meant. Same for a
+  // change of scope, which is a different list under the same query.
+  useEffect(() => setAt(0), [query, scope])
 
   // Focused with the caret at the end, not selecting what is there: the text is
   // a starting point to edit, and a selection would make the first keystroke
@@ -100,9 +163,11 @@ export function Palette({
     el.setSelectionRange(el.value.length, el.value.length)
   }, [])
 
-  // Keep the cursor row in view as it moves past the fold.
+  // Keep the cursor row in view as it moves past the fold. The rows are asked
+  // for by class rather than by child index: a section header is a child too,
+  // and counting it would scroll to the row above the one you are on.
   useEffect(() => {
-    listRef.current?.children[at]?.scrollIntoView({ block: 'nearest' })
+    listRef.current?.querySelectorAll('.palette-row')[at]?.scrollIntoView({ block: 'nearest' })
   }, [at])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -126,6 +191,17 @@ export function Palette({
       if (!chord || !chord.includes('+')) return
       onRebind?.(recording, chord)
       setRecording(null)
+      return
+    }
+
+    // ⇥ walks the filter, ⇧⇥ walks it back. It never leaves the box — there is
+    // nothing else in the palette to focus, and a tab that moved focus out of
+    // the input would strand every other key.
+    if (scopes && e.key === 'Tab') {
+      e.preventDefault()
+      const i = scopes.findIndex((s) => s.id === scope)
+      const next = (i + (e.shiftKey ? -1 : 1) + scopes.length) % scopes.length
+      setScope(scopes[next].id)
       return
     }
 
@@ -175,26 +251,58 @@ export function Palette({
             onKeyDown={onKeyDown}
           />
           {/* How many rows are under the query — the one fact the head can add
-              without repeating what the list already says. */}
-          <span className="palette-count">{results.length}</span>
+              without repeating what the list already says. With a filter the
+              chips carry that number per kind, and one total beside three
+              counts would be a fourth number saying nothing new. */}
+          {scopes ? (
+            <span className="palette-scopes">
+              {scopes.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="palette-scope"
+                  data-on={s.id === scope || undefined}
+                  // Pointer, not click: the input must keep focus, and mousedown
+                  // would blur it before the click landed.
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    setScope(s.id)
+                  }}
+                >
+                  {s.label} <b>{s.id === ALL ? matched.length : (counts.get(s.id) ?? 0)}</b>
+                </button>
+              ))}
+            </span>
+          ) : (
+            <span className="palette-count">{results.length}</span>
+          )}
         </div>
 
         <div className="palette-split">
           <div className="palette-list" ref={listRef}>
             {results.map(({ item, hits }, i) => (
-              <Row
-                key={item.id}
-                item={item}
-                hits={hits}
-                at={i === at}
-                // Pointer, not click: the input must keep focus, and mousedown
-                // would blur it before the click landed.
-                onPointerDown={(e) => {
-                  e.preventDefault()
-                  onPick(item.id)
-                }}
-                onPointerEnter={() => setAt(i)}
-              />
+              <Fragment key={item.id}>
+                {/* A header where the kind changes, and only while both kinds
+                    are in the list: narrowed to one, the header would be a
+                    label on the whole box. */}
+                {sections && scope === ALL && item.group !== results[i - 1]?.item.group && (
+                  <div className="palette-group">
+                    {item.group} · {counts.get(item.group) ?? 0}
+                  </div>
+                )}
+                <Row
+                  item={item}
+                  hits={hits}
+                  at={i === at}
+                  // Pointer, not click: the input must keep focus, and mousedown
+                  // would blur it before the click landed.
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    onPick(item.id)
+                  }}
+                  onPointerEnter={() => setAt(i)}
+                />
+              </Fragment>
             ))}
             {!results.length && <div className="palette-empty">No matches</div>}
           </div>
@@ -237,17 +345,25 @@ function Row({
   onPointerDown: (e: React.PointerEvent) => void
   onPointerEnter: () => void
 }) {
-  const { dir, name, dirHits, nameHits } = splitTitle(item.title, hits)
+  // A path is split into its dim directory and the name you are scanning for;
+  // a sentence is not a path and is drawn whole.
+  const { dir, name, dirHits, nameHits } = item.flat
+    ? { dir: '', name: item.title, dirHits: [], nameHits: hits }
+    : splitTitle(item.title, hits)
   return (
     <button
       className="palette-row"
       data-at={at || undefined}
+      data-flat={item.flat || undefined}
       onPointerDown={onPointerDown}
       onPointerEnter={onPointerEnter}
     >
       {/* bdi, because the dim half is drawn rtl so its ellipsis eats the head
           of the path — without the isolation the trailing slash reorders to
           the front and `src/main/` reads as `/src/main`. */}
+      {/* A session's dot, filled while a turn is in flight. Nothing draws for a
+          row that is not a session, so the file list keeps its left edge. */}
+      {item.mark !== undefined && <span className="palette-mark" data-on={item.mark || undefined} />}
       {dir && (
         <span className="palette-dir">
           <bdi>{highlight(dir, dirHits)}</bdi>

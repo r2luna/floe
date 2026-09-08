@@ -6,7 +6,7 @@ import {
   IconTrash,
   IconX
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { loadChoice, type ModelChoice } from './models'
 import type { Lane, Panel } from './lane'
 import {
@@ -23,7 +23,7 @@ import {
   toggleDock
 } from './lane'
 import { selRange } from './diff'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
@@ -31,7 +31,7 @@ import { useNarrow, useTouch } from './useNarrow'
 import { RailMenu } from './RailMenu'
 import { installPluginCommands, runCommand, type CommandContext } from './commands'
 import { REGISTRY } from './registry'
-import { Palette } from './Palette'
+import { ALL, Palette } from './Palette'
 import {
   load as loadLane,
   remember,
@@ -64,7 +64,7 @@ import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
-import { CommandPreview, FilePreview, ProjectPreview } from './palettePreview'
+import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import {
   DEFAULT_GROUP,
   type ContextUsage,
@@ -497,11 +497,18 @@ export default function App() {
     onPick: (id: string) => void
   } | null>(null)
   const [commandsOpen, setCommandsOpen] = useState(false)
-  // The file palette (⌘P): the worktree's files, or null while it is closed.
-  // The list is fetched when it opens rather than kept in sync — files appear
-  // and vanish behind the app all day, and a list read at the moment you ask
-  // for it cannot be stale.
-  const [fileList, setFileList] = useState<string[] | null>(null)
+  // ⌘P's files, or null while it is closed — which is also what says the
+  // palette is up. The list is fetched when it opens rather than kept in sync:
+  // files appear and vanish behind the app all day, and a list read at the
+  // moment you ask for it cannot be stale. The chats it offers above them need
+  // no fetch at all — the sidebar's worktree list already carries them.
+  const [finderFiles, setFinderFiles] = useState<string[] | null>(null)
+  // What ⌘P offers, rebuilt when either half moves. Null while it is closed:
+  // the same state says whether the palette is up and what is in it.
+  const finder = useMemo(
+    () => (finderFiles === null ? null : finderItems(worktrees.rows, finderFiles)),
+    [finderFiles, worktrees.rows]
+  )
   // The keymap, read from ~/.config/floe/keybindings.toml. It is the whole map,
   // not a set of overrides — the main process generates the file with every
   // default in it — so installing it REPLACES what resolveKey walks rather than
@@ -1495,9 +1502,11 @@ export default function App() {
     openFiles: () => {
       if (!here) return
       // Opens empty and fills: reading a large repo takes a moment, and a
-      // palette that waits for it looks like the key did nothing.
-      setFileList([])
-      void window.floe.files.all(here).then(setFileList)
+      // palette that waits for it looks like the key did nothing. The chats are
+      // in the box from the first frame either way — they are the rows you are
+      // most likely to have opened it for.
+      setFinderFiles([])
+      void window.floe.files.all(here).then(setFinderFiles)
     },
     // Opens on the last query, selected, so `/` then typing replaces it and `/`
     // then Enter repeats it.
@@ -1900,7 +1909,7 @@ export default function App() {
       }
       // An overlay owns the keyboard while it is up — including the user's own
       // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || fileList !== null || adding || newWt || finding !== null
+      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null
       const action =
         resolveKey(input, {
           typing,
@@ -1940,7 +1949,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, fileList, adding, newWt, finding, moving])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -2843,25 +2852,48 @@ export default function App() {
         />
       )}
 
-      {fileList && (
+      {finder && (
         <Palette
-          placeholder="Find a file…"
-          // The whole path is the title, so `srcapp` finds src/App.tsx: the
-          // fuzzy match runs on the title alone, and a bare filename would make
-          // the directory unsearchable.
-          items={fileList.map((path) => ({ id: path, title: path }))}
+          placeholder="Find a chat or a file…"
+          items={finder.items}
           // A repo has thousands of files and nobody reads past the fold of a
           // fuzzy list — they type another letter.
           limit={200}
-          sigil="▤"
-          hints="⏎ open · ↑↓ move · esc close"
-          // The head of the file, which is what tells you whether it is the one
-          // you meant — two files named index.ts differ by nothing else.
-          preview={(item) => here && <FilePreview root={here} path={item.id} />}
-          onClose={() => setFileList(null)}
-          onPick={(path) => {
-            setFileList(null)
-            setLane((l) => open(l, panelOf(panelForFile(path), path)))
+          // Five chats, so the files are on screen from the first frame however
+          // many sessions the project has. Narrowing to `chats` lifts it.
+          caps={{ chats: 5 }}
+          sections
+          scopes={FINDER_SCOPES}
+          sigil="⌕"
+          hints="⏎ open · ⇥ filter · ↑↓ move · esc close"
+          preview={(item) => {
+            const chat = finder.chats.get(item.id)
+            if (chat) {
+              return (
+                <SessionPreview
+                  title={chat.title}
+                  branch={chat.branch}
+                  worktree={chat.worktreePath}
+                  at={timeAgo(chat.mtime)}
+                  running={chat.running}
+                  model={chat.model}
+                  mode={chat.mode}
+                />
+              )
+            }
+            // The head of the file, which is what tells you whether it is the
+            // one you meant — two files named index.ts differ by nothing else.
+            return here && <FilePreview root={here} path={item.title} />
+          }}
+          onClose={() => setFinderFiles(null)}
+          onPick={(id) => {
+            setFinderFiles(null)
+            const chat = finder.chats.get(id)
+            // A chat carries its own worktree: picking one on another branch
+            // takes you there, the same as clicking its row in the sidebar.
+            if (chat) return ctxRef.current.openChat({ id: chat.id, worktreePath: chat.worktreePath })
+            // Not a chat, so the id is the path itself.
+            setLane((l) => open(l, panelOf(panelForFile(id), id)))
           }}
         />
       )}
@@ -2926,6 +2958,87 @@ export default function App() {
       )}
     </div>
   )
+}
+
+/**
+ * ⌘P's filter, and it opens on the first of them: the chats.
+ *
+ * The key is most often a way back to something you were doing, and a session
+ * is a place you left rather than a name you remember exactly — so the list
+ * starts as the chats alone, with the file count sitting beside it saying how
+ * many are one ⇥ away.
+ */
+const FINDER_SCOPES = [
+  { id: 'chats', label: 'chats' },
+  { id: 'files', label: 'files' },
+  { id: ALL, label: 'all' }
+]
+
+/** A chat row's other half — what picking it needs, which no id can carry. */
+interface FinderChat {
+  /** What openChat is called with: the harness's id when the session has one. */
+  id: string
+  worktreePath: string
+  title: string
+  branch: string
+  mtime: number
+  running?: boolean
+  model?: string
+  mode?: string
+}
+
+/**
+ * What ⌘P offers: every chat in the project, then every file in the worktree.
+ *
+ * Chats first because that is what the key is most often for — you are going
+ * back to something you were doing, and a session is a place you left rather
+ * than a name you remember exactly. The files keep the behaviour they always
+ * had: the whole path is the title, so `srcapp` finds src/App.tsx, and a bare
+ * filename would make the directory unsearchable.
+ *
+ * The chats come back in a map beside the rows because a palette hands back an
+ * id and nothing else: opening one needs the worktree it lives in, and the
+ * pane beside it needs facts that were never in the row.
+ */
+function finderItems(
+  rows: WorktreeRow[],
+  files: string[]
+): { items: PaletteItem[]; chats: Map<string, FinderChat> } {
+  const chats = new Map<string, FinderChat>()
+  const items: PaletteItem[] = []
+  const sessions = rows
+    .flatMap((row) => row.sessions.map((session) => ({ row, session })))
+    // Newest first: with no query typed, the list is a list of where you were.
+    .sort((a, b) => b.session.mtime - a.session.mtime)
+  for (const { row, session } of sessions) {
+    const key = `chat:${session.id}`
+    chats.set(key, {
+      id: session.claudeId ?? session.id,
+      worktreePath: row.worktree.path,
+      title: session.title,
+      branch: row.worktree.branch,
+      mtime: session.mtime,
+      running: session.running,
+      model: session.model,
+      mode: session.permissionMode
+    })
+    items.push({
+      id: key,
+      title: session.title,
+      // Where it is and when it last moved — the two things that tell two
+      // sessions of the same name apart.
+      detail: `${row.worktree.branch} · ${timeAgo(session.mtime)}`,
+      group: 'chats',
+      // Present, so every chat row gets the dot and the block keeps one left
+      // edge; filled only for a turn in flight.
+      mark: !!session.running,
+      // A title, not a path: "Count src/shared files" must not be drawn as a
+      // directory and a file name.
+      flat: true
+    })
+  }
+  for (const path of files) items.push({ id: path, title: path, group: 'files' })
+  return { items, chats }
 }
 
 /**

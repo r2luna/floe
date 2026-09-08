@@ -147,6 +147,49 @@ export function FilePreview({ root, path }: { root: string; path: string }) {
 }
 
 /**
+ * A chat, before you jump to it: which branch it is on, whether a turn is in
+ * flight, and what it was last set to run as.
+ *
+ * Facts only — no transcript. Reading the tail of a session means opening its
+ * JSONL, and arrowing down a list of chats would open one per row; the facts
+ * come from the list that was already fetched, so the pane costs nothing.
+ */
+export function SessionPreview({
+  title,
+  branch,
+  worktree,
+  at,
+  running,
+  model,
+  mode
+}: {
+  title: string
+  branch: string
+  worktree: string
+  /** When the session was last written to — epoch ms. */
+  at: string
+  running?: boolean
+  model?: string
+  mode?: string
+}) {
+  return (
+    <>
+      <PaneTitle>{title}</PaneTitle>
+      <Facts>
+        <Fact label="branch">{branch}</Fact>
+        <Fact label="worktree">{tilde(worktree)}</Fact>
+        <Fact label="state" tone={running ? 'warn' : 'ok'}>
+          {running ? `working · ${at}` : `idle · ${at}`}
+        </Fact>
+        {model && <Fact label="model">{model}</Fact>}
+        {mode && <Fact label="mode">{mode}</Fact>}
+      </Facts>
+      <PaneNote>⏎ opens it in the lane, on the worktree it belongs to.</PaneNote>
+    </>
+  )
+}
+
+/**
  * A command, before you run it: which group it belongs to, what will fire it,
  * and — the reason this pane exists — why it is refusing right now. A dimmed
  * row can only say "no"; this says which condition is missing.
