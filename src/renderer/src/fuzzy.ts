@@ -20,6 +20,21 @@ export interface PaletteItem {
   badge?: string
   group?: string
   /**
+   * A dot at the head of the row: filled when the session has a turn in flight,
+   * hollow when it is idle. Left undefined by every row that is not a session,
+   * which is what keeps the file list a plain list.
+   */
+  mark?: boolean
+  /**
+   * The title is prose, not a path: draw it whole, however many slashes it has.
+   *
+   * A chat is named after what it is about, and "Count src/shared files" split
+   * at the last slash reads as a file called "shared files" in a directory
+   * called "Count src/" — with the head of it eaten by the ellipsis the path
+   * rows want.
+   */
+  flat?: boolean
+  /**
    * Always offered, whatever the query. "Add project…" has to be there
    * precisely when the search finds nothing — that is the moment you learn the
    * project you wanted isn't added yet.
@@ -111,13 +126,22 @@ export function filterItems<T extends PaletteItem>(items: T[], query: string): S
  * A bare `#` offers every session and every file: without a cap the files sit
  * hundreds of rows below the fold, which reads as "there are no files". Ten of
  * each shows both blocks at once, and typing narrows from the full list.
+ *
+ * `n` can also be a per-group map, for a list whose blocks are not the same
+ * size: ⌘P holds a handful of chats and thousands of files, so the chats get a
+ * ceiling that keeps the files on screen and the files get none. A group the
+ * map does not name is not capped.
  */
-export function capGroups<T extends PaletteItem>(rows: Scored<T>[], n: number): Scored<T>[] {
+export function capGroups<T extends PaletteItem>(
+  rows: Scored<T>[],
+  n: number | Record<string, number>
+): Scored<T>[] {
   const seen = new Map<string | undefined, number>()
   return rows.filter((row) => {
+    const cap = typeof n === 'number' ? n : (n[row.item.group ?? ''] ?? Infinity)
     const count = (seen.get(row.item.group) ?? 0) + 1
     seen.set(row.item.group, count)
-    return count <= n
+    return count <= cap
   })
 }
 

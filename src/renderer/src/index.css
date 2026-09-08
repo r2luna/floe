@@ -4898,6 +4898,56 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* The kind filter, top right of the head: chats, files, or both. One segmented
+   control rather than three loose chips, because what it holds is a position —
+   you are IN a scope, you did not switch three things on.
+
+   Deliberately uncoloured. The accent means "a reply you have not read"; a
+   filter you did not set wearing it would make the loudest thing in the box the
+   one fact you already knew. */
+.palette-scopes {
+  display: flex;
+  flex: none;
+  border: 1px solid var(--line);
+  /* Square, like the mode chips — this is the same outline-chip family. */
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.palette-scope {
+  display: inline-flex;
+  gap: 5px;
+  align-items: baseline;
+  padding: 1px 8px;
+  border-left: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.palette-scope:first-child {
+  border-left: none;
+}
+
+.palette-scope:hover {
+  background: var(--wash-2);
+  color: var(--text);
+}
+
+/* The one you are in: the same wash the cursor row wears, so "here" means the
+   same thing in the head as it does in the list. */
+.palette-scope[data-on] {
+  background: var(--wash-4);
+  color: var(--text-strong);
+}
+
+/* How many of that kind matched. Tabular so the head does not jitter as the
+   counts fall with each keystroke. */
+.palette-scope b {
+  color: var(--faint);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The body. One row of two columns; with no preview the list is the only child
    and takes the whole width. */
 .palette-split {
@@ -5004,6 +5054,10 @@ button {
   color: var(--faint);
   font-size: 10px;
   letter-spacing: 0.08em;
+  /* Upper case here rather than in the string: a group is a value the list was
+     built with (`chats`, `files`), and shouting it is how it is drawn, not what
+     it is called. */
+  text-transform: uppercase;
 }
 
 /* Square, like every other list row in the app. The card around it keeps its
@@ -5066,6 +5120,22 @@ button {
 }
 
 .palette-title {
+  flex: none;
+}
+
+/* A row whose title is a sentence — a chat, named after what it is about. It
+   takes the slack and ellipsises, so what gets cut is the tail of the title
+   and never the branch and the age at the right edge, which are the two things
+   that tell two chats of the same name apart. */
+.palette-row[data-flat] .palette-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-row[data-flat] .palette-detail {
   flex: none;
 }
 

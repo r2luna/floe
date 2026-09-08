@@ -775,11 +775,13 @@ export const REGISTRY: Map<string, Command> = new Map(
       },
       {
         id: 'palette.files',
-        title: 'Find file…',
+        title: 'Find a chat or a file…',
         group: 'App',
         keys: '⌘P',
         // The list is the checked-out tree's, so it needs one — same refusal,
-        // and the same sentence, as opening the Files panel.
+        // and the same sentence, as opening the Files panel. The chats would
+        // survive without a worktree, but half a palette is not worth a second
+        // set of rules for when the key works.
         enabled: (c) => c.canOpen('file'),
         unavailable: (c) => c.whyCannotOpen('file'),
         run: (c) => c.openFiles()

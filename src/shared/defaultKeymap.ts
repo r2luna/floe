@@ -20,8 +20,11 @@ export const KEYMAP_SECTIONS: KeymapSection[] = [
     title: 'Palettes',
     doc: `Three palettes, on purpose. \`⌘⇧P\` is every command; \`⌘/\` is the narrower
 "switch project" list, because the common case should not make you read past
-forty commands to reach it. \`⌘K\` opens a chord — the next key completes it. \`⌘P\` is
-the worktree's files, and picking one opens it in the file panel.`,
+forty commands to reach it. \`⌘K\` opens a chord — the next key completes it.
+
+\`⌘P\` finds a place to be: the project's chats first, then the worktree's files.
+A chat opens in the lane on the worktree it belongs to, a file opens in the file
+panel, and \`⇥\` narrows the list to one kind or the other.`,
     binds: [
       { key: 'super+k', command: 'palette.chord' },
       { key: 'super+shift+p', command: 'palette.commands' },

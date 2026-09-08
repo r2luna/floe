@@ -1,0 +1,424 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>⌘P — chats first, then files (5 layouts)</title>
+<!-- The app's real stylesheet. Everything below reuses its tokens and its
+     .palette-* rules; the only new classes are the ones a proposal adds. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:78ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:78ch; }
+.opt{ margin:0 0 34px; }
+/* A stand-in for the scrim: the palette floats over the lane, so the mock puts
+   it on the app background rather than on the page. */
+.stage{ background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius);
+  padding:22px; max-width:1000px; display:flex; justify-content:center; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; }
+button.theme:hover{ color:var(--text-strong); }
+.palette{ box-shadow:none; }
+
+/* --- parts the proposals add ---------------------------------------------- */
+
+/* A chat row's title takes the slack and ellipsises, so what gets cut is the
+   end of a long session title rather than the branch and age at the edge. */
+.palette-row .palette-title{ flex:1 1 auto; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+/* The list column of a wide palette, widened: a chat row carries a title AND
+   its meta, which does not fit the file finder's 300px. */
+.palette[data-wide] .palette-list{ flex:0 0 360px; }
+
+/* The kind glyph: one column at the head of every row, so a chat and a file are
+   told apart before you read either. Fixed width, so the titles line up. */
+.p-kind{ flex:none; width:11px; color:var(--faint); text-align:center; }
+.palette-row[data-at] .p-kind{ color:var(--dim); }
+/* A live session, same dot the session rows wear. */
+.p-dot{ flex:none; width:6px; height:6px; border-radius:50%; align-self:center;
+  background:var(--live); }
+.p-dot[data-ask]{ background:var(--accent); }
+.p-dot[data-idle]{ background:none; border:1px solid var(--edge); }
+/* Right-hand meta: branch, project, age. Dim, pushed to the edge, never the
+   thing that gets cut. */
+.p-meta{ margin-left:auto; flex:none; display:flex; gap:8px; align-items:baseline;
+  color:var(--faint); font-size:11px; }
+.p-branch{ color:var(--dim); }
+.p-age{ color:var(--time-dim); font-variant-numeric:tabular-nums; }
+
+/* O2 — scope chips in the head. Outline chips, per the button rule. */
+.p-scopes{ display:flex; gap:4px; flex:none; }
+.p-scope{ border:1px solid var(--line); border-radius:1px; background:transparent;
+  color:var(--dim); font:inherit; font-size:11px; padding:1px 7px; cursor:pointer; }
+.p-scope[data-on]{ color:var(--accent); border-color:#4a3a2e; background:#221c17; }
+:root[data-theme='light'] .p-scope[data-on]{ color:#a8621f; border-color:#e8d3bf; background:#fbf4ed; }
+.p-scope span{ color:var(--faint); }
+
+/* O3 — the prefix legend under the head: what a leading character switches to. */
+.p-legend{ display:flex; gap:14px; padding:5px 11px; border-bottom:1px solid var(--line-soft);
+  color:var(--faint); font-size:11px; }
+.p-legend b{ color:var(--dim); font-weight:400; }
+
+/* O4 — two lists side by side, one per kind. */
+.p-cols{ display:flex; min-height:0; }
+.p-col{ flex:1; min-width:0; max-height:52vh; overflow:auto; padding:5px; }
+.p-col + .p-col{ border-left:1px solid var(--line-soft); }
+.p-colhead{ display:flex; align-items:baseline; gap:8px; padding:6px 10px 4px;
+  color:var(--faint); font-size:10px; letter-spacing:0.08em; }
+.p-colhead em{ font-style:normal; margin-left:auto; color:var(--time-dim); letter-spacing:0; }
+/* The column that does not hold the cursor steps back a shade. */
+.p-col[data-off] .palette-title{ color:var(--dim); }
+
+/* O5 — two-line chat row: title, then where it lives. */
+.p-row2{ display:block; width:100%; padding:5px 10px; text-align:left; color:var(--text); }
+.p-row2[data-at]{ background:var(--wash-4); }
+.p-l1{ display:flex; align-items:center; gap:8px; }
+.p-l2{ display:flex; align-items:baseline; gap:8px; padding-left:19px;
+  color:var(--faint); font-size:11px; }
+.p-l2 .p-age{ margin-left:auto; }
+.p-row2[data-at] .palette-title{ color:var(--text-strong); }
+</style>
+</head>
+<body>
+
+<h1>⌘P — every open chat first, then the files</h1>
+<p class="sub">One query, two kinds of answer. The question each layout answers differently:
+where do the files go once chats own the top of the list, and how do you get to them without
+scrolling past every session. Preview pane shown wide where the layout uses it.</p>
+
+<!-- ====================================================================== O1 -->
+<div class="opt">
+<h2>O1 — Two sections, chats above files</h2>
+<p class="note">The list the app already has, cut in two by the sticky group header it already
+draws. Chats cap at 5 rows so the files are always on screen; the cap lifts when the query
+matches nothing else. Zero new keys — ↑↓ walks straight through both sections.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="palette-count">38</span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <div class="palette-group">CHATS · 4</div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette for the rail</span>
+          <span class="p-meta"><span class="p-branch">rail</span><span class="p-age">2d</span></span>
+        </button>
+        <div class="palette-group">FILES · 34</div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats-files.html</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== O2 -->
+<div class="opt">
+<h2>O2 — Scope chips, ⇥ cycles</h2>
+<p class="note">Chats is the scope you land in; ⇥ moves to Files, ⇥ again to All. The count on
+each chip is that scope under the current query, so you can see the files exist without
+leaving the chats. One list, no cap, no scrolling past a section you did not want.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="p-scopes">
+        <button class="p-scope" data-on>chats <span>4</span></button>
+        <button class="p-scope">files <span>34</span></button>
+        <button class="p-scope">all <span>38</span></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette for the rail</span>
+          <span class="p-meta"><span class="p-branch">rail</span><span class="p-age">2d</span></span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ scope · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== O3 -->
+<div class="opt">
+<h2>O3 — Chats by default, a prefix for files</h2>
+<p class="note">Plain typing only ever searches chats. A leading <b>/</b> turns the box into the
+file finder — the sigil and the placeholder change with it, so the mode is visible in the
+head instead of remembered. The shortest list, and the one extra keystroke lands on the
+kind you meant instead of on a section header.</p>
+<div class="stage">
+  <div class="palette">
+    <div class="palette-head">
+      <span class="palette-sigil">▣</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="palette-count">4</span>
+    </div>
+    <div class="p-legend"><span><b>/</b> files</span><span><b>&gt;</b> commands</span><span><b>@</b> worktrees</span></div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette for the rail</span>
+          <span class="p-meta"><span class="p-branch">rail</span><span class="p-age">2d</span></span>
+        </button>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · / files · ↑↓ move · esc close</div>
+  </div>
+</div>
+<p class="note" style="margin-top:12px">The same box one keystroke later — <b>/</b> typed, files only:</p>
+<div class="stage">
+  <div class="palette">
+    <div class="palette-head">
+      <span class="palette-sigil">▤</span>
+      <input class="palette-input" value="/pal" readonly />
+      <span class="palette-count">34</span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <button class="palette-row" data-at>
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⌫ back to chats · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== O4 -->
+<div class="opt">
+<h2>O4 — Two columns, one per kind</h2>
+<p class="note">Both kinds on screen at once: chats left, files right, one query filtering both.
+←→ moves the cursor between columns, ↑↓ walks the one it is in. Nothing is capped and nothing
+is hidden, at the cost of the preview pane — the box only has room for two columns.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="palette-count">38</span>
+    </div>
+    <div class="p-cols">
+      <div class="p-col">
+        <div class="p-colhead">CHATS <em>4</em></div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps</span>
+          <span class="p-meta"><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild <b class="palette-hit">pal</b>ette preview</span>
+          <span class="p-meta"><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette</span>
+          <span class="p-meta"><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette rail</span>
+          <span class="p-meta"><span class="p-age">2d</span></span>
+        </button>
+      </div>
+      <div class="p-col" data-off>
+        <div class="p-colhead">FILES <em>34</em></div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats.html</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/shared/</bdi></span>
+          <span class="palette-title">command<b class="palette-hit">Pal</b>Ids.ts</span>
+        </button>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ←→ column · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== O5 -->
+<div class="opt">
+<h2>O5 — One ranked list, chats read as chats</h2>
+<p class="note">No sections and no modes: one list, chats scored above files on an equal match,
+so they sit at the top without being fenced off. A chat is two lines — its title, then the
+project, branch and last message — and a file stays one, so the kinds are told apart by shape
+rather than by a header you have to read.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="palette-count">38</span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <button class="p-row2" data-at>
+          <span class="p-l1"><span class="p-dot"></span>
+            <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span></span>
+          <span class="p-l2"><span>floe · cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="p-row2">
+          <span class="p-l1"><span class="p-dot" data-ask></span>
+            <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span></span>
+          <span class="p-l2"><span>floe · master · waiting on you</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="p-row2">
+          <span class="p-l1"><span class="p-dot" data-idle></span>
+            <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span></span>
+          <span class="p-l2"><span>floe · draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-kind">▤</span>
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="p-kind">▤</span>
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="p-kind">▤</span>
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<button class="theme" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+</body>
+</html>
