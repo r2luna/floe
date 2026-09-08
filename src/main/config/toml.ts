@@ -14,7 +14,9 @@
 import { parse as parseTomlRaw } from 'smol-toml'
 
 export type TomlScalar = string | number | boolean
-export type TomlValue = TomlScalar | TomlScalar[]
+/** An inline table — `{ key = "value" }`, one line, so surgical writes still work. */
+export type TomlTable = Record<string, TomlScalar>
+export type TomlValue = TomlScalar | TomlScalar[] | TomlTable
 
 export interface TomlParseError {
   line: number
@@ -64,8 +66,17 @@ function formatString(s: string): string {
   return `"${escaped}"`
 }
 
+/** A bare key where TOML allows one, quoted where it does not. */
+const formatKey = (key: string): string => (/^[A-Za-z0-9_-]+$/.test(key) ? key : formatString(key))
+
 export function formatValue(value: TomlValue): string {
   if (Array.isArray(value)) return `[${value.map((v) => formatValue(v)).join(', ')}]`
+  if (value !== null && typeof value === 'object') {
+    const body = Object.entries(value)
+      .map(([k, v]) => `${formatKey(k)} = ${formatValue(v)}`)
+      .join(', ')
+    return `{ ${body} }`
+  }
   if (typeof value === 'string') return formatString(value)
   if (typeof value === 'boolean') return value ? 'true' : 'false'
   if (!Number.isFinite(value)) throw new Error(`cannot write non-finite number to TOML: ${value}`)

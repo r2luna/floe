@@ -120,11 +120,32 @@ export function insertImageRef(
  * numbering, so `image 02` always names the second image still attached.
  * Renumbering rather than leaving holes is what keeps the text honest: the
  * agent is handed the images in order and has no idea one was taken away.
+ *
+ * `count` is how many images were attached before the removal — anything
+ * numbered past that is prose the user typed, not a reference, and prose does
+ * not get renumbered under them.
  */
-export function renumberImageRefs(text: string, removed: number): string {
+export function renumberImageRefs(text: string, removed: number, count = Infinity): string {
   return text.replace(IMAGE_REF, (m, lead: string, old: string, bare: string, trail: string) => {
     const n = Number(old ?? bare)
+    if (n < 1 || n > count) return m
     if (n === removed) return lead && trail ? ' ' : ''
     return n > removed ? `${lead}${imageRef(n - 1)}${trail}` : m
   })
+}
+
+/**
+ * The image token that ends exactly at the caret, if there is one.
+ *
+ * What Backspace uses: the token is one chip on screen, so it erases as one
+ * thing — and with it goes the image it named. Only at its END, matching how
+ * a file reference behaves (see refBefore in trigger.ts).
+ */
+export function imageRefBefore(
+  text: string,
+  caret: number
+): { start: number; end: number; n: number } | null {
+  const m = /(?:\[[Ii]mage #?(\d+)\]|\bimage (\d\d+))$/.exec(text.slice(0, caret))
+  if (!m) return null
+  return { start: m.index, end: caret, n: Number(m[1] ?? m[2]) }
 }

@@ -3,7 +3,8 @@
 An Electron app for managing git worktrees and Claude Code sessions across projects.
 Desktop only — the v1 headless server was removed and gets rebuilt from scratch for v2.
 The in-app MCP control server is back (`src/main/mcpServer.ts`): agents drive Floe over
-`/mcp/<token>` — see [docs/mcp.md](docs/mcp.md).
+`/mcp/<token>`, whichever harness answers the turn (`src/main/mcpHarness.ts` projects the
+same server list into claude, codex, opencode and gemini) — see [docs/mcp.md](docs/mcp.md).
 
 ## Core principle — keyboard first
 
@@ -26,6 +27,7 @@ user-facing command or action, ship its MCP tooling in the same change:
 
 - A renderer/palette command: register it in `renderer/src/commands.ts`'s registry + `src/shared/commandIds.ts` (lockstep enforced by `registry.test.ts`) — `run_command`/`list_commands` then expose it automatically.
 - A main-process action (new IPC handler / service function): add a dedicated tool in `src/main/mcpServer.ts` `registerTools()` and list it in `mcpServer.test.ts`.
+- A new harness: give it a projection in `src/main/mcpHarness.ts` (and its off switch for queries), not a special case at the spawn site.
 
 Ask: "could an agent do this without the UI?" If not, it's not finished. Details and the tool-writing pattern: [docs/mcp.md](docs/mcp.md).
 

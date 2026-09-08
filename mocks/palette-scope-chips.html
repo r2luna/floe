@@ -1,0 +1,433 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>⌘P — sections + scope filters, top right</title>
+<!-- The app's real stylesheet. Everything below reuses its tokens and the
+     .palette-* rules; the only new classes are the ones the scope row adds. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:78ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:78ch; }
+.opt{ margin:0 0 34px; }
+.stage{ background:var(--bg); border:1px solid var(--line-soft); border-radius:var(--radius);
+  padding:22px; max-width:1000px; display:flex; justify-content:center; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; }
+button.theme:hover{ color:var(--text-strong); }
+
+/* --- shared row parts ------------------------------------------------------ */
+.palette-row .palette-title{ flex:1 1 auto; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.palette[data-wide] .palette-list{ flex:0 0 360px; }
+.p-dot{ flex:none; width:6px; height:6px; border-radius:50%; align-self:center;
+  background:var(--live); }
+.p-dot[data-ask]{ background:var(--accent); }
+.p-dot[data-idle]{ background:none; border:1px solid var(--edge); }
+.p-meta{ margin-left:auto; flex:none; display:flex; gap:8px; align-items:baseline;
+  color:var(--faint); font-size:11px; }
+.p-branch{ color:var(--dim); }
+.p-age{ color:var(--time-dim); font-variant-numeric:tabular-nums; }
+/* The file rows keep a dir + name, so nothing here touches .palette-dir. */
+
+/* --- V1: text chips with counts ------------------------------------------- */
+.p-scopes{ display:flex; gap:4px; flex:none; }
+.p-scope{ border:1px solid var(--line); border-radius:1px; background:transparent;
+  color:var(--dim); font:inherit; font-size:11px; padding:1px 7px; cursor:pointer;
+  display:inline-flex; gap:5px; align-items:baseline; }
+.p-scope:hover{ color:var(--text); border-color:var(--edge); }
+.p-scope[data-on]{ color:var(--accent); border-color:#4a3a2e; background:#221c17; }
+.p-scope b{ color:var(--faint); font-weight:400; font-variant-numeric:tabular-nums; }
+.p-scope[data-on] b{ color:var(--accent); opacity:0.75; }
+:root[data-theme='light'] .p-scope[data-on]{ color:#a8621f; border-color:#e8d3bf; background:#fbf4ed; }
+
+/* --- V2: glyph chips ------------------------------------------------------- */
+.p-glyphs{ display:flex; gap:2px; flex:none; }
+.p-glyph{ border:1px solid transparent; border-radius:1px; background:transparent;
+  color:var(--faint); font:inherit; font-size:11px; padding:1px 6px; cursor:pointer;
+  display:inline-flex; gap:4px; align-items:baseline; }
+.p-glyph:hover{ color:var(--text); }
+.p-glyph[data-on]{ color:var(--accent); border-color:#4a3a2e; background:#221c17; }
+.p-glyph b{ font-weight:400; font-variant-numeric:tabular-nums; opacity:0.7; }
+:root[data-theme='light'] .p-glyph[data-on]{ color:#a8621f; border-color:#e8d3bf; background:#fbf4ed; }
+
+/* --- V3: one segmented control -------------------------------------------- */
+.p-seg{ display:flex; flex:none; border:1px solid var(--line); border-radius:1px;
+  overflow:hidden; }
+.p-seg button{ background:transparent; border:none; border-left:1px solid var(--line);
+  color:var(--dim); font:inherit; font-size:11px; padding:1px 8px; cursor:pointer;
+  display:inline-flex; gap:5px; align-items:baseline; }
+.p-seg button:first-child{ border-left:none; }
+.p-seg button:hover{ color:var(--text); background:var(--wash-2); }
+.p-seg button[data-on]{ color:var(--text-strong); background:var(--wash-4); }
+.p-seg b{ color:var(--faint); font-weight:400; font-variant-numeric:tabular-nums; }
+
+/* --- V4: chips on their own strip under the head --------------------------- */
+.p-strip{ display:flex; align-items:center; gap:8px; padding:5px 11px;
+  border-bottom:1px solid var(--line-soft); }
+.p-strip .p-hint{ color:var(--faint); font-size:11px; }
+.p-strip .p-scopes{ margin-left:auto; }
+</style>
+</head>
+<body>
+
+<h1>⌘P — sections in the list, filters top right</h1>
+<p class="sub">One shape in all four: chats above files under sticky headers, a scope filter in the
+top right that narrows to one kind, ⇥ to cycle it and ⌥1/⌥2/⌥3 to jump straight to one. What
+differs is only how the filter is drawn and where it sits — everything under the head is
+identical, so the choice is about the head alone.</p>
+
+<!-- ====================================================================== V1 -->
+<div class="opt">
+<h2>V1 — Text chips with counts</h2>
+<p class="note">The count on each chip is that scope under the current query, so the chips replace
+the head's single number: you see 34 files exist while reading the 4 chats. Active chip wears the
+accent outline (the app's only accent), never a fill.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="p-scopes">
+        <button class="p-scope" data-on>all <b>38</b></button>
+        <button class="p-scope">chats <b>4</b></button>
+        <button class="p-scope">files <b>34</b></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <div class="palette-group">CHATS · 4</div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette for the rail</span>
+          <span class="p-meta"><span class="p-branch">rail</span><span class="p-age">2d</span></span>
+        </button>
+        <div class="palette-group">FILES · 34</div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats-files.html</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ filter · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== V2 -->
+<div class="opt">
+<h2>V2 — Glyph chips, the sigils the palette already uses</h2>
+<p class="note">▣ chats, ▤ files, ✻ both — the same glyph vocabulary the sigil at the head already
+speaks, with the count beside it. Half the width of V1, so a long query never collides with the
+filter; the cost is that the kinds are named by symbol until you hover.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="p-glyphs">
+        <button class="p-glyph" data-on>✻ <b>38</b></button>
+        <button class="p-glyph">▣ <b>4</b></button>
+        <button class="p-glyph">▤ <b>34</b></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <div class="palette-group">CHATS · 4</div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <div class="palette-group">FILES · 34</div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats-files.html</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ filter · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== V3 -->
+<div class="opt">
+<h2>V3 — One segmented control</h2>
+<p class="note">Three chips welded into one box with hairlines between them, so the filter reads as
+a single control with a position rather than as three buttons you might have toggled
+independently. The active segment takes the neutral row wash — no accent, because the filter is a
+place you are, not a thing you did.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="p-seg">
+        <button data-on>all <b>38</b></button>
+        <button>chats <b>4</b></button>
+        <button>files <b>34</b></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <div class="palette-group">CHATS · 4</div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <div class="palette-group">FILES · 34</div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats-files.html</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ filter · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- ====================================================================== V4 -->
+<div class="opt">
+<h2>V4 — Its own strip under the head</h2>
+<p class="note">The head stays a caret and nothing else, and the filter gets a strip of its own —
+right-aligned, with room on the left for what the scope key is. Costs 26px of height, buys a head
+that never crowds and a place to put the next filter (worktree, project) when one is asked for.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="palette-count">38</span>
+    </div>
+    <div class="p-strip">
+      <span class="p-hint">⇥ filter</span>
+      <span class="p-scopes">
+        <button class="p-scope" data-on>all <b>38</b></button>
+        <button class="p-scope">chats <b>4</b></button>
+        <button class="p-scope">files <b>34</b></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <div class="palette-group">CHATS · 4</div>
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <div class="palette-group">FILES · 34</div>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">Pal</b>ette.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>src/renderer/src/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ettePreview.tsx</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>docs/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette.md</span>
+        </button>
+        <button class="palette-row">
+          <span class="palette-dir"><bdi>mocks/</bdi></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette-chats-files.html</span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ filter · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<!-- narrowed -->
+<div class="opt">
+<h2>Filtered to one kind (V1, chats)</h2>
+<p class="note">What any of them look like once the filter is narrowed: the headers go away — one
+kind needs no section — and the cap on chats lifts, because the list is nothing else now.</p>
+<div class="stage">
+  <div class="palette" data-wide>
+    <div class="palette-head">
+      <span class="palette-sigil">⌘</span>
+      <input class="palette-input" value="pal" readonly />
+      <span class="p-scopes">
+        <button class="p-scope">all <b>38</b></button>
+        <button class="p-scope" data-on>chats <b>4</b></button>
+        <button class="p-scope">files <b>34</b></button>
+      </span>
+    </div>
+    <div class="palette-split">
+      <div class="palette-list">
+        <button class="palette-row" data-at>
+          <span class="p-dot"></span>
+          <span class="palette-title"><b class="palette-hit">pal</b>ette scroll jumps on filter</span>
+          <span class="p-meta"><span class="p-branch">cmd-p</span><span class="p-age">12m</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-ask></span>
+          <span class="palette-title">rebuild the <b class="palette-hit">pal</b>ette preview pane</span>
+          <span class="p-meta"><span class="p-branch">master</span><span class="p-age">1h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">chat + file <b class="palette-hit">pal</b>ette merge</span>
+          <span class="p-meta"><span class="p-branch">draw-v2</span><span class="p-age">3h</span></span>
+        </button>
+        <button class="palette-row">
+          <span class="p-dot" data-idle></span>
+          <span class="palette-title">colour <b class="palette-hit">pal</b>ette for the rail</span>
+          <span class="p-meta"><span class="p-branch">rail</span><span class="p-age">2d</span></span>
+        </button>
+      </div>
+      <div class="palette-side">
+        <p class="palette-pane-title">palette scroll jumps on filter</p>
+        <div class="palette-facts">
+          <div class="palette-fact"><b>project</b><span>floe</span></div>
+          <div class="palette-fact"><b>branch</b><span>cmd-p</span></div>
+          <div class="palette-fact"><b>state</b><span data-tone="ok">running · 12m</span></div>
+          <div class="palette-fact"><b>turns</b><span>34</span></div>
+        </div>
+        <p class="palette-pane-note">last · “rodei o gate, dois testes de fuzzy quebraram no
+        cap de grupo — vou arrumar o slice antes de mexer no css.”</p>
+      </div>
+    </div>
+    <div class="palette-foot">⏎ open · ⇥ filter · ↑↓ move · esc close</div>
+  </div>
+</div>
+</div>
+
+<button class="theme" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+</body>
+</html>

@@ -182,7 +182,18 @@ test('a full turn: spawn, start the thread, run it, settle the reply', async () 
     // "never" is deliberate: an approval request is answered with a flat
     // decline, so a policy that asks would wedge the turn.
     approvalPolicy: 'never',
-    sandbox: 'read-only'
+    sandbox: 'read-only',
+    // Floe's own tools, scoped to this thread so the url carries THIS session's
+    // token. `approve` is required: with approvalPolicy "never" and anything
+    // else, every MCP call comes back "requires approval".
+    config: {
+      mcp_servers: {
+        floe: {
+          url: 'http://127.0.0.1:0/mcp/k-happy',
+          default_tools_approval_mode: 'approve'
+        }
+      }
+    }
   })
   assert.deepEqual(sentParams('thread/settings/update'), {
     threadId: 'th-1',
@@ -231,7 +242,19 @@ test('a known thread is resumed, and a mode change is pushed at it', async () =>
   // instead of starting a second one.
   await chatWithCodexServer(win, 'k-happy', '/work/tree', 'now build it', 'gpt-5.5', undefined, 'acceptEdits')
 
-  assert.deepEqual(sentParams('thread/resume'), { threadId: 'th-1', cwd: '/work/tree', model: 'gpt-5.5' })
+  // The config is restated on resume: it does not survive the server process,
+  // and a rejoined thread that quietly lost its Floe tools is worse than one
+  // that never had them.
+  assert.deepEqual(sentParams('thread/resume'), {
+    threadId: 'th-1',
+    cwd: '/work/tree',
+    model: 'gpt-5.5',
+    config: {
+      mcp_servers: {
+        floe: { url: 'http://127.0.0.1:0/mcp/k-happy', default_tools_approval_mode: 'approve' }
+      }
+    }
+  })
   assert.equal(server().sent.filter((m) => (m as { method?: string }).method === 'thread/start').length, 1)
   // acceptEdits is workspace-write + the default collaboration mode.
   assert.deepEqual(sentParams('thread/settings/update'), {

@@ -15,10 +15,13 @@ import { parseToml } from './toml'
  * previous file intact instead of a truncated one, since rename is atomic
  * within a filesystem.
  */
-export function writeFileAtomic(path: string, text: string): void {
+export function writeFileAtomic(path: string, text: string, mode?: number): void {
   const tmp = `${path}.tmp`
   try {
-    writeFileSync(tmp, text)
+    // The mode goes on the temp file, because the rename is what the caller
+    // ends up with: chmod-ing `path` afterwards would leave a window where the
+    // new file is readable, and a later write would drop the mode again.
+    writeFileSync(tmp, text, mode === undefined ? undefined : { mode })
     renameSync(tmp, path)
   } catch (err) {
     try {
@@ -38,10 +41,10 @@ export function writeFileAtomic(path: string, text: string): void {
  * broken document. Parsing the result before it replaces the original turns
  * that from "the user's config is gone" into "the save failed, nothing changed".
  */
-export function writeTomlFile(path: string, text: string): void {
+export function writeTomlFile(path: string, text: string, mode?: number): void {
   const parsed = parseToml(text)
   if (!parsed.ok) {
     throw new Error(`refusing to write invalid TOML to ${path}: line ${parsed.error.line}: ${parsed.error.message}`)
   }
-  writeFileAtomic(path, text)
+  writeFileAtomic(path, text, mode)
 }

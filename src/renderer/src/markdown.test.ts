@@ -300,3 +300,20 @@ test('an image reference is a chip of its own', () => {
     ['[Image #1]']
   )
 })
+
+test('a token is only a chip when it names an image that is attached', () => {
+  const text = 'crop image 01 and image 02'
+  const one = tokenizeMarkdown(text, undefined, 1)
+  assert.deepEqual(
+    one.filter((t) => t.cls === 'md-attach').map((t) => t.text),
+    ['image 01']
+  )
+  assert.equal(one.map((t) => t.text).join(''), text)
+
+  // Nothing attached, nothing coloured — the words are just words.
+  const none = tokenizeMarkdown(text, undefined, 0)
+  assert.equal(none.filter((t) => t.cls === 'md-attach').length, 0)
+  assert.equal(none.map((t) => t.text).join(''), text)
+
+  assert.equal(tokenizeMarkdown(text, undefined, 2).filter((t) => t.cls === 'md-attach').length, 2)
+})

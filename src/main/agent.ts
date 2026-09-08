@@ -895,6 +895,31 @@ export function answerQuestion(key: string, requestId: string, answer: string): 
   })
 }
 
+/**
+ * What a session is parked on, for a caller that is not the window: one entry
+ * per unanswered control request, tagged with which of the two it is.
+ *
+ * The map holds the CLI's own tool input, so the kind is read back off the
+ * shape rather than stored twice — a payload `parseQuestions` recognises is an
+ * AskUserQuestion, anything else is a tool asking for permission.
+ */
+export interface PendingPrompt {
+  requestId: string
+  kind: 'question' | 'permission'
+  questions?: AgentQuestion[]
+}
+
+export function pendingPrompts(key: string): PendingPrompt[] {
+  const found = resolveConn(key)
+  if (!found) return []
+  return [...found[1].pendingPerms].map(([requestId, input]) => {
+    const questions = parseQuestions(input)
+    return questions.length
+      ? { requestId, kind: 'question' as const, questions }
+      : { requestId, kind: 'permission' as const }
+  })
+}
+
 export function stopAgent(win: BrowserWindow, key: string): void {
   // Before the early return, and before the conn is looked at: stop means stop,
   // and a relay armed on this chat would otherwise answer the turn you just

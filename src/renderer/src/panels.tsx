@@ -3752,8 +3752,12 @@ function FileView({ root, path, find }: { root?: string; path: string; find?: st
   )
 }
 
-/** Terse "time ago" for a plan's mtime — the plans panel is a narrow column. */
-function timeAgo(ms: number): string {
+/**
+ * Terse "time ago" for a plan's mtime — the plans panel is a narrow column, and
+ * so is a palette row, which is why ⌘P's chat rows borrow it rather than
+ * growing a second dialect of the same three letters.
+ */
+export function timeAgo(ms: number): string {
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
   if (s < 60) return 'now'
   const m = Math.floor(s / 60)

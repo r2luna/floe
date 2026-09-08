@@ -20,6 +20,7 @@ import {
 import type { Attached } from '../../shared/types'
 import {
   imageNum,
+  imageRefBefore,
   insertImageRef,
   previewUrl,
   readAttachment,
@@ -518,11 +519,6 @@ export function Composer({
     [mentions]
   )
 
-  // Memoised on the draft: the composer re-renders for plenty that is not
-  // typing (a streaming panel above it, menu state), and re-tokenizing the
-  // whole draft each time is pure repeat work.
-  const mirrorTokens = useMemo(() => tokenizeMarkdown(value, isRef), [value, isRef])
-
   const pick = (item: PaletteItem) => {
     const el = input.current
     if (!el || !trigger) return
@@ -536,6 +532,16 @@ export function Composer({
   // Kept beside the text under the same key, so leaving the panel with a
   // pasted screenshot and coming back finds it still attached.
   const { images, files, setImages, setFiles } = usePending(draftKey)
+
+  // Memoised on the draft: the composer re-renders for plenty that is not
+  // typing (a streaming panel above it, menu state), and re-tokenizing the
+  // whole draft each time is pure repeat work. The image count is a dependency
+  // because it decides which `image NN` tokens are references at all.
+  const mirrorTokens = useMemo(
+    () => tokenizeMarkdown(value, isRef, images.length),
+    [value, isRef, images.length]
+  )
+
   const [rejected, setRejected] = useState<string[]>([])
   // Set while the file picker is (or just was) up: the attach button's hover
   // style is suppressed until the pointer proves it is still there.
@@ -680,6 +686,20 @@ export function Composer({
     if (e.key === 'Backspace' && !e.altKey && !e.metaKey && !e.ctrlKey) {
       const el = e.currentTarget
       if (el.selectionStart === el.selectionEnd) {
+        // An image's token IS the image: erasing the words takes the picture
+        // with it, chip and all. Leaving the attachment behind would send the
+        // agent an image nothing in the message points at.
+        const img = imageRefBefore(value, el.selectionStart)
+        if (img && img.n >= 1 && img.n <= images.length) {
+          e.preventDefault()
+          const next = renumberImageRefs(value, img.n, images.length)
+          setImages((prev) => prev.filter((_, i) => i !== img.n - 1))
+          onChange(next)
+          // Every later token keeps its length through the renumbering, so what
+          // follows the cut still sits the same distance from the end.
+          setCaret(next.length - (value.length - img.end))
+          return
+        }
         const cut = refBefore(value, el.selectionStart, isRef)
         if (cut) {
           e.preventDefault()
@@ -790,7 +810,7 @@ export function Composer({
     const at = images.findIndex((x) => x.id === id)
     if (at === -1) return
     setImages((prev) => prev.filter((x) => x.id !== id))
-    onChange(renumberImageRefs(value, at + 1))
+    onChange(renumberImageRefs(value, at + 1, images.length))
   }
 
   // Paste is the same gesture by another name: a screenshot on the clipboard

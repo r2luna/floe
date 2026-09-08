@@ -452,10 +452,12 @@ export const MCP_TOML = `# =====================================================
 #    url       = "https://mcp.example/…"   # http only
 #    command   = "npx"                     # stdio only
 #    args      = ["-y", "@some/mcp"]       # stdio only, optional
+#    env       = { API_KEY = "…" }         # stdio only, optional
+#    headers   = { Authorization = "Bearer …" }  # http only, optional
 #    enabled   = true                      # optional, defaults to true
 #
-#  A server that needs environment variables can wrap them:
-#    command = "env"
-#    args    = ["KEY=value", "npx", "-y", "@some/mcp"]
+#  env and headers are the credentials the server needs. They are secrets in a
+#  plain file: keep this one to yourself (chmod 600), and prefer a project file
+#  outside the repo over committing a token.
 # ==============================================================================
 `

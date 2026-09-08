@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
 import type { AgentQuestion, PermissionMode } from '../shared/types'
 import { dropSettled, sendAgentEvent } from './agent'
+import { codexThreadConfig } from './mcpHarness'
 import { resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
 
@@ -217,6 +218,16 @@ function onQuestion(reqId: number | string, params: Record<string, unknown>): vo
 }
 
 /**
+ * The question one codex session is parked on, in the shape the MCP prompt
+ * tools report Claude's in — so `session_prompts` answers for both runtimes
+ * rather than for whichever one happens to be Claude.
+ */
+export function codexPendingQuestion(key: string): { requestId: string; texts: string[] } | null {
+  const q = questionBySession.get(key)
+  return q ? { requestId: String(q.rpcId), texts: q.texts } : null
+}
+
+/**
  * Every codex session blocked on a question right now — the same authority
  * `waitingKeys()` is for Claude, so the renderer's `?` reconciles against one
  * answer whichever runtime asked.
@@ -326,7 +337,14 @@ export async function chatWithCodexServer(
       // Thread known but maybe from a previous server process — resume is
       // idempotent for a running thread, so just always rejoin it.
       try {
-        await request('thread/resume', { threadId, cwd: worktreePath, model: slug })
+        // The config does not survive the server process, so a resume restates
+        // it — otherwise a rejoined thread quietly loses its Floe tools.
+        await request('thread/resume', {
+          threadId,
+          cwd: worktreePath,
+          model: slug,
+          config: codexThreadConfig(key, worktreePath)
+        })
       } catch {
         threadId = undefined // rollout gone — start over
       }
@@ -338,7 +356,10 @@ export async function chatWithCodexServer(
         // See codexPosture: the sandbox is the setting that carries the mode,
         // and "never" keeps an unanswerable approval request from wedging us.
         approvalPolicy: 'never',
-        sandbox: posture.sandbox
+        sandbox: posture.sandbox,
+        // Floe's own tools plus its MCP registry, scoped to this thread so the
+        // url carries THIS session's token (mcpHarness.ts).
+        config: codexThreadConfig(key, worktreePath)
       })
       threadId = String((started.thread as { id?: string })?.id ?? '')
       if (!threadId) throw new Error('codex thread/start returned no thread id.')
