@@ -82,6 +82,8 @@ const {
   activeTurnKeys,
   dropSettled,
   waitForTurn,
+  strandedReplayKeys,
+  runReplaySweep,
   sendToAgent,
   stopAgent,
   hasActiveTurn,
@@ -1308,4 +1310,116 @@ test('handleLine: two agents finishing together both close', () => {
     { kind: 'subagent-done', toolUseId: 't2', reply: 'two' }
   ])
   assert.equal(conn.subagents.size, 0)
+})
+
+// ── the stranded replay ─────────────────────────────────────────────────────
+// The 40-hour typing line. A replay left `running` with nothing behind it is
+// invisible to the watchdog above (it walks `conns`, and the whole point is
+// that there is no conn), while activeTurnKeys keeps reporting it and
+// replaySnapshot keeps handing the dead turn's `startedAt` back on every open.
+
+test('strandedReplayKeys: no live turn behind a running replay is a strand, after its own grace', () => {
+  const now = 100_000_000
+  const claude = { running: true, startedAt: now - 90_000, choice: { provider: 'claude' } }
+  const entries: [string, typeof claude][] = [['stranded', claude]]
+  // Claude holds a conn for as long as it works, so a replay without one is
+  // over — the grace window only covers the respawn a send performs.
+  assert.deepEqual(strandedReplayKeys(entries, () => false, now), ['stranded'])
+  assert.deepEqual(strandedReplayKeys(entries, () => true, now), [], 'a live turn is never swept')
+  // Inside the grace it is left alone: a send that is respawning right now has
+  // a moment where the replay is ahead of its conn.
+  assert.deepEqual(strandedReplayKeys(entries, () => false, claude.startedAt + 1_000), [])
+  // A finished replay is not a strand — nothing to close.
+  assert.deepEqual(strandedReplayKeys([['done', { running: false, startedAt: 0 }]], () => false, now), [])
+})
+
+test('strandedReplayKeys: a conn-less runtime is judged by a ceiling, not by the missing conn', () => {
+  // codex, opencode and the local agents keep no conn BY DESIGN, so its absence
+  // says nothing about them. Sweeping them on Claude's grace would kill a turn
+  // three minutes into a legitimate run.
+  const now = 100_000_000
+  const codex: [string, { running: boolean; startedAt: number; choice: { provider: string } }][] = [
+    ['cx', { running: true, startedAt: now - 600_000, choice: { provider: 'codex' } }]
+  ]
+  assert.deepEqual(strandedReplayKeys(codex, () => false, now), [], 'ten minutes in, still working')
+  assert.deepEqual(strandedReplayKeys(codex, () => false, now + 3_600_000), ['cx'], 'past the ceiling, released')
+})
+
+test('sendToAgent: a child that died MID-TURN takes its turn down with it', () => {
+  // The reported bug, end to end. The panel re-keys itself to the claudeId the
+  // moment the CLI reports one, so the next send arrives under a name the conn
+  // is not filed under — it resolves to the same child, which by then is a
+  // zombie. Dropping that conn silently (what this used to do) left the replay
+  // under the OLD name saying `running` with nobody able to end it: the
+  // watchdog cannot see a replay, and the late `close` is dropped by isCurrent.
+  addCreatedSession({ id: 'zombie-1', worktreePath: WT })
+  const { win, events, spawn } = startSession('zombie-1')
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'zombie-cid' })
+  assert.ok(activeTurnKeys().includes('zombie-1'), 'the turn is genuinely in flight')
+
+  // Mid-turn death, the zombie shape: reaped by the OS, exit unobserved, pipe
+  // gone. No `close` is ever emitted for it.
+  spawn.child.stdin.destroyed = true
+  const at = spawned.length
+  sendToAgent(win, 'zombie-cid', WT, 'still there?', DEFAULT_OPTS)
+  assert.equal(spawned.length, at + 1, 'respawned rather than writing into the corpse')
+
+  assert.ok(!activeTurnKeys().includes('zombie-1'), 'the dead turn is no longer reported as in flight')
+  assert.ok(events.some((e) => e.kind === 'done'), 'and the panel was told, so the typing line comes off')
+  // The one the user actually sees: reopening the chat must not be handed the
+  // dead turn's clock. Before the fix this answered with the strand's
+  // `startedAt` — the 40 hours — and cut the transcript there.
+  const snapshot = replaySnapshot('zombie-cid')
+  assert.equal(snapshot.running, true, 'the NEW turn is the one in flight')
+  assert.equal(snapshot.startedAt, replaySnapshot('zombie-1').startedAt, 'timed from the send just made')
+  endSession(win, 'zombie-cid', spawned[at].child)
+})
+
+test('runReplaySweep: a strand nothing else can reach is released, and said out loud', () => {
+  // The safety net for every shape not enumerated above, and the only cover the
+  // conn-less runtimes have at all. The user has been watching a spinner that
+  // was lying to them, so this one speaks rather than closing quietly.
+  const { win, events } = fakeWin()
+  markTurnStart('sweep-1', { provider: 'claude', mode: 'default' }, win)
+  assert.ok(activeTurnKeys().includes('sweep-1'))
+
+  runReplaySweep(Date.now() + 30_000)
+  assert.ok(activeTurnKeys().includes('sweep-1'), 'inside the grace, left alone')
+
+  runReplaySweep(Date.now() + 120_000)
+  assert.ok(!activeTurnKeys().includes('sweep-1'), 'past it, released')
+  assert.deepEqual(kinds(events).slice(-2), ['error', 'done'])
+  assert.equal(replaySnapshot('sweep-1').running, false, 'and reopening the chat sees a finished turn')
+})
+
+test('runReplaySweep: a live turn is never swept, however long it runs', () => {
+  // The other half. A turn CAN legitimately run for hours (a long Bash, an
+  // agent out on a big job), and a sweep that closed it would be the same bug
+  // pointing the other way: the answer still streaming into a panel that has
+  // already been told the turn ended.
+  addCreatedSession({ id: 'longrun-1', worktreePath: WT })
+  const { win, events, spawn } = startSession('longrun-1')
+  runReplaySweep(Date.now() + 48 * 3_600_000)
+  assert.ok(activeTurnKeys().includes('longrun-1'), 'two days into a live turn, still running')
+  assert.ok(!events.some((e) => e.kind === 'done'))
+  endSession(win, 'longrun-1', spawn.child)
+})
+
+test('runReplaySweep: a strand beside a working alias is closed quietly', () => {
+  // One session answers to two names and a panel listens for BOTH, so a `done`
+  // sent under the stranded name would take the typing line off the turn that
+  // is genuinely in flight under the other one. Closing the replay is enough:
+  // it is all replaySnapshot and activeTurnKeys read.
+  addCreatedSession({ id: 'twin-old', worktreePath: WT })
+  linkCreatedSession('twin-old', 'twin-cid')
+  const { win, events } = fakeWin()
+  markTurnStart('twin-old', { provider: 'claude', mode: 'default' }, win)
+  // The live half, under the name the panel now holds.
+  const live = startSession('twin-cid', 'the real turn')
+
+  runReplaySweep(Date.now() + 120_000)
+  assert.ok(!activeTurnKeys().includes('twin-old'), 'the strand is gone')
+  assert.ok(activeTurnKeys().includes('twin-cid'), 'and the live turn is untouched')
+  assert.ok(!events.some((e) => e.kind === 'done'), 'nothing that would clear the live spinner was sent')
+  endSession(live.win, 'twin-cid', live.spawn.child)
 })

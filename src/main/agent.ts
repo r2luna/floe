@@ -201,10 +201,16 @@ const seqs = new Map<string, number>()
 // the panel's initial read already has it.
 const replays = new Map<string, AgentReplay>()
 
+// The window a turn was announced to, so the sweep below can close a replay
+// nothing else can still reach. Kept beside `replays` rather than inside one:
+// an AgentReplay crosses the IPC boundary, and a BrowserWindow does not.
+const replayWins = new Map<string, BrowserWindow>()
+
 export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?: BrowserWindow): void {
   // Last turn's answer is not this one's — a waiter parked now must not be
   // handed the reply to the question before it.
   runtimeText.delete(key)
+  if (win) replayWins.set(key, win)
   replays.set(key, {
     running: true,
     lastSeq: seqs.get(key) ?? 0,
@@ -257,6 +263,48 @@ export function replayInFlight(
 ): boolean {
   if (!replay?.running) return false
   return !conn || conn.turnActive
+}
+
+/**
+ * Close a turn whose replay still says `running` with nothing left to end it.
+ *
+ * The `done` is what a panel is waiting for, but sending it is not always safe:
+ * one session answers to two names and a panel listens for BOTH, so a strand
+ * closed while the session's OTHER name is genuinely working would take the
+ * typing line off the live turn. When that is the case the replay is only
+ * marked finished — which is all replaySnapshot and activeTurnKeys need to stop
+ * serving a turn that ended long ago.
+ */
+function closeStrandedReplay(
+  key: string,
+  win: BrowserWindow | undefined,
+  why: string,
+  text = '',
+  notice?: string
+): void {
+  const replay = replays.get(key)
+  if (!replay?.running) return
+  const busyAlias = sessionNames(key).some((n) => n !== key && conns.get(n)?.turnActive)
+  log('replay-strand-closed', {
+    key,
+    why,
+    ageMs: replay.startedAt ? Date.now() - replay.startedAt : 0,
+    provider: replay.choice?.provider ?? 'claude',
+    busyAlias,
+    emitted: Boolean(win) && !busyAlias
+  })
+  if (win && !busyAlias) {
+    if (notice) send(win, key, { kind: 'error', message: notice })
+    // `done` travels the ordinary path, so recordForReplay clears `running`
+    // and the panel takes the line off exactly as it would on a real ending.
+    send(win, key, { kind: 'done', ok: false })
+  } else {
+    replay.running = false
+    replay.events = []
+  }
+  // Either way the turn is over, and a parked send_message(wait) must not go on
+  // holding another session open for an answer that is never coming.
+  resolveWaiters(key, text)
 }
 
 export function replaySnapshot(key: string): AgentReplay {
@@ -635,7 +683,26 @@ export function sendToAgent(
   // The process may have died while we were idle (machine slept, claude reaped)
   // before `close` fired. Writing to its stdin would break; drop it so we respawn
   // and --resume from the persisted session id instead.
+  //
+  // "While we were idle" was the assumption, and it is not always true: the
+  // child can die MID-TURN, and then nothing ever ends that turn. Its late
+  // `close` is dropped by isCurrent once this key is deleted, the watchdog only
+  // walks `conns` so it never sees a replay again — and the replay left
+  // `running` under this name is the eternal "is typing", with a `startedAt`
+  // that reopening the chat then cuts the transcript at. This is the last
+  // moment anything holds both the dead conn and the name it ran under, so the
+  // turn is closed here rather than left for a sweep to find hours later.
   if (conn && isChildDead(conn.child)) {
+    stopTaskWatcher(conn)
+    conn.turnActive = false
+    conn.turnClosed = true
+    // Whatever it streamed before it died is still what it said — flushed
+    // first, like every other ending, so it lands above the `done` and not
+    // into the conn that replaces it.
+    flushDeltas(win, connKey, conn)
+    // Silent otherwise: the user is sending their next message right now, and
+    // the respawn below --resumes the session. The `done` is the correction.
+    closeStrandedReplay(connKey, win, 'dead-child', conn.lastAssistantText)
     conns.delete(connKey)
     connKey = key
     conn = undefined
@@ -985,6 +1052,20 @@ const SILENT_RECOVER_MS = 300_000
 // turnMs:4045077) that only ended when the user manually hit Stop. No real
 // Bash tool call in this app plausibly runs this silent, so recover instead.
 const SILENT_RECOVER_MS_STALLED = 1_200_000
+// A replay left `running` with no live turn behind it is a strand the watchdog
+// above cannot see: it walks `conns`, and this is precisely the state where
+// there is no conn to walk. Before the sweep below, such a turn stayed "is
+// typing" until the app was restarted — activeTurnKeys kept reporting it, so
+// the renderer's own correction believed it, and replaySnapshot handed the dead
+// turn's `startedAt` back on every reopen. That is the 40-hour clock.
+//
+// Claude holds a conn for as long as it works, so its replay without one is
+// stranded the moment the grace window passes — the window only covers the
+// respawn a send performs. The one-shot runtimes (codex, opencode…) keep no
+// conn by design, so nothing about them can be concluded from its absence and
+// only a hard ceiling can judge them.
+const CLAUDE_STRAND_MS = 60_000
+const RUNTIME_STRAND_MS = 3_600_000
 let watchdog: NodeJS.Timeout | null = null
 
 // What the watchdog should do with a single turn this tick — a pure function so
@@ -1105,9 +1186,58 @@ export function runWatchdogTick(entries: Iterable<[string, Conn]>, now: number):
   }
 }
 
+/**
+ * The replay keys whose turn is over in every way but the flag.
+ *
+ * Pure, and exported for its unit test, for the same reason `watchdogAction`
+ * is: the maps it reads have no seam a test can reach, and the whole bug is one
+ * branch of the decision. `hasLiveTurn` is asked rather than `conns` read
+ * directly — a conn that exists but is idle is exactly as stranded as no conn
+ * at all, and activeTurnKeys reports both.
+ */
+export function strandedReplayKeys(
+  entries: Iterable<[string, { running: boolean; startedAt?: number; choice?: { provider?: string } }]>,
+  hasLiveTurn: (key: string) => boolean,
+  now: number
+): string[] {
+  const stranded: string[] = []
+  for (const [key, replay] of entries) {
+    if (!replay.running || hasLiveTurn(key)) continue
+    const provider = replay.choice?.provider ?? 'claude'
+    const ceiling = provider === 'claude' ? CLAUDE_STRAND_MS : RUNTIME_STRAND_MS
+    if (now - (replay.startedAt ?? now) > ceiling) stranded.push(key)
+  }
+  return stranded
+}
+
+// One sweep over the replays. Isolated per key like runWatchdogTick's loop: a
+// single destroyed window must not stop every other strand from being closed.
+export function runReplaySweep(now: number): void {
+  for (const key of strandedReplayKeys(replays, (k) => conns.get(k)?.turnActive === true, now)) {
+    try {
+      closeStrandedReplay(
+        key,
+        replayWins.get(key),
+        'watchdog',
+        '',
+        // Said, unlike the dead-child path: there the user is already sending
+        // their next message, here they are watching a spinner that has been
+        // lying to them and nothing else will ever explain it.
+        'That turn never reported back — the session was released. Send your message again.'
+      )
+    } catch (e) {
+      log('watchdog-error', { key, message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+}
+
 export function startAgentWatchdog(): void {
   if (watchdog) return
-  watchdog = setInterval(() => runWatchdogTick(conns, Date.now()), WATCHDOG_MS)
+  watchdog = setInterval(() => {
+    const now = Date.now()
+    runWatchdogTick(conns, now)
+    runReplaySweep(now)
+  }, WATCHDOG_MS)
   watchdog.unref?.() // never keep the app alive just for the watchdog
 }
 
