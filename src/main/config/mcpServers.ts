@@ -69,6 +69,10 @@ function parseServers(raw: string, file: string, scope: McpServerEntry['scope'])
       url,
       command,
       args: t.strArray('args'),
+      // Credentials, the reason a registered server can actually connect: an
+      // API key for a stdio command, a bearer token for an http one.
+      env: t.strTable('env'),
+      headers: t.strTable('headers'),
       enabled: t.has('enabled') ? t.bool('enabled', true) : true,
       file,
       index
@@ -121,9 +125,14 @@ function fileFor(scope: McpServerEntry['scope'], projectPath?: string): string {
   return path
 }
 
+// 0600, unlike every other config Floe writes: this one holds `env` and
+// `headers` — API keys and bearer tokens — and a default umask would leave them
+// world-readable.
+const SECRET = 0o600
+
 function edit(path: string, edits: TomlEdit[]): void {
   const raw = existsSync(path) ? readFileSync(path, 'utf8') : MCP_TOML
-  writeTomlFile(path, editToml(raw, edits))
+  writeTomlFile(path, editToml(raw, edits), SECRET)
 }
 
 export interface NewMcpServer {
@@ -132,8 +141,12 @@ export interface NewMcpServer {
   url?: string
   command?: string
   args?: string[]
+  env?: Record<string, string>
+  headers?: Record<string, string>
   enabled?: boolean
 }
+
+const hasKeys = (o?: Record<string, string>): boolean => !!o && Object.keys(o).length > 0
 
 export function addMcpServer(scope: McpServerEntry['scope'], server: NewMcpServer, projectPath?: string): McpServerEntry {
   const name = checkName(server.name)
@@ -149,6 +162,8 @@ export function addMcpServer(scope: McpServerEntry['scope'], server: NewMcpServe
   if (server.url) fields.push(['url', server.url])
   if (server.command) fields.push(['command', server.command])
   if (server.args?.length) fields.push(['args', server.args])
+  if (hasKeys(server.env)) fields.push(['env', server.env as Record<string, string>])
+  if (hasKeys(server.headers)) fields.push(['headers', server.headers as Record<string, string>])
   if (server.enabled === false) fields.push(['enabled', false])
   edit(path, [{ op: 'appendEntry', table: 'server', fields }])
   const made = readFile(path, scope).find((s) => s.name === name)
@@ -184,6 +199,16 @@ export function updateMcpServer(name: string, patch: McpServerPatch, projectPath
   if (patch.args !== undefined) {
     if (!patch.args.length) edits.push({ op: 'unset', table: 'server', key: 'args', index: found.index })
     else set('args', patch.args)
+  }
+  // An empty table is how a patch says "drop the credentials", the same way an
+  // empty string drops a url.
+  if (patch.env !== undefined) {
+    if (!hasKeys(patch.env)) edits.push({ op: 'unset', table: 'server', key: 'env', index: found.index })
+    else set('env', patch.env)
+  }
+  if (patch.headers !== undefined) {
+    if (!hasKeys(patch.headers)) edits.push({ op: 'unset', table: 'server', key: 'headers', index: found.index })
+    else set('headers', patch.headers)
   }
   if (patch.enabled !== undefined) set('enabled', patch.enabled)
   if (edits.length) edit(found.file, edits)

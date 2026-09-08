@@ -9,8 +9,10 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { z } from 'zod'
 import type {
   AgentRunOptions,
+  Project,
   McpCommand,
   McpCommandResult,
+  McpServerEntry,
   PermissionMode,
   Worktree
 } from '../shared/types'
@@ -61,6 +63,39 @@ import {
   refuseReason
 } from './queries'
 import type { Route } from '../shared/mentions'
+import { installEverywhere, installMessage } from './mcpInstall'
+import { log } from './log'
+import { getClaudeInfo } from './claudeInfo'
+import { startMcpAuth } from './mcpAuth'
+import { existsSync, realpathSync, rmSync } from 'node:fs'
+import {
+  addProjectByPath,
+  removeProject,
+  renameProject,
+  setProjectGroup,
+  setProjectPinned,
+  setProjectReadOnly
+} from './projects'
+import { listCommands, removeCommand, type ProjectCommand } from './commands'
+import {
+  commandOutput,
+  commandRuns,
+  isCommandRunning,
+  restartCommand,
+  startCommand,
+  stopCommand
+} from './commandRunner'
+import { answerQuestion, pendingPrompts, respondPermission, type PendingPrompt } from './agent'
+import { answerCodexQuestion, codexPendingQuestion } from './codexServer'
+import {
+  renameCreatedSession,
+  setCreatedSessionChoice
+} from './sessionStore'
+import { closeSessionFully } from './sessionClose'
+import { clearReview, commitFileDiff, hasReviewCheckpoint, restoreReview, reviewCommits } from './git'
+import { localUsage } from './localAgents'
+import { copyPlan, PLANS_DIR, readImplementPhases } from './plans'
+import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort } from './mcpHarness'
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import {
@@ -126,6 +161,28 @@ function getWindow(): BrowserWindow | undefined {
 function pushCommand(command: McpCommand): void {
   const win = getWindow()
   if (win && !win.isDestroyed()) win.webContents.send('mcp:command', command)
+}
+
+// Ask the renderer to run one of its own commands, and don't wait for it: the
+// tool already did the work in main, this is only the repaint. `project.reload`
+// is the one that matters — the sidebar's project list re-reads on nothing
+// else, so a project added over MCP would otherwise not show up until the user
+// asked for it themselves.
+function pushRefresh(commandId: string): void {
+  pushCommand({ kind: 'run_command', callerKey: 'refresh', requestId: randomUUID(), commandId })
+}
+
+// A raw renderer event (`sessions:changed`), for state main changed behind the
+// UI's back that has a listener already.
+function pushEvent(channel: string): void {
+  const win = getWindow()
+  if (win && !win.isDestroyed()) win.webContents.send(channel)
+}
+
+/** The branch a worktree is on, as the project's worktree list reports it. */
+async function branchOf(project: string, worktree: string): Promise<string> {
+  const found = (await listWorktrees(project)).find((w) => w.path === worktree)
+  return found?.branch ?? ''
 }
 
 // Tell the renderer a project's worktree set changed (e.g. via create_worktree),
@@ -347,10 +404,45 @@ function textResult(value: unknown): { content: Array<{ type: 'text'; text: stri
 // What every tool answers with — tools never throw, they answer `{ error }`.
 type ToolResult = ReturnType<typeof textResult>
 
+/**
+ * The registered project a caller means, whatever spelling it used.
+ *
+ * On macOS `/tmp` is a symlink to `/private/tmp`, so the path a project is
+ * stored under is rarely the one an agent types. The project tools match on the
+ * resolved form and then act on the STORED path — the store's own lookups are
+ * exact, and a near-miss there is silent: `removeProject` on a path it does not
+ * know answers with the full list, exactly as if it had worked.
+ */
+function registeredProject(path: string): Project | undefined {
+  const projects = listProjects()
+  const wanted = realPath(path)
+  return projects.find((p) => p.path === path || realPath(p.path) === wanted)
+}
+
+/** realpath, or the path as given when it does not exist (yet). */
+function realPath(path: string): string {
+  try {
+    return realpathSync(path)
+  } catch {
+    return path
+  }
+}
+
 // A project path, or a worktree inside one — callers pass either. Omitted means
 // "global only", which is not the same as "this project".
+//
+// Resolved first, and resolved on the way out: the store keeps repo roots as
+// `repoRoot()` reported them, so an agent that says `/tmp/x` where the project
+// lives at `/private/tmp/x` must not be handed its own spelling back. It would
+// be used to CREATE a second project directory for the same repo — which is
+// exactly what `add_project_command` did before this.
+export function projectRoot(project: string): string {
+  const at = realPath(project)
+  return projectFor(at) ?? projectFor(project) ?? at
+}
+
 function rootFor(project?: string): string | undefined {
-  return project ? (projectFor(project) ?? project) : undefined
+  return project ? projectRoot(project) : undefined
 }
 
 const sessionSummary = (s: CreatedSession): Record<string, unknown> => ({
@@ -376,7 +468,14 @@ function registerTools(server: McpServer, token: string): void {
   registerColonyTools(server)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
+  registerProjectTools(server)
   registerCommandTools(server, token)
+  registerCommandRunTools(server)
+  registerSessionStateTools(server, token)
+  registerSessionPickerTools(server)
+  registerReviewTools(server)
+  registerUsageTools(server)
+  registerPlanExtraTools(server)
   registerPluginToolsOn(server)
 }
 
@@ -1107,6 +1206,45 @@ function registerPlanTools(server: McpServer, token: string): void {
   )
 }
 
+function registerPlanExtraTools(server: McpServer): void {
+  server.tool(
+    'plan_phases',
+    "A spec's implementation phases, as the Plans tab lists them: what each phase is called and whether it is done. The shape `/implement` walks.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      branch: z.string().optional().describe("Which branch's specs/ folder. Defaults to the worktree's own branch.")
+    },
+    async ({ worktree, branch }) => {
+      try {
+        return textResult(readImplementPhases(worktree, branch))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'copy_plan',
+    'Copy a plan into another worktree, so a worktree cut for a plan carries its own copy (plans do not travel with the branch). Refuses to overwrite a plan of the same name.',
+    {
+      worktree: z.string().describe('The worktree the plan is in now.'),
+      path: z.string().describe('The plan path relative to that worktree, from list_plans.'),
+      destination: z.string().describe('The worktree path to copy it into.')
+    },
+    async ({ worktree, path, destination }) => {
+      try {
+        const name = path.split('/').pop() ?? path
+        if (existsSync(join(destination, PLANS_DIR, name))) {
+          return textResult({ error: `${name} already exists in ${destination} — rename it or delete it first.` })
+        }
+        return textResult(copyPlan(worktree, path, destination))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
 function registerDrawingTools(server: McpServer, token: string): void {
   // --- Drawings -------------------------------------------------------------
   //
@@ -1425,7 +1563,7 @@ function registerColonyTools(server: McpServer): void {
     { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
     async ({ project }) => {
       try {
-        return textResult(boardFor(projectFor(project) ?? project))
+        return textResult(boardFor(projectRoot(project)))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1446,7 +1584,7 @@ function registerColonyTools(server: McpServer): void {
     },
     async ({ project, name, brief, kind, start }) => {
       try {
-        const root = projectFor(project) ?? project
+        const root = projectRoot(project)
         const task = addTask({ project: root, name, brief, kind: kind as TaskKind | undefined })
         const win = getWindow()
         if (start && win) {
@@ -1633,7 +1771,7 @@ function registerMcpRegistryTools(server: McpServer): void {
     async ({ project }) => {
       try {
         const root = rootFor(project)
-        return textResult(listMcpServers(root))
+        return textResult(listMcpServers(root).map(redactServer))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1650,14 +1788,22 @@ function registerMcpRegistryTools(server: McpServer): void {
       url: z.string().optional().describe('The server url (http transport).'),
       command: z.string().optional().describe('The command to run (stdio transport).'),
       args: z.array(z.string()).optional().describe('Arguments for the stdio command.'),
+      env: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('stdio only: environment the server needs, e.g. { API_KEY: "…" }. Stored in plain text in mcp.toml.'),
+      headers: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('http only: headers every request carries, e.g. { Authorization: "Bearer …" }. Stored in plain text in mcp.toml.'),
       enabled: z.boolean().optional().describe('Defaults to true.'),
       project: z.string().optional().describe('The repo root path (or a worktree path). Required for scope=project.')
     },
-    async ({ name, scope, transport, url, command, args, enabled, project }) => {
+    async ({ name, scope, transport, url, command, args, env, headers, enabled, project }) => {
       try {
         const root = rootFor(project)
-        const server_ = addMcpServer(scope, { name, transport, url, command, args, enabled } as NewMcpServer, root)
-        return textResult(server_)
+        const server_ = addMcpServer(scope, { name, transport, url, command, args, env, headers, enabled } as NewMcpServer, root)
+        return textResult(redactServer(server_))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1674,13 +1820,17 @@ function registerMcpRegistryTools(server: McpServer): void {
       url: z.string().optional().describe('Empty string removes the field.'),
       command: z.string().optional().describe('Empty string removes the field.'),
       args: z.array(z.string()).optional().describe('Empty array removes the field.'),
+      env: z.record(z.string(), z.string()).optional().describe('stdio credentials. An empty object removes them.'),
+      headers: z.record(z.string(), z.string()).optional().describe('http credentials. An empty object removes them.'),
       enabled: z.boolean().optional(),
       project: z.string().optional().describe('The repo root path (or a worktree path), for project entries.')
     },
-    async ({ name, new_name, transport, url, command, args, enabled, project }) => {
+    async ({ name, new_name, transport, url, command, args, env, headers, enabled, project }) => {
       try {
         const root = rootFor(project)
-        return textResult(updateMcpServer(name, { name: new_name, transport, url, command, args, enabled }, root))
+        return textResult(
+          redactServer(updateMcpServer(name, { name: new_name, transport, url, command, args, env, headers, enabled }, root))
+        )
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1704,6 +1854,459 @@ function registerMcpRegistryTools(server: McpServer): void {
       }
     }
   )
+
+  server.tool(
+    'mcp_server_status',
+    "Whether the registry's servers actually connect, as a session in this worktree sees them: connected, needs-auth or failed. This is the `claude:info` probe the MCP panel's chips come from, so it answers for Claude — the other harnesses report their own state in their own CLIs.",
+    { worktree: z.string().describe('The worktree path a session would run in.') },
+    async ({ worktree }) => {
+      try {
+        const info = await getClaudeInfo(worktree, mcpConfigFor('info-probe', worktree))
+        return textResult(info.mcpServers)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'authenticate_mcp_server',
+    "Start the OAuth flow for a registry server that reports needs-auth. Floe runs `claude mcp login <name>` in a PTY and opens the consent page: a person has to approve it in the browser, so call this, tell the user to finish it, and read the outcome from mcp_server_status — this answers as soon as the flow is under way, not when it succeeds. The server must be one Claude can see (Floe's registry reaches spawned sessions; `claude mcp login` reads Claude's own config). Never returns a token.",
+    {
+      name: z.string().describe('The server name, from list_mcp_servers.'),
+      worktree: z.string().describe('The worktree whose session the login is for.')
+    },
+    async ({ name, worktree }) => {
+      try {
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available — the consent page needs one.' })
+        startMcpAuth(win, worktree, name)
+        return textResult({ started: true, waitingOn: 'the user approving the consent page in the browser' })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
+/**
+ * An entry as a tool may report it: names of the credentials, never values.
+ *
+ * The registry holds API keys and bearer tokens now, and every caller of
+ * `list_mcp_servers` is an agent — including one running in a session the user
+ * did not open. The panel (a person, at their own machine) still shows the file.
+ */
+export function redactServer(s: McpServerEntry): McpServerEntry {
+  const mask = (o?: Record<string, string>): Record<string, string> | undefined =>
+    o && Object.fromEntries(Object.keys(o).map((k) => [k, '***']))
+  return { ...s, env: mask(s.env), headers: mask(s.headers) }
+}
+
+// --- Projects (the sidebar's own list — projects.ts) ------------------------
+// Registering a repo is the one thing an agent could not do at all: the
+// palette's `project.add` opens an input a person types into, so there was no
+// headless way in.
+
+function registerProjectTools(server: McpServer): void {
+  server.tool(
+    'add_project',
+    'Register a git repository with Floe, the way "Add project…" does. The path must be a git repo, and it is resolved to the repo root first. Adding one Floe already has is not an error — it answers with the project it had, and `created: false`.',
+    {
+      path: z.string().describe('Absolute path of the repository root.'),
+      group: z.string().optional().describe('Which sidebar group to put it in. Defaults to the first one.')
+    },
+    async ({ path, group }) => {
+      try {
+        const added = await addProjectByPath(path, group)
+        if (added.error) return textResult({ error: added.error })
+        pushRefresh('project.reload')
+        return textResult(added)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'remove_project',
+    "Forget a project. Destructive in Floe only — the repository and its worktrees stay on disk, but Floe's record of them (and the sessions listed under them) goes. Only on explicit intent.",
+    { path: z.string().describe('The repo root path, from list_projects.') },
+    async ({ path }) => {
+      try {
+        const found = registeredProject(path)
+        if (!found) return textResult({ error: `not a registered project: ${path}` })
+        const projects = removeProject(found.path)
+        pushRefresh('project.reload')
+        return textResult({ removed: found.path, projects })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'update_project',
+    "A project's own settings: what it is called, which group it sits in, whether it is pinned to the top, and whether it is read-only (a read-only project refuses worktree creation and edits).",
+    {
+      path: z.string().describe('The repo root path, from list_projects.'),
+      name: z.string().optional().describe('Rename it in the sidebar.'),
+      group: z.string().optional().describe('Move it to this group.'),
+      pinned: z.boolean().optional().describe('Pin it to the top of the list.'),
+      read_only: z.boolean().optional().describe('Refuse changes in this project.')
+    },
+    async ({ path, name, group, pinned, read_only }) => {
+      try {
+        const found = registeredProject(path)
+        if (!found) return textResult({ error: `not a registered project: ${path}` })
+        const at = found.path
+        let projects = listProjects()
+        if (name !== undefined) projects = renameProject(at, name)
+        if (group !== undefined) projects = setProjectGroup(at, group)
+        if (pinned !== undefined) projects = setProjectPinned(at, pinned)
+        if (read_only !== undefined) projects = setProjectReadOnly(at, read_only)
+        pushRefresh('project.reload')
+        return textResult(projects.find((p) => p.path === at))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
+// --- The worktree's registered processes, running (commandRunner.ts) --------
+// `list_project_commands` / `add_project_command` write the definitions; these
+// four are the buttons: run, stop, read the log, drop the row. The UI's own
+// `command.run` acts on whatever the cursor is on, which is no use to an agent.
+
+/** One command row, resolved from a name or an id, in the worktree it runs in. */
+function commandRow(
+  worktree: string,
+  command: string
+): { row: ProjectCommand; key: string; project: string; at: string } | { error: string } {
+  // Resolved once, then used for everything below. `projectFor` prefix-matches
+  // stored paths, so `/tmp/x` finds nothing when the project lives at
+  // `/private/tmp/x` — and a run key built from the caller's spelling would be a
+  // SECOND key for a command the UI is already running under its own.
+  const at = realPath(worktree)
+  const project = projectFor(at)
+  if (!project) return { error: `no registered project owns ${worktree}` }
+  const rows = listCommands(project, at)
+  const row = rows.find((c) => c.id === command || c.name.toLowerCase() === command.toLowerCase())
+  if (!row) return { error: `no command "${command}" here — this worktree has: ${rows.map((c) => c.name).join(', ') || 'none'}` }
+  // The key the renderer uses, so main is tracking ONE run per command whether
+  // it was started from a keybinding or from here.
+  return { row, key: `${at}#${row.id}`, project, at }
+}
+
+function registerCommandRunTools(server: McpServer): void {
+  server.tool(
+    'run_project_command',
+    "Start (or restart) one of the worktree's registered processes — the command pane's `r`. Only a command already in commands.toml: this runs a stored definition, never arbitrary shell.",
+    {
+      worktree: z.string().describe('The worktree path to run it in.'),
+      command: z.string().describe('The command name or id, from list_project_commands.')
+    },
+    async ({ worktree, command }) => {
+      try {
+        const found = commandRow(worktree, command)
+        if ('error' in found) return textResult(found)
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No window available to run a command in.' })
+        const { row, key, at } = found
+        const branch = await branchOf(found.project, at)
+        // 0×0: the log panel resizes the PTY when it attaches, exactly as it
+        // does for a command started from a keybinding.
+        const start = isCommandRunning(key) ? restartCommand : startCommand
+        start(win, key, row.cwd || at, branch, row.command, 0, 0, row.watch, row.autoRestart)
+        return textResult({ started: row.name, key })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'stop_project_command',
+    'Stop a running registered process (and its file watcher, so it does not come straight back).',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      command: z.string().describe('The command name or id.')
+    },
+    async ({ worktree, command }) => {
+      try {
+        const found = commandRow(worktree, command)
+        if ('error' in found) return textResult(found)
+        stopCommand(getWindow(), found.key)
+        return textResult({ stopped: found.row.name })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'read_command_output',
+    "The tail of a running command's output — what the log panel shows, for a caller with no panel. Also reports whether it is still running.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      command: z.string().describe('The command name or id.'),
+      limit: z.number().optional().describe('How many lines from the end (default 200).')
+    },
+    async ({ worktree, command, limit }) => {
+      try {
+        const found = commandRow(worktree, command)
+        if ('error' in found) return textResult(found)
+        const run = commandRuns().find((r) => r.key === found.key)
+        return textResult({
+          name: found.row.name,
+          running: isCommandRunning(found.key),
+          state: run?.state,
+          exitCode: run?.exitCode,
+          output: commandOutput(found.key, limit ?? 200)
+        })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'remove_project_command',
+    'Delete a registered process from commands.toml. Stops it first if it is running — a row can be removed, its process cannot be orphaned.',
+    {
+      worktree: z.string().describe('The worktree path (the entry may be scoped to it).'),
+      command: z.string().describe('The command name or id.')
+    },
+    async ({ worktree, command }) => {
+      try {
+        const found = commandRow(worktree, command)
+        if ('error' in found) return textResult(found)
+        // Unconditionally, not `if running`: during an auto-restart backoff the
+        // run reads as stopped while its timer is still armed, and a removed row
+        // whose process respawns has nothing left to stop it with.
+        stopCommand(getWindow(), found.key)
+        return textResult(removeCommand(found.project, found.at, found.row.id))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
+// --- Unblocking and steering a session --------------------------------------
+
+/**
+ * What a session is parked on, whichever runtime asked. Claude's prompts live on
+ * its conn (permissions and questions both); codex keeps its questions on the
+ * app-server thread, and nothing else can ask at all.
+ */
+function promptsFor(key: string): PendingPrompt[] {
+  const codex = codexPendingQuestion(key)
+  return codex
+    ? [{ requestId: codex.requestId, kind: 'question', questions: codex.texts.map((q) => ({ question: q, options: [] })) }]
+    : pendingPrompts(key)
+}
+
+function registerSessionStateTools(server: McpServer, token: string): void {
+  server.tool(
+    'session_prompts',
+    "What a session is blocked on: the AskUserQuestion prompts and tool-permission requests it raised and nobody has answered. `list_sessions` reports THAT one is waiting (needsYou); this reports what it is waiting for.",
+    { session_id: z.string().describe('The Floe session id.') },
+    async ({ session_id }) => {
+      const target = findSessionAny(session_id)
+      if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+      return textResult(promptsFor(connKeyFor(target)))
+    }
+  )
+
+  server.tool(
+    'answer_session_prompt',
+    [
+      'Answer a prompt from session_prompts: `answer` for a question, `allow` for a tool permission.',
+      'Only for a session THIS caller created (create_session) — a session the user is sitting in front of is theirs to answer,',
+      'and quietly approving its tool permissions from another agent is not something Floe will do.'
+    ].join(' '),
+    {
+      session_id: z.string().describe('The Floe session id, from session_prompts.'),
+      request_id: z.string().describe('The prompt id, from session_prompts.'),
+      answer: z.string().optional().describe('The reply to a question.'),
+      allow: z.boolean().optional().describe('For a permission: true runs the tool, false refuses it.')
+    },
+    async ({ session_id, request_id, answer, allow }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        if (target.spawnedBy !== token) {
+          return textResult({ error: 'That session was not created by this one — only its owner may answer for it.' })
+        }
+        const key = connKeyFor(target)
+        // The request has to still be pending, and be the kind being answered:
+        // the responders below take an unknown id without complaint (they send
+        // a control response for `{}`), so an agent answering a stale prompt
+        // would be told it worked.
+        const prompt = promptsFor(key).find((p) => p.requestId === request_id)
+        if (!prompt) {
+          return textResult({ error: `Nothing is waiting on ${request_id} — call session_prompts for what is.` })
+        }
+        if (allow !== undefined) {
+          if (prompt.kind !== 'permission') return textResult({ error: 'That one is a question — answer it with `answer`.' })
+          respondPermission(key, request_id, allow)
+          return textResult({ answered: request_id, allowed: allow })
+        }
+        if (answer === undefined) return textResult({ error: 'Pass `answer` for a question or `allow` for a permission.' })
+        if (prompt.kind !== 'question') return textResult({ error: 'That one is a tool permission — answer it with `allow`.' })
+        // Codex questions travel the app-server's own JSON-RPC, Claude's the
+        // control channel. Same order index.ts answers them in.
+        if (!answerCodexQuestion(key, [[answer]])) answerQuestion(key, request_id, answer)
+        return textResult({ answered: request_id })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+}
+
+// Steering one from outside: the composer's picker, and the close button.
+function registerSessionPickerTools(server: McpServer): void {
+  server.tool(
+    'update_session',
+    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. Takes effect on its next turn.",
+    {
+      session_id: z.string().describe('The Floe session id.'),
+      harness: z.enum(HARNESSES as [string, ...string[]]).optional().describe('Who answers from now on.'),
+      model: z.string().optional().describe("That harness's own model slug."),
+      effort: z.enum(EFFORTS).optional().describe('How hard to think.'),
+      mode: z
+        .enum(MODES.map((m) => m.id) as [PermissionMode, ...PermissionMode[]])
+        .optional()
+        .describe('plan, default (ask), acceptEdits (auto) or skip (bypass). Snapped to the nearest mode the harness can do.'),
+      title: z.string().optional().describe('Rename it in the sidebar.')
+    },
+    async ({ session_id, harness, model, effort, mode, title }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        if (title !== undefined) renameCreatedSession(target.id, title)
+        if (harness || model || effort || mode) {
+          // One write, because these four are one choice: a mode the new
+          // harness cannot do is snapped here rather than failing the turn, and
+          // a model belongs to the harness that offered it — switching harness
+          // without naming one clears it back to that harness's own default
+          // rather than handing codex an `opus`.
+          const provider = harness ?? target.provider
+          const switched = harness !== undefined && harness !== (target.provider ?? 'claude')
+          setCreatedSessionChoice(target.id, {
+            provider,
+            model: model ?? (switched ? '' : undefined),
+            effort,
+            mode: mode ? nearestMode(mode, provider) : undefined
+          })
+        }
+        pushEvent('sessions:changed')
+        return textResult(sessionSummary(findSessionAny(session_id) ?? target))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'close_session',
+    'Close a session for good: its turn is stopped, its side conversations are dropped and it leaves the sidebar. The transcript on disk stays. Destructive — only on explicit intent.',
+    { session_id: z.string().describe('The Floe session id.') },
+    async ({ session_id }) => {
+      try {
+        const target = findSessionAny(session_id)
+        if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        const win = getWindow()
+        if (win) stopAgent(win, connKeyFor(target))
+        closeSessionFully(win ?? null, {
+          id: target.id,
+          worktreePath: target.worktreePath,
+          claudeId: target.claudeId
+        })
+        pushEvent('sessions:changed')
+        return textResult({ closed: target.id })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
+// --- Review: the commits, not just the working tree -------------------------
+
+function registerReviewTools(server: McpServer): void {
+  server.tool(
+    'list_commits',
+    "The commits on this branch since its review base — what the Changes panel lists above the working diff, newest first.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      limit: z.number().optional().describe('How many to return (default 50).')
+    },
+    async ({ worktree, limit }) => {
+      try {
+        const commits = await reviewCommits(worktree)
+        return textResult(commits.slice(0, limit ?? 50))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'commit_diff',
+    'The diff one commit made to one file (paths come from list_commits). For the uncommitted work, use file_diff.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      commit: z.string().describe('The commit hash, from list_commits.'),
+      path: z.string().describe('The file path relative to the worktree.')
+    },
+    async ({ worktree, commit, path }) => {
+      try {
+        return textResult(await commitFileDiff(worktree, commit, path))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'set_review_base',
+    "Move the line the Changes panel measures from. `clear` marks everything up to now as reviewed (the diff goes empty and rebuilds as new work lands); `restore` puts the base back where the branch started. `status` just reports which of the two it is on.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      action: z.enum(['clear', 'restore', 'status']).describe('What to do with the review base.')
+    },
+    async ({ worktree, action }) => {
+      try {
+        if (action === 'clear') return textResult({ cleared: await clearReview(worktree) })
+        if (action === 'restore') {
+          restoreReview(worktree)
+          return textResult({ restored: true })
+        }
+        return textResult({ cleared: hasReviewCheckpoint(worktree) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+}
+
+function registerUsageTools(server: McpServer): void {
+  server.tool(
+    'harness_usage',
+    "Every harness's own account state: which plan window is open, how much of it is spent, when it resets. What the topbar gauge reads, for an agent deciding whether to hand work to another harness.",
+    {},
+    async () => {
+      try {
+        return textResult(await localUsage())
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
 }
 
 function registerCommandTools(server: McpServer, token: string): void {
@@ -1722,7 +2325,7 @@ function registerCommandTools(server: McpServer, token: string): void {
     },
     async ({ project }) => {
       try {
-        return textResult(projectCommands(projectFor(project) ?? project))
+        return textResult(projectCommands(projectRoot(project)))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1745,7 +2348,7 @@ function registerCommandTools(server: McpServer, token: string): void {
     },
     async ({ project, name, command, cwd, auto_start, auto_restart, watch, notify, worktree }) => {
       try {
-        const root = projectFor(project) ?? project
+        const root = projectRoot(project)
         const commands = defineCommand(root, {
           name,
           command,
@@ -1912,6 +2515,8 @@ export function startMcpServer(getWindow: () => BrowserWindow | undefined): void
   const onListening = (): void => {
     const addr = httpServer?.address()
     if (addr && typeof addr === 'object') serverPort = addr.port
+    // Publish it where the non-Claude harnesses read it (mcpHarness.ts).
+    setMcpPort(serverPort)
     boundPreferred = serverPort === PREFERRED_PORT
     // Auto-register in the user's global Claude config on boot, so a fresh
     // install guarantees the floe tools exist in every claude session with no
@@ -1942,36 +2547,20 @@ function runClaude(args: string[]): Promise<{ code: number; out: string }> {
   })
 }
 
-// `claude mcp add` failed. The one thing worth guessing at is the common cause:
-// the CLI is not on the PATH Electron inherited.
-export function installFailure(out: string): { ok: false; message: string } {
-  const hint = /ENOENT|not found/i.test(out) ? ' (is the `claude` CLI on PATH?)' : ''
-  return { ok: false, message: `Failed to register Floe MCP${hint}: ${out || 'unknown error'}` }
-}
-
-// A registration written to a fallback port dies with this app run, so say so
-// rather than letting the user find out at the next launch.
-export function installSuccess(url: string, durable: boolean): { ok: true; message: string } {
-  const warn = durable
-    ? ''
-    : ' Note: Floe is on a fallback port this run, so restart it once to make the registration durable.'
-  return { ok: true, message: `Floe MCP registered globally at ${url}. Any claude session can now drive Floe.${warn}` }
-}
-
 export async function installGlobal(): Promise<{ ok: boolean; message: string }> {
   if (!serverPort) return { ok: false, message: 'The MCP server is not running yet — try again in a moment.' }
-  const url = `http://127.0.0.1:${serverPort}/mcp/${GLOBAL_TOKEN}`
-  // Best-effort remove of a stale entry; ignore "not found".
-  await runClaude(['mcp', 'remove', '-s', 'user', 'floe'])
-  const add = await runClaude(['mcp', 'add', '-s', 'user', '-t', 'http', 'floe', url])
-  return add.code === 0 ? installSuccess(url, boundPreferred) : installFailure(add.out)
+  const url = mcpUrlFor(GLOBAL_TOKEN)
+  // Every harness the user might open a terminal with, not just Claude — the
+  // same reason a spawned session gets the config whichever CLI answers it.
+  const results = await installEverywhere(url)
+  return { ok: results.some((r) => r.ok), message: installMessage(results, url, boundPreferred) }
 }
 
 // Boot-time idempotent wrapper around installGlobal(): if Claude already has the
 // exact registration we'd write, do nothing; otherwise (re)install it. Never
 // throws — a missing `claude` CLI just leaves the manual command as fallback.
 async function ensureGlobalRegistered(): Promise<void> {
-  const url = `http://127.0.0.1:${serverPort}/mcp/${GLOBAL_TOKEN}`
+  const url = mcpUrlFor(GLOBAL_TOKEN)
   try {
     const current = await new Promise<string>((resolve) => {
       execFile('claude', ['mcp', 'get', 'floe'], { timeout: 15_000 }, (_err, stdout, stderr) =>
@@ -1982,7 +2571,29 @@ async function ensureGlobalRegistered(): Promise<void> {
   } catch {
     // fall through and (re)install
   }
-  await installGlobal()
+  // Claude only, and deliberately: it has a CLI that owns its own config, so
+  // this is not Floe editing a file the user hand-wrote. The other harnesses
+  // are registered when the user asks for it (installGlobal).
+  await runClaude(['mcp', 'remove', '-s', 'user', 'floe'])
+  const add = await runClaude(['mcp', 'add', '-s', 'user', '-t', 'http', 'floe', url])
+  if (add.code !== 0) log('mcp-global-register-failed', { out: add.out })
+}
+
+// Every per-session config written this run. They carry the registry's
+// credentials, and the filename is fixed by the managed hooks' ps-ancestry walk
+// (hooks.ts DETECT_FLOE), so they cannot move into the 0700 directory the other
+// harnesses' configs use — they are deleted on the way out instead.
+const written = new Set<string>()
+
+function clearSessionConfigs(): void {
+  for (const file of written) {
+    try {
+      rmSync(file, { force: true })
+    } catch {
+      /* best-effort — the file is 0600 either way */
+    }
+  }
+  written.clear()
 }
 
 // Write (or rewrite) the per-session --mcp-config file and return its path.
@@ -1993,28 +2604,10 @@ async function ensureGlobalRegistered(): Promise<void> {
 // (see hooks.ts DETECT_FLOE) — renaming it breaks them.
 export function mcpConfigFor(key: string, worktreePath?: string): string {
   const file = join(app.getPath('temp'), `floe-mcp-${key}.json`)
-  const mcpServers: Record<string, unknown> = {
-    floe: {
-      type: 'http',
-      url: `http://127.0.0.1:${serverPort}/mcp/${encodeURIComponent(key)}`
-    }
-  }
-  // Merge Floe's own MCP registry (global + this worktree's project) so a
-  // server registered once in the panel reaches every session — the skills
-  // model applied to MCP config. Best-effort: a broken mcp.toml costs its
-  // entries (Settings shows the parse error), never the floe tools.
+  written.add(file)
+  written.add(file)
   try {
-    const project = worktreePath ? (projectFor(worktreePath) ?? undefined) : undefined
-    for (const s of listMcpServers(project)) {
-      if (!s.enabled || s.name === 'floe') continue
-      mcpServers[s.name] =
-        s.transport === 'http' ? { type: 'http', url: s.url } : { command: s.command, args: s.args ?? [] }
-    }
-  } catch {
-    // ignore — the registry is additive
-  }
-  try {
-    writeFileSync(file, JSON.stringify({ mcpServers }))
+    writeFileSync(file, JSON.stringify(claudeMcpConfig(serversFor(key, worktreePath))), { mode: 0o600 })
   } catch {
     // Non-fatal: agent.ts will still pass the path; a missing file just means no
     // floe tools for that session.
@@ -2040,6 +2633,7 @@ export function mcpConfigFor(key: string, worktreePath?: string): string {
  */
 export function emptyMcpConfigFor(key: string): string {
   const file = join(app.getPath('temp'), `floe-mcp-none-${key}.json`)
+  written.add(file)
   try {
     writeFileSync(file, JSON.stringify({ mcpServers: {} }))
   } catch {
@@ -2055,4 +2649,7 @@ export function shutdown(): void {
   httpServer?.close()
   httpServer = undefined
   serverPort = 0
+  setMcpPort(0)
+  clearHarnessConfigs()
+  clearSessionConfigs()
 }

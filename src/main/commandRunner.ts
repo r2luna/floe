@@ -502,6 +502,17 @@ export function commandRuns(): CommandRun[] {
   }))
 }
 
+/**
+ * The scrollback of one command, for a caller with no terminal to attach: the
+ * MCP `read_command_output` tool reads what the log panel would have shown.
+ */
+export function commandOutput(key: string, limit = 200): string {
+  const run = runs.get(key)
+  if (!run) return ''
+  const lines = run.buffer.split('\n')
+  return lines.slice(-limit).join('\n')
+}
+
 export function isCommandRunning(key: string): boolean {
   return !!runs.get(key)?.running
 }

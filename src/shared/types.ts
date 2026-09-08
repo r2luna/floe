@@ -290,6 +290,10 @@ export interface McpServerEntry {
   /** stdio: the command to run, with its args. */
   command?: string
   args?: string[]
+  /** stdio: environment the server process needs — API keys, mostly. */
+  env?: Record<string, string>
+  /** http: headers every request carries — bearer tokens, mostly. */
+  headers?: Record<string, string>
   enabled: boolean
   /** Absolute path of the mcp.toml the entry lives in, for opening it to edit. */
   file: string

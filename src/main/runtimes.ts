@@ -10,6 +10,7 @@ import { logTurn } from './runtimeLog'
 import { markTurnStart, sendAgentEvent } from './agent'
 import { seedFor } from './handoff'
 import { lmStudioServerModels } from './localAgents'
+import { harnessMcp } from './mcpHarness'
 
 // Running a turn on something other than Claude.
 //
@@ -89,7 +90,9 @@ function run(
   bin: string,
   args: string[],
   cwd: string,
-  timeoutMs = 10 * 60 * 1000
+  timeoutMs = 10 * 60 * 1000,
+  /** What the harness needs to see Floe's MCP servers — mcpHarness.ts. */
+  extraEnv: Record<string, string> = {}
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
@@ -102,7 +105,7 @@ function run(
       // only to the parent, and an orphaned CLI keeps burning its login prompt.
       child = spawn(bin, args, {
         cwd,
-        env: process.env,
+        env: { ...process.env, ...extraEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true
       })
@@ -353,8 +356,11 @@ export async function runRuntime(
       // series of strangers.
       if (thread.sessionId) args.push('-s', thread.sessionId)
       args.push(prompt)
+      // Floe's own tools plus its MCP registry, in opencode's dialect: a JSON
+      // blob in the environment, merged over the user's own config rather than
+      // replacing it (mcpHarness.ts).
       const { text, sessionId } = textFromJson(
-        await run('opencode', args, worktreePath, 3 * 60 * 1000)
+        await run('opencode', args, worktreePath, 3 * 60 * 1000, harnessMcp('opencode', key, worktreePath))
       )
       if (sessionId) thread.sessionId = sessionId
       if (text) say(win, key, text, { model, effort, provider: runtime })
@@ -373,7 +379,9 @@ export async function runRuntime(
       // rather than an id we chose, so there is no way to name OUR session
       // among several open at once. Sending the transcript as context would be
       // the upgrade, once these panels can hand one over.
-      const { text } = textFromJson(await run('gemini', args, worktreePath, 3 * 60 * 1000))
+      const { text } = textFromJson(
+        await run('gemini', args, worktreePath, 3 * 60 * 1000, harnessMcp('gemini', key, worktreePath))
+      )
       if (text) say(win, key, text, { model, effort, provider: runtime })
       emit(win, key, { kind: 'done', ok: true })
       return

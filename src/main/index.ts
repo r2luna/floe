@@ -75,7 +75,6 @@ import { dispatchTurn } from './turn'
 import {
   discardQuery,
   fanOut,
-  forgetQueriesOf,
   mergeQuery,
   openQueryFor,
   peekQuery,
@@ -106,7 +105,6 @@ import {
   renameCreatedSession,
   linkCreatedSession,
   resumeSession,
-  closeSession,
   getViewState,
   setProjectWorktree,
   setWorktreeView,
@@ -134,9 +132,14 @@ import { lastUsage, refreshUsageNow, setUsageProbeCwd } from './usageMonitor'
 import { startMcpAuth, cancelMcpAuth, pasteMcpAuth, killAllMcpAuths } from './mcpAuth'
 import { authStatus, startLogin, pasteCode, cancelLogin, logout } from './claudeAuth'
 import { claudeStats } from './claudeStats'
-import { forgetThread } from './runtimes'
+// Closing a session lives in its own module now — the MCP server closes one
+// too (`close_session`), and it cannot import this file. Re-exported because
+// this is still where the rest of the app (and index.test.ts) looks for it.
+import { closeSessionFully, sessionKeys, type CloseSessionOptions } from './sessionClose'
+export { closeSessionFully, sessionKeys }
+export type { CloseSessionOptions }
 import { localAgents, localStats, localUsage } from './localAgents'
-import { forgetSeen, sessionTranscript } from './handoff'
+import { sessionTranscript } from './handoff'
 import { detectDevCommand, startDev, stopDev } from './devServer'
 import {
   listCommands,
@@ -505,8 +508,6 @@ export function hideWindow(win: BrowserWindow | null): void {
   win?.hide()
 }
 
-export type CloseSessionOptions = { id: string; worktreePath: string; claudeId?: string }
-
 // Give a session a short, smart title after a turn, unless manually renamed.
 // Interactive sessions get Claude's own ai-title; the headless runs Floe drives
 // have none, so we generate one with Haiku from the opening request — but only
@@ -530,30 +531,6 @@ export function applyTitle(claudeId: string, title: string | null): string | nul
 /** A title the user never chose: "Session 3", or the raw first message. */
 export function isPlaceholderTitle(title: string, worktreePath: string, claudeId: string): boolean {
   return /^Session \d+$/.test(title) || title === firstUserTitle(worktreePath, claudeId)
-}
-
-// Its side conversations go first, while the store still says they exist:
-// `closeSession` drops the records, and after that there is nothing left to find
-// the running conns, threads and watermarks by. Each one is stopped and
-// forgotten outright — a query whose session is gone has no panel to reopen it
-// in and no chat to merge it into.
-export function closeSessionFully(win: BrowserWindow | null, opts: CloseSessionOptions): void {
-  forgetQueriesOf(win, opts.id)
-  // Local-runtime chats (lmstudio/ollama/opencode) keep their whole message
-  // history in memory, keyed by the session key the renderer used — either id. A
-  // closed session's history is unreachable, so drop it here. And with the
-  // thread goes the record of how much of the conversation each harness was
-  // holding — the two are the same fact from opposite ends.
-  for (const key of sessionKeys(opts)) {
-    forgetThread(key)
-    forgetSeen(key)
-  }
-  closeSession(opts)
-}
-
-/** Both names a session answers to — the created id and Claude's own. */
-export function sessionKeys(opts: CloseSessionOptions): string[] {
-  return opts.claudeId ? [opts.id, opts.claudeId] : [opts.id]
 }
 
 /** The message an unknown throw carries, for a log line or an IPC reply. */

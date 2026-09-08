@@ -124,6 +124,22 @@ export class TableReader {
     return v as string[]
   }
 
+  /** A `key = { A = "1", B = "2" }` table of strings — env vars, http headers. */
+  strTable(key: string): Record<string, string> | undefined {
+    const v = this.obj[key]
+    if (v === undefined) return undefined
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+      this.bad(key, `${key} must be a table of strings, e.g. ${key} = { NAME = "value" }`)
+      return undefined
+    }
+    const entries = Object.entries(v as Record<string, unknown>)
+    if (entries.some(([, value]) => typeof value !== 'string')) {
+      this.bad(key, `every value in ${key} must be a string`)
+      return undefined
+    }
+    return Object.fromEntries(entries) as Record<string, string>
+  }
+
   /** Report a problem the caller found itself, on this table's line. */
   reject(key: string, reason: string): void {
     this.bad(key, reason)

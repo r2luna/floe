@@ -1,8 +1,8 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
 import type { Worktree } from '../shared/types'
 import { waitFor } from './watch.test-helper.ts'
@@ -37,9 +37,9 @@ const {
   shutdown,
   connKeyFor,
   createdWorktree,
-  installFailure,
-  installSuccess,
   pluginShape,
+  projectRoot,
+  redactServer,
   sendOptions,
   transcriptLine
 } = await import('./mcpServer.ts')
@@ -128,6 +128,25 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'remove_mcp_server',
       'list_project_commands',
       'add_project_command',
+      'mcp_server_status',
+      'authenticate_mcp_server',
+      'add_project',
+      'remove_project',
+      'update_project',
+      'run_project_command',
+      'stop_project_command',
+      'read_command_output',
+      'remove_project_command',
+      'session_prompts',
+      'answer_session_prompt',
+      'update_session',
+      'close_session',
+      'list_commits',
+      'commit_diff',
+      'set_review_base',
+      'harness_usage',
+      'plan_phases',
+      'copy_plan',
       'list_commands',
       'run_command'
     ]) {
@@ -336,22 +355,6 @@ test('sendOptions: a handle in the prompt routes the same as naming the harness'
   assert.equal(named.options.shown, undefined)
 })
 
-test('installFailure / installSuccess say what the user has to do about it', () => {
-  // The common cause of a failed `claude mcp add` is the CLI not being on the
-  // PATH Electron inherited — worth guessing at, but only when it looks like it.
-  assert.match(installFailure('spawn claude ENOENT').message, /is the `claude` CLI on PATH\?/)
-  assert.doesNotMatch(installFailure('some other failure').message, /on PATH/)
-  assert.equal(installFailure('spawn claude ENOENT').ok, false)
-  assert.match(installFailure('').message, /unknown error/)
-
-  const url = 'http://127.0.0.1:41673/mcp/global'
-  assert.equal(installSuccess(url, true).ok, true)
-  assert.doesNotMatch(installSuccess(url, true).message, /fallback port/)
-  // A registration written to a fallback port dies with this app run: say so
-  // now rather than letting the user find out at the next launch.
-  assert.match(installSuccess(url, false).message, /fallback port this run/)
-})
-
 // --- The lifted tool handlers, over the real transport --------------------
 
 async function callTool(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -420,6 +423,171 @@ test('list_queries and stop_session report an unknown session by name', async ()
 test('start_merge refuses a path no Floe project contains', async () => {
   const out = await callTool('start_merge', { worktree: '/tmp/not-a-floe-worktree' })
   assert.match(String(out.error), /No Floe project contains this worktree/)
+})
+
+test('the registry carries credentials, and never hands them back', async () => {
+  const made = await callTool('add_mcp_server', {
+    name: 'paid',
+    scope: 'global',
+    transport: 'http',
+    url: 'https://mcp.example/mcp',
+    headers: { Authorization: 'Bearer s3cret' }
+  })
+  assert.deepEqual(made.headers, { Authorization: '***' }, 'the name of the header, never its value')
+
+  const listed = (await callTool('list_mcp_servers', {})) as unknown as Array<Record<string, unknown>>
+  const found = listed.find((e) => e.name === 'paid')
+  assert.deepEqual(found?.headers, { Authorization: '***' })
+
+  // The value really is on disk, though — a redacted read must not mean a
+  // redacted write.
+  const onDisk = readFileSync(join(scratchConfig, 'floe', 'mcp.toml'), 'utf8')
+  assert.match(onDisk, /Authorization = "Bearer s3cret"/)
+
+  const patched = await callTool('update_mcp_server', { name: 'paid', headers: {} })
+  assert.equal(patched.headers, undefined, 'an empty table drops the credentials')
+  await callTool('remove_mcp_server', { name: 'paid' })
+})
+
+test('redactServer masks every value it is given, and invents none', () => {
+  const entry = {
+    name: 'x',
+    scope: 'global' as const,
+    transport: 'stdio' as const,
+    command: 'npx',
+    enabled: true,
+    file: '/tmp/mcp.toml',
+    index: 0,
+    env: { A: '1', B: '2' }
+  }
+  assert.deepEqual(redactServer(entry).env, { A: '***', B: '***' })
+  assert.equal(redactServer({ ...entry, env: undefined }).env, undefined)
+})
+
+test('a project path is resolved before it is used, never handed back as typed', () => {
+  // `/tmp` is a symlink to `/private/tmp` on macOS. A tool that answered with
+  // the caller's spelling let `add_project_command` create a SECOND project
+  // directory for a repo Floe already had — and then the command it wrote was
+  // invisible to every tool that resolved the path properly.
+  const real = mkdtempSync(join(realpathSync(tmpdir()), 'floe-mcp-alias-'))
+  assert.equal(projectRoot(real), real, 'a resolved path is left alone')
+
+  const alias = join(tmpdir(), basename(real))
+  assert.equal(projectRoot(alias), real, 'an alias resolves to the path the store keeps')
+  assert.equal(projectRoot('/tmp/floe-mcp-never-existed'), '/tmp/floe-mcp-never-existed', 'a path that is not there is answered as given')
+  rmSync(real, { recursive: true, force: true })
+})
+
+test('the project tools refuse what is not a project, and report what they did', async () => {
+  const notARepo = await callTool('add_project', { path: '/tmp/floe-mcp-not-a-repo' })
+  assert.ok(notARepo.error, 'a path that is not a git repository cannot be added')
+
+  const unknown = await callTool('update_project', { path: '/tmp/nope', pinned: true })
+  assert.match(String(unknown.error), /not a registered project/)
+
+  // A remove that matched nothing used to answer with the whole project list —
+  // indistinguishable from having worked.
+  const gone = await callTool('remove_project', { path: '/tmp/nope' })
+  assert.match(String(gone.error), /not a registered project/)
+})
+
+test('the command tools need a project that owns the worktree', async () => {
+  for (const name of ['run_project_command', 'stop_project_command', 'read_command_output', 'remove_project_command']) {
+    const out = await callTool(name, { worktree: '/tmp/floe-mcp-orphan', command: 'dev' })
+    assert.match(String(out.error), /no registered project owns/, `${name} must say why it cannot run`)
+  }
+})
+
+test('session_prompts and answer_session_prompt only speak for sessions this caller made', async () => {
+  assert.match(String((await callTool('session_prompts', { session_id: 'nope' })).error), /Unknown session: nope/)
+
+  // Created by /mcp/test-key... but through the tool, so spawnedBy is set to
+  // exactly this caller — the owner check has to pass for its own child.
+  const mine = await callTool('create_session', { worktree: '/tmp/floe-mcp-wt', title: 'Child' })
+  const prompts = (await callTool('session_prompts', { session_id: mine.sessionId as string })) as unknown as unknown[]
+  assert.deepEqual(prompts, [], 'a session with no live conn is parked on nothing')
+
+  // A session nobody claims is not answerable from here.
+  const store = await import('./sessionStore.ts')
+  store.addCreatedSession({ id: 'floe-mcp-orphan-session', worktreePath: '/tmp/floe-mcp-wt', title: 'Theirs' })
+  const refused = await callTool('answer_session_prompt', {
+    session_id: 'floe-mcp-orphan-session',
+    request_id: 'r1',
+    answer: 'yes'
+  })
+  assert.match(String(refused.error), /only its owner may answer for it/)
+
+  // A request id nothing is waiting on used to answer `{answered: r1}` — the
+  // responders take an unknown id without complaint.
+  const stale = await callTool('answer_session_prompt', {
+    session_id: mine.sessionId as string,
+    request_id: 'r1',
+    answer: 'yes'
+  })
+  assert.match(String(stale.error), /Nothing is waiting on r1/)
+})
+
+test('update_session writes the picker, and close_session takes the row away', async () => {
+  const made = await callTool('create_session', { worktree: '/tmp/floe-mcp-wt', title: 'Steer me' })
+  const id = made.sessionId as string
+
+  // Give it a claude model first, so the switch below has something to clear.
+  await callTool('update_session', { session_id: id, model: 'opus' })
+  const updated = await callTool('update_session', { session_id: id, title: 'Steered', harness: 'codex', mode: 'default' })
+  assert.equal(updated.title, 'Steered')
+  // codex has no "ask": the mode snaps to the nearest thing it can honestly do
+  // (shared/modes.ts walks lightest first, so "ask" lands on plan) rather than
+  // failing the turn later.
+  const store = await import('./sessionStore.ts')
+  assert.equal(store.getCreatedSession(id)?.permissionMode, 'plan')
+  assert.equal(store.getCreatedSession(id)?.provider, 'codex')
+  // `opus` is a claude model: carrying it into codex would fail the next turn.
+  assert.equal(store.getCreatedSession(id)?.model, '')
+
+  assert.equal((await callTool('close_session', { session_id: id })).closed, id)
+  assert.equal(store.getCreatedSession(id), undefined, 'the session is gone from the store')
+  assert.match(String((await callTool('update_session', { session_id: id })).error), /Unknown session/)
+})
+
+test('the review tools answer for a directory that is not a repository', async () => {
+  const commits = await callTool('list_commits', { worktree: '/tmp/floe-mcp-not-a-repo' })
+  assert.ok(commits.error || Array.isArray(commits), 'either the commits or a reason, never a throw')
+
+  // commit_diff answers with the diff itself, so an empty one is empty text —
+  // not JSON, and not an error either.
+  const client = await connect()
+  try {
+    const raw = await client.callTool({
+      name: 'commit_diff',
+      arguments: { worktree: '/tmp/floe-mcp-not-a-repo', commit: 'HEAD', path: 'x.ts' }
+    })
+    assert.equal((raw.content as Array<{ type: string }>)[0].type, 'text')
+  } finally {
+    await client.close()
+  }
+
+  const base = await callTool('set_review_base', { worktree: '/tmp/floe-mcp-not-a-repo', action: 'status' })
+  assert.equal(base.cleared, false)
+  const usage = await callTool('harness_usage', {})
+  assert.equal(typeof usage, 'object', 'usage answers for whatever harnesses are installed')
+})
+
+test('copy_plan refuses to write over a plan of the same name', async () => {
+  const wt = mkdtempSync(join(tmpdir(), 'floe-mcp-plans-'))
+  const dest = mkdtempSync(join(tmpdir(), 'floe-mcp-plans-dest-'))
+  mkdirSync(join(wt, '.floe', 'plans'), { recursive: true })
+  mkdirSync(join(dest, '.floe', 'plans'), { recursive: true })
+  writeFileSync(join(wt, '.floe', 'plans', 'p.md'), '# plan')
+
+  const copied = await callTool('copy_plan', { worktree: wt, path: '.floe/plans/p.md', destination: dest })
+  assert.equal(copied.name, 'p.md')
+  const again = await callTool('copy_plan', { worktree: wt, path: '.floe/plans/p.md', destination: dest })
+  assert.match(String(again.error), /already exists/)
+
+  // The phases reader answers an empty list for a worktree with no spec.
+  assert.deepEqual(await callTool('plan_phases', { worktree: wt }), [] as unknown as Record<string, unknown>)
+  rmSync(wt, { recursive: true, force: true })
+  rmSync(dest, { recursive: true, force: true })
 })
 
 test('every registered tool name is unique across the domain registrars', async () => {

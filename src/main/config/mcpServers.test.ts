@@ -1,6 +1,6 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './hook.test-helper.ts'
@@ -12,7 +12,8 @@ process.env.XDG_CONFIG_HOME = scratch
 
 installHook()
 
-const { addMcpServer, listMcpServers, removeMcpServer, updateMcpServer, globalMcpPath } = await import('./mcpServers.ts')
+const { addMcpServer, listMcpServers, mcpConfigErrors, removeMcpServer, updateMcpServer, globalMcpPath } =
+  await import('./mcpServers.ts')
 
 after(() => rmSync(scratch, { recursive: true, force: true }))
 
@@ -46,6 +47,41 @@ test('a stdio server keeps its command and args', () => {
   addMcpServer('global', { name: 'local-tool', transport: 'stdio', command: 'npx', args: ['-y', '@some/mcp'] })
   const found = listMcpServers().find((s) => s.name === 'local-tool')
   assert.deepEqual(found?.args, ['-y', '@some/mcp'])
+})
+
+test('credentials round-trip: env for stdio, headers for http', () => {
+  const made = addMcpServer('global', {
+    name: 'paid',
+    transport: 'http',
+    url: 'https://mcp.example/mcp',
+    headers: { Authorization: 'Bearer s3cret' }
+  })
+  assert.deepEqual(made.headers, { Authorization: 'Bearer s3cret' })
+  // An inline table: one line, so the surgical writes still find the value.
+  assert.match(readFileSync(globalMcpPath(), 'utf8'), /headers\s+= \{ Authorization = "Bearer s3cret" \}/)
+
+  // Credentials in a file every process on the machine can read is not a
+  // registry, it is a leak.
+  assert.equal(statSync(globalMcpPath()).mode & 0o777, 0o600)
+
+  const withEnv = updateMcpServer('local-tool', { env: { API_KEY: 'k', OTHER: 'v' } })
+  assert.deepEqual(withEnv.env, { API_KEY: 'k', OTHER: 'v' })
+
+  // An empty table is how a patch says "drop them", the way an empty string
+  // drops a url.
+  assert.equal(updateMcpServer('local-tool', { env: {} }).env, undefined)
+  assert.equal(updateMcpServer('paid', { headers: {} }).headers, undefined)
+  removeMcpServer('paid')
+})
+
+test('a credential table of the wrong shape is reported, not coerced', () => {
+  // Appended, not written over: the other entries are what the next test reads.
+  const before = readFileSync(globalMcpPath(), 'utf8')
+  writeFileSync(globalMcpPath(), `${before}\n[[server]]\nname = "bad"\ntransport = "stdio"\ncommand = "npx"\nenv = "API_KEY=1"\n`)
+  const found = listMcpServers().find((s) => s.name === 'bad')
+  assert.equal(found?.env, undefined, 'a string where a table belongs is dropped, and the entry survives')
+  assert.match(mcpConfigErrors().at(-1)?.reason ?? '', /env must be a table of strings/)
+  writeFileSync(globalMcpPath(), before)
 })
 
 test('remove deletes the entry and only that entry', () => {

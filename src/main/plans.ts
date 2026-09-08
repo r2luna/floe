@@ -9,7 +9,7 @@ import type { ImplementPhase, PlanFile } from '../shared/types'
 // directly so the Plans tab can show them. Newest first; a missing directory
 // (no plans written yet) just yields an empty list.
 
-const PLANS_DIR = '.floe/plans'
+export const PLANS_DIR = '.floe/plans'
 // Spec-driven pipelines (e.g. the "ds" pipeline) write their docs — spec.md,
 // plan.md, tasks.md, contracts/*, … — under `specs/<branch-ish>/` in the repo
 // itself (tracked, not gitignored). The Plans panel surfaces the folder matching
