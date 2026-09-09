@@ -4,9 +4,11 @@ import type { MergeStep, MergeStepId, MergeStepStatus, Worktree } from '../../sh
 /**
  * A guided merge in flight.
  *
- * `root` is the project the merge belongs to, so a flow survives switching
- * project and comes back when you return — the git work carries on either way,
- * and a checklist that vanished with a click would leave it unobservable.
+ * Identified by its worktree: merges are independent of each other, so a branch
+ * stuck on a failed step never stands between you and merging another one.
+ * `root` is the project it belongs to, so a flow survives switching project and
+ * comes back when you return — the git work carries on either way, and a
+ * checklist that vanished with a click would leave it unobservable.
  */
 export interface MergeFlow {
   root: string
@@ -20,6 +22,8 @@ export interface MergeFlow {
   sessionId?: string
   done: boolean
   cancelled: boolean
+  /** When it started, so the panel can fall back to the newest one. */
+  startedAt: number
 }
 
 /** The steps a merge runs, in order. `closetask` is deliberately not among them. */
@@ -58,9 +62,35 @@ export function resolvePrompt(base: string, branch: string, files: string[]): st
   return `I'm merging \`${base}\` into \`${branch}\` and hit conflicts${list}\n\nResolve the conflicts preserving the intent of both sides and removing all markers (<<<<<<<, =======, >>>>>>>). Then run \`git add\` on the resolved files, but do NOT commit — I'll review and commit. When you're done, briefly summarize what changed.`
 }
 
+/**
+ * Which checklist the panel shows, and what else is running behind it.
+ *
+ * The tree the app is in wins, like every other worktree command. Otherwise the
+ * project's newest flow, so a merge running in the background stays watchable —
+ * including the one whose worktree its own cleanup step has just deleted, which
+ * would otherwise take the finished checklist off screen with it.
+ *
+ * Pure, and separate from the hook, because it is the whole of "merges are
+ * independent": what is on screen is a question about the branch you are in,
+ * never about which merge started first.
+ */
+export function pickFlow(
+  flows: Record<string, MergeFlow>,
+  root?: string,
+  worktreePath?: string
+): { flow: MergeFlow | null; mine: MergeFlow[] } {
+  const mine = Object.values(flows)
+    .filter((f) => f.root === root)
+    .sort((a, b) => b.startedAt - a.startedAt)
+  const here = worktreePath ? (flows[worktreePath] ?? null) : null
+  return { flow: (here?.root === root ? here : null) ?? mine[0] ?? null, mine }
+}
+
 export interface Merge {
-  /** The flow belonging to the open project, or null. */
+  /** The flow on screen: the one for the tree the app is in, else the newest of the open project. */
   flow: MergeFlow | null
+  /** Every flow of the open project, newest first — the panel names the ones it is not showing. */
+  flows: MergeFlow[]
   /** Begin a merge. Returns why it refused, or null when it started. */
   start: (wt: Worktree) => string | null
   /** Approve at the review checkpoint: commit the merge and carry on. */
@@ -81,10 +111,16 @@ export interface Merge {
  * and each failure has a different answer — stash and retry, resolve again,
  * fast-forward by hand. `merge:*` in main exposes the steps; this decides what
  * happens between them, and the panel only draws what it finds here.
+ *
+ * Flows are per worktree and run side by side: a merge that stopped on a failed
+ * step is that branch's problem, and waiting for it before you can merge another
+ * branch would make one bad preflight block the whole project.
  */
 export function useMerge(deps: {
-  /** The open project. Which flow the panel shows follows it. */
+  /** The open project. Which flows the panel can show follows it. */
   root?: string
+  /** The tree the app is in. Its flow is the one on screen, like every other worktree command. */
+  worktreePath?: string
   /** Open a chat on the session that will resolve the conflicts. */
   openResolve: (session: { id: string; worktreePath: string }, prompt: string) => void
   /** Stop the turns running in a worktree — main tears down everything else. */
@@ -94,68 +130,76 @@ export function useMerge(deps: {
   /** Bring the merge panel up. Called when a flow starts. */
   show: () => void
 }): Merge {
-  const { root, openResolve, stopAgents, onWorktreeGone, show } = deps
+  const { root, worktreePath, openResolve, stopAgents, onWorktreeGone, show } = deps
 
-  // Keyed by project root: two projects can have a merge running at once, and
-  // switching between them swaps which checklist is on screen without touching
-  // either chain.
+  // Keyed by worktree path: every merge is its own chain, and the key is also
+  // the flow's identity — the steps thread it around instead of writing to
+  // whichever one happened to start last.
   const [flows, setFlows] = useState<Record<string, MergeFlow>>({})
   const flowsRef = useRef(flows)
   flowsRef.current = flows
-  // The chain mutates ONE flow — the one it was started for, pinned here so the
-  // async steps keep writing to it after the user has switched project.
-  const runRoot = useRef<string | null>(null)
 
-  const flow = root ? (flows[root] ?? null) : null
+  const { flow, mine } = pickFlow(flows, root, worktreePath)
 
-  const running = (): MergeFlow | null => {
-    const r = runRoot.current
-    return r ? (flowsRef.current[r] ?? null) : null
+  const at = (key: string): MergeFlow | null => flowsRef.current[key] ?? null
+  /** The flow, unless the user has dropped it — a step in flight then writes nothing. */
+  const alive = (key: string): MergeFlow | null => {
+    const f = at(key)
+    return f && !f.cancelled ? f : null
   }
 
-  function patchFlow(arg: MergeFlow | null | ((f: MergeFlow | null) => MergeFlow | null)): void {
-    const target = runRoot.current
-    if (!target) return
+  function patchFlow(
+    key: string,
+    arg: MergeFlow | null | ((f: MergeFlow | null) => MergeFlow | null)
+  ): void {
     setFlows((all) => {
-      const cur = all[target] ?? null
+      const cur = all[key] ?? null
       const next = typeof arg === 'function' ? arg(cur) : arg
       const copy = { ...all }
-      if (next) copy[target] = next
-      else delete copy[target]
+      if (next) copy[key] = next
+      else delete copy[key]
       return copy
     })
   }
 
-  function step(id: MergeStepId, patch: Partial<MergeStep>): void {
-    patchFlow((f) => (f ? { ...f, steps: f.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) } : f))
+  function step(key: string, id: MergeStepId, patch: Partial<MergeStep>): void {
+    patchFlow(key, (f) =>
+      f ? { ...f, steps: f.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)) } : f
+    )
   }
 
-  function skip(ids: MergeStepId[]): void {
-    patchFlow((f) =>
+  function skip(key: string, ids: MergeStepId[]): void {
+    patchFlow(key, (f) =>
       f ? { ...f, steps: f.steps.map((s) => (ids.includes(s.id) ? { ...s, status: 'skipped' } : s)) } : f
     )
   }
 
   // --- the chain -----------------------------------------------------------
+  //
+  // Every step takes the flow's key and reads its state back through `at`: the
+  // chain is async and several can be in flight at once, so nothing here may
+  // depend on which merge the user is looking at.
 
-  async function runPreflight(target: string, worktreePath: string): Promise<void> {
-    const pf = await window.floe.merge.preflight(target, worktreePath)
-    if (running()?.cancelled) return
+  async function runPreflight(key: string): Promise<void> {
+    const f = at(key)
+    if (!f) return
+    const pf = await window.floe.merge.preflight(f.root, key)
+    if (!alive(key)) return
     if (!pf.ok || !pf.base || !pf.branch) {
-      step('preflight', { status: 'error', detail: pf.message ?? 'Preflight failed' })
+      step(key, 'preflight', { status: 'error', detail: pf.message ?? 'Preflight failed' })
       return
     }
     const base = pf.base
     const branch = pf.branch
     // The two steps that name the branches only learn them here — before
     // preflight nobody knows what base is.
-    patchFlow((f) =>
-      f
+    patchFlow(key, (fl) =>
+      fl
         ? {
-            ...f,
+            ...fl,
             base,
             branch,
-            steps: f.steps.map((s) =>
+            steps: fl.steps.map((s) =>
               s.id === 'preflight'
                 ? { ...s, status: 'done' }
                 : s.id === 'merge'
@@ -165,38 +209,38 @@ export function useMerge(deps: {
                     : s
             )
           }
-        : f
+        : fl
     )
-    void runMergeBase(worktreePath, base, branch)
+    void runMergeBase(key, base, branch)
   }
 
-  async function runMergeBase(worktreePath: string, base: string, branch: string): Promise<void> {
-    step('merge', { status: 'running' })
-    const res = await window.floe.merge.base(worktreePath, base)
-    if (running()?.cancelled) return
+  async function runMergeBase(key: string, base: string, branch: string): Promise<void> {
+    step(key, 'merge', { status: 'running' })
+    const res = await window.floe.merge.base(key, base)
+    if (!alive(key)) return
     if (res.status === 'error') {
-      step('merge', { status: 'error', detail: res.message })
+      step(key, 'merge', { status: 'error', detail: res.message })
       return
     }
     if (res.status === 'uptodate') {
-      step('merge', { status: 'done', detail: 'Already up to date' })
-      skip(['resolve', 'review', 'commit'])
-      void runFastForward()
+      step(key, 'merge', { status: 'done', detail: 'Already up to date' })
+      skip(key, ['resolve', 'review', 'commit'])
+      void runFastForward(key)
       return
     }
     if (res.status === 'clean') {
-      step('merge', { status: 'done', detail: 'No conflicts' })
+      step(key, 'merge', { status: 'done', detail: 'No conflicts' })
       // Nothing to resolve and nothing to review: git already made the commit.
-      skip(['resolve', 'review'])
-      step('commit', {
+      skip(key, ['resolve', 'review'])
+      step(key, 'commit', {
         status: 'done',
         detail: `${res.commit ?? ''} ${res.subject ?? ''}`.trim() || 'Committed'
       })
-      void runFastForward()
+      void runFastForward(key)
       return
     }
-    step('merge', { status: 'done', detail: `${res.conflicts?.length ?? 0} conflict(s)` })
-    startResolve(worktreePath, base, branch, res.conflicts ?? [])
+    step(key, 'merge', { status: 'done', detail: `${res.conflicts?.length ?? 0} conflict(s)` })
+    startResolve(key, base, branch, res.conflicts ?? [])
   }
 
   /**
@@ -206,34 +250,34 @@ export function useMerge(deps: {
    * that conversation's context into the conflict analysis, and the answer to
    * "which side wins here" is not improved by an hour of unrelated work.
    */
-  function startResolve(worktreePath: string, base: string, branch: string, conflicts: string[]): void {
+  function startResolve(key: string, base: string, branch: string, conflicts: string[]): void {
     const id = crypto.randomUUID()
     void window.floe.claude
-      .createSession({ id, worktreePath, title: `Merge ${branch}` })
+      .createSession({ id, worktreePath: key, title: `Merge ${branch}` })
       .then(() => {
-        patchFlow((f) => (f ? { ...f, sessionId: id } : f))
-        step('resolve', { status: 'running', detail: 'Resolving conflicts…' })
-        openResolve({ id, worktreePath }, resolvePrompt(base, branch, conflicts))
+        if (!alive(key)) return
+        patchFlow(key, (f) => (f ? { ...f, sessionId: id } : f))
+        step(key, 'resolve', { status: 'running', detail: 'Resolving conflicts…' })
+        openResolve({ id, worktreePath: key }, resolvePrompt(base, branch, conflicts))
       })
-      .catch((e: Error) => step('resolve', { status: 'error', detail: e.message }))
+      .catch((e: Error) => step(key, 'resolve', { status: 'error', detail: e.message }))
   }
 
-  async function onResolved(): Promise<void> {
-    const f = running()
-    if (!f || f.cancelled) return
-    const check = await window.floe.merge.resolveCheck(f.worktreePath)
-    if (running()?.cancelled) return
+  async function onResolved(key: string): Promise<void> {
+    if (!alive(key)) return
+    const check = await window.floe.merge.resolveCheck(key)
+    if (!alive(key)) return
     if (!check.resolved) {
-      step('resolve', {
+      step(key, 'resolve', {
         status: 'error',
         detail: `Still ${check.conflicts.length} file(s) with conflicts`
       })
       return
     }
-    step('resolve', { status: 'done', detail: 'Conflicts resolved' })
+    step(key, 'resolve', { status: 'done', detail: 'Conflicts resolved' })
     // The one human checkpoint in the flow: what an agent decided about a
     // conflict is exactly the kind of change nobody should commit unread.
-    patchFlow((fl) =>
+    patchFlow(key, (fl) =>
       fl
         ? {
             ...fl,
@@ -248,38 +292,37 @@ export function useMerge(deps: {
     )
   }
 
-  async function runCommit(): Promise<void> {
-    const f = running()
-    if (!f) return
-    step('commit', { status: 'running' })
-    const res = await window.floe.merge.commit(f.worktreePath)
-    if (running()?.cancelled) return
+  async function runCommit(key: string): Promise<void> {
+    if (!at(key)) return
+    step(key, 'commit', { status: 'running' })
+    const res = await window.floe.merge.commit(key)
+    if (!alive(key)) return
     if (!res.ok) {
-      step('commit', { status: 'error', detail: res.message })
+      step(key, 'commit', { status: 'error', detail: res.message })
       return
     }
-    step('commit', {
+    step(key, 'commit', {
       status: 'done',
       detail: `${res.commit ?? ''} ${res.subject ?? ''}`.trim() || 'Committed'
     })
-    void runFastForward()
+    void runFastForward(key)
   }
 
-  async function runFastForward(): Promise<void> {
-    const f = running()
+  async function runFastForward(key: string): Promise<void> {
+    const f = at(key)
     if (!f) return
-    step('fastforward', { status: 'running' })
+    step(key, 'fastforward', { status: 'running' })
     const res = await window.floe.merge.ff(f.root, f.base, f.branch)
-    if (running()?.cancelled) return
+    if (!alive(key)) return
     if (!res.ok) {
-      step('fastforward', { status: 'error', detail: res.message })
+      step(key, 'fastforward', { status: 'error', detail: res.message })
       return
     }
-    step('fastforward', {
+    step(key, 'fastforward', {
       status: 'done',
       detail: res.baseCommit ? `${f.base} → ${res.baseCommit}` : 'Fast-forwarded'
     })
-    await runDropDatabase()
+    await runDropDatabase(key)
   }
 
   /**
@@ -288,97 +331,97 @@ export function useMerge(deps: {
    * Order matters: the credentials live in the worktree's `.env`, which the
    * cleanup step deletes. A no-op (no database configured) counts as done.
    */
-  async function runDropDatabase(): Promise<void> {
-    const f = running()
+  async function runDropDatabase(key: string): Promise<void> {
+    const f = at(key)
     if (!f) return
-    step('database', { status: 'running', detail: undefined })
+    step(key, 'database', { status: 'running', detail: undefined })
     let res: { ok: boolean; dropped: boolean; detail?: string; message?: string }
     try {
-      res = await window.floe.remove.dropDatabase(f.root, f.worktreePath)
+      res = await window.floe.remove.dropDatabase(f.root, key)
     } catch (e) {
-      step('database', { status: 'error', detail: e instanceof Error ? e.message : String(e) })
+      step(key, 'database', { status: 'error', detail: e instanceof Error ? e.message : String(e) })
       return
     }
     if (!res.ok) {
-      step('database', { status: 'error', detail: res.message })
+      step(key, 'database', { status: 'error', detail: res.message })
       return
     }
-    step('database', res.dropped ? { status: 'done', detail: res.detail } : { status: 'skipped', detail: res.detail })
-    if (running()?.cancelled) return
-    await runCleanup()
+    step(key, 'database', res.dropped ? { status: 'done', detail: res.detail } : { status: 'skipped', detail: res.detail })
+    if (!alive(key)) return
+    await runCleanup(key)
   }
 
-  async function runCleanup(): Promise<void> {
-    const f = running()
+  async function runCleanup(key: string): Promise<void> {
+    const f = at(key)
     if (!f) return
-    step('cleanup', { status: 'running' })
+    step(key, 'cleanup', { status: 'running' })
     // Main stops the dev server, the commands and the terminals; the turns in
     // flight are the renderer's to stop.
-    stopAgents(f.worktreePath)
+    stopAgents(key)
     let ok = true
     try {
-      await window.floe.worktrees.teardown(f.root, f.worktreePath)
+      await window.floe.worktrees.teardown(f.root, key)
     } catch (e) {
       ok = false
-      step('cleanup', { status: 'error', detail: e instanceof Error ? e.message : String(e) })
+      step(key, 'cleanup', { status: 'error', detail: e instanceof Error ? e.message : String(e) })
     }
     if (!ok) return
-    onWorktreeGone(f.worktreePath)
-    step('cleanup', { status: 'done', detail: 'Worktree closed' })
-    await runCloseBranch()
+    onWorktreeGone(key)
+    step(key, 'cleanup', { status: 'done', detail: 'Worktree closed' })
+    await runCloseBranch(key)
   }
 
   // The branch is fully in base after the fast-forward, so a safe `-d` is
   // enough — a `-D` here would hide the case where it somehow is not.
-  async function runCloseBranch(): Promise<void> {
-    const f = running()
+  async function runCloseBranch(key: string): Promise<void> {
+    const f = at(key)
     if (!f) return
-    step('closebranch', { status: 'running' })
+    step(key, 'closebranch', { status: 'running' })
     const res = await window.floe.remove.branch(f.root, f.branch, false)
     if (!res.ok) {
-      step('closebranch', { status: 'error', detail: res.message })
+      step(key, 'closebranch', { status: 'error', detail: res.message })
       return
     }
-    step('closebranch', { status: 'done', detail: `Deleted ${f.branch}` })
-    finish()
+    step(key, 'closebranch', { status: 'done', detail: `Deleted ${f.branch}` })
+    finish(key)
   }
 
-  // Let the all-green checklist linger, then drop it. Pinned to the root it
-  // started on: `runRoot` may have moved by the time the timer fires.
-  function finish(): void {
-    const target = runRoot.current
-    patchFlow((f) => (f ? { ...f, done: true } : f))
+  // Let the all-green checklist linger, then drop it.
+  function finish(key: string): void {
+    patchFlow(key, (f) => (f ? { ...f, done: true } : f))
     setTimeout(() => {
-      if (!target) return
       setFlows((all) => {
-        if (!all[target]?.done) return all
+        if (!all[key]?.done) return all
         const copy = { ...all }
-        delete copy[target]
+        delete copy[key]
         return copy
       })
     }, 1800)
   }
 
   // --- entry points --------------------------------------------------------
+  //
+  // The four answers act on the flow ON SCREEN, which is the one the panel's
+  // chips and keys are labelled for.
 
   function start(wt: Worktree): string | null {
     if (!root) return 'no project open'
     if (wt.isMain) return `"${wt.branch}" is the main worktree — there is nothing to merge it into`
     if (wt.blocked) return `merge is blocked for "${wt.branch}" (.gw-nomerge)`
-    if (flowsRef.current[root] && !flowsRef.current[root].done) {
-      // Already running: show it rather than starting a second chain over the
-      // same repository.
+    const open = flowsRef.current[wt.path]
+    if (open && !open.done) {
+      // This branch is already merging: show it rather than starting a second
+      // chain over the same worktree. Another branch is free to start its own.
       show()
       return null
     }
-    runRoot.current = root
     const steps: MergeStep[] = STEP_IDS.map((id) => ({
       id,
       title: MERGE_STEP_TITLES[id],
       status: 'pending' as MergeStepStatus
     }))
     steps[0].status = 'running'
-    patchFlow({
+    patchFlow(wt.path, {
       root,
       worktreePath: wt.path,
       branch: wt.branch,
@@ -386,17 +429,18 @@ export function useMerge(deps: {
       steps,
       awaiting: null,
       done: false,
-      cancelled: false
+      cancelled: false,
+      startedAt: Date.now()
     })
     show()
-    void runPreflight(root, wt.path)
+    void runPreflight(wt.path)
     return null
   }
 
   function approve(): void {
-    if (!root) return
-    runRoot.current = root
-    patchFlow((f) =>
+    if (!flow) return
+    const key = flow.worktreePath
+    patchFlow(key, (f) =>
       f
         ? {
             ...f,
@@ -405,62 +449,58 @@ export function useMerge(deps: {
           }
         : f
     )
-    void runCommit()
+    void runCommit(key)
   }
 
   async function stashRetry(): Promise<void> {
-    if (!root) return
-    runRoot.current = root
-    const f = running()
-    if (!f) return
-    const errored = f.steps.find((s) => s.status === 'error')
+    if (!flow) return
+    const key = flow.worktreePath
+    const errored = flow.steps.find((s) => s.status === 'error')
     if (!errored) return
     // Which tree is dirty is in the message preflight refused with — the branch,
     // or the main worktree it is going into.
-    const path = /main worktree/i.test(errored.detail ?? '') ? f.root : f.worktreePath
-    step('preflight', { status: 'running', detail: 'Stashing…' })
+    const path = /main worktree/i.test(errored.detail ?? '') ? flow.root : key
+    step(key, 'preflight', { status: 'running', detail: 'Stashing…' })
     const res = await window.floe.merge.stash(path)
-    if (running()?.cancelled) return
+    if (!alive(key)) return
     if (!res.ok) {
-      step('preflight', { status: 'error', detail: res.message ?? 'Stash failed' })
+      step(key, 'preflight', { status: 'error', detail: res.message ?? 'Stash failed' })
       return
     }
-    void runPreflight(f.root, f.worktreePath)
+    void runPreflight(key)
   }
 
   function retry(): void {
-    if (!root) return
-    runRoot.current = root
-    const f = running()
-    if (!f) return
-    const errored = f.steps.find((s) => s.status === 'error')
+    if (!flow) return
+    const key = flow.worktreePath
+    const errored = flow.steps.find((s) => s.status === 'error')
     if (!errored) return
-    step(errored.id, { status: 'running', detail: undefined })
-    if (errored.id === 'preflight') void runPreflight(f.root, f.worktreePath)
-    else if (errored.id === 'merge') void runMergeBase(f.worktreePath, f.base, f.branch)
+    step(key, errored.id, { status: 'running', detail: undefined })
+    if (errored.id === 'preflight') void runPreflight(key)
+    else if (errored.id === 'merge') void runMergeBase(key, flow.base, flow.branch)
     else if (errored.id === 'resolve') {
       // Ask again in the same session — it already has the conflict in context.
-      if (f.sessionId) openResolve({ id: f.sessionId, worktreePath: f.worktreePath }, resolvePrompt(f.base, f.branch, []))
-    } else if (errored.id === 'commit') void runCommit()
-    else if (errored.id === 'fastforward') void runFastForward()
-    else if (errored.id === 'database') void runDropDatabase()
-    else if (errored.id === 'cleanup') void runCleanup()
-    else if (errored.id === 'closebranch') void runCloseBranch()
+      if (flow.sessionId) openResolve({ id: flow.sessionId, worktreePath: key }, resolvePrompt(flow.base, flow.branch, []))
+    } else if (errored.id === 'commit') void runCommit(key)
+    else if (errored.id === 'fastforward') void runFastForward(key)
+    else if (errored.id === 'database') void runDropDatabase(key)
+    else if (errored.id === 'cleanup') void runCleanup(key)
+    else if (errored.id === 'closebranch') void runCloseBranch(key)
   }
 
   function cancel(): void {
-    if (!root) return
-    runRoot.current = root
+    if (!flow) return
+    const key = flow.worktreePath
     // Marked cancelled first so a step already in flight drops its result
     // instead of writing into a flow the user has dismissed.
-    patchFlow((f) => (f ? { ...f, cancelled: true } : f))
-    patchFlow(null)
+    patchFlow(key, (f) => (f ? { ...f, cancelled: true } : f))
+    patchFlow(key, null)
   }
 
   /**
    * Resume when the resolving turn ends.
    *
-   * Keyed by the session, not by the open project: the merge carries on while
+   * Keyed by the session, not by what is on screen: the merge carries on while
    * you are somewhere else, and the flow it belongs to is whichever one started
    * that session.
    */
@@ -470,12 +510,11 @@ export function useMerge(deps: {
       if (!hit) return
       const [target, f] = hit
       if (f.steps.find((s) => s.id === 'resolve')?.status !== 'running') return
-      runRoot.current = target
-      if (event.kind === 'done') void onResolved()
-      else if (event.kind === 'error') step('resolve', { status: 'error', detail: 'The turn failed' })
+      if (event.kind === 'done') void onResolved(target)
+      else if (event.kind === 'error') step(target, 'resolve', { status: 'error', detail: 'The turn failed' })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  return { flow, start, approve, retry, stashRetry: () => void stashRetry(), cancel }
+  return { flow, flows: mine, start, approve, retry, stashRetry: () => void stashRetry(), cancel }
 }

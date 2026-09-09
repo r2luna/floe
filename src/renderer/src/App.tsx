@@ -1051,16 +1051,21 @@ export default function App() {
   }
 
   /**
-   * The guided merge, one flow per project.
+   * The guided merge, one flow per worktree.
    *
    * Everything the chain needs from the app is passed in rather than reached
    * for: it opens a chat for the conflict-resolution turn, stops the turns
    * running in a worktree it is about to tear down, and clears what that
    * worktree had on screen once it is gone. The hook owns the git steps and
    * nothing else.
+   *
+   * `here` decides which checklist is on screen, like every other worktree
+   * command: branches merge independently, so a flow stuck on a failed step is
+   * left where it is instead of standing in front of the next merge.
    */
   const merge = useMerge({
     root: projects.current?.path,
+    worktreePath: here,
     // A merge session is an ordinary chat — same panel, same transcript — that
     // is handed its opening message and pinned to `full`: it has to edit files
     // and `git add` without a prompt per tool, whatever the composer was set to.
@@ -1969,8 +1974,8 @@ export default function App() {
       }
       case 'start_merge': {
         // The guided merge starts from a Worktree row of the OPEN project
-        // (useMerge keys flows by projects.current). On the right project with
-        // the row loaded it starts now; otherwise park the request and navigate
+        // (the panel shows the flow of the tree the app is in). On the right
+        // project with the row loaded it starts now; otherwise park and navigate
         // — the effect below fires it once the rows arrive. The tool's timeout
         // answers the caller if they never do.
         const row = worktrees.rows.find((r) => r.worktree.path === command.worktreePath)

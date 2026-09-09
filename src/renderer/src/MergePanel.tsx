@@ -21,12 +21,19 @@ const DESTRUCTIVE = new Set<string>(['database', 'cleanup', 'closebranch'])
  * Its buttons dispatch command ids rather than acting, so the chips and the
  * keys are the same commands — `⏎` confirm, `r` review, `s` stash — and cannot
  * drift. See the rule at the top of commands.ts.
+ *
+ * One checklist at a time — the branch you are in — with the project's other
+ * merges named above it: they run independently, and a merge you cannot see is
+ * one you would never go back to.
  */
 export function MergePanel({
   flow,
+  flows,
   onCommand
 }: {
   flow: MergeFlow | null
+  /** Every merge running in the project, so the ones off screen still say so. */
+  flows: MergeFlow[]
   onCommand: (id: string) => void
 }) {
   if (!flow) return <p className="empty">No merge running. ⌘K M merges this worktree.</p>
@@ -54,6 +61,8 @@ export function MergePanel({
           {settled}/{steps.length}
         </span>
       </div>
+
+      <Others flows={flows} shown={flow.worktreePath} />
 
       <ul className="merge-track">
         {steps.map((s) => (
@@ -151,5 +160,35 @@ function Step({
         </div>
       )}
     </li>
+  )
+}
+
+/** What a flow is doing, in one word, for the line naming the ones off screen. */
+function stateOf(f: MergeFlow): string {
+  if (f.done) return 'done'
+  if (f.steps.some((s) => s.status === 'error')) return 'failed'
+  if (f.awaiting === 'review') return 'waiting'
+  return 'running'
+}
+
+/**
+ * The project's other merges: branch and state, no more.
+ *
+ * Not buttons — the way to one is to go to its branch, the same move that
+ * points the rest of the app at it. Reading them here is what tells you the
+ * move is worth making.
+ */
+function Others({ flows, shown }: { flows: MergeFlow[]; shown: string }) {
+  const rest = flows.filter((f) => f.worktreePath !== shown)
+  if (!rest.length) return null
+  return (
+    <div className="merge-others">
+      also merging:{' '}
+      {rest.map((f) => (
+        <span key={f.worktreePath} className={`merge-other merge-other-${stateOf(f)}`}>
+          {f.branch} {stateOf(f)}
+        </span>
+      ))}
+    </div>
   )
 }

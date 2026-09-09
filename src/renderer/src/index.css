@@ -3461,6 +3461,43 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+/* The project's other merges, above the checklist: one dim line, one chip per
+   branch, tinted only when it is stopped or waiting on you. */
+.merge-others {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 4px 10px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.merge-other {
+  padding: 1px 5px;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* Same two reds and the same accent the checklist's own rows carry, so a
+   branch reads the same off screen as it does on it. */
+.merge-other-failed {
+  border-color: color-mix(in srgb, #c07a72 45%, transparent);
+  color: #c49495;
+}
+
+:root[data-theme='light'] .merge-other-failed {
+  border-color: color-mix(in srgb, #b1454a 40%, transparent);
+  color: #b1454a;
+}
+
+.merge-other-waiting {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
+
 .merge-track {
   list-style: none;
   margin: 0;

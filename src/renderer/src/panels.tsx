@@ -782,7 +782,8 @@ export function PanelBody({
   if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
   // The checklist draws itself from the flow and dispatches command ids for
   // everything it offers — the chips and the keys are the same commands.
-  if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
+  if (kind === 'merge')
+    return <MergePanel flow={merge.flow} flows={merge.flows} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'provision')
     return <ProvisionPanel flow={provision.flow} onCommand={(id) => onCommand?.(id)} />

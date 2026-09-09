@@ -306,9 +306,11 @@ the diff on screen without approving, \`s\` stashes a tree too dirty to merge an
 runs the checks again, and Escape drops the checklist and its panel with it.
 Escape does not undo the merge: what git has already done stays done.
 
-\`⌘K M\` while one is already running brings its panel back rather than starting
-a second — which is how you get from the diff you opened with \`r\` to the
-approval waiting for you.`,
+\`⌘K M\` on a branch that is already merging brings its panel back rather than
+starting a second — which is how you get from the diff you opened with \`r\` to
+the approval waiting for you. Other branches are free to merge at the same time:
+each has its own checklist, and the panel shows the one you are in, so a merge
+stopped on a failed step never blocks the next one.`,
     binds: [
       { key: 'super+k m', command: 'worktree.merge' },
       { key: 'enter', command: 'merge.confirm', when: 'panel == "merge"' },
