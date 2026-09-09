@@ -784,7 +784,13 @@ export function PanelBody({
   if (kind === 'merge') return <MergePanel flow={merge.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'remove') return <RemovePanel flow={remove.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'provision')
-    return <ProvisionPanel flow={provision.flow} onCommand={(id) => onCommand?.(id)} />
+    return (
+      <ProvisionPanel
+        flow={provision.flow}
+        onCommand={(id) => onCommand?.(id)}
+        onAnswer={provision.answer}
+      />
+    )
   if (kind === 'setup') return <SetupPanel flow={setup.flow} onCommand={(id) => onCommand?.(id)} />
   if (kind === 'files')
     return <FilesTree root={cwd} scope={sub} onOpen={onOpen} onCommand={onCommand} find={find} />

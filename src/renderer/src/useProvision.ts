@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ProvisionEvent, ProvisionStep } from '../../shared/types'
+import type { ProvisionAsk, ProvisionEvent, ProvisionStep } from '../../shared/types'
 
 /**
  * A worktree's setup, in flight.
@@ -19,6 +19,14 @@ export interface ProvisionFlow {
   ok?: boolean
   /** The last line of output, so a long install says what it is doing. */
   tail?: string
+  /**
+   * The premise question waiting on the user, if one is.
+   *
+   * Held on the flow rather than beside it because it belongs to this
+   * worktree's setup like every other row: switch worktree and the question
+   * goes with it, come back and it is still there waiting.
+   */
+  ask?: ProvisionAsk | null
 }
 
 export interface Provision {
@@ -30,6 +38,8 @@ export interface Provision {
   start: (target: { root: string; worktreePath: string; branch: string }) => void
   /** Re-run from the step that failed, keeping what already succeeded. */
   retry: () => void
+  /** Answer the premise question on screen. `null` ends the interview. */
+  answer: (requestId: string, text: string | null) => void
   /** Drop the checklist. The steps that ran stay run. */
   dismiss: () => void
 }
@@ -104,6 +114,12 @@ export function useProvision(deps: {
 
   function dismiss(): void {
     if (!here) return
+    // Dropping the checklist ends the interview with it: main is holding a
+    // question this panel was the only way to answer, and leaving it pending
+    // would keep the worktree waiting on a panel that no longer exists. Sent
+    // outside the updater, which React is free to run more than once.
+    const pending = flow?.ask
+    if (pending) void window.floe.provision.answer(pending.requestId, null)
     setFlows((all) => {
       const copy = { ...all }
       delete copy[here]
@@ -153,6 +169,10 @@ export function useProvision(deps: {
               )
             }
           }
+        // A question, or its withdrawal (`ask: null`) once the interview is
+        // past it. Both are the same event so the panel never has to guess
+        // whether the thing it is drawing is still being asked.
+        if (e.kind === 'ask') return { ...all, [e.worktreePath]: { ...cur, ask: e.ask } }
         // Output arrives in chunks that are usually a partial line; the last
         // non-empty one is what the step is doing right now.
         if (e.kind === 'log') {
@@ -178,5 +198,20 @@ export function useProvision(deps: {
     })
   }, [])
 
-  return { flow, runningPaths, start: (t) => start(t), retry, dismiss }
+  /**
+   * Send the answer and drop the question in the same beat.
+   *
+   * Optimistic on purpose: main's next event is the following question (or the
+   * step going green), and leaving the answered one on screen until it arrives
+   * reads as an answer that did not register.
+   */
+  function answer(requestId: string, text: string | null): void {
+    setFlows((all) => {
+      const path = Object.keys(all).find((p) => all[p].ask?.requestId === requestId)
+      return path ? { ...all, [path]: { ...all[path], ask: null } } : all
+    })
+    void window.floe.provision.answer(requestId, text)
+  }
+
+  return { flow, runningPaths, start: (t) => start(t), retry, answer, dismiss }
 }

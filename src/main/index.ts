@@ -207,7 +207,14 @@ import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTas
 import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
-import { provisionWorktree, dropWorktreeDatabase, unlinkWorktreeSite, ensureContainerUp } from './provision'
+import { ensurePremiseFile, PREMISE_REL } from './premise'
+import {
+  provisionWorktree,
+  answerProvisionAsk,
+  dropWorktreeDatabase,
+  unlinkWorktreeSite,
+  ensureContainerUp
+} from './provision'
 import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
@@ -1198,6 +1205,19 @@ export function registerWorktreeIpc(): void {
       if (win) void provisionWorktree(win, root, worktreePath, branch, opts)
     }
   )
+  // Create-if-absent, so the editor always has a file to open. The premise
+  // itself is written by the interview or by hand — see main/premise.ts.
+  // Answers with the WORKTREE-RELATIVE path: the editor is launched rooted at
+  // the worktree, the same as every other file the app opens.
+  handle('premise:ensure', (_event, worktreePath: string) => {
+    ensurePremiseFile(worktreePath)
+    return PREMISE_REL
+  })
+  // The checklist answering the premise interview. `null` means "stop asking" —
+  // see answerProvisionAsk.
+  handle('provision:answer', (_event, requestId: string, answer: string | null) => {
+    answerProvisionAsk(requestId, answer)
+  })
   // Bring a container-mode worktree up (idempotent, no-op for host-native
   // projects). Fire-and-forget — the renderer doesn't wait.
   handle('provision:ensureUp', (_event, root: string, worktreePath: string, branch: string) => {

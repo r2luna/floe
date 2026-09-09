@@ -46,6 +46,12 @@ writeFileSync(
   join(HOME, '.floe', 'support.env'),
   'DOMAIN=test.example\nMYSQL_ROOT_PASSWORD=rootpw\nPOSTGRES_PASSWORD=pgpw\n'
 )
+// The premise interview is off for the recipe tests: it is a real `claude`
+// spawn (premise.ts is not behind the child_process stub below) and it would
+// put its own row on every checklist these tests assert on. Its own test turns
+// it back on with the model faked.
+mkdirSync(join(HOME, '.config', 'floe'), { recursive: true })
+writeFileSync(join(HOME, '.config', 'floe', 'floe.toml'), '[premise]\nenabled = false\n')
 
 const hookSource = `
 import { existsSync } from 'node:fs'
@@ -59,6 +65,10 @@ export async function resolve(specifier, context, next) {
   if (specifier === 'electron') return { url: 'stub:electron', shortCircuit: true, format: 'module' }
   if (STUBS[specifier] && (context.parentURL ?? '').endsWith('/provision.ts'))
     return { url: STUBS[specifier], shortCircuit: true, format: 'module' }
+  // premise.ts spawns the interview's model. Same stub, so the one test that
+  // turns the interview on decides what the model said.
+  if (specifier === 'node:child_process' && (context.parentURL ?? '').endsWith('/premise.ts'))
+    return { url: 'stub:child_process', shortCircuit: true, format: 'module' }
   if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\\.[a-z]+$/i.test(specifier)) {
     try {
       const base = context.parentURL ? new URL(specifier, context.parentURL) : pathToFileURL(specifier)
@@ -97,6 +107,12 @@ const SOURCE = {
     "\\n    else child.emit('exit', plan.code === undefined ? 0 : plan.code)" +
     "\\n  })" +
     "\\n  return child" +
+    "\\n}" +
+    "\\nexport function execFile(cmd, args, opts, cb) {" +
+    "\\n  const plan = globalThis.__provSpawnPlan(cmd, args) ?? {}" +
+    "\\n  globalThis.__provSpawns.push({ cmd, args, cwd: opts.cwd, env: opts.env })" +
+    "\\n  queueMicrotask(() => cb(null, plan.stdout ?? '', ''))" +
+    "\\n  return {}" +
     "\\n}"
 }
 export async function load(url, context, next) {
@@ -138,8 +154,15 @@ declare global {
   var __provSandbox: { disabled: boolean; bwrap: boolean }
 }
 
-const { dropWorktreeDatabase, ensureContainerUp, getAppUrl, provisionWorktree, unlinkWorktreeSite } =
-  await import('./provision.ts')
+const {
+  answerProvisionAsk,
+  dropWorktreeDatabase,
+  ensureContainerUp,
+  getAppUrl,
+  provisionWorktree,
+  unlinkWorktreeSite
+} = await import('./provision.ts')
+const { invalidateFloeConfig } = await import('./config/floe.ts')
 const store = await import('./config/projectStore.ts')
 
 function reset(): void {
@@ -561,6 +584,106 @@ test('a worktree with no recognised stack gets an empty plan, not a failure', as
   assert.deepEqual(planIds(events), [])
   assert.equal(finished(events), true)
   assert.deepEqual(globalThis.__provSpawns, [])
+})
+
+// ── the premise interview ────────────────────────────────────────────────────
+//
+// Off for every other test in this file (see the floe.toml written at the top).
+// These turn it on with the model's answers planned, and drive the questions the
+// way the checklist does.
+
+/** Run with the interview enabled, restoring the config afterwards. */
+async function withInterview<T>(run: () => Promise<T>): Promise<T> {
+  const path = join(HOME, '.config', 'floe', 'floe.toml')
+  writeFileSync(path, '[premise]\nenabled = true\nprovider = "claude"\nmodel = "sonnet"\n')
+  invalidateFloeConfig()
+  try {
+    return await run()
+  } finally {
+    writeFileSync(path, '[premise]\nenabled = false\n')
+    invalidateFloeConfig()
+  }
+}
+
+/** The question currently on screen, once main has asked it. */
+function currentAsk(events: ProvisionEvent[]): Extract<ProvisionEvent, { kind: 'ask' }>['ask'] {
+  return events.filter((e) => e.kind === 'ask').at(-1)?.ask ?? null
+}
+
+/** Let the interview's pending model call / await settle. */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+test('the interview asks, then writes the premise the answers compose', async () => {
+  reset()
+  // Two model calls in order: the questions, then the composed file.
+  const answers = [
+    '[{"id":"goal","question":"What ships?"},{"id":"kind","question":"Which kind?","options":["feature","bug"]}]',
+    '## Goal\nShip the premise flow.'
+  ]
+  globalThis.__provSpawnPlan = (cmd) => (cmd === 'claude' ? { stdout: answers.shift() ?? '' } : { code: 0 })
+
+  const root = checkout('floe-root-', { 'README.md': '#\n' })
+  const wt = checkout('floe-wt-', { 'README.md': '#\n' })
+
+  await withInterview(async () => {
+    const events = await provision(root, wt)
+    assert.deepEqual(planIds(events), ['premise'], 'the row is on the checklist even with no stack')
+
+    await settle()
+    const first = currentAsk(events)
+    assert.equal(first?.question, 'What ships?')
+    assert.equal(first?.index, 1)
+    assert.equal(first?.total, 2)
+
+    answerProvisionAsk(first!.requestId, 'the premise flow')
+    await settle()
+    const second = currentAsk(events)
+    assert.deepEqual(second?.options, ['feature', 'bug'])
+
+    answerProvisionAsk(second!.requestId, 'feature')
+    await settle()
+    await settle()
+
+    assert.equal(currentAsk(events), null, 'the question is withdrawn when the interview ends')
+    assert.equal(status(events, 'premise'), 'done')
+    assert.equal(readFileSync(join(wt, '.floe', 'premise.md'), 'utf8'), '## Goal\nShip the premise flow.\n')
+  })
+})
+
+test('skipping the interview leaves no premise and no more questions', async () => {
+  reset()
+  globalThis.__provSpawnPlan = (cmd) =>
+    cmd === 'claude' ? { stdout: '[{"question":"What ships?"},{"question":"Which kind?"}]' } : { code: 0 }
+
+  const root = checkout('floe-root-', { 'README.md': '#\n' })
+  const wt = checkout('floe-wt-', { 'README.md': '#\n' })
+
+  await withInterview(async () => {
+    const events = await provision(root, wt)
+    await settle()
+    const first = currentAsk(events)
+    assert.ok(first)
+
+    answerProvisionAsk(first!.requestId, null)
+    await settle()
+
+    assert.equal(currentAsk(events), null)
+    assert.equal(status(events, 'premise'), 'skipped')
+    assert.equal(existsSync(join(wt, '.floe', 'premise.md')), false, 'half an interview writes nothing')
+  })
+})
+
+test('a worktree that already has a premise is not interviewed again', async () => {
+  reset()
+  const root = checkout('floe-root-', { 'README.md': '#\n' })
+  const wt = checkout('floe-wt-', { 'README.md': '#\n', '.floe/premise.md': '## Goal\nAlready written.\n' })
+
+  await withInterview(async () => {
+    const events = await provision(root, wt)
+    await settle()
+    assert.deepEqual(planIds(events), [])
+    assert.deepEqual(globalThis.__provSpawns, [], 'no model call either')
+  })
 })
 
 test('a destroyed window swallows the events instead of throwing', async () => {

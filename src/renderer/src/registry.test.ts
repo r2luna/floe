@@ -26,6 +26,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     makePanel: (kind: string, sub?: string) => panel(kind, sub),
     canOpen: () => true,
     editSkill: () => {},
+    editPremise: () => {},
     openChat: () => {},
     whyCannotOpen: () => 'not available',
     patchFor: () => '',

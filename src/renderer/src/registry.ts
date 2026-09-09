@@ -1997,6 +1997,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.provision.start()
       },
       {
+        // The premise the interview writes on create (main/premise.ts). This is
+        // the way back into it: to fix what you answered in a hurry, or to
+        // write one for a worktree that predates the file.
+        id: 'worktree.premise',
+        title: 'Edit this worktree’s premise',
+        group: 'Worktrees',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree open — a premise belongs to one',
+        run: (c) => c.editPremise()
+      },
+      {
         id: 'provision.confirm',
         title: 'Provision: retry from the failed step',
         group: 'Worktrees',
