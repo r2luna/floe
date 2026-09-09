@@ -507,11 +507,19 @@ the panel header while anything is ticked, so what \`d\` is about to delete is
 always on screen.
 
 \`d\` asks before it deletes, and what it deletes is Floe's record: the Claude
-transcripts stay on disk.`,
+transcripts stay on disk.
+
+\`u\` is a different mark: it puts the unread dot back on a chat, to read later.
+In the list it marks the row under the cursor; \`⌘⇧U\` marks the chat you are
+reading, from anywhere — including mid-sentence in the composer, which is where
+you are when you decide this one is for later. Both toggle, and a mark on the
+chat you have open stays on until you leave and come back.`,
     binds: [
       { key: 'x', command: 'session.mark', when: 'panel == "worktrees"' },
       { key: 'd', command: 'session.deleteMarked', when: 'panel == "worktrees"' },
-      { key: 'escape', command: 'session.markClear', when: 'panel == "worktrees" and marked' }
+      { key: 'escape', command: 'session.markClear', when: 'panel == "worktrees" and marked' },
+      { key: 'u', command: 'session.unread', when: 'panel == "worktrees"' },
+      { key: 'super+shift+u', command: 'session.unread' }
     ]
   }
 ]

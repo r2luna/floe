@@ -4656,7 +4656,9 @@ function SessionMark({
     )
   if (working) return <Spinner />
   return (
-    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
+    // "unread", not "unread reply": the mark is also one you put there
+    // yourself, on a chat you decided to read later.
+    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread' : undefined} />
   )
 }
 
@@ -4670,6 +4672,11 @@ function SessionMark({
  */
 function namesOf(s: ClaudeSessionMeta): string[] {
   return s.claudeId && s.claudeId !== s.id ? [s.id, s.claudeId] : [s.id]
+}
+
+/** The same question, asked of a DOM row — what the right-click menu has. */
+function rowUnread(row: HTMLElement, unread: ReadonlySet<string>): boolean {
+  return [row.dataset.session, row.dataset.claude].some((n) => !!n && unread.has(n))
 }
 
 /**
@@ -5027,6 +5034,13 @@ function WorktreesList({
       run: () => onCommand?.('session.markClear')
     },
     {
+      // Reads the live set, so the item says which way the toggle will go —
+      // the row it was opened on is the one the command will act on.
+      label: menu && rowUnread(menu.row, unread) ? 'Mark as read' : 'Mark as unread',
+      keys: 'u',
+      run: () => onCommand?.('session.unread')
+    },
+    {
       // Says how many, because with a selection open `d` is not about the row
       // you right-clicked — and a menu reading "Delete session…" over four
       // ticked sessions would be describing the wrong thing.
@@ -5141,6 +5155,10 @@ function WorktreesList({
               // cursor is on — `x` and `d` read these rather than counting rows,
               // which a folded branch would throw off.
               data-session={s.id}
+              // The other name. The unread mark can be keyed by either (the
+              // events carry whichever the conn spawned with), so `u` has to be
+              // able to take it off under both — see unreadTarget.
+              data-claude={s.claudeId ?? undefined}
               data-worktree={worktree.path}
               // Work another chat set running, not a session of its own. The
               // mark is on every spawned row; the indent only on one whose
