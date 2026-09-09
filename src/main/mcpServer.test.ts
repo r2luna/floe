@@ -86,6 +86,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'list_sessions',
       'create_session',
       'send_message',
+      'ask_peer',
       'ask_codex',
       'read_session_output',
       'open_query',
@@ -408,11 +409,18 @@ test('open_query names the session it could not find, and needs a window to open
   assert.match(String(noWindow.error), /No window available/)
 })
 
-test('ask_codex refuses when the caller is not a Floe session', async () => {
+test('ask_peer refuses when the caller is not a Floe session', async () => {
   // The client connects as /mcp/test-key, which resolves to no session — so
-  // there is no chat for Codex to answer into, and no Codex is spawned.
-  const out = await callTool('ask_codex', { prompt: 'review this' })
+  // there is no chat for the peer to answer into, and nothing is spawned.
+  const out = await callTool('ask_peer', { harness: 'codex', prompt: 'review this' })
   assert.match(String(out.error), /must be called from a Floe session/)
+  // Any harness, in any direction: a codex session asking claude is the same
+  // call with the other name in it.
+  const back = await callTool('ask_peer', { harness: 'claude', prompt: 'and you?' })
+  assert.match(String(back.error), /must be called from a Floe session/)
+  // The old name still answers, so sessions written against it keep working.
+  const legacy = await callTool('ask_codex', { prompt: 'review this' })
+  assert.match(String(legacy.error), /must be called from a Floe session/)
 })
 
 test('list_queries and stop_session report an unknown session by name', async () => {

@@ -64,7 +64,7 @@ const home = mkdtempSync(join(tmpdir(), 'floe-codex-home-'))
 process.env.HOME = home
 process.env.FLOE_TEST_USERDATA = mkdtempSync(join(tmpdir(), 'floe-codex-data-'))
 
-const { nextExchange, MAX_EXCHANGES, codexModels, resolveModel, askCodex, chatWithCodex, getCodexUsage } =
+const { codexModels, resolveModel, codexPosture, chatWithCodex, getCodexUsage } =
   await import('./codex.ts')
 
 // ---------------------------------------------------------------- fixtures
@@ -160,25 +160,7 @@ function stream(child: FakeChild, lines: string[], opts: { stderr?: string; code
   child.emit('close', opts.code ?? 0)
 }
 
-const REPLY = (text: string): string => JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text } })
-
 // ---------------------------------------------------------------- the tests
-
-// The exchange window: MAX_EXCHANGES real turns, then one capped call that resets
-// the window so the next round starts fresh after the user's guidance.
-test('nextExchange caps after MAX_EXCHANGES and then resets', () => {
-  const state = { step: 0 }
-  for (let i = 1; i <= MAX_EXCHANGES; i++) {
-    assert.deepEqual(nextExchange(state), { capped: false })
-    assert.equal(state.step, i)
-  }
-  // Window full: next call is capped and does not consume a step.
-  assert.deepEqual(nextExchange(state), { capped: true })
-  assert.equal(state.step, 0)
-  // Fresh round after the cap.
-  assert.deepEqual(nextExchange(state), { capped: false })
-  assert.equal(state.step, 1)
-})
 
 test('codexModels offers only the user-listable, API-supported cache entries', () => {
   seedHome({ cache: TWO_MODELS })
@@ -210,111 +192,13 @@ test('resolveModel keeps a slug codex still offers and drops one it does not', (
   assert.equal(resolveModel(undefined), 'gpt-5.5')
 })
 
-test('askCodex drives one exec turn and reports it as a subagent row', async () => {
-  seedHome({ cache: TWO_MODELS })
-  const { win, events } = fakeWin()
-  const p = askCodex(win, 's1', '/work/tree', 'compare the two parsers')
-
-  const { cmd, args, opts, child } = last()
-  assert.equal(cmd, 'codex')
-  assert.equal(opts.cwd, '/work/tree')
-  assert.deepEqual(args.slice(0, 7), ['exec', '--json', '--skip-git-repo-check', '-m', 'gpt-5.5', '-s', 'read-only'])
-  assert.equal(args[7], '--', "'--' must terminate option parsing before the prompt")
-  // A fresh thread gets the machine-to-machine contract; the prompt rides last.
-  assert.match(args[8], /^\[M2M PROTOCOL\]/)
-  assert.ok(args[8].endsWith('compare the two parsers'))
-  assert.equal(child.stdin.ended, true, 'stdin must be closed or `codex exec` never starts a turn')
-
-  stream(child, [
-    'codex 0.9.0 starting…', // a stray log line, not JSON
-    '{"type":"item.started"', // a truncated line
-    '{"type":"thread.started","thread_id":"th-abc-1"}',
-    JSON.stringify({ type: 'item.completed', item: { type: 'command_execution' } }),
-    REPLY('draft'),
-    REPLY('parser B wins'), // the LAST agent_message is the reply
-    JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1200, output_tokens: 34, cached_input_tokens: 900 } })
-  ])
-
-  assert.deepEqual(await p, { capped: false, reply: 'parser B wins', exchange: 1 })
-  assert.equal(events[0].kind, 'subagent-start')
-  assert.equal(events[0].description, 'compare the two parsers', 'the preamble stays out of the row title')
-  const progress = events.filter((e) => e.kind === 'subagent-progress')
-  assert.deepEqual(
-    progress.map((e) => (e as { tool?: string }).tool),
-    ['command_execution', 'agent_message', 'agent_message']
-  )
-  const done = events.at(-1) as { kind: string; reply?: string }
-  assert.equal(done.kind, 'subagent-done')
-  assert.equal(done.reply, 'parser B wins')
-})
-
-test('the next exchange resumes the thread codex reported, without the preamble', async () => {
-  const { win } = fakeWin()
-  const p = askCodex(win, 's1', '/work/tree', 'and the allocator?')
-  const { args, child } = last()
-  assert.deepEqual(args.slice(0, 6), ['exec', 'resume', 'th-abc-1', '--json', '--skip-git-repo-check', '-m'])
-  assert.equal(args.at(-1), 'and the allocator?')
-  assert.ok(!args.includes('-s'), 'resume inherits the sandbox from the first turn')
-  stream(child, [REPLY('same')])
-  assert.equal((await p).exchange, 2)
-})
-
-test('a new topic forgets the thread and restarts the exchange count', async () => {
-  const { win } = fakeWin()
-  const p = askCodex(win, 's1', '/work/tree', 'different question', true)
-  const { args, child } = last()
-  assert.equal(args[0], 'exec')
-  assert.notEqual(args[1], 'resume')
-  stream(child, [REPLY('ok')])
-  assert.deepEqual(await p, { capped: false, reply: 'ok', exchange: 1 })
-})
-
-test('a thread id that is not a plain token is never used as argv', async () => {
-  const { win } = fakeWin()
-  const first = askCodex(win, 'evil', '/w', 'go')
-  // codex's own output is still input: a thread id shaped like a flag must not
-  // become a leading argument.
-  stream(last().child, ['{"type":"thread.started","thread_id":"-c sandbox_mode=danger-full-access"}', REPLY('a')])
-  await first
-
-  const second = askCodex(win, 'evil', '/w', 'again')
-  assert.notEqual(last().args[1], 'resume', 'a bad thread id falls back to a fresh thread')
-  stream(last().child, [REPLY('b')])
-  await second
-})
-
-test('the exchange cap stops calling codex until the user weighs in', async () => {
-  const { win } = fakeWin()
-  const turn = async (): Promise<unknown> => {
-    const p = askCodex(win, 'capped', '/w', 'q')
-    stream(last().child, [REPLY('a')])
-    return p
-  }
-  for (let i = 0; i < MAX_EXCHANGES; i++) await turn()
-  const before = spawns.length
-  assert.deepEqual(await askCodex(win, 'capped', '/w', 'one too many'), { capped: true })
-  assert.equal(spawns.length, before, 'a capped call must not spawn codex at all')
-  // The window reset, so the user saying "keep going" starts a fresh round.
-  assert.equal(((await turn()) as { exchange: number }).exchange, 1)
-})
-
-test('a turn that produces no reply surfaces codex stderr, and the row still closes', async () => {
-  const { win, events } = fakeWin()
-  const p = askCodex(win, 'boom', '/w', 'q')
-  stream(last().child, [], { stderr: '  stream error: 401 unauthorized\n', code: 1 })
-  const r = (await p) as { error?: string; reply?: string }
-  assert.equal(r.error, 'stream error: 401 unauthorized')
-  assert.equal(r.reply, undefined)
-  const done = events.at(-1) as { kind: string; reply?: string }
-  assert.equal(done.kind, 'subagent-done', 'the subagent row must not be left running')
-  assert.equal(done.reply, undefined)
-})
-
-test('a missing codex binary says so instead of leaking the spawn error', async () => {
-  const { win } = fakeWin()
-  const p = askCodex(win, 'enoent', '/w', 'q')
-  last().child.emit('error', new Error('spawn codex ENOENT'))
-  assert.equal(((await p) as { error?: string }).error, 'codex CLI not found on PATH.')
+test('codexPosture maps Floe modes onto codex sandbox + collaboration', () => {
+  assert.deepEqual(codexPosture('plan'), { sandbox: 'read-only', collaboration: 'plan' })
+  assert.deepEqual(codexPosture('acceptEdits'), { sandbox: 'workspace-write', collaboration: 'default' })
+  assert.deepEqual(codexPosture('skip'), { sandbox: 'danger-full-access', collaboration: 'default' })
+  // "ask" is not a mode codex has (shared/modes.ts), so it lands on read-only
+  // rather than on something looser than the caller asked for.
+  assert.deepEqual(codexPosture('default'), { sandbox: 'read-only', collaboration: 'plan' })
 })
 
 test('chatWithCodex streams the reply, the token fill and done into the session', async () => {

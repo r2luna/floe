@@ -17,6 +17,7 @@ const STUBS = {
   './agent': 'stub:agent',
   './handoff': 'stub:handoff',
   './runtimes': 'stub:runtimes',
+  './peer': 'stub:peer',
   './runtimeLog': 'stub:runtimeLog',
   './turn': 'stub:turn',
   './log': 'stub:log'
@@ -43,6 +44,7 @@ const SOURCE = {
     "\\nexport function activeTurnKeys() { return globalThis.__busy }" +
     "\\nexport function onceTurnDone(key, cb) { (globalThis.__waits[key] ??= []).push(cb) }",
   'stub:runtimes': "export function forgetThread(key) { globalThis.__forgot.push(key) }",
+  'stub:peer': "export function forgetPeers(key) { globalThis.__forgotPeers.push(key) }",
   'stub:runtimeLog':
     "export function logTurn(key, item) { globalThis.__logged.push({ key, item }) }" +
     "\\nexport function dropRuntimeTranscript(key) { globalThis.__dropped.push(key) }",
@@ -84,6 +86,7 @@ declare global {
   var __stopped: string[]
   // eslint-disable-next-line no-var
   var __forgot: string[]
+  var __forgotPeers: string[]
   // eslint-disable-next-line no-var
   var __forgotRead: string[]
   // eslint-disable-next-line no-var
@@ -132,6 +135,7 @@ function fresh(unread: number): { sessionId: string; qkey: string } {
   globalThis.__events = []
   globalThis.__stopped = []
   globalThis.__forgot = []
+  globalThis.__forgotPeers = []
   globalThis.__forgotRead = []
   globalThis.__logged = []
   globalThis.__dropped = []
@@ -197,6 +201,9 @@ test('a merge after a peek sends the rest, and closes', () => {
   // merge, so what the chat has already been shown has to outlive it too.
   assert.ok(globalThis.__stopped.includes(qkey))
   assert.ok(globalThis.__forgot.includes(qkey))
+  // The peer windows and threads a query opened go with it, or the next query
+  // on that key starts halfway through someone else's exchange count.
+  assert.ok(globalThis.__forgotPeers.includes(qkey))
   assert.equal(globalThis.__forgotRead.includes(qkey), false)
 })
 

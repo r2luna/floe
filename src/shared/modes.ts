@@ -121,3 +121,16 @@ export function modeFromLabel(label: string): PermissionMode | undefined {
   if (label === 'full') return 'skip'
   return MODES.find((m) => m.label === label || m.id === label)?.id
 }
+
+/**
+ * The lighter of two modes.
+ *
+ * A peer consult (main/peer.ts) asks for a mode, and what it may have is
+ * bounded by what the session that called it was given: an agent running in a
+ * `plan` chat must not open a peer that writes. Ceiling first, ask second —
+ * this is the ceiling.
+ */
+export function clampMode(want: PermissionMode, ceiling: PermissionMode): PermissionMode {
+  const rank = (id: PermissionMode): number => MODES.findIndex((m) => m.id === id)
+  return rank(want) <= rank(ceiling) ? want : ceiling
+}

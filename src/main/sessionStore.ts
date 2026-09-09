@@ -56,6 +56,16 @@ export interface CreatedSession {
    * moment it happened.
    */
   provider?: string
+  /**
+   * The conversation id each non-Claude harness minted for this session, by
+   * harness name.
+   *
+   * Claude has `claudeId` and its own JSONL, so it resumes after a restart.
+   * Everyone else kept its thread in a Map in main: quitting Floe — or codex's
+   * app-server dying — lost a conversation the harness still had on disk, and
+   * the next message started a stranger. This is that id, written down.
+   */
+  threads?: Record<string, string>
   // The session id of the agent that opened this one (MCP create_session). A
   // spawned session has no human in front of it — only the parent talks to the
   // user — so the agent answers its AskUserQuestion for it. See agent.ts.
@@ -407,6 +417,36 @@ export function createdSessionChoice(
   // A record with nothing chosen is not an answer — the transcript still is.
   if (!c || (!c.provider && !c.model && !c.effort && !c.permissionMode)) return null
   return { provider: c.provider, model: c.model, effort: c.effort, mode: c.permissionMode }
+}
+
+/** The id `harness` last used for this session's conversation, if any. */
+export function getSessionThread(id: string, harness: string): string | undefined {
+  return findByKey(read().created, id)?.threads?.[harness]
+}
+
+/** Remember the conversation id a harness minted, so a restart can resume it. */
+export function setSessionThread(id: string, harness: string, threadId: string): void {
+  const store = read()
+  const c = findByKey(store.created, id)
+  if (!c || c.threads?.[harness] === threadId) return
+  c.threads = { ...c.threads, [harness]: threadId }
+  write(store)
+}
+
+/**
+ * Forget every harness thread this session holds.
+ *
+ * Not on close — a closed session is reopened and should still be itself. This
+ * is for the deliberate reset: a new topic, or a thread the harness told us it
+ * no longer has.
+ */
+export function clearSessionThreads(id: string, harness?: string): void {
+  const store = read()
+  const c = findByKey(store.created, id)
+  if (!c?.threads) return
+  if (harness) delete c.threads[harness]
+  else c.threads = undefined
+  write(store)
 }
 
 // Record that an agent (not the user) opened this session, so the questions it

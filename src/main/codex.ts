@@ -8,10 +8,12 @@ import {
   type CodexModel,
   type CodexUsage,
   type CodexUsageWindow,
+  type PermissionMode,
   CODEX_CONTEXT_WINDOW
 } from '../shared/types'
 import { sendAgentEvent } from './agent'
 import { logTurn } from './runtimeLog'
+import { rememberThread, threadFor } from './threads'
 
 // The Codex models Floe offers, read from codex's own on-disk cache so the
 // picker matches exactly what `codex` can run — no hardcoded list to rot. Only
@@ -55,124 +57,42 @@ export function resolveModel(model: string | undefined): string {
   return list[0].slug
 }
 
-// Surface a codex event as a subagent row in the caller session's tree, reusing
-// the same subagent-start/progress/done lifecycle (and the isDestroyed guard) as
-// Claude's own Task subagents in agent.ts.
 // agent.ts's funnel: stamps the per-session seq and feeds the replay snapshot.
 function emit(win: BrowserWindow, key: string, event: AgentEvent): void {
   sendAgentEvent(win, key, event)
 }
 
-// Drives the local `codex` CLI (`codex exec --json`) as a pair-programming
-// partner for a Claude session. Each caller session gets one running Codex
-// "thread" it can converse with over several exchanges; Codex shows up as a
-// subagent row in that session's tree (reusing the subagent-* AgentEvents), and
-// the conversation is capped at MAX_EXCHANGES turns before Claude must check in
-// with the user.
-
-// Max Codex↔Claude exchanges before we force a check-in with the user. After the
-// cap the window resets, so once the user says "keep going" the next call starts
-// a fresh count of 5 on the same thread.
-export const MAX_EXCHANGES = 5
-
-// Machine-to-machine contract, injected once at the top of a fresh Codex thread
-// (first turn / new topic). ask_codex is Claude⇄Codex, not Codex→human — so tell
-// Codex to talk to its peer at maximum signal density: no pleasantries, no
-// restating shared context, technical shorthand over prose. The human-readable
-// summary happens later, on the Claude side, once they've converged.
-const M2M_PREAMBLE = [
-  '[M2M PROTOCOL] Your interlocutor is another AI (Claude), not a human. Optimize this exchange for machine-to-machine bandwidth, not human readability:',
-  '- Maximum signal, minimum tokens. Drop greetings, sign-offs, hedging, praise, and meta-talk ("great question", "let me think", "I agree that...").',
-  '- Do NOT restate context you both already share; reference it (file:line, symbol, prior point #) instead of re-explaining.',
-  '- Prefer terse fragments, technical shorthand, symbols, and structured lists over full prose sentences.',
-  '- State claims, evidence, and disagreements directly and flatly. Lead with the delta from the last message.',
-  '- No summary for a human reader — that is produced separately. Emit only what advances the shared analysis.'
-].join('\n')
-
-// Codex is read-only by default: this is analysis / pair-programming, not an
-// editor. Flip to 'workspace-write' here (and drop --skip on resume) if you want
-// Codex to actually change files.
-const SANDBOX = 'read-only'
-
-// Hard ceiling on a single Codex turn so a hung subprocess can't wedge the
-// blocking MCP tool call forever.
+// Hard ceiling on a single Codex turn so a hung caller cannot wait on a wedged
+// subprocess forever.
 const TURN_TIMEOUT_MS = 240_000
 
-interface CodexState {
-  threadId?: string // codex thread id, for `exec resume`
-  step: number // exchanges used in the current window
+// The mechanics of driving the local `codex` CLI: which argv to build, how to
+// read its JSONL, what posture each permission mode maps onto. Who may talk to
+// codex, in whose name, and how many times before checking in with the user is
+// NOT here — that is peer.ts, and it asks the same questions of every harness.
+
+/** Floe's four modes in codex's own two settings. */
+export function codexPosture(mode: PermissionMode): { sandbox: string; collaboration: string } {
+  if (mode === 'skip') return { sandbox: 'danger-full-access', collaboration: 'default' }
+  if (mode === 'acceptEdits') return { sandbox: 'workspace-write', collaboration: 'default' }
+  return { sandbox: 'read-only', collaboration: 'plan' }
 }
 
-const states = new Map<string, CodexState>()
-
-// Advance the exchange window. Returns capped=true (without consuming a step)
-// once the window is full, and resets it so the next call after the user's
-// guidance starts fresh. Pure + exported for the unit test.
-export function nextExchange(state: CodexState): { capped: boolean } {
-  if (state.step >= MAX_EXCHANGES) {
-    state.step = 0
-    return { capped: true }
-  }
-  state.step += 1
-  return { capped: false }
-}
-
-export interface CodexResult {
-  capped: boolean // hit the exchange cap — no Codex call was made
-  reply?: string // Codex's message this exchange
-  exchange?: number // which exchange this was (1-based, within the window)
-  error?: string
-}
-
-// Run one exchange with Codex for a caller session. Spawns (or resumes) a Codex
-// thread, streams its activity into the caller's subagent tree, and resolves
-// with Codex's final message.
-export async function askCodex(
-  win: BrowserWindow,
-  callerKey: string,
+/**
+ * One `codex exec` turn, resuming `threadId` when there is one.
+ *
+ * The mode is passed in rather than pinned: codex used to be hard-wired to
+ * read-only here because this path only ever served "a second pair of eyes for
+ * Claude". A peer is not a reviewer with a fixed ceiling — what it may do is
+ * decided by whoever calls it, against the caller's own mode (peer.ts).
+ */
+export function runCodexExchange(
   worktreePath: string,
-  prompt: string,
-  newTopic = false
-): Promise<CodexResult> {
-  const state = states.get(callerKey) ?? { step: 0 }
-  states.set(callerKey, state)
-  if (newTopic) {
-    state.threadId = undefined
-    state.step = 0
-  }
-
-  const { capped } = nextExchange(state)
-  if (capped) return { capped: true }
-
-  const toolUseId = `codex:${callerKey}:${Date.now()}`
-  const startedAt = Date.now()
-  emit(win, callerKey, {
-    kind: 'subagent-start',
-    toolUseId,
-    agentType: 'codex',
-    description: prompt.slice(0, 120),
-    harness: 'codex'
-  })
-
-  // Set the machine-to-machine contract once, at the top of a fresh thread — a
-  // new topic reset threadId to undefined above, so this covers both cases.
-  // Resumed turns inherit the tone, so we don't re-inject it (and don't pollute
-  // the subagent row's description with the preamble).
-  const codexPrompt = state.threadId ? prompt : `${M2M_PREAMBLE}\n\n---\n\n${prompt}`
-  const args = codexArgs(state.threadId, codexPrompt, callerKey, resolveModel(undefined))
-  try {
-    const { reply, threadId } = await runCodex(worktreePath, args, (tool, tokens) =>
-      emit(win, callerKey, { kind: 'subagent-progress', toolUseId, tokens, tool })
-    )
-    if (threadId) state.threadId = threadId
-    // Hand the answer to the renderer so the exchange can become a visible block
-    // in the thread instead of vanishing with the subagent row.
-    emit(win, callerKey, { kind: 'subagent-done', toolUseId, reply, ms: Date.now() - startedAt })
-    return { capped: false, reply, exchange: state.step }
-  } catch (e) {
-    emit(win, callerKey, { kind: 'subagent-done', toolUseId, ms: Date.now() - startedAt })
-    return { capped: false, error: (e as Error).message, exchange: state.step }
-  }
+  o: { threadId?: string; prompt: string; model?: string; effort?: string; mode: PermissionMode },
+  onProgress?: (tool: string | undefined, tokens: number) => void
+): Promise<{ reply: string; threadId?: string; tokens: number }> {
+  const args = codexArgs(o.threadId, o.prompt, resolveModel(o.model), o.effort, o.mode)
+  return runCodex(worktreePath, args, onProgress)
 }
 
 // Chat directly with Codex as the backend of a Floe session (the user picked
@@ -187,12 +107,13 @@ export async function chatWithCodex(
   model: string | undefined,
   effort?: string
 ): Promise<void> {
-  const state = states.get(key) ?? { step: 0 }
-  states.set(key, state)
-  const args = codexArgs(state.threadId, prompt, key, resolveModel(model), effort)
+  // `plan` keeps this path's long-standing read-only sandbox. The user's real
+  // codex chat runs on the app-server instead (codexServer.ts), which does take
+  // the picker's mode — this is the exec fallback, and it does not write.
+  const args = codexArgs(threadFor(key, 'codex'), prompt, resolveModel(model), effort, 'plan')
   try {
     const { reply, threadId, tokens } = await runCodex(worktreePath, args)
-    if (threadId) state.threadId = threadId
+    if (threadId) rememberThread(key, 'codex', threadId)
     if (reply) {
       emit(win, key, { kind: 'text', text: reply })
       // Codex writes its own rollout, but under an id we cannot resume by, so
@@ -216,9 +137,9 @@ export async function chatWithCodex(
 function codexArgs(
   threadId: string | undefined,
   prompt: string,
-  token: string,
   model: string,
-  effort?: string
+  effort?: string,
+  mode: PermissionMode = 'plan'
 ): string[] {
   const cfg = effort ? ['-c', `model_reasoning_effort=${mapEffort(effort)}`] : []
   // '--' terminates codex's option parsing so a prompt starting with '-' can't
@@ -232,7 +153,17 @@ function codexArgs(
   const modelArg = ['-m', model]
   return safe
     ? ['exec', 'resume', safe, '--json', '--skip-git-repo-check', ...modelArg, ...cfg, '--', prompt]
-    : ['exec', '--json', '--skip-git-repo-check', ...modelArg, '-s', SANDBOX, ...cfg, '--', prompt]
+    : [
+        'exec',
+        '--json',
+        '--skip-git-repo-check',
+        ...modelArg,
+        '-s',
+        codexPosture(mode).sandbox,
+        ...cfg,
+        '--',
+        prompt
+      ]
 }
 
 // Floe's five effort levels → codex's three. xhigh/max both land on high.
@@ -240,6 +171,22 @@ function mapEffort(effort: string): string {
   if (effort === 'low') return 'low'
   if (effort === 'medium') return 'medium'
   return 'high'
+}
+
+/**
+ * codex's stderr, minus the line it prints on every single run.
+ *
+ * "Reading additional input from stdin..." appears even with stdin closed
+ * immediately, so as the last line of stderr it became the error message for
+ * every failed turn — telling the user to look at a pipe when the actual
+ * problem was a usage limit.
+ */
+function cleanStderr(stderr: string): string {
+  return stderr
+    .split('\n')
+    .filter((l) => l.trim() && !l.trim().startsWith('Reading additional input from stdin'))
+    .join('\n')
+    .trim()
 }
 
 // Spawn one `codex exec` process, parse its JSONL events, report live progress
@@ -260,6 +207,11 @@ function runCodex(
     let threadId: string | undefined
     let reply = ''
     let tokens = 0
+    // What codex said went wrong, in its own words. Its failures arrive as JSON
+    // events on stdout — a usage limit, a provider it cannot reach — while
+    // stderr carries only startup noise, so a turn that died with a readable
+    // reason was being reported as "Reading additional input from stdin...".
+    let failure = ''
 
     const timer = setTimeout(() => {
       child.kill('SIGTERM')
@@ -288,6 +240,12 @@ function runCodex(
           const item = msg.item as { type?: string; text?: string }
           if (item.type === 'agent_message' && typeof item.text === 'string') reply = item.text
           onProgress?.(item.type, tokens)
+        } else if (msg.type === 'error' || msg.type === 'turn.failed') {
+          const said =
+            typeof msg.message === 'string'
+              ? msg.message
+              : ((msg.error as { message?: string } | undefined)?.message ?? '')
+          if (said) failure = said
         } else if (msg.type === 'turn.completed' && msg.usage && typeof msg.usage === 'object') {
           // input_tokens is the full prompt the model saw this turn (incl. the
           // resumed thread + the cached portion), so input + output is the
@@ -310,7 +268,7 @@ function runCodex(
     child.on('close', () => {
       clearTimeout(timer)
       if (reply) resolve({ reply, threadId, tokens })
-      else reject(new Error(stderr.trim() || 'Codex produced no reply.'))
+      else reject(new Error(failure || cleanStderr(stderr) || 'Codex produced no reply.'))
     })
   })
 }
