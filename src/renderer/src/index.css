@@ -7205,8 +7205,11 @@ kbd {
   border-bottom: 1px solid var(--line-soft);
 }
 
-/* The rail in one glyph. The outline-chip pattern, sized for a thumb. */
-.lane-menu {
+/* The rail in one glyph, and ⌘T beside it. The outline-chip pattern, sized for
+   a thumb — the same box as a `.lane-tab`, so the two fixed buttons and the row
+   that scrolls past them sit on one line. */
+.lane-menu,
+.lane-new {
   display: grid;
   place-items: center;
   flex: none;
@@ -7221,6 +7224,14 @@ kbd {
   border-color: var(--line);
   background: var(--wash-2);
   color: var(--text-strong);
+}
+
+/* No worktree, nowhere to start: dimmed rather than hidden, so the bar does not
+   change shape between a project being open and not. */
+.lane-new:disabled {
+  color: var(--faint);
+  border-color: var(--line-soft);
+  opacity: 0.55;
 }
 
 .lane-tabs {
