@@ -2367,7 +2367,6 @@ button {
   min-height: 0;
   overflow-y: auto;
   padding: 6px 11px;
-  font-variant-ligatures: none;
   /* Chrome's scroll anchoring rewrites scrollTop when content above the
      viewport settles. In a streaming transcript that reads as the user
      scrolling, and the panel stops following the stream. The follow is ours to

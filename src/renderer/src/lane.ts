@@ -173,20 +173,35 @@ export function open(lane: Lane, panel: Panel): Lane {
 }
 
 /**
- * Close one panel. Not its neighbours: every panel in the lane is a thing you
- * asked for, and closing the leftmost to reclaim room must not take the work to
- * its right with it. Accumulation is prevented in `open`, by replacing a panel
- * of the same kind — not here.
+ * The panel a list opens, which has no other way in.
+ *
+ * The diff is only ever a row of the changes list — nothing else opens one —
+ * so closing that list has to take the diff with it, or you are left reading a
+ * file with no way to pick the next one. The file reader is not here: the tree
+ * opens it, and the tree is not the only door.
+ */
+const DEPENDENT: Record<string, string> = { changes: 'diff' }
+
+/**
+ * Close one panel, and whatever depended on it (see DEPENDENT). Not its
+ * neighbours: every panel in the lane is a thing you asked for, and closing the
+ * leftmost to reclaim room must not take the work to its right with it.
+ * Accumulation is prevented in `open`, by replacing a panel of the same kind —
+ * not here.
  *
  * The lane may end up empty; the rail and the goto bindings are how you get
  * back, so it is a state you can leave, not a dead end.
  */
 export function close(lane: Lane, index: number): Lane {
   if (index < 0 || index >= lane.panels.length) return lane
-  const panels = lane.panels.filter((_, i) => i !== index)
+  const dependent = DEPENDENT[lane.panels[index].kind]
+  const gone = new Set(
+    lane.panels.flatMap((p, i) => (i === index || p.kind === dependent ? [i] : []))
+  )
+  const panels = lane.panels.filter((_, i) => !gone.has(i))
   // Closing a panel to the LEFT of the focused one shifts every index after it,
   // so the focus has to follow or it would silently jump to a different panel.
-  const focus = lane.focus > index ? lane.focus - 1 : lane.focus
+  const focus = lane.focus - [...gone].filter((i) => i < lane.focus).length
   // max(0, …) because an emptied lane has no last index to clamp against.
   return { panels, focus: clamp(focus, Math.max(0, panels.length - 1)) }
 }
