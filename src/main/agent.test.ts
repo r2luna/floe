@@ -1068,6 +1068,23 @@ test('sendToAgent: an answer arriving under an alias reaches the one live conn',
   endSession(win, 'alias-1', spawn.child)
 })
 
+test('stopAgent: a stop arriving under an alias kills the live child', () => {
+  // The reported bug: the panel re-keys itself to the claudeId the moment the
+  // CLI reports it, mid-turn, while the conn stays filed under the Floe id.
+  // `conns.get(key)` alone then missed, Stop returned having killed nothing,
+  // and the turn it was meant to cancel kept streaming under "is typing".
+  addCreatedSession({ id: 'stop-alias', worktreePath: WT })
+  const { win, events, spawn } = startSession('stop-alias')
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'stop-alias-cid' })
+  stopAgent(win, 'stop-alias-cid')
+  assert.deepEqual(spawn.child.signals, ['SIGTERM'], 'the child the panel was watching was killed')
+  assert.ok(
+    events.some((e) => e.kind === 'done'),
+    'and the turn was ended for the panel'
+  )
+  spawn.child.emit('close', 0)
+})
+
 test('sendToAgent: a query gets an empty, strict MCP config — never the global one', () => {
   // A query's key is not a session id, so the token it would carry resolves to
   // nothing; and leaving the token out would let the CLI inherit the globally

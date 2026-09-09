@@ -927,8 +927,16 @@ export function stopAgent(win: BrowserWindow, key: string): void {
   // cancelled. It is also the only stop a one-shot runtime gets — those keep no
   // conn, so everything below this line is skipped for them.
   cancelRelay(key)
-  const conn = conns.get(key)
-  if (!conn) return
+  // Through every name this session answers to, not just the one the caller
+  // holds. The renderer keys a panel by `claudeId ?? id` and the conn stays
+  // filed under whatever name spawned it, so `conns.get(key)` alone missed the
+  // live child whenever the CLI reported its id after the turn had started —
+  // Stop then reset the panel and killed nothing, and the turn it was meant to
+  // cancel kept streaming. Same aliasing send/answerQuestion resolve through.
+  const found = resolveConn(key)
+  if (!found) return
+  const [connKey, conn] = found
+  if (connKey !== key) cancelRelay(connKey)
   // Deregister first so the child's late `close` (guarded by isCurrent) is a
   // no-op, then release any send_message(wait) caller with the text so far —
   // otherwise it blocks until the 120s timeout — and kill. Emit the one
@@ -936,13 +944,19 @@ export function stopAgent(win: BrowserWindow, key: string): void {
   // reset every stop caller relies on — the composer Stop AND worktree merge/
   // remove, which stop turns without touching renderer state — so their sessions
   // don't stay stuck "running" with orphaned subagent rows.
-  conns.delete(key)
+  conns.delete(connKey)
   stopTaskWatcher(conn)
   conn.turnActive = false
   conn.turnClosed = true
-  log('stop', { key, turnMs: conn.turnStartedAt ? Date.now() - conn.turnStartedAt : 0, subagents: conn.subagents.size })
-  flushDeltas(win, key, conn) // surface whatever text had streamed before the stop
-  resolveWaiters(key, conn.lastAssistantText)
+  log('stop', {
+    key,
+    connKey,
+    turnMs: conn.turnStartedAt ? Date.now() - conn.turnStartedAt : 0,
+    subagents: conn.subagents.size
+  })
+  flushDeltas(win, connKey, conn) // surface whatever text had streamed before the stop
+  resolveWaiters(connKey, conn.lastAssistantText)
+  if (connKey !== key) resolveWaiters(key, conn.lastAssistantText)
   // A wedged child may ignore SIGTERM. We already deregistered, so a survivor is
   // an invisible orphan — log it (escalate to SIGKILL later only if the log shows
   // this actually happens; ponytail: observability now, escalation when proven).
@@ -954,7 +968,10 @@ export function stopAgent(win: BrowserWindow, key: string): void {
   killTimer.unref?.()
   child.once('close', () => clearTimeout(killTimer))
   child.kill('SIGTERM')
-  send(win, key, { kind: 'done', ok: true })
+  // Under the name the turn RAN under — that is the replay the panel reads and
+  // the strand its "is typing" hangs on. A panel listens for every name of its
+  // session, so the one `done` reaches whichever of the two it was opened with.
+  send(win, connKey, { kind: 'done', ok: true })
 }
 
 // PIDs of every live Claude session process, for the topbar memory readout.
