@@ -13,11 +13,17 @@ import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
 import type { QueryMark } from '../shared/types'
 
 // Claude Code stores each session as ~/.claude/projects/<encoded-cwd>/<id>.jsonl,
-// where the cwd path has every "/" and "." replaced with "-". We read those to
-// surface real sessions per worktree — including ones started in the terminal.
+// where the cwd path has every NON-ALPHANUMERIC character replaced with "-". We
+// read those to surface real sessions per worktree — including ones started in
+// the terminal.
+//
+// Not just "/" and ".": a worktree under a directory with an underscore in its
+// name (`__.macs`) encoded to a directory the CLI never writes, so every read
+// missed and the chat opened on "Nothing said yet." with its whole transcript
+// sitting on disk. Same rule as cliSessionJsonl in agent.ts.
 
 const projectsDir = (): string => join(homedir(), '.claude', 'projects')
-const encode = (p: string): string => p.replace(/[/.]/g, '-')
+const encode = (p: string): string => p.replace(/[^a-zA-Z0-9]/g, '-')
 const ACTIVE_WINDOW_MS = 2 * 60 * 1000
 
 export interface ClaudeSessionMeta {

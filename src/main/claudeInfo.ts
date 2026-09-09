@@ -33,7 +33,7 @@ const PROBE_ARGS = [
 
 // Mirror claudeSessions.ts: sessions live at ~/.claude/projects/<encoded-cwd>/.
 const projectsDir = (): string => join(homedir(), '.claude', 'projects')
-const encode = (p: string): string => p.replace(/[/.]/g, '-')
+const encode = (p: string): string => p.replace(/[^a-zA-Z0-9]/g, '-')
 
 // Best-effort: drop a probe's throwaway session file so it never shows up in the
 // Resume picker. Called after the process exits, so the file is fully flushed.

@@ -84,10 +84,15 @@ test('generateWorktreeDesc: no spec returns null', async () => {
 
 const { loadClaudeTranscript } = await import('./claudeSessions.ts')
 
+// The CLI's own slug for a cwd: every non-alphanumeric character becomes '-'.
+// Written here exactly as the CLI writes it, so a path the two rules disagree
+// about (anything with an underscore) is a real test and not a tautology.
+const cliSlug = (worktree: string): string => worktree.replace(/[^a-zA-Z0-9]/g, '-')
+
 /** Write a session file where the loader looks for it, and point HOME at it. */
 function seedSession(worktree: string, id: string, lines: unknown[]): string {
   const home = mkdtempSync(join(tmpdir(), 'floe-home-'))
-  const dir = join(home, '.claude', 'projects', worktree.replace(/[/.]/g, '-'))
+  const dir = join(home, '.claude', 'projects', cliSlug(worktree))
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n'))
   process.env.HOME = home
@@ -141,6 +146,35 @@ test('two parallel Task calls reload as two subagent rows, the finished one clos
     assert.ok(!items.some((i) => i.text === 'segredo do subagente'), 'sidechain lines are the child transcript')
     // The launching line is still the assistant's own text, not a tool chip.
     assert.equal(items[1].text, 'abrindo duas frentes')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// A worktree whose path holds an underscore. The CLI slugs it to '-' like every
+// other non-alphanumeric; Floe only replaced '/' and '.', so it looked for a
+// directory the CLI never writes and every read came back empty — the chat
+// opened on "Nothing said yet." with its whole transcript sitting on disk.
+test('a worktree path with underscores finds its transcript', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/clients/__.macs'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-08T20:00:00.000Z', message: { content: 'oi' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-08T20:00:01.000Z',
+      message: { model: 'claude-opus-5', content: [{ type: 'text', text: 'olá' }] }
+    }
+  ])
+  try {
+    assert.deepEqual(
+      loadClaudeTranscript(worktree, 'sess').map((i) => [i.role, i.text]),
+      [
+        ['user', 'oi'],
+        ['assistant', 'olá']
+      ]
+    )
   } finally {
     process.env.HOME = home
     rmSync(dir, { recursive: true, force: true })
@@ -620,7 +654,7 @@ interface World {
 }
 
 function projectDirOf(w: World, worktree: string): string {
-  return join(w.home, '.claude', 'projects', worktree.replace(/[/.]/g, '-'))
+  return join(w.home, '.claude', 'projects', cliSlug(worktree))
 }
 
 function writeTranscript(w: World, worktree: string, id: string, lines: unknown[] | string): string {
