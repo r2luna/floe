@@ -1039,7 +1039,30 @@ export type ProvisionEvent =
   | { worktreePath: string; kind: 'plan'; branch: string; steps: ProvisionStep[] } // the full step list, all pending
   | { worktreePath: string; kind: 'step'; id: string; status: ProvisionStatus; detail?: string }
   | { worktreePath: string; kind: 'log'; id: string; text: string } // live output of a running step
+  // The premise interview needs an answer before it can go on. The only event
+  // that travels the other way too: the panel replies over `provision:answer`
+  // with the requestId, which is how main knows which question was answered
+  // when two worktrees are provisioning at once.
+  | { worktreePath: string; kind: 'ask'; ask: ProvisionAsk | null }
   | { worktreePath: string; kind: 'done'; ok: boolean }
+
+/**
+ * A question a step is holding on, as the checklist draws it.
+ *
+ * `options` present makes it a pick (numbered 1-9, `t` to type instead);
+ * absent makes it a text box. Answering with null skips the rest of the
+ * interview — a premise nobody wanted to write is better than a half-written
+ * one, and the file simply isn't created.
+ */
+export interface ProvisionAsk {
+  /** The step holding on it — the row the question is drawn under. */
+  stepId: string
+  requestId: string
+  question: string
+  options?: string[]
+  index: number // 1-based, for "2/3"
+  total: number
+}
 
 // --- Slash commands (Claude Code commands + skills) ------------------------
 

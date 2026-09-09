@@ -33,6 +33,7 @@ import {
 } from './git'
 import { worktreeStatus } from './gitStatus'
 import { provisionWorktree } from './provision'
+import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
 // `./draw/index`, not `./draw`: the MCP test loads this graph under a plain
 // `node --test`, whose loader hook resolves a file specifier, not a directory.
@@ -485,16 +486,30 @@ export function createdWorktree(worktrees: Worktree[], branch: string): Worktree
   return worktrees.find((w) => w.branch === branch || w.path.endsWith(branch)) ?? worktrees[worktrees.length - 1]
 }
 
+/**
+ * The premise an agent supplied with the create, written before provisioning.
+ *
+ * Order matters: the setup checklist interviews a worktree that has no premise
+ * (provision.ts), and an agent that already said what the branch is for has
+ * answered the only question it would have been asked.
+ */
+function seedPremise(created: { path: string } | undefined, premise?: string): void {
+  const text = premise?.trim()
+  if (created && text) writePremise(created.path, text)
+}
+
 async function createWorktreeTool(
   project: string,
   branch: string,
   base?: string,
-  note?: string
+  note?: string,
+  premise?: string
 ): Promise<ToolResult> {
   try {
     const worktrees = await createWorktree(project, branch, { base, note })
     pushWorktrees(project, worktrees)
     const created = createdWorktree(worktrees, branch)
+    seedPremise(created, premise)
     // Run the per-stack setup the same way the in-app create flow does —
     // otherwise an MCP-created worktree lands with no environment.
     // Fire-and-forget; progress streams to the setup checklist.
@@ -583,9 +598,38 @@ function registerWorktreeTools(server: McpServer, token: string): void {
       project: z.string().describe('The repo root path of the project.'),
       branch: z.string().describe('The branch name to create or reuse.'),
       base: z.string().optional().describe('The base branch to fork from (defaults to the main branch).'),
-      note: z.string().optional().describe('An optional short note/label for the worktree.')
+      note: z.string().optional().describe('An optional short note/label for the worktree.'),
+      premise: z
+        .string()
+        .optional()
+        .describe(
+          "The worktree's standing brief (Markdown: ## Goal / ## Scope / ## Out of scope / ## Constraints / ## Done when, under 200 words). Every session started in this worktree opens with it. Passing one also skips the interview the setup checklist would otherwise run."
+        )
     },
-    async (a) => createWorktreeTool(a.project, a.branch, a.base, a.note)
+    async (a) => createWorktreeTool(a.project, a.branch, a.base, a.note, a.premise)
+  )
+
+  server.tool(
+    'worktree_premise',
+    "Read or replace a worktree's premise — the standing brief handed to the FIRST turn of every session started there (.floe/premise.md). Omit `premise` to read the current one. Keep it under 200 words: it is prepended to a real prompt, not stored for reference.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      premise: z
+        .string()
+        .optional()
+        .describe('The new brief, in Markdown. Replaces what is there. Omit to read.')
+    },
+    async ({ worktree, premise }) => {
+      try {
+        if (premise === undefined) {
+          return textResult({ worktree, premise: readPremise(worktree) ?? null, path: PREMISE_REL })
+        }
+        writePremise(worktree, premise)
+        return textResult({ worktree, written: PREMISE_REL, premise: readPremise(worktree) ?? null })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
   )
 
   server.tool(

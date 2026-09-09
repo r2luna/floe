@@ -403,6 +403,12 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       unlinkSite: (target: string): Promise<UnlinkSiteResult> =>
         ipcRenderer.invoke('remove:unlinkSite', target)
     },
+    // The worktree's standing brief. `ensure` creates the scaffold when there
+    // isn't one yet, so the edit command always has a file to open.
+    premise: {
+      ensure: (worktreePath: string): Promise<string> =>
+        ipcRenderer.invoke('premise:ensure', worktreePath)
+    },
     provision: {
       run: (
         root: string,
@@ -410,6 +416,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         branch: string,
         opts?: { from?: string; skip?: string[] }
       ): Promise<void> => ipcRenderer.invoke('provision:run', root, worktreePath, branch, opts),
+      // Answer the premise interview's current question. `null` skips the rest.
+      answer: (requestId: string, answer: string | null): Promise<void> =>
+        ipcRenderer.invoke('provision:answer', requestId, answer),
       // Bring a worktree's containerized env up (idempotent) without re-running the
       // full provision recipe — used when reopening a container-mode worktree.
       ensureUp: (root: string, worktreePath: string, branch: string): Promise<void> =>

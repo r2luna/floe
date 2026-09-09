@@ -138,6 +138,7 @@ export const COMMAND_IDS: string[] = [
   'remove.confirm',
   'remove.cancel',
   'worktree.provision',
+  'worktree.premise',
   'provision.confirm',
   'provision.cancel',
   // Project setup (the commands a project gets registered)

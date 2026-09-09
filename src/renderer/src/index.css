@@ -3709,6 +3709,49 @@ button {
   border-color: #b1454a;
 }
 
+/* The premise interview, inline under its checklist row (ProvisionPanel's Ask).
+   The only step that asks instead of running, so it is the only one with a
+   focusable body — the outline stays off, because the focused thing is the
+   question, and the box already sits inside a running step. */
+.ask {
+  margin-top: 6px;
+  outline: none;
+}
+
+.ask-q {
+  color: var(--text-strong);
+  font-size: 11.5px;
+  margin-bottom: 6px;
+}
+
+.ask-count {
+  margin-left: 6px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.ask-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask .dialog-input {
+  width: 100%;
+}
+
+.ask-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.ask-key {
+  color: var(--faint);
+  font-size: 10px;
+}
+
 /* The uncommitted work the force checkpoint is asking about, listed under the
    step that would destroy it. Porcelain lines, monospaced so the two-column
    status prefix lines up, and capped: the answer to "is there anything here I

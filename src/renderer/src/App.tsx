@@ -1446,6 +1446,18 @@ export default function App() {
   }
 
   /**
+   * Open this worktree's premise in the editor, creating the scaffold first.
+   *
+   * Same editor path as a skill's Markdown — main answers with the relative
+   * path so the launch is rooted at the worktree, like every other file.
+   */
+  const editPremise = (): void => {
+    const dir = current?.worktree.path
+    if (!dir) return
+    void window.floe.premise.ensure(dir).then((rel) => editSkill(dir, rel))
+  }
+
+  /**
    * Keep the "3/12" honest when the rows arrive after the query does.
    *
    * The count used to be a snapshot taken the moment you typed, which was fine
@@ -1630,6 +1642,7 @@ export default function App() {
     lane,
     setLane,
     editSkill,
+    editPremise,
     panelEl: panelAt,
     rowsOf,
     project: projects.current?.path,

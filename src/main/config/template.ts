@@ -146,6 +146,33 @@ system-prompt = "system-prompt.md"
 
 
 # ------------------------------------------------------------------------------
+# | Worktree premise
+# ------------------------------------------------------------------------------
+# |
+# | A new worktree is interviewed about its own purpose while it provisions: a
+# | few short questions in the setup checklist, and the answers become
+# | \`.floe/premise.md\` inside the worktree. That file is handed to the FIRST
+# | turn of every session started there, so a new chat already knows what the
+# | branch is for without you saying it again.
+# |
+# | \`provider\` is \`claude\` or \`codex\`: the interview is two headless calls, and
+# | those are the two that answer that way. \`model\` is passed straight through —
+# | a claude name (\`sonnet\`, \`haiku\`) or a codex slug — so it is never checked
+# | against a list here. \`effort\` is optional; unset means the harness's own.
+# |
+# | \`enabled = false\` turns the interview off. Premise files already written are
+# | still read and still injected.
+# |
+# ------------------------------------------------------------------------------
+
+[premise]
+enabled  = true
+provider = "claude"
+model    = "sonnet"
+# effort = "medium"
+
+
+# ------------------------------------------------------------------------------
 # | Terminal
 # ------------------------------------------------------------------------------
 # |

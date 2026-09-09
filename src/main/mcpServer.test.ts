@@ -80,6 +80,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'remove_worktree',
       'merge_worktree',
       'worktree_status',
+      'worktree_premise',
       'list_branches',
       'changed_files',
       'file_diff',

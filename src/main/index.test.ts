@@ -329,6 +329,8 @@ const CHANNELS = [
   'worktrees:setBlocked',
   'worktrees:merge',
   'provision:run',
+  'premise:ensure',
+  'provision:answer',
   'provision:ensureUp',
   'merge:preflight',
   'merge:stash',

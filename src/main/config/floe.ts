@@ -32,6 +32,10 @@ export { EFFORTS } from '../../shared/types'
 export const THEMES = ['system', 'dark', 'light'] as const
 
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
+// Who can run the premise interview. A subset of PROVIDERS on purpose: the flow
+// is two headless print-mode calls (`claude -p`, `codex exec`), and those are the
+// only two harnesses Floe can drive that way without a session behind them.
+export const PREMISE_PROVIDERS = ['claude', 'codex'] as const
 // The written names for how much the agent may do. `MODES` in shared/modes.ts
 // carries the same four under the ids the CLIs use; these are the words a
 // person types in a config file.
@@ -75,6 +79,23 @@ export interface FloeConfig {
    * session you are in. Absent means the harness's own default.
    */
   harness: Record<string, HarnessDefault>
+  /**
+   * The premise interview — the questions a new worktree is asked about its own
+   * purpose, and the model that asks them (see main/premise.ts).
+   *
+   * Its own block rather than a reuse of `agent`: this runs unattended in a
+   * checklist, one short print-mode call at a time, so it wants a cheap fast
+   * model even when a session starts on opus. `provider` is only claude or
+   * codex — the flow is two one-shot calls with no tools, which is the one
+   * shape every harness here can answer identically.
+   */
+  premise: {
+    enabled: boolean
+    provider: (typeof PREMISE_PROVIDERS)[number]
+    /** Not validated: `sonnet` for claude, a codex slug for codex. */
+    model: string
+    effort?: (typeof EFFORTS)[number]
+  }
   /** Who the launcher greets. Empty means "whoever this machine says I am". */
   user: { name?: string }
   terminal: { shell?: string }
@@ -112,6 +133,9 @@ export const DEFAULTS: FloeConfig = {
   // Empty, not one entry per harness: a harness with nothing set here is not
   // the same as one set to "" — it means nobody has answered the question.
   harness: {},
+  // sonnet, not opus: the interview is three short questions and one rewrite,
+  // and it runs while the user is waiting on the checklist.
+  premise: { enabled: true, provider: 'claude', model: 'sonnet', effort: undefined },
   user: { name: undefined },
   terminal: { shell: undefined },
   composer: { vim: false },
@@ -223,6 +247,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const update = subTable(sink, raw, root, 'update')
   const projects = subTable(sink, raw, root, 'projects')
   const harness = readHarnesses(sink, raw, root)
+  const premise = subTable(sink, raw, root, 'premise')
   const integrations = (root.integrations ?? {}) as Record<string, unknown>
   const jira = subTable(sink, raw, integrations, 'jira')
   const bitbucket = subTable(sink, raw, integrations, 'bitbucket')
@@ -249,6 +274,17 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         systemPromptFile: agent?.str('system-prompt', d.agent.systemPromptFile) ?? d.agent.systemPromptFile
       },
       harness,
+      premise: {
+        enabled: premise?.bool('enabled', d.premise.enabled) ?? d.premise.enabled,
+        provider:
+          premise?.oneOf('provider', PREMISE_PROVIDERS, d.premise.provider) ?? d.premise.provider,
+        // Free string for the same reason as `[harness]`'s: a codex slug is
+        // codex's business, and a name we cannot check is not a name we reject.
+        model: premise?.str('model', d.premise.model) ?? d.premise.model,
+        effort: premise?.optStr('effort')
+          ? (premise?.oneOf('effort', EFFORTS, 'medium') ?? undefined)
+          : undefined
+      },
       // Blank is not a name: an emptied box means "go back to the machine's",
       // which is the same state as never having set one.
       user: { name: user?.optStr('name')?.trim() || undefined },

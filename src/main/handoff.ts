@@ -41,6 +41,7 @@ import { hasRelay, stripRelay } from '../shared/relay'
 // Circular with agent.ts (it imports seedFor) — safe on the same terms as
 // agent↔mcpServer: neither side touches the other at module top level.
 import { sendAgentEvent } from './agent'
+import { premiseSeed } from './premise'
 import { log } from './log'
 
 /** How long a harness holds a conversation on its own. */
@@ -226,6 +227,11 @@ function watermark(key: string, harness: string, items: TranscriptItem[]): numbe
  * The watermark moves at the START of the turn: a turn that dies halfway has
  * still delivered its packet, and re-sending the whole history on the retry
  * would be paying twice for context the model already read.
+ *
+ * The worktree's premise rides the same seam (premise.ts). It is a different
+ * kind of thing — standing context, not a handover — but it wants exactly what
+ * this function already does: reach the model on its own terms whichever
+ * harness is answering, once, without a session having to know it exists.
  */
 export function seedFor(
   win: BrowserWindow | null,
@@ -234,6 +240,11 @@ export function seedFor(
   harness: string
 ): string {
   const items = sessionTranscript(worktreePath, key)
+  // Only when nothing has been said yet — the premise opens a conversation, it
+  // does not interrupt one. Read off the transcript rather than remembered in a
+  // Map so it survives a restart: a session that has already been told is one
+  // that has entries, whether or not this process is the one that told it.
+  const premise = items.length === 0 ? premiseSeed(worktreePath) : ''
   const seen = watermark(key, harness, items)
   if (memoryOf(harness) === 'process') processSeen.set(processKey(key, harness), Date.now())
   // Our own handoff chips are bookkeeping, not conversation — a harness reading
@@ -242,9 +253,9 @@ export function seedFor(
     items.filter((i) => (i.at ?? 0) > seen && !(i.role === 'tool' && i.name === 'handoff')),
     harness
   )
-  if (!gap.length) return ''
+  if (!gap.length) return premise
   const packet = buildPacket(gap, { to: harness })
-  if (!packet) return ''
+  if (!packet) return premise
   // Who is handing over: the last harness that answered inside the gap. None
   // means the gap is only the user's own messages (or this harness's own turns,
   // for one that remembers nothing) — a refresh, not a handoff.
@@ -259,5 +270,6 @@ export function seedFor(
     logTurn(key, { role: 'tool', name: 'handoff', summary: label })
     if (win && !win.isDestroyed()) sendAgentEvent(win, key, { kind: 'tool', name: 'handoff', summary: label })
   }
-  return packet
+  // Premise first: it is the frame the packet is read inside.
+  return premise + packet
 }

@@ -4,7 +4,18 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import type { ProjectEnvConfig, ProvisionEvent, ProvisionStep } from '../shared/types'
+import { randomUUID } from 'node:crypto'
 import { detectPackageManager } from './devServer'
+import { readBase } from './git'
+import { floeConfig } from './config/floe'
+import {
+  composePremise,
+  hasPremise,
+  interviewQuestions,
+  PREMISE_REL,
+  writePremise,
+  type PremiseAnswer
+} from './premise'
 import { bwrapPresent, sandboxDisabled, sandboxedSpawn } from './sandbox'
 import { isLaravel, listCommands } from './commands'
 import { startCommand, userShell } from './commandRunner'
@@ -815,6 +826,107 @@ type WithoutWorktree<T> = T extends unknown ? Omit<T, 'worktreePath'> : never
 // recipe in order, streaming progress. Stops at the first failed step. `from`
 // resumes at a step (earlier ones are reported done without re-running) and
 // `skip` marks steps skipped — together they back the checklist's retry/skip.
+// --- the premise interview --------------------------------------------------
+//
+// The one part of setup that asks instead of runs. It rides the same checklist
+// because that is where the user already is while a worktree comes up, but it
+// runs BESIDE the recipe rather than inside it: composer install must not wait
+// on a question, and a question must not wait on composer install.
+//
+// See premise.ts for what it writes and why the file exists at all.
+
+/** The step id the interview reports under. */
+export const PREMISE_STEP_ID = 'premise'
+
+/** Questions on screen, waiting for the panel to answer them. */
+const pendingAsks = new Map<string, { worktreePath: string; resolve: (answer: string | null) => void }>()
+
+/**
+ * The checklist answered. `null` skips the rest of the interview — one refusal
+ * ends it, rather than asking the remaining questions of someone who has just
+ * said they don't want to be asked.
+ */
+export function answerProvisionAsk(requestId: string, answer: string | null): void {
+  const pending = pendingAsks.get(requestId)
+  if (!pending) return
+  pendingAsks.delete(requestId)
+  pending.resolve(answer)
+}
+
+/** Drop a worktree's open questions — a re-run replaces the interview. */
+function cancelAsks(worktreePath: string): void {
+  for (const [id, pending] of Array.from(pendingAsks)) {
+    if (pending.worktreePath !== worktreePath) continue
+    pendingAsks.delete(id)
+    pending.resolve(null)
+  }
+}
+
+type Emit = (e: WithoutWorktree<ProvisionEvent>) => void
+
+/**
+ * Whether this run interviews the worktree.
+ *
+ * Not on a retry (the `from` path re-runs a recipe that failed halfway — the
+ * user is fixing composer, not being asked about scope again), unless the
+ * premise step is itself what they retried. Never when the file is already
+ * there: a premise is written once and edited by hand after that.
+ */
+function wantsInterview(worktreePath: string, opts: { from?: string; skip?: string[] }): boolean {
+  if (!floeConfig().premise.enabled) return false
+  if (hasPremise(worktreePath)) return false
+  if ((opts.skip ?? []).includes(PREMISE_STEP_ID)) return false
+  return !opts.from || opts.from === PREMISE_STEP_ID
+}
+
+async function runInterview(worktreePath: string, branch: string, emit: Emit): Promise<void> {
+  const step = (status: ProvisionStep['status'], detail?: string): void =>
+    emit({ kind: 'step', id: PREMISE_STEP_ID, status, detail })
+  const clear = (): void => emit({ kind: 'ask', ask: null })
+
+  step('running', 'working out what to ask')
+  const questions = await interviewQuestions(worktreePath, branch, readBase(worktreePath))
+  if (!questions.length) return step('skipped')
+
+  const answers: PremiseAnswer[] = []
+  for (const [i, q] of questions.entries()) {
+    const requestId = randomUUID()
+    emit({
+      kind: 'ask',
+      ask: {
+        stepId: PREMISE_STEP_ID,
+        requestId,
+        question: q.question,
+        options: q.options,
+        index: i + 1,
+        total: questions.length
+      }
+    })
+    const answer = await new Promise<string | null>((resolve) =>
+      pendingAsks.set(requestId, { worktreePath, resolve })
+    )
+    // Skipped: stop asking, and leave the worktree without a premise rather
+    // than writing one from half an interview.
+    if (answer === null) {
+      clear()
+      return step('skipped')
+    }
+    if (answer.trim()) answers.push({ question: q.question, answer })
+  }
+  clear()
+  if (!answers.length) return step('skipped')
+
+  step('running', 'writing the premise')
+  const body = await composePremise(worktreePath, branch, answers)
+  if (!body) return step('failed', 'the model returned nothing to write')
+  try {
+    writePremise(worktreePath, body)
+  } catch (e) {
+    return step('failed', e instanceof Error ? e.message : String(e))
+  }
+  step('done', PREMISE_REL)
+}
+
 export async function provisionWorktree(
   win: BrowserWindow,
   root: string,
@@ -830,12 +942,31 @@ export async function provisionWorktree(
     if (!win.isDestroyed()) win.webContents.send('provision:event', { worktreePath, ...e })
   }
 
+  // A re-run replaces whatever the last one was still asking.
+  cancelAsks(worktreePath)
+  // The interview is its own track, started before the recipe and never awaited
+  // by it. `done` reports the RECIPE — a worktree whose environment is ready is
+  // ready whether or not its premise has been written, and the checklist keeps
+  // showing the question after the installs finish.
+  // Started only once its row is on the checklist (below): a step event that
+  // lands before the plan is overwritten by the plan's own `pending`.
+  const interviewing = wantsInterview(worktreePath, opts)
+  const premiseRow: ProvisionStep[] = interviewing
+    ? [{ id: PREMISE_STEP_ID, label: 'What this worktree is for', status: 'pending' }]
+    : []
+  const startInterview = (): void => {
+    if (interviewing) void runInterview(worktreePath, branch, emit)
+  }
+
   // Only wait when the main checkout itself is a known stack — otherwise a
   // genuinely stack-less project would hang for the full timeout on every
   // create. When `root` has a stack, the worktree will too once git settles.
   const stack = detectStack(root) ? await waitForStack(worktreePath) : detectStack(worktreePath)
   if (!stack) {
-    emit({ kind: 'plan', branch, steps: [] })
+    // No recipe to run, but a worktree with no stack still has a purpose worth
+    // writing down — the interview above is already running.
+    emit({ kind: 'plan', branch, steps: premiseRow })
+    startInterview()
     emit({ kind: 'done', ok: true })
     return
   }
@@ -853,12 +984,16 @@ export async function provisionWorktree(
     env?.mode === 'container' ? laravelContainerRecipe : stack === 'laravel' ? laravelRecipe : nodeRecipe
   const skip = new Set(opts.skip ?? [])
 
-  const steps: ProvisionStep[] = recipe.map((s) => ({
-    id: s.id,
-    label: s.label,
-    status: skip.has(s.id) ? 'skipped' : 'pending'
-  }))
+  const steps: ProvisionStep[] = [
+    ...premiseRow,
+    ...recipe.map((s) => ({
+      id: s.id,
+      label: s.label,
+      status: (skip.has(s.id) ? 'skipped' : 'pending') as ProvisionStep['status']
+    }))
+  ]
   emit({ kind: 'plan', branch, steps })
+  startInterview()
 
   let started = !opts.from
   let ok = true

@@ -72,6 +72,44 @@ function runtimeSaid(id: string, item: Record<string, unknown>): void {
   appendFileSync(join(dir, file), JSON.stringify({ at: tick(), ...item }) + '\n')
 }
 
+/** A worktree of its own, with a premise in it. */
+function worktreeWithPremise(text: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'floe-handoff-wt-'))
+  mkdirSync(join(dir, '.floe'), { recursive: true })
+  writeFileSync(join(dir, '.floe', 'premise.md'), text)
+  return dir
+}
+
+test('the first turn of a session opens with the worktree premise', () => {
+  fresh()
+  const wt = worktreeWithPremise('## Goal\nWrite the premise once.\n')
+  const seed = seedFor(null, 'first', wt, 'claude')
+  assert.match(seed, /<worktree-premise>/)
+  assert.match(seed, /Write the premise once\./)
+})
+
+test('every harness gets it, not just the one that happens to be first', () => {
+  fresh()
+  const wt = worktreeWithPremise('## Goal\nWrite the premise once.\n')
+  for (const harness of ['claude', 'codex', 'gemini', 'opencode']) {
+    assert.match(seedFor(null, `each-${harness}`, wt, harness), /<worktree-premise>/, harness)
+  }
+})
+
+test('a session already under way is not handed the premise again', () => {
+  fresh()
+  const wt = worktreeWithPremise('## Goal\nWrite the premise once.\n')
+  // Not a fresh chat any more: something has been said in it.
+  runtimeSaid('under-way', { role: 'user', text: 'carry on' })
+  assert.doesNotMatch(seedFor(null, 'under-way', wt, 'codex'), /<worktree-premise>/)
+})
+
+test('a worktree with no premise seeds exactly what it did before', () => {
+  fresh()
+  const wt = mkdtempSync(join(tmpdir(), 'floe-handoff-bare-'))
+  assert.equal(seedFor(null, 'bare', wt, 'claude'), '')
+})
+
 test('a session that has only ever been Claude hands Claude nothing', () => {
   fresh()
   claudeSaid('solo', 'user', 'add the parser')

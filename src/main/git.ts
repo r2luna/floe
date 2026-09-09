@@ -156,7 +156,7 @@ export async function reorderWorktrees(root: string, orderedPaths: string[]): Pr
   return listWorktrees(root)
 }
 
-function readBase(path: string): string | undefined {
+export function readBase(path: string): string | undefined {
   const file = join(path, '.gw-base')
   if (!existsSync(file)) return undefined
   return readFileSync(file, 'utf8').split('\n')[0].trim() || undefined

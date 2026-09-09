@@ -75,6 +75,8 @@ export interface CommandContext {
    * dance the file tree does, and the registry must not learn it twice.
    */
   editSkill: (dir: string, rel: string) => void
+  /** Open the current worktree's premise (.floe/premise.md) for editing. */
+  editPremise: () => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
   /** Forget the project the cursor is on, after asking. */
