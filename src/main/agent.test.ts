@@ -992,7 +992,9 @@ test('sendToAgent: attachments travel as content blocks, prompt last', () => {
   assert.equal(blocks[2].source.type, 'text')
   assert.equal(blocks[2].source.data, 'hi there')
   assert.equal(blocks[3].text, 'look at these', 'the prompt comes after its attachments')
-  assert.deepEqual(kinds(events), ['turn'])
+  // The turn header, then what the user said: a session is watched in more than
+  // one place, and the line only reaches the other viewers if it goes on the wire.
+  assert.deepEqual(kinds(events), ['turn', 'steer'])
   endSession(win, 'spawn-att', spawned[at].child)
 })
 
@@ -1003,12 +1005,37 @@ test('sendToAgent: a send during a live turn steers it instead of spawning a sec
   assert.equal(spawned.length, at, 'one session, one claude — a second would strand the first')
   assert.equal(wrote(spawn.child, 1).message.content, 'actually, stop')
   assert.equal(hasActiveTurn('steer-1'), true, 'the running turn continues; it is not reset')
-  // Into the replay, not onto the wire: the panel that typed it already shows
-  // it, and until the CLI absorbs it the replay is the only place a panel
-  // mounting mid-turn can read what was said.
+  // Into the replay, for the panel that mounts before the CLI absorbs it.
   assert.deepEqual(kinds(replaySnapshot('steer-1').events), ['steer'])
   assert.equal(readSessionBuffer('steer-1'), 'user: hello\nuser: actually, stop')
   endSession(win, 'steer-1', spawn.child)
+})
+
+test('sendToAgent: what the user says goes on the wire, stamped with the panel that typed it', () => {
+  // The bug this covers: a session watched from a second window — or, over the
+  // server plugin's gate, from another machine — streamed the model's answer
+  // but never the question. The line was pushed straight into the sender's own
+  // transcript and nowhere else, so the other viewer saw replies to nothing.
+  const { win, events, spawn } = startSession('wire-1', 'first', { ...DEFAULT_OPTS, panel: 'panel-a' })
+  const opening = events.find((e) => e.kind === 'steer')
+  assert.equal(opening?.text, 'first', 'the line that opened the turn is broadcast')
+  assert.equal(opening?.panel, 'panel-a', 'stamped, so only the panel that typed it drops the echo')
+  // Same on a steer, which is the harder half: the CLI writes it to the JSONL
+  // only when it absorbs it, so until then the wire is every other viewer's
+  // ONLY copy — there is nothing on disk for them to read.
+  sendToAgent(win, 'wire-1', WT, 'actually, stop', { ...DEFAULT_OPTS, panel: 'panel-a' })
+  const steers = events.filter((e) => e.kind === 'steer')
+  assert.deepEqual(steers.map((e) => e.text), ['first', 'actually, stop'])
+  endSession(win, 'wire-1', spawn.child)
+})
+
+test('sendToAgent: an unstamped line is shown by every panel, the sender included', () => {
+  // No panel typed it — an agent's `send_message`, a followup timer — so there
+  // is no optimistic copy anywhere and nobody may drop it.
+  const { win, events, spawn } = startSession('wire-2', 'from an agent')
+  const opening = events.find((e) => e.kind === 'steer')
+  assert.equal(opening?.panel, undefined)
+  endSession(win, 'wire-2', spawn.child)
 })
 
 test('sendToAgent: changing the model retires the child and respawns', () => {

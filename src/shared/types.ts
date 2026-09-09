@@ -821,6 +821,16 @@ export interface AgentRunOptions {
    * that never named it.
    */
   shown?: string
+  /**
+   * The panel that typed this message, so it can ignore the echo of its own
+   * line while every OTHER viewer of the session renders it.
+   *
+   * A session is not watched in one place: a second window, and — since the
+   * server plugin — a whole other machine, are reading the same chat. The
+   * sender shows its line optimistically (useTranscript's `deliver`), so
+   * without this id it would show it twice.
+   */
+  panel?: string
 }
 
 export interface AgentQuestionOption {
@@ -943,12 +953,17 @@ export type AgentEvent =
   // turn). `from` is its nick — the transcript heads the line with it rather
   // than with the user's, because the user did not say this.
   | { kind: 'peer'; from: string; text: string }
-  // A message typed into the turn while it ran (a steer). NOT broadcast — the
-  // panel that sent it has already shown it — but kept in the replay: the CLI
-  // only writes a steer to the JSONL when it absorbs it, which can be a whole
-  // tool call later, and until then this is the only copy a panel mounting
-  // mid-turn can get.
-  | { kind: 'steer'; text: string; at: number }
+  // What the USER said — the line that opened the turn, or one typed into it
+  // while it ran (a steer).
+  //
+  // Broadcast, because a session has more than one viewer: another window, or
+  // another machine over the server plugin's gate. Only the panel that typed it
+  // is already showing it, and `panel` is how that one drops its own echo.
+  //
+  // Kept in the replay too: the CLI only writes a steer to the JSONL when it
+  // absorbs it, which can be a whole tool call later, and until then this is
+  // the only copy a panel mounting mid-turn can get.
+  | { kind: 'steer'; text: string; at: number; panel?: string }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
