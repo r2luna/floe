@@ -55,6 +55,10 @@ export async function applyConfig(): Promise<void> {
   try {
     const config = await window.floe.config.get()
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
+    // Layout is a stylesheet switch, not a component one: every layout renders
+    // the same transcript, and the rules keyed off this attribute are what move
+    // the nick, the air and the surfaces. See CHAT_LAYOUTS in shared/types.
+    document.documentElement.dataset.chatLayout = config.appearance.chatLayout
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
     setHarnessDefaults(config.harness)

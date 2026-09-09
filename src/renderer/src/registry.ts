@@ -30,7 +30,21 @@ import { startSkillDraft } from './skillDraft.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
-import type { FileOp } from '../../shared/types.ts'
+import { CHAT_LAYOUTS, type FileOp } from '../../shared/types.ts'
+
+/**
+ * The layout after this one, wrapping — what `chat.layout` steps through.
+ *
+ * Takes the CURRENT value from the attribute rather than re-reading the config:
+ * appearance.ts already puts the file's value there on every change, so the
+ * attribute is the config, one IPC round trip earlier.
+ */
+const nextChatLayout = (current: string | undefined): string => {
+  const at = CHAT_LAYOUTS.indexOf((current ?? '') as (typeof CHAT_LAYOUTS)[number])
+  // -1 (unset, or a value from a newer version) steps to the second entry the
+  // same way index 0 does, which is the right answer for both.
+  return CHAT_LAYOUTS[(at + 1) % CHAT_LAYOUTS.length] as string
+}
 
 /** The chat the lane is showing — what a query is opened off. */
 const chatOf = (c: CommandContext): Panel | undefined =>
@@ -1457,6 +1471,24 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'App',
         keys: '⌘,',
         run: (c) => c.setLane((l) => toggleKind(l, 'settings', () => c.makePanel('settings')))
+      },
+      {
+        // Settings has a row for this, but a layout is judged by reading a real
+        // transcript in it — so there has to be a way to step through them from
+        // the chat itself, without a panel covering the thing being looked at.
+        id: 'chat.layout',
+        title: 'Next chat layout',
+        group: 'App',
+        run: (c) => {
+          const next = nextChatLayout(document.documentElement.dataset.chatLayout)
+          // The write goes to floe.toml and comes back as a `config:changed`,
+          // which is what actually moves the attribute — see appearance.ts.
+          // Setting it here as well would race that and flicker.
+          void window.floe.config
+            .set('appearance', 'chat-layout', next)
+            .then(() => c.say(`Chat layout: ${next}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
       },
       {
         id: 'project.add',

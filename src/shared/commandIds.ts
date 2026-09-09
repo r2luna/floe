@@ -71,6 +71,7 @@ export const COMMAND_IDS: string[] = [
   'group.delete',
   'auth.account',
   'settings.open',
+  'chat.layout',
   'commands.open',
   'skills.open',
   'skill.new',

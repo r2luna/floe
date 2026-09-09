@@ -137,6 +137,7 @@ import type { Provision } from './useProvision'
 import type { ProjectSetup } from './useProjectSetup'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
+  CHAT_LAYOUTS,
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
@@ -2089,8 +2090,11 @@ function Head({
         <span className="irc-lead">{said}</span>
       </>
     )
+  // --nick is inert in every layout but `rail`, where it colours the dot this
+  // head hangs on the timeline. A custom property rather than a class because
+  // the value is one of fourteen hues picked per nick at runtime.
   return (
-    <div className="irc-head">
+    <div className="irc-head" style={{ '--nick': nickColor(who.nick) } as CSSProperties}>
       {said}
       {turn}
     </div>
@@ -2112,14 +2116,25 @@ function Entry({
   cwd?: string
   streaming?: boolean
 }) {
+  const who = whoOf(item)
+  // You, not merely "the user role": a `from` on a user item is ANOTHER session
+  // typing into this channel, and the `surfaces` layout's well means "your own
+  // side of the conversation", which that is not.
+  const mine = item.role === 'user' && !item.from
   return (
-    <div className="irc-entry" data-cont={!isNew || undefined}>
+    <div
+      className="irc-entry"
+      data-cont={!isNew || undefined}
+      data-me={mine || undefined}
+      // Read by the `rail` layout for the dot's colour and ignored by the rest.
+      style={{ '--nick': nickColor(who.nick) } as CSSProperties}
+    >
       <div className="irc-body">
         {/* Inside the body, not above it: the time and the nick open the same
             line the message does, and the words wrap back under them. */}
         {isNew && (
           <Head
-            who={whoOf(item)}
+            who={who}
             at={item.at}
             peer={item.from ? (item.role === 'user' ? 'session' : 'agent') : undefined}
             cost={cost}
@@ -5840,6 +5855,18 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           label: 'Avatar colour',
           value: config.appearance.penguinColor,
           hint: 'every tone carries a dark and a light value'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'chat-layout',
+          label: 'Chat layout',
+          value: config.appearance.chatLayout,
+          // Spread from the shared list rather than retyped: the reader
+          // validates against the same array, so a row offering a value the
+          // file would reject cannot happen.
+          options: [...CHAT_LAYOUTS],
+          hint: 'how a turn is arranged — classic is the log the app shipped with'
         }
       ]
     },

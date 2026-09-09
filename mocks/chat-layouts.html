@@ -1,0 +1,201 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — chat layout options</title>
+<!-- The app's real stylesheet. Every option below is an OVERRIDE on top of it,
+     scoped to .o1 … .o6, so what you see is the real type, colour and spacing
+     with only the layout lever changed. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 90px; max-width:1040px; }
+.sec { margin:0 0 30px; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 8px; font-size:11px; color:var(--dim); line-height:1.5; }
+.chat { padding:12px 14px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+h1 { font-size:14px; margin:0 0 4px; }
+.intro { color:var(--dim); font-size:11px; line-height:1.6; margin:0 0 26px; max-width:78ch; }
+
+/* The work wrapper is inert everywhere except O5, where it becomes a band. */
+.work { display:contents; }
+
+/* ---- O1 · gutter column ------------------------------------------------- */
+.o1 .irc-entry { display:grid; grid-template-columns:88px 1fr; column-gap:14px; margin-top:15px; }
+.o1 .irc-entry:first-child { margin-top:0; }
+.o1 .irc-entry[data-cont] { margin-top:4px; }
+.o1 .irc-lead { float:none; display:flex; flex-direction:column-reverse; align-items:flex-end; grid-column:1; margin:0; line-height:1.45; }
+.o1 .irc-lead .irc-time { margin:0; font-size:10px; }
+.o1 .irc-lead .irc-peer { margin:0; }
+.o1 .irc-body { grid-column:2; }
+.o1 .work { display:block; }
+.o1 .work, .o1 .ag-group, .o1 .irc-sys, .o1 .irc-typing { margin-left:102px; }
+/* The model suffix takes its own line rather than blowing the gutter open. */
+.o1 .irc-lead .irc-host { display:block; font-size:10px; }
+.o1 .irc-sys, .o1 .irc-typing { margin-top:15px; }
+
+/* ---- O2 · turn surfaces ------------------------------------------------- */
+.o2 .irc-entry { margin-top:9px; }
+.o2 .irc-entry:first-child { margin-top:0; }
+.o2 .irc-entry[data-cont] { margin-top:2px; }
+.o2 .irc-entry[data-me] .irc-body { padding:8px 12px; border:1px solid var(--line); border-left:2px solid var(--nick-you); border-radius:var(--radius); background:var(--well); }
+.o2 .irc-entry:not([data-me]) .irc-body { padding:0 12px; border-left:2px solid transparent; }
+.o2 .work { display:block; margin:6px 0 6px 14px; padding-left:12px; border-left:1px solid var(--line-soft); }
+.o2 .ag-group { margin-left:26px; }
+.o2 .irc-sys, .o2 .irc-typing { margin-left:14px; }
+
+/* ---- O3 · ruled turns --------------------------------------------------- */
+.o3 .irc-entry { margin-top:14px; padding-top:13px; border-top:1px solid var(--line-soft); }
+.o3 .irc-entry:first-child { margin-top:0; padding-top:0; border-top:0; }
+.o3 .irc-entry[data-cont] { margin-top:8px; padding-top:0; border-top:0; }
+.o3 .work { display:block; margin-top:8px; }
+.o3 .irc-sys, .o3 .irc-typing { margin-top:14px; padding-top:13px; border-top:1px solid var(--line-soft); }
+
+/* ---- O4 · timeline rail ------------------------------------------------- */
+.o4 .chat { padding-left:22px; }
+.o4 .irc-entry, .o4 .work, .o4 .ag-group, .o4 .irc-sys, .o4 .irc-typing { position:relative; padding-left:17px; border-left:1px solid var(--line); }
+.o4 .irc-entry { margin-top:14px; }
+.o4 .irc-entry:first-child { margin-top:0; }
+.o4 .irc-entry[data-cont] { margin-top:4px; }
+.o4 .irc-entry::before { content:''; position:absolute; left:-4px; top:6px; width:7px; height:7px; border-radius:50%; background:var(--bg); border:1px solid var(--nick, var(--edge)); }
+.o4 .irc-entry[data-cont]::before { display:none; }
+.o4 .work { display:block; margin-top:5px; }
+.o4 .work::before, .o4 .ag-group::before { content:''; position:absolute; left:-2px; top:9px; width:5px; height:1px; background:var(--edge); }
+.o4 .irc-sys, .o4 .irc-typing { margin-top:14px; }
+
+/* ---- O5 · speech vs work ------------------------------------------------ */
+.o5 .irc-entry { margin-top:14px; }
+.o5 .irc-entry:first-child { margin-top:0; }
+.o5 .irc-entry[data-cont] { margin-top:5px; }
+.o5 .work { display:block; margin:9px 0; padding:5px 10px; border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--wash-1); }
+.o5 .work .tool-run { margin:0; }
+.o5 .ag-group { margin:9px 0; padding:5px 10px; border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--wash-1); }
+.o5 .irc-sys, .o5 .irc-typing { margin-top:14px; }
+
+/* ---- O6 · label line + measure ------------------------------------------ */
+.o6 .irc-entry { margin-top:16px; }
+.o6 .irc-entry:first-child { margin-top:0; }
+.o6 .irc-entry[data-cont] { margin-top:7px; }
+.o6 .irc-lead { float:none; display:block; margin:0 0 2px; line-height:1.4; }
+.o6 .irc-lead .irc-nick { font-size:11px; letter-spacing:0.05em; }
+.o6 .irc-lead .irc-time { margin-right:7px; font-size:10px; }
+.o6 .irc-body { max-width:80ch; line-height:1.8; }
+.o6 .work { display:block; margin-top:7px; }
+.o6 .irc-sys, .o6 .irc-typing { margin-top:16px; }
+/* ---- O7 · Bloom-style · asymmetric + collapsed work ---------------------
+   From runbloom.app. Four moves: only YOUR message carries a surface, the
+   agent's carries none; a run of work is one collapsed count line, quieter
+   than the prose; metadata (cost) drops out of the sentence and becomes a
+   footer; paragraphs inside a message get real air.
+   Floe-legal version: Bloom fills the user bubble solid blue, which
+   docs/ui-conventions.md forbids — here it is a recessed well with a border,
+   which reads as the same asymmetry without the saturated fill. */
+.o7 .irc-entry { margin-top:13px; }
+.o7 .irc-entry:first-child { margin-top:0; }
+.o7 .irc-entry[data-cont] { margin-top:9px; }
+.o7 .irc-entry[data-me] { display:flex; justify-content:flex-end; }
+.o7 .irc-entry[data-me] .irc-body { max-width:62%; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius); background:var(--well); color:var(--text-strong); }
+.o7 .irc-body > .irc-cost { float:none; display:block; margin-top:5px; padding:0; }
+.o7 .irc-body .md p { margin-bottom:9px; }
+.o7 .irc-body .md p:last-child, .o7 .irc-body .md > :last-child { margin-bottom:0; }
+.o7 .irc-body .md ul, .o7 .irc-body .md ol { margin-bottom:9px; }
+/* Softer than the app's --wash-4: at Bloom's paragraph rhythm the darker pill
+   turns every mention of an identifier into a lump. */
+.o7 .irc-body .md-code { background:var(--wash-2); }
+.o7 .work { display:block; margin:9px 0; }
+.o7 .work .run-fold { font-size:11px; opacity:0.8; }
+.o7 .ag-group, .o7 .irc-sys, .o7 .irc-typing { margin-top:13px; }
+
+/* ---- O7b · Bloom, all the way ------------------------------------------
+   The same layout with Bloom's actual typography: proportional body, mono for
+   code only, and NO pill behind inline code — the face alone marks it. This
+   breaks the one rule in AGENTS.md that says Floe is mono end to end, which is
+   why it is shown separately rather than folded into O7. */
+.o7b .irc-entry { margin-top:13px; }
+.o7b .irc-entry:first-child { margin-top:0; }
+.o7b .irc-entry[data-cont] { margin-top:9px; }
+.o7b .irc-entry[data-me] { display:flex; justify-content:flex-end; }
+.o7b .irc-entry[data-me] .irc-body { max-width:62%; padding:7px 11px; border:1px solid var(--line); border-radius:var(--radius); background:var(--well); color:var(--text-strong); }
+.o7b .irc-body { font-family:-apple-system, "SF Pro Text", "Inter", system-ui, sans-serif; font-size:13.5px; line-height:1.55; }
+.o7b .irc-lead, .o7b .irc-nick { font-family:var(--mono); }
+.o7b .irc-body .md-code { padding:0; background:none; color:var(--text-strong); font-family:var(--mono); font-size:12.5px; }
+.o7b .irc-body > .irc-cost { float:none; display:block; margin-top:5px; padding:0; font-family:var(--mono); }
+.o7b .irc-body .md p { margin-bottom:9px; }
+.o7b .irc-body .md p:last-child, .o7b .irc-body .md > :last-child { margin-bottom:0; }
+.o7b .irc-body .md ul, .o7b .irc-body .md ol { margin-bottom:9px; }
+.o7b .work { display:block; margin:9px 0; }
+.o7b .work .run-fold { font-size:11px; opacity:0.8; }
+.o7b .ag-group, .o7b .irc-sys, .o7b .irc-typing { margin-top:13px; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — chat layout options</h1>
+<p class="intro">Same conversation, eight layouts, the real stylesheet underneath. Today's transcript is option 0 at the top: one column, no gap between turns, the nick floated into the first line so wrapped text returns past it. Each option changes exactly one lever. Options 7 and 7b come from runbloom.app.</p>
+<div id="out"></div>
+</div>
+<script>
+/* One conversation, rendered identically into every option. Written as an array
+   joined with '' because `.irc-body` is white-space: pre-wrap — a newline in the
+   markup would render as a real line break. */
+var C = [
+'<div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>the composer eats the first keystroke after the palette closes — it only happens when the palette was opened with ⌘K, not from the row menu</div></div>',
+'<div class="irc-entry" style="--nick:var(--nick-claude)"><div class="irc-body"><span class="irc-cost"><span>1m 12s</span><span class="irc-cost-sep">·</span><span>↓18.4k tokens</span></span><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude<span class="irc-host">@opus-5</span></span></span><div class="md"><p>Looking. <code class="md-code">Palette.tsx</code> restores focus on unmount, but the composer\'s <code class="md-code">onFocus</code> guard drops the event that arrives in the same tick.</p></div></div></div>',
+'<div class="work"><div class="tool-run"><div class="run-fold" data-open role="button"><span class="bash-mark">▾</span><span class="run-fold-line"><span class="run-fold-count">4 calls</span><span class="run-fold-verbs"> · read ×2, grep, edit</span></span></div><div class="run-fold-body"><div class="tool-row"><span class="tool-mark">▸</span><span class="tool-line"><span class="tool-verb">read</span><span class="tool-arg"> src/renderer/src/<span class="tool-base">panels.tsx</span></span></span></div><div class="tool-row"><span class="tool-mark">▸</span><span class="tool-line"><span class="tool-verb">grep</span><span class="tool-arg">&#32;<span class="tool-base">restoreFocus</span></span><span class="sh-num"> ×3</span></span></div><div class="bash-row" role="button"><span class="bash-mark">▸</span><span class="bash-code">pnpm test</span><span class="bash-acts"><span class="bash-act">copy</span><span class="bash-act">run</span></span></div></div></div></div>',
+'<div class="irc-entry" data-cont style="--nick:var(--nick-claude)"><div class="irc-body"><div class="md"><p>Two things are fighting:</p><ul><li>the palette restores focus synchronously on unmount</li><li>the composer\'s guard ignores any focus event in the same tick, so the keystroke lands nowhere</li></ul><p>Deferring the restore to a microtask fixes it without touching the guard.</p></div></div></div>',
+'<div class="ag-group"><div class="irc-body irc-act ag-line"><span class="irc-star">*</span><span class="spin">⠹</span><span class="ag-desc"><span class="ag-type">explore</span> find every panel that restores focus · <span class="ag-tool">grep</span>&#32;<span class="irc-dim">18s · 4.2k</span></span><span class="ag-h" data-h="claude">claude</span><span class="ag-meter"><i style="width:46%"></i></span></div></div>',
+'<div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:06</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>do it, and check the light theme after</div></div>',
+'<div class="irc-entry" style="--nick:var(--nick-codex)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:07</span><span class="irc-nick" style="color:var(--nick-codex)">codex</span><span class="irc-peer">session</span></span><div class="md"><p>Agreed on the microtask. I\'d add a test that types straight after ⌘K.</p></div></div></div>',
+'<div class="irc-sys"><span class="irc-star">***</span> session started on <code>chat-layout</code></div>',
+'<div class="irc-typing" data-live><span class="irc-nick" style="color:var(--nick-claude)">claude</span> is typing<span class="spin">⠹</span>&#32;<span class="irc-dim"> 12s · 3.4k</span></div>'
+].join('');
+
+var OPTS = [
+  ['o0', '0 · today — flat log', 'One column, zero gap between turns, the nick floated into the first line. Nothing marks where a turn starts, so a speaker change reads like a line wrap.'],
+  ['o1', '1 · gutter column', 'Time and nick move into a fixed 88px gutter; every body starts at the same left edge and stays there when it wraps. Consecutive turns from one speaker drop the head. Slack/Discord cozy.'],
+  ['o2', '2 · turn surfaces', 'Your messages become a recessed well with a nick-coloured left edge; agent turns stay flush on the panel. Work hangs off a hairline under the turn that ran it. Zed / Cursor.'],
+  ['o3', '3 · ruled turns', 'Keeps today\'s column exactly. A hairline plus 14px of air above every speaker change, nothing above a continuation. Smallest change, most of the win.'],
+  ['o4', '4 · timeline rail', 'A vertical line down the left; each turn hangs a dot in the nick\'s colour, each run of work a tick. Scanning a long session becomes reading the rail. Linear\'s activity feed.'],
+  ['o5', '5 · speech vs work', 'Messages stay plain and full width. Everything that is not speech — tool runs, subagents — moves into its own bordered band, so prose and machinery alternate instead of interleaving.'],
+  ['o7', '7 · Bloom — asymmetric + collapsed work', 'From runbloom.app. Only your message carries a surface; the agent\'s carries none, so turn boundaries are found by shape rather than read. A run of work collapses to one line quieter than the prose, the cost drops out of the sentence into a footer, and paragraphs inside a message get real air.'],
+  ['o7b', '7b · Bloom, all the way', 'The same layout with Bloom\'s actual typography: proportional body, mono for code only, and no pill behind inline code. Breaks the mono-end-to-end rule in AGENTS.md — shown so the trade is visible, not to smuggle it in.'],
+  ['o6', '6 · label line + measure', 'Nick becomes a small label on its own line above the words, so no message is ever indented by its own header. Prose capped at 80ch and leaded at 1.8.']
+];
+
+document.getElementById('out').innerHTML = OPTS.map(function (o) {
+  return '<div class="sec"><p class="lbl">' + o[1] + '</p><p class="sub">' + o[2] + '</p><div class="chat ' + o[0] + '">' + C + '</div></div>';
+}).join('');
+
+/* O1 is the one option whose head is not inside the body: the gutter is a grid
+   column, so the lead has to be the entry's own child. In the app this is a
+   two-line change in ChatPanel; here it is done after render so every option
+   still shares one source of markup. */
+document.querySelectorAll('.o1 .irc-entry').forEach(function (e) {
+  var lead = e.querySelector('.irc-lead');
+  if (lead) e.insertBefore(lead, e.firstChild);
+  else e.insertBefore(document.createElement('span'), e.firstChild);
+});
+
+/* Bloom's default is a run of work COLLAPSED to its count line. */
+document.querySelectorAll('.o7 .run-fold, .o7b .run-fold').forEach(function (f) {
+  f.removeAttribute('data-open');
+  var m = f.querySelector('.bash-mark');
+  if (m) m.textContent = '▸';
+  var body = f.parentNode.querySelector('.run-fold-body');
+  if (body) body.remove();
+});
+
+/* Bloom keeps the turn's cost out of the sentence; as a footer it has to sit
+   at the END of the body, not at the top where the markup puts it. */
+document.querySelectorAll('.o7 .irc-body > .irc-cost, .o7b .irc-body > .irc-cost').forEach(function (c) {
+  c.parentNode.appendChild(c);
+});
+
+/* Your own message needs no nick and no clock — the side it sits on says it. */
+document.querySelectorAll('.o7 .irc-entry[data-me] .irc-lead, .o7b .irc-entry[data-me] .irc-lead').forEach(function (l) { l.remove(); });
+
+/* ?only=o3 renders one option on its own, for looking at it full size. */
+var q = new URLSearchParams(location.search);
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+var only = q.get('only');
+if (only) document.querySelectorAll('.sec').forEach(function (s) {
+  if (!s.querySelector('.chat.' + only)) s.remove();
+});
+</script></body></html>
