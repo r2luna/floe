@@ -152,6 +152,7 @@ export function QueryPanel({
       <Composer
         value={text}
         onChange={setText}
+        historyKey={session.worktreePath}
         onSend={(choice, attached) => {
           pinned.current = true
           // No handle read here, on purpose: the panel IS the address. A line

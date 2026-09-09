@@ -1069,6 +1069,7 @@ function Launcher({
         value={text}
         onChange={setText}
         draftKey={`branch:${cwd}`}
+        historyKey={cwd}
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
@@ -1656,6 +1657,7 @@ function ChatPanel({
         value={text}
         onChange={setText}
         draftKey={session?.id}
+        historyKey={cwd}
         onSend={(choice, attached) => {
           repin()
           // A line that OPENS with `@codex` is addressed to codex: that one

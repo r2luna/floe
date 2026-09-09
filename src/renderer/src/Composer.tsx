@@ -102,7 +102,8 @@ export function Composer({
   onDigit,
   onEmptyEnter,
   modelLeft,
-  draftKey
+  draftKey,
+  historyKey
 }: {
   value: string
   onChange: (next: string) => void
@@ -172,6 +173,9 @@ export function Composer({
       was pasted in follows the text: without a key the chips only live as long
       as this composer is mounted. */
   draftKey?: string
+  /** Which worktree's ↑/↓ history this composer walks — its path. Without one
+      there is no history, for the same reason `draftKey` has none. */
+  historyKey?: string
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -205,6 +209,11 @@ export function Composer({
   // 0 the last message sent. `stash` holds what was typed before you left it.
   const at = useRef(-1)
   const stash = useRef('')
+  // Another worktree is another list, so the walk starts over rather than
+  // landing on whatever index the last one was left at.
+  useEffect(() => {
+    at.current = -1
+  }, [historyKey])
   // Which model answers. Lives here because the picker does, and persists so
   // the choice survives a reload — the CLI default would otherwise win back
   // every restart.
@@ -735,7 +744,7 @@ export function Composer({
       // arrows are still moving the caret between the lines of a draft.
       const before = value.slice(0, el.selectionStart)
       if ((back ? before : value.slice(el.selectionStart)).includes('\n')) return
-      const list = readHistory()
+      const list = readHistory(historyKey)
       const next = at.current + (back ? 1 : -1)
       if (next < -1 || next >= list.length) return
       e.preventDefault()
@@ -846,7 +855,7 @@ export function Composer({
    * a message to leave with different bookkeeping behind them.
    */
   function submit(): void {
-    pushHistory(value)
+    pushHistory(value, historyKey)
     at.current = -1
     // The chips go with the message, and only then stop being pending. An
     // empty send is a no-op downstream, so the attachments stay put rather
