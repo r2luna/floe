@@ -1,0 +1,75 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — commands pane harness</title>
+<!-- The app's real stylesheet, and the exact DOM CommandsPane.tsx emits. Nothing
+     here re-declares a `.cmd-*` rule: if it looks wrong on this page it is wrong
+     in the app. Keep it in step when the pane's markup changes. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+  .page { padding:24px 28px; display:flex; gap:24px; align-items:flex-start; }
+  .col { }
+  .cap { margin:0 0 6px; color:var(--dim); font-size:11px; }
+  /* The pane as it really sits: a focused panel, its body's own 8px inset. */
+  .panel { width:440px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+  .panel[data-focused] { background:var(--panel-focused); }
+  .wide .panel { width:720px; }
+  .theme { position:fixed; top:14px; right:18px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page" id="page"></div>
+<script>
+var ico = function (d) { return '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7">' + d + '</svg>'; };
+var PLAY = ico('<path d="M7 4v16l13-8z"/>'), STOP = ico('<rect x="6" y="6" width="12" height="12" rx="1"/>'), REDO = ico('<path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/>');
+
+/* name, command, state, note, err, scope — mirroring what note() produces. */
+var CMDS = [
+  ['dev',       'pnpm dev',                        'running',  '142 MB', 0, 'project'],
+  ['queue',     'php artisan queue:work --tries=3','running',  '88 MB',  0, 0],
+  ['vite',      'pnpm vite --host',                'starting', 'starting…', 0, 0],
+  ['scheduler', 'php artisan schedule:work',       'idle',     '',       0, 0],
+  ['horizon',   'php artisan horizon',             'crash-looping','restarted 5× in 30s', 1, 'project'],
+  ['pail',      'php artisan pail',                'exited',   'exit 1 · 3h ago · ran 2m 14s', 1, 0]
+];
+var LABEL = { idle:'stopped', starting:'starting', running:'running', stopping:'stopping', exited:'stopped', 'crash-looping':'stopped' };
+
+function row(c, group) {
+  var st = c[2], live = st === 'running' || st === 'starting';
+  var err = st === 'crash-looping' || c[4];
+  var label = LABEL[st];
+  return '<button class="row cmd-row" data-command="' + c[0] + '"' + (live ? ' data-live' : '') + '>' +
+    '<span class="cmd-l1">' +
+      (live ? '<span class="spin">⠹</span>' : '<span class="dot' + (err ? ' dot-err' : '') + '"></span>') +
+      '<span class="row-name">' + c[0] + '</span>' +
+      (c[5] ? '<span class="cmd-scope">project</span>' : '') +
+      (label !== group ? '<span class="cmd-state"' + (live ? ' data-run' : '') + '>' + label + '</span>' : '') +
+    '</span>' +
+    '<span class="cmd-l2"><span class="cmd-cmd">' + c[1] + '</span>' +
+      (c[3] ? '<span class="cmd-note"' + (c[4] ? ' data-err="true"' : '') + '>' + c[3] + '</span>' : '') +
+    '</span>' +
+    '<span class="cmd-acts">' + (live
+      ? '<span class="cmd-act" role="button" title="Restart">' + REDO + '</span><span class="cmd-act" role="button" title="Stop (s)">' + STOP + '</span>'
+      : '<span class="cmd-act" role="button" title="Run (r)">' + PLAY + '</span>') + '</span>' +
+    '</button>';
+}
+
+function pane() {
+  var isLive = function (c) { return c[2] === 'running' || c[2] === 'starting'; };
+  var out = '<div class="changes-head"><span>2/6 running</span><span class="cmd-headacts">' +
+    '<span class="cmd-runall" role="button">Stop all</span>' +
+    '<span class="cmd-runall" role="button">Run all</span></span></div>';
+  ['running', 'stopped'].forEach(function (g) {
+    var block = CMDS.filter(function (c) { return isLive(c) === (g === 'running'); });
+    if (!block.length) return;
+    out += '<div class="group-label">' + g.toUpperCase() + '</div>';
+    out += block.map(function (c) { return row(c, g); }).join('');
+  });
+  return out;
+}
+
+document.getElementById('page').innerHTML =
+  '<div class="col"><p class="cap">panel width — 440px</p><div class="panel" data-focused><div class="panel-body">' + pane() + '</div></div></div>' +
+  '<div class="col wide"><p class="cap">wide — 720px</p><div class="panel" data-focused><div class="panel-body">' + pane() + '</div></div></div>';
+
+if (new URLSearchParams(location.search).get('theme') === 'light')
+  document.documentElement.dataset.theme = 'light';
+</script></body></html>

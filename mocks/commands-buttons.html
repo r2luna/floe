@@ -1,0 +1,150 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — commands pane, button treatments</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 80px; max-width:1240px; }
+h1 { font-size:14px; margin:0 0 4px; }
+.intro { color:var(--dim); font-size:11px; line-height:1.6; margin:0 0 8px; max-width:92ch; }
+.diag { margin:0 0 24px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); font-size:11px; line-height:1.75; color:var(--dim); max-width:92ch; }
+.diag b { color:var(--text-strong); }
+.diag code { padding:1px 5px; border-radius:var(--radius); background:var(--wash-4); color:var(--text-strong); }
+.grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:26px 24px; }
+.sec { min-width:0; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 8px; font-size:11px; color:var(--dim); line-height:1.55; }
+.pane { padding:6px 0; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+
+/* The 5b layout, held constant: grouped by state, the state word dropped where
+   the heading already says it, actions in a column of their own. */
+.pane .cmd-row { display:grid; grid-template-columns:1fr auto; align-items:center; gap:0 10px; padding:7px 8px; }
+.pane .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.pane .cmd-l1 { grid-column:1; grid-row:1; }
+.pane .cmd-l2 { grid-column:1; grid-row:2; margin-top:2px; }
+.pane .cmd-acts { grid-column:2; grid-row:1 / span 2; margin-left:0; opacity:1; }
+.pane .group-label { padding:9px 8px 4px; color:var(--dim); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; }
+.pane .cmd-row[data-live] { border-left:2px solid color-mix(in srgb, var(--working) 55%, transparent); padding-left:6px; }
+
+/* ---- B0 · today ---------------------------------------------------------- */
+/* padding 1px 4px, radius-sm, 12px icon, 2px gap — and opacity 0 until the
+   pointer or the cursor is on the row. Shown visible, so this is the size and
+   weight alone. */
+
+/* ---- B1 · the same chip, properly sized --------------------------------- */
+.b1 .cmd-acts { gap:4px; }
+.b1 .cmd-act { padding:3px 6px; border-radius:var(--radius); }
+.b1 .cmd-act svg { width:13px; height:13px; }
+
+/* ---- B2 · icon and word -------------------------------------------------- */
+.b2 .cmd-acts { gap:4px; }
+.b2 .cmd-act { gap:5px; padding:3px 8px; border-radius:var(--radius); font-size:11px; }
+.b2 .cmd-act svg { width:12px; height:12px; }
+
+/* ---- B3 · one segmented control ----------------------------------------- */
+.b3 .cmd-acts { gap:0; border:1px solid var(--edge); border-radius:var(--radius); overflow:hidden; }
+.b3 .cmd-act { border:0; border-radius:0; padding:3px 8px; }
+.b3 .cmd-act + .cmd-act { border-left:1px solid var(--edge); }
+.b3 .cmd-act svg { width:13px; height:13px; }
+.b3 .cmd-act:hover { background:var(--wash-3); }
+
+/* ---- B4 · tinted by what it does ---------------------------------------- */
+/* The canonical mode-chip tones from docs/ui-conventions.md: coloured text over
+   a barely-there tint, never a fill, and a light value for each. */
+.b4 .cmd-acts { gap:4px; }
+.b4 .cmd-act { padding:3px 6px; border-radius:var(--radius); }
+.b4 .cmd-act svg { width:13px; height:13px; }
+.b4 .cmd-act[data-act='run'] { color:#93b8a1; border-color:#283129; background:#1b201d; }
+.b4 .cmd-act[data-act='stop'] { color:#c49495; border-color:#352829; background:#221b1c; }
+:root[data-theme='light'] .b4 .cmd-act[data-act='run'] { color:#2f7d52; border-color:#b6d9c3; background:#eef6f1; }
+:root[data-theme='light'] .b4 .cmd-act[data-act='stop'] { color:#b1454a; border-color:#e3bdbf; background:#f9eef0; }
+
+/* ---- B5 · the key on the chip ------------------------------------------- */
+.b5 .cmd-acts { gap:4px; }
+.b5 .cmd-act { gap:5px; padding:3px 7px; border-radius:var(--radius); }
+.b5 .cmd-act svg { width:12px; height:12px; }
+.b5 .cmd-key { color:var(--faint); font-size:10px; }
+.b5 .cmd-act:hover .cmd-key { color:var(--dimmer); }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — the commands pane buttons, in the 5b layout</h1>
+<p class="intro">Layout held at 5b throughout; only the buttons change.</p>
+<p class="diag"><b>What is wrong with them now.</b>
+They are <code>padding: 1px 4px</code> around a 12px icon with a <code>--radius-sm</code> (2.5px) corner and a <code>2px</code> gap between the pair — about 20×16, which is under half the size of every other pressable thing in the app (<code>Run all</code> beside them is <code>padding: 0 6px</code> at 11px text). Two of them 2px apart read as one smudge rather than two targets, and nothing distinguishes <b>run</b> from <b>stop</b> except a glyph at 12px. On top of that they are <code>opacity: 0</code> until the pointer or the cursor reaches the row — every option here draws them always.</p>
+<div class="grid" id="out"></div>
+</div>
+<script>
+var CMDS = [
+  { name:'dev',       cmd:'pnpm dev',                        state:'running', label:'running', note:'142 MB', scope:'project' },
+  { name:'queue',     cmd:'php artisan queue:work --tries=3', state:'running', label:'running', note:'88 MB' },
+  { name:'scheduler', cmd:'php artisan schedule:work',       state:'idle',    label:'stopped' },
+  { name:'vite',      cmd:'pnpm vite --host',                state:'err',     label:'crash-looping', note:'exited 1', err:true },
+  { name:'horizon',   cmd:'php artisan horizon',             state:'idle',    label:'stopped', scope:'project' }
+];
+var esc = function (t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+var ico = function (d) { return '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.7">' + d + '</svg>'; };
+var PLAY = ico('<path d="M7 4v16l13-8z"/>');
+var STOP = ico('<rect x="6" y="6" width="12" height="12" rx="1"/>');
+var REDO = ico('<path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/>');
+
+var SAID_BY_HEADING = { running: true, stopped: true };
+
+/* Each treatment answers "what goes inside a .cmd-act" for a given action. */
+function actsFor(c, kind) {
+  var run = c.state === 'running';
+  var mk = function (act, icon, word, key) {
+    var inner = icon;
+    if (kind === 'word') inner += '<span>' + word + '</span>';
+    if (kind === 'key') inner += '<span class="cmd-key">' + key + '</span>';
+    return '<span class="cmd-act" role="button" data-act="' + act + '" title="' + word + ' (' + key + ')">' + inner + '</span>';
+  };
+  return '<span class="cmd-acts">' + (run
+    ? mk('restart', REDO, 'restart', '⇧r') + mk('stop', STOP, 'stop', 's')
+    : mk('run', PLAY, 'run', 'r')) + '</span>';
+}
+
+function row(c, kind) {
+  var st = SAID_BY_HEADING[c.label] ? '' : '<span class="cmd-state">' + c.label + '</span>';
+  return '<button class="row cmd-row"' + (c.state === 'running' ? ' data-live' : '') + '>' +
+    '<span class="cmd-l1">' +
+      (c.state === 'running' ? '<span class="spin">⠹</span>' : '<span class="dot' + (c.state === 'err' ? ' dot-err' : '') + '"></span>') +
+      '<span class="row-name">' + c.name + '</span>' +
+      (c.scope ? '<span class="cmd-scope">' + c.scope + '</span>' : '') + st +
+    '</span>' +
+    '<span class="cmd-l2"><span class="cmd-cmd">' + esc(c.cmd) + '</span>' +
+      (c.note ? '<span class="cmd-note"' + (c.err ? ' data-err="true"' : '') + '>' + c.note + '</span>' : '') +
+    '</span>' + actsFor(c, kind) + '</button>';
+}
+
+function pane(kind) {
+  var live = CMDS.filter(function (c) { return c.state === 'running'; });
+  var down = CMDS.filter(function (c) { return c.state !== 'running'; });
+  return '<div class="changes-head"><span>2/5 running</span><span class="cmd-headacts">' +
+    '<span class="cmd-runall" role="button">Stop all</span><span class="cmd-runall" role="button">Run all</span></span></div>' +
+    '<div class="group-label">running</div>' + live.map(function (c) { return row(c, kind); }).join('') +
+    '<div class="group-label">stopped</div>' + down.map(function (c) { return row(c, kind); }).join('');
+}
+
+var OPTS = [
+  ['b0', '0 · today', 'The shipped chip, drawn visible: a 12px glyph in a 1px×4px box with a 2.5px corner, 2px apart. Half the size of every other control in the app.', 'icon'],
+  ['b1', '1 · the same chip, properly sized', 'Nothing new — the app-standard corner, 3px×6px of padding, a 13px glyph and 4px between them. The smallest change that makes them targets.', 'icon'],
+  ['b2', '2 · icon and word', 'run / stop / restart spelled out. Unmistakable and the biggest target, at the cost of the widest action column — the command line loses that width on a narrow panel.', 'word'],
+  ['b3', '3 · one segmented control', 'Restart and stop share a single bordered box with a divider, so a running row carries one control with two halves rather than two chips that read as one smudge.', 'icon'],
+  ['b4', '4 · tinted by what it does', "Run takes the accept tone, stop the danger tone, straight from docs/ui-conventions.md — coloured text over a barely-there tint, never a fill, each with its light value. The two actions stop depending on a 12px glyph to tell them apart.", 'icon'],
+  ['b5', '5 · the key on the chip', 'The chip carries the key that does the same thing. Fits the keyboard-first rule better than a tooltip nobody hovers for, and makes the mouse path teach the keyboard one.', 'key']
+];
+
+document.getElementById('out').innerHTML = OPTS.map(function (o) {
+  return '<div class="sec"><p class="lbl">' + o[1] + '</p><p class="sub">' + o[2] + '</p>' +
+    '<div class="pane ' + o[0] + '">' + pane(o[3]) + '</div></div>';
+}).join('');
+
+var q = new URLSearchParams(location.search);
+if (q.get('only')) document.querySelectorAll('.sec').forEach(function (el) {
+  if (!el.querySelector('.pane').classList.contains(q.get('only'))) el.remove();
+});
+if (q.get('w')) document.querySelector('.grid').style.gridTemplateColumns = q.get('w') + 'px';
+if (q.get('nodiag')) { document.querySelector('.diag').remove(); document.querySelector('.intro').remove(); }
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+</script></body></html>
