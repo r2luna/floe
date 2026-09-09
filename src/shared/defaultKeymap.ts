@@ -200,6 +200,19 @@ key from the file tree, the plans list, the reader and a diff.`,
     ]
   },
   {
+    title: 'Open in the default app',
+    doc: `\`o\` hands the file under the cursor to the system and lets it choose
+the program: an \`.html\` opens in your browser, a \`.png\` in the image viewer, a
+\`.xlsx\` in the spreadsheet. It is the answer for the files the reader beside
+the list can only show as bytes, and it is the same key from the file tree and
+from the changes list. \`e\` still opens the same row in your editor.
+
+On a directory it does nothing: the tree walks folders with \`l\` and \`.\`, and
+handing one to a file manager would be leaving the app to do what the panel
+already does.`,
+    binds: [{ key: 'o', command: 'file.open', when: 'panel in ["files", "changes"]' }]
+  },
+  {
     title: 'Skills',
     doc: `The skills panel's own letters, and deliberately the same four the file
 tree uses: \`n\` writes a new one, \`r\` renames it, \`d\` deletes it and \`e\` opens

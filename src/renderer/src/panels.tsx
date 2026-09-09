@@ -2918,6 +2918,9 @@ function ChangesList({
           className="row change-row"
           key={f.relPath}
           title={f.relPath}
+          // What `o` reads to know which file to hand the OS — the same marker
+          // the tree's rows carry, so one command covers both lists.
+          data-file={f.relPath}
           onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
           // The cursor IS the DOM focus here — j/k focus the row — so focusing
           // is the only signal that the selected file changed. The preview must
@@ -3387,7 +3390,10 @@ function FilesTree({
   const menuFor = (node: FileNode): MenuAction[] => [
     ...(node.type === 'dir'
       ? [{ label: 'Open folder here', keys: '.', run: () => onCommand?.('files.root') }]
-      : [{ label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('editor.open') }]),
+      : [
+          { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('editor.open') },
+          { label: 'Open in the default app', keys: 'o', run: () => onCommand?.('file.open') }
+        ]),
     // Only while there is somewhere to come back out to.
     ...(base ? [{ label: 'Leave folder', keys: '-', run: () => onCommand?.('files.unroot') }] : []),
     { label: 'Rename…', keys: 'r', run: () => onCommand?.('files.rename') },

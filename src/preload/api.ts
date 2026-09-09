@@ -816,6 +816,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       apply: (worktreePath: string, ops: FileOp[]): Promise<string[]> =>
         ipcRenderer.invoke('files:apply', worktreePath, ops),
       /**
+       * Hand the file to the OS and let it choose the app — `o` on a file row.
+       * An .html opens in the browser, a .png in the image viewer. Rejects with
+       * whatever the OS complained about when nothing opens.
+       */
+      open: (worktreePath: string, relPath: string): Promise<void> =>
+        ipcRenderer.invoke('files:open', worktreePath, relPath),
+      /**
        * Fires when anything in the worktree lands on disk — including the
        * gitignored files (`.floe/plans/…`) the review event skips, because the
        * tree lists those too. Armed by `review.watch`: one watcher in main

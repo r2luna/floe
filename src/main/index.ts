@@ -192,7 +192,15 @@ import {
   reapOrphanCommands,
   runShellCapture
 } from './commandRunner'
-import { applyFileOps, listDir, readFileContent, renderDocument, resolveWikiLink, searchableFiles } from './files'
+import {
+  applyFileOps,
+  listDir,
+  readFileContent,
+  renderDocument,
+  resolveWikiLink,
+  safeResolve,
+  searchableFiles
+} from './files'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTask, tick } from './colony/runner'
@@ -999,6 +1007,16 @@ export function registerFileIpc(): void {
   handle('files:apply', (_event, worktreePath: string, ops: FileOp[]) =>
     applyFileOps(worktreePath, ops)
   )
+  // `o` on a file row: hand the path to the OS and let it pick the app — an
+  // .html opens in the browser, a .xlsx in the spreadsheet. The reader beside
+  // the list shows the bytes; this is for the files that only mean something
+  // in the program that made them.
+  handle('files:open', async (_event, worktreePath: string, relPath: string) => {
+    const failure = await shell.openPath(safeResolve(worktreePath, relPath))
+    // openPath resolves with the OS's complaint instead of rejecting, and a
+    // silent no-op is the one thing a keybinding must never be.
+    if (failure) throw new Error(failure)
+  })
   handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
   handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))
   handle('review:fileDiff', (_event, worktreePath: string, relPath: string, context?: number) =>

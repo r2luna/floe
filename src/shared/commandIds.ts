@@ -38,6 +38,7 @@ export const COMMAND_IDS: string[] = [
   'files.move',
   'files.delete',
   'editor.open',
+  'file.open',
   'files.collapse',
   'files.root',
   'files.unroot',
