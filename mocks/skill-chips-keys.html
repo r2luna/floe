@@ -1,0 +1,134 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — chip navigation by keyboard</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 80px; max-width:1180px; }
+h1 { font-size:14px; margin:0 0 4px; }
+.intro { color:var(--dim); font-size:11px; line-height:1.6; margin:0 0 8px; max-width:88ch; }
+.taken { margin:0 0 24px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); font-size:11px; line-height:1.7; color:var(--dim); max-width:88ch; }
+.taken b { color:var(--text-strong); }
+.taken code { padding:1px 5px; border-radius:var(--radius); background:var(--wash-4); color:var(--text-strong); }
+.scheme { margin:0 0 30px; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 10px; font-size:11px; color:var(--dim); line-height:1.55; max-width:92ch; }
+.states { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:16px; }
+.state { min-width:0; }
+.cap { margin:0 0 5px; font-size:10px; letter-spacing:0.07em; text-transform:uppercase; color:var(--dim); }
+.box { position:relative; }
+.box .composer-menu { position:static; max-height:none; }
+.fakebox { margin-top:6px; padding:7px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); color:var(--dim); font-size:12px; }
+.fakebox b { color:var(--text); font-weight:400; }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+
+/* The chip row. Sticky like the existing breadcrumb, and outline-chip like
+   every other control in the app — never a fill. */
+.chips { position:sticky; top:-5px; z-index:1; display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:-5px -5px 4px; padding:7px 8px; border-bottom:1px solid var(--line); background:var(--well); }
+.chip-cat { padding:2px 8px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); color:var(--dim); font:inherit; font-size:10.5px; }
+/* APPLIED — the filter in force. The accent, as everywhere a chip is chosen. */
+.chip-cat[data-on] { border-color:color-mix(in srgb, var(--accent) 55%, transparent); color:var(--accent); }
+/* UNDER THE CURSOR — the same wash a menu row takes at `data-at`, so "where
+   the keyboard is" looks the same whether it is on a chip or on a row. */
+.chip-cat[data-at] { background:var(--wash-4); border-color:var(--edge); color:var(--text-strong); }
+.chip-cat[data-on][data-at] { border-color:var(--accent); color:var(--accent); }
+/* The row only shows its keys while it HAS the cursor: a hint on screen at all
+   times is a hint nobody reads. */
+.chips-hint { margin-left:auto; padding-left:10px; color:var(--dim); font-size:10px; }
+.chips:not([data-focus]) .chips-hint { visibility:hidden; }
+
+.composer-menu-row { display:grid; grid-template-columns:1fr auto; row-gap:1px; align-items:start; }
+.composer-menu-title { grid-column:1; }
+.composer-menu-scope { grid-column:2; grid-row:1; color:var(--dim); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; }
+.composer-menu-desc { grid-column:1 / -1; color:var(--dim); font-size:11px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — navigating the category chips from the keyboard</h1>
+<p class="intro">Three schemes for reaching the chips without leaving the composer. The constraint is that the textarea keeps focus the whole time — the menu never takes it, which is why every pick goes through <code>onPointerDown</code> with the default prevented.</p>
+<p class="taken"><b>What the menu already claims</b> (Composer.tsx:619–649):
+<code>↑ ↓</code> move the row cursor · <code>⏎</code> <b>and</b> <code>⇥</code> both pick the row · <code>Esc</code> leaves the drill, then closes ·
+<code>→</code> drills into a row <i>only when that row has variants</i> · <code>←</code> leaves a drill <i>only when you are in one</i> · <code>1–9</code> answer a question when the box is empty.<br>
+So <b>⇥ is not available</b> — it already picks. <code>← →</code> are free in the skill menu, because a skill has no variants and no drill, and the code only ever claims them when there is somewhere to go.</p>
+<div id="out"></div>
+</div>
+<script>
+var SK = [
+  { n:'code-review',     d:'Review the diff for correctness bugs and simplification cleanups', s:'builtin', c:'review' },
+  { n:'security-review', d:'Security review of the pending changes on this branch',            s:'builtin', c:'review' },
+  { n:'simplify',        d:'Reuse, simplification and efficiency cleanups, then apply them',   s:'builtin', c:'review' },
+  { n:'deploy',          d:'Cut and publish a release so the auto-updater can ship it',        s:'project', c:'release' },
+  { n:'run',             d:"Launch and drive this project's app to see a change working",      s:'builtin', c:'project' },
+  { n:'dataviz',         d:'Charts and dashboards that read as one system',                    s:'global',  c:'docs' },
+  { n:'loop',            d:'Run a prompt or slash command on a recurring interval',            s:'harness', c:'automation' }
+];
+var CATS = ['all','review','release','project','docs','automation'];
+var esc = function (t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+
+/* opts: { on, at, focus, hint } — `on` is the applied filter, `at` the cursor. */
+function chips(o) {
+  return '<div class="chips"' + (o.focus ? ' data-focus' : '') + '>' +
+    CATS.map(function (c, i) {
+      return '<button class="chip-cat"' + (c === o.on ? ' data-on' : '') + (i === o.at ? ' data-at' : '') + '>' + c + '</button>';
+    }).join('') +
+    '<span class="chips-hint">' + (o.hint || '← → move · ⏎ apply') + '</span></div>';
+}
+
+function list(cat, at) {
+  var rows = SK.filter(function (s) { return !cat || cat === 'all' || s.c === cat; });
+  return rows.map(function (s, i) {
+    return '<button class="composer-menu-row"' + (i === at ? ' data-at' : '') + '>' +
+      '<span class="composer-menu-title">' + esc(s.n) + '</span>' +
+      '<span class="composer-menu-desc">' + esc(s.d) + '</span>' +
+      '<span class="composer-menu-scope">' + s.s + '</span></button>';
+  }).join('');
+}
+
+function menu(inner, typed) {
+  return '<div class="box"><div class="composer-menu" data-drop="down">' + inner + '</div>' +
+    '<div class="fakebox">/<b>' + (typed || '') + '</b></div></div>';
+}
+
+var SCHEMES = [
+  {
+    lbl: 'K1 · the cursor walks up into the chips  (recommended)',
+    sub: '↑ from the first skill row lands on the chip row instead of wrapping to the last. While the cursor is there ← → move between chips, ⏎ applies and drops back into the list, ↓ drops back without applying, Esc closes. No new key: ← → are claimed exactly when the cursor is on the chips, which is the same conditional claim the drill arrows already use. The chips sit above the rows, so up-into-them is where they are.',
+    states: [
+      ['cursor in the list (default)', menu(chips({ on:'all', at:-1 }) + list('all', 1))],
+      ['↑ → — cursor on review, all still applied', menu(chips({ on:'all', at:1, focus:true }) + list('all', -1))],
+      ['⏎ — review applied, cursor back in the list', menu(chips({ on:'review', at:-1 }) + list('review', 0))]
+    ]
+  },
+  {
+    lbl: 'K2 · ⇧⇥ steps the category',
+    sub: 'The cursor never leaves the list; ⇧⇥ just advances the applied filter and the chip row redraws. ⇥ still picks, so the pair reads as "⇥ takes this one, ⇧⇥ changes the set". One key, no second cursor to explain — but it only goes forward, and with six categories that is up to five presses to reach the one you want.',
+    states: [
+      ['before', menu(chips({ on:'all', at:-1, hint:'⇧⇥ category' }) + list('all', 0))],
+      ['⇧⇥', menu(chips({ on:'review', at:-1, hint:'⇧⇥ category' }) + list('review', 0))],
+      ['⇧⇥ ⇧⇥', menu(chips({ on:'release', at:-1, hint:'⇧⇥ category' }) + list('release', 0))]
+    ]
+  },
+  {
+    lbl: 'K3 · type the category',
+    sub: 'A category typed with a trailing colon narrows the list, and the chip row is a legend of what you could type rather than something you steer. Costs no key at all and composes with the filter you are already typing — but it is only reachable by knowing the names, so the chips have to stay clickable for it to be discoverable.',
+    states: [
+      ['/', menu(chips({ on:'all', at:-1, hint:'type a category' }) + list('all', 0), '')],
+      ['/rev…', menu(chips({ on:'review', at:-1, hint:'type a category' }) + list('review', 0), 'review:')],
+      ['/review: s', menu(chips({ on:'review', at:-1, hint:'type a category' }) +
+        '<button class="composer-menu-row" data-at><span class="composer-menu-title">security-review</span><span class="composer-menu-desc">Security review of the pending changes on this branch</span><span class="composer-menu-scope">builtin</span></button>' +
+        '<button class="composer-menu-row"><span class="composer-menu-title">simplify</span><span class="composer-menu-desc">Reuse, simplification and efficiency cleanups, then apply them</span><span class="composer-menu-scope">builtin</span></button>', 'review: s')]
+    ]
+  }
+];
+
+document.getElementById('out').innerHTML = SCHEMES.map(function (s) {
+  return '<div class="scheme"><p class="lbl">' + s.lbl + '</p><p class="sub">' + s.sub + '</p><div class="states">' +
+    s.states.map(function (st) { return '<div class="state"><p class="cap">' + st[0] + '</p>' + st[1] + '</div>'; }).join('') +
+    '</div></div>';
+}).join('');
+
+/* ?only=k3 (or k1 / k2) shows one scheme on its own. */
+var only = new URLSearchParams(location.search).get('only');
+if (only) document.querySelectorAll('.scheme').forEach(function (el) {
+  if (!el.querySelector('.lbl').textContent.toLowerCase().startsWith(only)) el.remove();
+});
+</script></body></html>

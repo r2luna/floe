@@ -1,0 +1,193 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — `/` skill menu layouts</title>
+<!-- The app's real stylesheet. Every option is an override scoped to .s1 … .s6,
+     so the type, colour and row metrics are the app's, not this page's. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 80px; max-width:1180px; }
+h1 { font-size:14px; margin:0 0 4px; }
+.intro { color:var(--dim); font-size:11px; line-height:1.6; margin:0 0 24px; max-width:84ch; }
+.grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:26px 24px; }
+.sec { min-width:0; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 8px; font-size:11px; color:var(--dim); line-height:1.5; }
+/* The menu is position:absolute over the composer in the app. Here it is laid
+   out inline so eight of them fit on one page — the only rule this file
+   changes about it. */
+.box { position:relative; }
+.box .composer-menu { position:static; max-height:none; }
+/* The composer under it, so a row is judged at the width it really has. */
+.fakebox { margin-top:6px; padding:7px 10px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); color:var(--dim); font-size:12px; }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+.note { margin:26px 0 0; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); font-size:11px; color:var(--dim); line-height:1.6; }
+.note b { color:var(--text-strong); }
+
+/* ---- S1 · two-line rows (Bloom's quick prompts) ------------------------- */
+.s1 .composer-menu-row { display:grid; grid-template-columns:1fr auto; align-items:start; row-gap:1px; padding:6px 10px; }
+.s1 .composer-menu-title { grid-column:1; }
+.s1 .composer-menu-scope { grid-column:2; grid-row:1; }
+.s1 .composer-menu-desc { grid-column:1 / -1; color:var(--dim); font-size:11px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---- S2 · one line, description inline ---------------------------------- */
+.s2 .composer-menu-row { gap:8px; }
+.s2 .composer-menu-desc { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
+.s2 .composer-menu-scope { flex:none; }
+
+/* ---- S3 · grouped by category ------------------------------------------- */
+.s3 .composer-menu-row { gap:8px; }
+.s3 .composer-menu-desc { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--dim); font-size:11px; }
+.s3 .composer-menu-scope { flex:none; }
+
+/* ---- S4 · category rail beside the list --------------------------------- */
+.s4 .composer-menu { display:grid; grid-template-columns:118px 1fr; gap:0; padding:0; }
+.s4 .rail { border-right:1px solid var(--line); padding:5px 0; }
+.s4 .rail-row { display:block; width:100%; padding:5px 10px; text-align:left; color:var(--dim); font-size:11px; }
+.s4 .rail-row[data-at] { background:var(--wash-4); color:var(--text-strong); }
+.s4 .list { padding:5px; min-width:0; }
+.s4 .composer-menu-row { display:grid; grid-template-columns:1fr auto; row-gap:1px; align-items:start; }
+.s4 .composer-menu-title { grid-column:1; }
+.s4 .composer-menu-scope { grid-column:2; grid-row:1; }
+.s4 .composer-menu-desc { grid-column:1 / -1; color:var(--dim); font-size:11px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---- S5 · category chips above the rows --------------------------------- */
+.s5 .chips { position:sticky; top:-5px; z-index:1; display:flex; flex-wrap:wrap; gap:4px; margin:-5px -5px 4px; padding:7px 8px; border-bottom:1px solid var(--line); background:var(--well); }
+/* The app-wide outline-chip pattern — never a solid fill. */
+.s5 .chip-cat { padding:2px 8px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); color:var(--dim); font:inherit; font-size:10.5px; cursor:pointer; }
+.s5 .chip-cat[data-on] { border-color:color-mix(in srgb, var(--accent) 55%, transparent); color:var(--accent); }
+.s5 .composer-menu-row { display:grid; grid-template-columns:1fr auto; row-gap:1px; align-items:start; }
+.s5 .composer-menu-title { grid-column:1; }
+.s5 .composer-menu-scope { grid-column:2; grid-row:1; }
+.s5 .composer-menu-desc { grid-column:1 / -1; color:var(--dim); font-size:11px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ---- S6 · flat, but the description is searched -------------------------- */
+.s6 .composer-menu-row { display:grid; grid-template-columns:1fr auto; row-gap:1px; align-items:start; }
+.s6 .composer-menu-title { grid-column:1; }
+.s6 .composer-menu-scope { grid-column:2; grid-row:1; }
+.s6 .composer-menu-desc { grid-column:1 / -1; color:var(--dim); font-size:11px; line-height:1.4; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* The scope, as the small right-edge tag the projects panel already uses for
+   "a fact about where the row lives" rather than more of its description. */
+.composer-menu-scope { color:var(--dim); font-size:10px; letter-spacing:0.06em; text-transform:uppercase; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — the `/` skill menu, six layouts</h1>
+<p class="intro">The surface is the composer's `/` menu, drawn from the app's real stylesheet. Option 0 is what ships today: the name, and the scope word right-aligned. The description a skill already carries is never shown, and the fuzzy filter matches the name only (fuzzy.ts:101), which is why a skill you can describe but cannot name is a skill you cannot find.</p>
+<div class="grid" id="out"></div>
+<div class="note" id="search"></div>
+</div>
+<script>
+var SKILLS = [
+  { n:'code-review',      d:'Review the diff for correctness bugs and simplification cleanups', s:'builtin', c:'review' },
+  { n:'security-review',  d:'Security review of the pending changes on this branch',            s:'builtin', c:'review' },
+  { n:'simplify',         d:'Reuse, simplification and efficiency cleanups, then apply them',   s:'builtin', c:'review' },
+  { n:'deploy',           d:'Cut and publish a release so the auto-updater can ship it',        s:'project', c:'release' },
+  { n:'setup-commands',   d:'Read this project and register its long-running commands',         s:'builtin', c:'project' },
+  { n:'run',              d:"Launch and drive this project's app to see a change working",      s:'builtin', c:'project' },
+  { n:'init',             d:'Initialize a CLAUDE.md with codebase documentation',               s:'builtin', c:'docs' },
+  { n:'dataviz',          d:'Charts and dashboards that read as one system',                    s:'global',  c:'docs' },
+  { n:'update-config',    d:'Configure the harness through settings.json',                      s:'global',  c:'config' },
+  { n:'keybindings-help', d:'Customize keyboard shortcuts and chord bindings',                  s:'global',  c:'config' },
+  { n:'loop',             d:'Run a prompt or slash command on a recurring interval',            s:'harness', c:'automation' },
+  { n:'schedule',         d:'Create and manage scheduled cloud agents',                         s:'harness', c:'automation' }
+];
+
+var esc = function (t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+
+/* Rows, in whichever shape the option asks for. `at` is the cursor row — every
+   option keeps one, because this list is driven from the keyboard. */
+function rows(list, opt, at) {
+  var out = '', last = null;
+  list.forEach(function (s, i) {
+    var g = opt.groupBy ? opt.groupBy(s) : null;
+    if (g && g !== last) { out += '<div class="composer-menu-group">' + g + '</div>'; last = g; }
+    out += '<button class="composer-menu-row"' + (i === at ? ' data-at' : '') + '>' +
+      '<span class="composer-menu-title">' + esc(s.n) + '</span>' +
+      (opt.desc ? '<span class="composer-menu-desc">' + esc(s.d) + '</span>' : '') +
+      (opt.scope === 'detail' ? '<span class="composer-menu-detail">' + s.s + '</span>' : '') +
+      (opt.scope === 'tag' ? '<span class="composer-menu-scope">' + s.s + '</span>' : '') +
+      '</button>';
+  });
+  return out;
+}
+
+var byScope = function (s) { return s.s === 'harness' ? 'harness' : 'floe'; };
+var byCat = function (s) { return s.c; };
+var order = function (key) {
+  return SKILLS.slice().sort(function (a, b) {
+    return key(a) === key(b) ? a.n.localeCompare(b.n) : key(a).localeCompare(key(b));
+  });
+};
+
+var OPTS = [
+  ['s0', '0 · today', 'Name, and the scope right-aligned. Grouped floe / harness. The description a skill already has is not drawn, so the list is twelve nouns.',
+    function () { return rows(order(byScope), { scope:'detail', groupBy:byScope }, 1); }],
+
+  ['s1', '1 · two-line rows', "Bloom's quick prompts: name on top, description under it. The most readable and the most expensive — half as many rows fit before the menu scrolls.",
+    function () { return rows(order(byScope), { desc:true, scope:'tag', groupBy:byScope }, 1); }],
+
+  ['s2', '2 · one line, description inline', 'The description takes the middle of the row and ellipsises; the scope shrinks to a tag at the edge. Same row height as today, most of the information.',
+    function () { return rows(order(byScope), { desc:true, scope:'tag', groupBy:byScope }, 1); }],
+
+  ['s3', '3 · grouped by category', 'The group heading becomes the `category:` from frontmatter instead of the scope, and the scope demotes to the edge tag. Same rows as 2 — only the cut changes.',
+    function () { return rows(order(byCat), { desc:true, scope:'tag', groupBy:byCat }, 1); }],
+
+  ['s4', '4 · category rail beside the list', 'Categories in a left column, skills on the right. ← → move between them, ↑ ↓ within. The most structure and the only option that adds a second focus target to a menu you are typing into.',
+    function () {
+      var pick = SKILLS.filter(function (s) { return s.c === 'review'; });
+      var cats = ['all','review','release','project','docs','config','automation'];
+      return '<div class="rail">' + cats.map(function (c, i) {
+        return '<button class="rail-row"' + (i === 1 ? ' data-at' : '') + '>' + c + '</button>';
+      }).join('') + '</div><div class="list">' + rows(pick, { desc:true, scope:'tag' }, 0) + '</div>';
+    }],
+
+  ['s5', '5 · category chips', 'A sticky chip row narrows the list; typing narrows it further. Chips are the outline-chip pattern, so the active one is a tinted outline and never a fill.',
+    function () {
+      var cats = ['all','review','release','project','docs','config','automation'];
+      return '<div class="chips">' + cats.map(function (c, i) {
+        return '<button class="chip-cat"' + (i === 0 ? ' data-on' : '') + '>' + c + '</button>';
+      }).join('') + '</div>' + rows(order(byCat), { desc:true, scope:'tag' }, 0);
+    }],
+
+  ['s6', '6 · flat, description searched', 'No categories at all. One list, ranked, with the description on the row — and the filter matches it, which is what makes a taxonomy optional at twelve skills.',
+    function () { return rows(SKILLS.slice().sort(function (a,b) { return a.n.localeCompare(b.n); }), { desc:true, scope:'tag' }, 0); }]
+];
+
+document.getElementById('out').innerHTML = OPTS.map(function (o) {
+  return '<div class="sec"><p class="lbl">' + o[1] + '</p><p class="sub">' + o[2] + '</p>' +
+    '<div class="box ' + o[0] + '"><div class="composer-menu" data-drop="down">' + o[3]() + '</div>' +
+    '<div class="fakebox">/</div></div></div>';
+}).join('');
+
+/* The search question, isolated from the layout question: same query, same
+   rows, one matching the name only and one matching the description too. */
+var Q = 'bug';
+function hit(text, q) {
+  var i = text.toLowerCase().indexOf(q);
+  if (i < 0) return null;
+  return esc(text.slice(0, i)) + '<b class="palette-hit">' + esc(text.slice(i, i + q.length)) + '</b>' + esc(text.slice(i + q.length));
+}
+var nameHits = SKILLS.filter(function (s) { return hit(s.n, Q); });
+var descHits = SKILLS.filter(function (s) { return hit(s.n, Q) || hit(s.d, Q); });
+document.getElementById('search').innerHTML =
+  '<p style="margin:0 0 8px"><b>The search question, on its own.</b> Typing <b>/' + Q + '</b>, against the same twelve skills. ' +
+  'Today the filter scores the title and nothing else, so a skill you can describe but cannot name is unreachable — this is independent of which layout wins.</p>' +
+  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">' +
+  '<div><div class="composer-menu-group">today — name only</div><div class="box s2"><div class="composer-menu" data-drop="down">' +
+  (nameHits.length ? rows(nameHits, { desc:true, scope:'tag' }, 0) : '<div class="composer-menu-row" style="color:var(--dim)">no matches</div>') +
+  '</div></div></div>' +
+  '<div><div class="composer-menu-group">name + description</div><div class="box s2"><div class="composer-menu" data-drop="down">' +
+  descHits.map(function (s) {
+    return '<button class="composer-menu-row"><span class="composer-menu-title">' + (hit(s.n, Q) || esc(s.n)) + '</span>' +
+      '<span class="composer-menu-desc">' + (hit(s.d, Q) || esc(s.d)) + '</span>' +
+      '<span class="composer-menu-scope">' + s.s + '</span></button>';
+  }).join('') +
+  '</div></div></div></div>';
+
+/* ?only=search shows just the search comparison, for looking at it full size. */
+if (new URLSearchParams(location.search).get('only') === 'search') {
+  document.getElementById('out').remove();
+  document.querySelector('.intro').remove();
+}
+</script></body></html>
