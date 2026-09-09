@@ -6,6 +6,7 @@ import {
   commonDir,
   selRange,
   inSelection,
+  dragAnchor,
   quoteSelection,
   fileRef,
   appendComment
@@ -66,6 +67,17 @@ test('selRange normalises whichever way the selection was dragged', () => {
   assert.deepEqual(selRange({ anchor: 6, head: 2 }), [2, 6], 'extending upward is the same range')
   assert.deepEqual(selRange({ anchor: 3, head: 3 }), [3, 3])
   assert.equal(selRange(null), null)
+})
+
+test('a plain gutter press anchors where it landed', () => {
+  assert.equal(dragAnchor(null, 4, 9, false), 9)
+  assert.equal(dragAnchor({ anchor: 2, head: 3 }, 3, 9, false), 9, 'a new drag replaces the old range')
+})
+
+test('shift-clicking the gutter extends what is already open', () => {
+  assert.equal(dragAnchor({ anchor: 2, head: 3 }, 3, 9, true), 2)
+  assert.equal(dragAnchor(null, 4, 9, true), 4, 'nothing selected yet: extend from the cursor')
+  assert.equal(dragAnchor(null, undefined, 9, true), 9, 'no cursor either: one line')
 })
 
 test('inSelection covers both ends', () => {

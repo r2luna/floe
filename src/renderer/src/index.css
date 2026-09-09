@@ -3755,6 +3755,16 @@ button {
   display: grid;
   grid-template-columns: 44px 44px 14px minmax(0, 1fr);
   align-items: baseline;
+  /* The gutter — everything left of the text — is the handle for marking lines
+     with the mouse, the drag `v` does from the keyboard, so it has to look
+     pressable. The text column keeps the I-beam: dragging THERE still selects
+     text, which is how a line gets copied out of a diff. */
+  cursor: pointer;
+}
+
+.diff-code,
+.md-text {
+  cursor: auto;
 }
 
 /* One number column, not the diff's two — a file has no old and new side. */
@@ -6470,6 +6480,43 @@ kbd {
 /* What the app says to a keyboard user when a command refuses. Bottom centre so
    it never covers the composer or a panel head, and above everything so a
    palette does not hide the reason it just refused something. */
+/* The chip over a marked block — the mouse's `c`.
+   Fixed, because it is placed against the panel's rows in viewport coordinates
+   and must not be clipped by the body it floats over. Its size is a constant on
+   both sides: TIP_W/TIP_H in App.tsx place it before it renders. */
+.sel-tip {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 132px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-focused);
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sel-tip:hover,
+.sel-tip:focus-visible {
+  background: var(--wash-3);
+}
+
+/* Quiet, like the key in a band of actions: the word is the subject here, and
+   a boxed key beside it would read as a second button. */
+.sel-tip kbd {
+  padding: 0;
+  border: none;
+  color: var(--faint);
+  font: inherit;
+  font-size: 9.5px;
+}
+
 .notice {
   position: fixed;
   bottom: 18px;

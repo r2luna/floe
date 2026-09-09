@@ -158,6 +158,23 @@ export function inSelection(sel: DiffSelection | null | undefined, row: number):
 }
 
 /**
+ * Where a gutter drag anchors when it starts on row `at`.
+ *
+ * A plain press anchors where you pressed. Shift extends what is already open
+ * instead — its anchor, or the cursor when nothing is selected — so shift-click
+ * finishes a range the same way whether `v` or a drag started it.
+ */
+export function dragAnchor(
+  sel: DiffSelection | null | undefined,
+  cursor: number | undefined,
+  at: number,
+  shift: boolean
+): number {
+  if (!shift) return at
+  return sel?.anchor ?? cursor ?? at
+}
+
+/**
  * The comment body for a selection: a location line, then the selected rows as
  * a diff block.
  *

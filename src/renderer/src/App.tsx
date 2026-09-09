@@ -6,7 +6,7 @@ import {
   IconTrash,
   IconX
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { loadChoice, type ModelChoice } from './models'
 import type { Lane, Panel } from './lane'
 import {
@@ -23,7 +23,7 @@ import {
   slotOf,
   toggleDock
 } from './lane'
-import { selRange } from './diff'
+import { dragAnchor, selRange } from './diff'
 import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
@@ -80,6 +80,15 @@ import {
  * what the command promises in the palette.
  */
 const IDLE_MS = 60 * 60_000
+
+/**
+ * The marked-block chip's box, in CSS pixels, so it can be placed before it is
+ * rendered. Measured rather than read back: the chip has one fixed label, and a
+ * layout pass to learn a size that never changes would cost a frame of flicker
+ * on every drag. Keep in step with `.sel-tip` in index.css.
+ */
+const TIP_W = 132
+const TIP_H = 24
 
 /** A session the bulk delete is about to forget, and the worktree it lives in. */
 type Target = { s: WorktreeRow['sessions'][number]; path: string }
@@ -1217,6 +1226,132 @@ export default function App() {
   const focusSink = (panel: HTMLElement | null | undefined): HTMLElement | null =>
     panel?.querySelector<HTMLElement>('[data-focus-sink]') ?? null
 
+  /* --- marking lines with the mouse ---------------------------------------
+   *
+   * The same selection `v` opens, made by dragging. The grab handle is the
+   * GUTTER — the line-number column — and only the gutter: dragging across the
+   * code still selects text, which is how a line gets copied out of a diff.
+   * One press marks one line, a drag marks the range, shift extends what is
+   * already open; `c` then comments it, exactly as after `v`.
+   */
+  // The drag carries the panel's ELEMENT, not just its index: the window
+  // listeners below are installed once, so anything they read off this render's
+  // `lane` — `panelAt` included — would be the lane as it was at boot.
+  const dragSel = useRef<{ panel: number; el: HTMLElement; anchor: number } | null>(null)
+
+  /**
+   * The chip that floats over a marked block: `c` for the hand already on the
+   * mouse. The keyboard never needs it — which is why it is a second route to
+   * one command, not a second way of commenting — but a block marked by
+   * dragging has to say what it can do next, on screen, where the drag ended.
+   */
+  const [selTip, setSelTip] = useState<{ x: number; y: number } | null>(null)
+
+  // In a ref because the drag's window listeners are installed once: they call
+  // the CURRENT placement, not the one from the render that installed them.
+  const placeSelTip = useRef<() => void>(() => {})
+  placeSelTip.current = () => {
+    const panel = lane.panels[lane.focus]
+    const el = panelAt(lane.focus)
+    const body = el?.querySelector('.panel-body')?.getBoundingClientRect()
+    const head = panel?.selection ? rowsOf(el)[panel.selection.head]?.getBoundingClientRect() : undefined
+    const live = panel?.kind === 'diff' || panel?.kind === 'file'
+    // Scrolled out of sight, and it is pointing at nothing: an offer that hangs
+    // at the edge of the panel over rows it does not act on is worse than none.
+    const seen =
+      head && body && head.bottom > body.top && head.top < body.bottom && body.left < window.innerWidth
+    if (!live || !body || !head || !seen || dragSel.current) {
+      setSelTip((now) => (now === null ? now : null))
+      return
+    }
+    // On the head row, at the right edge — where a drag ends, and the one part
+    // of a line of code that is reliably empty. Anywhere over the gutter would
+    // cover the numbers you are selecting by.
+    //
+    // The edge is the WINDOW's when the panel runs past it: the lane scrolls
+    // sideways, so a panel's own right edge is regularly off screen, and a chip
+    // pinned to it would be an offer nobody can see.
+    const next = {
+      x: Math.round(Math.max(body.left + 8, Math.min(body.right, window.innerWidth) - TIP_W - 10)),
+      y: Math.round(
+        Math.min(Math.max(head.top + (head.height - TIP_H) / 2, body.top + 2), body.bottom - TIP_H - 2)
+      )
+    }
+    setSelTip((now) => (now && now.x === next.x && now.y === next.y ? now : next))
+  }
+
+  // Every render: the selection, the panel and the scroll position all move it,
+  // and the guard above means an unchanged position costs nothing. Scrolling
+  // the body is the one mover React never re-renders for, hence the listener.
+  useEffect(() => {
+    placeSelTip.current()
+  })
+  useEffect(() => {
+    const replace = (): void => placeSelTip.current()
+    window.addEventListener('scroll', replace, true)
+    window.addEventListener('resize', replace)
+    return () => {
+      window.removeEventListener('scroll', replace, true)
+      window.removeEventListener('resize', replace)
+    }
+  }, [])
+
+  /** The index of the row under `target`, in the same list the cursor indexes. */
+  const rowIndexAt = (panel: HTMLElement | undefined, target: EventTarget | null): number => {
+    const row = (target as HTMLElement | null)?.closest?.<HTMLElement>('[data-nav], button')
+    return row ? rowsOf(panel).indexOf(row) : -1
+  }
+
+  const startLineDrag = (e: ReactMouseEvent, panelIndex: number): void => {
+    const panel = lane.panels[panelIndex]
+    const el = panelAt(panelIndex)
+    if (!panel || (panel.kind !== 'diff' && panel.kind !== 'file') || e.button !== 0) return
+    // The gutter is "the row, minus its text column" rather than the number
+    // spans themselves: an added line's old-number cell is empty, and an empty
+    // grid item on a baseline row is zero pixels tall — a handle you cannot hit.
+    const hit = e.target as HTMLElement | null
+    if (!hit?.closest('.diff-row, .diff-hunk') || hit.closest('.diff-code, .md-text')) return
+    const at = rowIndexAt(el, e.target)
+    if (at === -1 || !el) return
+    // The gutter drags lines, not text — and the row is focused by hand because
+    // the default that would have done it is exactly what we just cancelled.
+    e.preventDefault()
+    rowsOf(el)[at]?.focus({ preventScroll: true })
+    const anchor = dragAnchor(panel.selection, panel.cursor, at, e.shiftKey)
+    dragSel.current = { panel: panelIndex, el, anchor }
+    setLane((l) => patchPanel(focusAt(l, panelIndex), panelIndex, { cursor: at, selection: { anchor, head: at } }))
+  }
+
+  // On the window, not the panel: a drag that runs off the bottom of the panel
+  // is still the same drag, and it has to end wherever the button comes up.
+  useEffect(() => {
+    const move = (e: MouseEvent) => {
+      const drag = dragSel.current
+      if (!drag) return
+      const at = rowIndexAt(drag.el, e.target)
+      if (at === -1) return
+      rowsOf(drag.el)[at]?.focus({ preventScroll: true })
+      setLane((l) => {
+        const panel = l.panels[drag.panel]
+        if (!panel || (panel.cursor === at && panel.selection?.head === at)) return l
+        return patchPanel(l, drag.panel, { cursor: at, selection: { anchor: drag.anchor, head: at } })
+      })
+    }
+    const up = () => {
+      dragSel.current = null
+      // The chip is hidden for the length of the drag — it would sit under the
+      // pointer, over the very lines being marked — so releasing is what brings
+      // it back, and no lane change follows a release to do it for us.
+      placeSelTip.current()
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    return () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+    }
+  }, [])
+
   /**
    * The project the cursor is sitting on, for `d` and `m`.
    *
@@ -2347,7 +2482,10 @@ export default function App() {
                 data-focused={i === lane.focus || undefined}
                 data-bare={bare || undefined}
                 data-docked={panel.dock || undefined}
-                onMouseDown={() => setLane((l) => focusAt(l, i))}
+                onMouseDown={(e) => {
+                  setLane((l) => focusAt(l, i))
+                  startLineDrag(e, i)
+                }}
                 onFocus={() => setLane((l) => (l.focus === i ? l : focusAt(l, i)))}
                 // Clicking or tabbing to a row moves the cursor too, so mouse
                 // and keyboard never disagree about where you are. setCursor
@@ -2932,6 +3070,25 @@ export default function App() {
             enterProject(id)
           }}
         />
+      )}
+
+      {/* The mouse's route to `c`. It floats over the block rather than sitting
+          in the panel header because what it acts on is the block — and after a
+          drag the pointer is already there. The key is printed on it, which is
+          how the keyboard route gets taught to the hand that used the mouse. */}
+      {selTip && (
+        <button
+          type="button"
+          className="sel-tip"
+          style={{ left: selTip.x, top: selTip.y }}
+          // The selection would be dropped by the panel taking focus back
+          // before the click ever ran.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => runCommand(REGISTRY, ctxRef.current, 'selection.comment')}
+        >
+          Send to composer
+          <kbd>c</kbd>
+        </button>
       )}
 
       {/* An update is downloaded and waiting. Nothing else in the app applies
