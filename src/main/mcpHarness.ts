@@ -85,6 +85,18 @@ export function harnessMcp(harness: string, key: string, worktreePath?: string):
   return harnessEnv(harness, key, mapFor(key, worktreePath))
 }
 
+/**
+ * The env a PEER consult spawns with (peer.ts): every server switched off.
+ *
+ * Same reasoning as a query (D8), and the same danger: a peer answering inside
+ * someone else's session must not be able to open panels, create sessions or
+ * post messages as its caller. The token is never handed over, and the
+ * inherited global registration is turned off by name.
+ */
+export function peerMcp(harness: string, key: string, worktreePath?: string): Record<string, string> {
+  return harnessEnv(harness, key, queryServers(worktreePath))
+}
+
 /** What this caller gets: its own servers, or every server switched off. */
 function mapFor(key: string, worktreePath?: string): McpServerMap {
   return isQueryKey(key) ? queryServers(worktreePath) : serversFor(key, worktreePath)

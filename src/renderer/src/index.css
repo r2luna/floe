@@ -3317,26 +3317,6 @@ button {
   border-color: #b1454a;
 }
 
-/* The per-row ▶/■/↻. Spans with a button role, never buttons: a real button
-   would join the cursor's row list (see rowsOf in App) and the cursor would
-   stop three times per command. They stay out of the flow until the pointer is
-   over the row — the keyboard has its own keys for all three, so these are the
-   mouse's copy of an existing path, not a second one. */
-.cmd-acts {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex: none;
-  margin-left: 6px;
-  opacity: 0;
-}
-
-.cmd-row:hover .cmd-acts,
-.cmd-row:focus .cmd-acts,
-.cmd-row:focus-visible .cmd-acts {
-  opacity: 1;
-}
-
 .cmd-act {
   display: flex;
   align-items: center;
@@ -6936,27 +6916,47 @@ kbd {
 /* A command row is two lines, not one: the name and its state read as a unit,
    and the command line under them is what you scan when two rows share a name.
    Otherwise it is an ordinary `.row` — the lane's cursor walks it, and the same
-   focus ring lands on it. */
+   focus ring lands on it.
+
+   A grid, so the actions get a column of their own. Floated to the right of a
+   line instead, they landed at a different x on every row — the note ahead of
+   them is a different width each time — and the row ended up with two right
+   edges: one where the scope chip and the note stop, another where the buttons
+   began. The column gives the pane a single one. */
 .cmd-row {
-  display: block;
-  padding-block: 5px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 10px;
+  padding: 6px 8px;
 }
 
 .cmd-l1 {
+  grid-column: 1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: 7px;
 }
 
 .cmd-l2 {
+  grid-column: 1;
+  grid-row: 2;
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 2px;
   /* Indented to clear the dot, so the command line starts under the name
      rather than under the status mark. */
   padding-left: 13px;
   color: var(--dim);
   font-size: 12px;
+}
+
+/* Running reads as running without a fill: a hairline in the working tone down
+   the edge of the row, the same colour the spinner beside it takes. */
+.cmd-row[data-live] {
+  padding-left: 6px;
+  border-left: 2px solid color-mix(in srgb, var(--working) 55%, transparent);
 }
 
 .cmd-cmd {
@@ -7009,29 +7009,30 @@ kbd {
 }
 
 /* Spans with a button role, not buttons: a real button would join the cursor's
-   row list and every command would cost three extra stops to walk past. Shown
-   on hover and whenever the row has the cursor, so the keyboard route never
-   depends on the pointer being somewhere. */
+   row list and every command would cost three extra stops to walk past.
+   Always drawn, never revealed on hover: a control you can only find by
+   putting the pointer on it is one most people never learn is there, and this
+   pane's whole job is starting and stopping things.
+   On the command line rather than the name line, so they sit level with the
+   note they share the row's second half with. */
 .cmd-acts {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: center;
   display: flex;
-  gap: 2px;
+  gap: 4px;
   flex: none;
-  opacity: 0;
 }
 
-.cmd-row:hover .cmd-acts,
-.cmd-row[data-cursor] .cmd-acts,
-.cmd-row:focus .cmd-acts,
-.cmd-row:focus-visible .cmd-acts {
-  opacity: 1;
-}
-
+/* The app's own corner and roughly the metrics of `Run all` above it — at
+   1px/4px around a 12px glyph these were under half the size of every other
+   pressable thing in the pane. */
 .cmd-act {
   display: flex;
   align-items: center;
-  padding: 1px 4px;
+  padding: 3px 6px;
   border: 1px solid var(--edge);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   color: var(--dim);
   cursor: pointer;
 }
@@ -7925,4 +7926,361 @@ kbd {
   margin: 0 0 6px;
   color: var(--accent);
   font-size: 11px;
+}
+
+/* --- chat layouts --------------------------------------------------------
+   `[appearance] chat-layout` in floe.toml, applied as `data-chat-layout` on
+   <html> by appearance.ts. Every layout renders the SAME transcript DOM — the
+   difference is entirely here, which is why adding one is a block of rules and
+   not a component.
+
+   `classic` is the log the app shipped with and has no rules at all: one
+   column, no air between turns, the nick floated into the message's own first
+   line. Each block below pulls exactly one lever on it.
+
+   Two structures recur:
+
+   - The nick GUTTER. `.irc-lead` is a float inside `.irc-body`, so on a message
+     longer than one line the words wrap back past it and every message starts
+     at a different x. Padding the body and pulling the float back into that
+     padding with a negative margin fixes it without moving the markup: the
+     float's margin box ends before the content edge, so it never shortens a
+     line box, and line one starts where line two does.
+   - The CONTINUATION. `.irc-entry[data-cont]` is the same speaker still
+     talking, so it takes less air than a speaker change and never a separator —
+     a rule through the middle of one turn would group it backwards.
+
+   Air goes ABOVE a turn, never below: the act lines, tool runs and subagent
+   rows that follow a message belong to it and must stay against it. -------- */
+
+/* --- gutter: the time and nick in a fixed left column --------------------- */
+
+:root[data-chat-layout='gutter'] .chat > .irc-entry {
+  margin-top: 15px;
+}
+
+:root[data-chat-layout='gutter'] .chat > .irc-entry:first-child {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='gutter'] .chat > .irc-entry[data-cont] {
+  margin-top: 4px;
+}
+
+/* The body's own left edge, and the width of the column in front of it. The
+   two are one measurement: --chat-gutter is the column, and the padding is it
+   plus the gap the words start after. */
+:root[data-chat-layout='gutter'] .chat {
+  --chat-gutter: 88px;
+  --chat-gutter-gap: 14px;
+}
+
+:root[data-chat-layout='gutter'] .irc-body {
+  padding-left: calc(var(--chat-gutter) + var(--chat-gutter-gap));
+}
+
+/* Pulled back into the padding it just made: the float lives entirely to the
+   left of the content edge, so no line box is ever shortened by it and the
+   first line starts exactly where the wrapped ones do. */
+:root[data-chat-layout='gutter'] .irc-lead {
+  width: var(--chat-gutter);
+  margin-left: calc(-1 * (var(--chat-gutter) + var(--chat-gutter-gap)));
+  margin-right: 0;
+  text-align: right;
+}
+
+/* Right-aligned against the words, so the eye reads down one hard edge. The
+   clock drops under the nick — it is the quieter of the two and the nick is
+   what you scan for. */
+:root[data-chat-layout='gutter'] .irc-lead .irc-time {
+  display: block;
+  margin-right: 0;
+  line-height: 1.35;
+}
+
+:root[data-chat-layout='gutter'] .irc-lead .irc-nick {
+  display: block;
+  line-height: 1.35;
+}
+
+/* `@opus-5` takes its own line rather than blowing the column open. */
+:root[data-chat-layout='gutter'] .irc-lead .irc-host {
+  display: block;
+  font-size: 10px;
+}
+
+:root[data-chat-layout='gutter'] .irc-lead .irc-peer {
+  margin-left: 0;
+}
+
+/* A run that OPENS with work has no words to sit in front of, so its head is a
+   row rather than a float — it gets the column by padding, not by pulling. */
+:root[data-chat-layout='gutter'] .chat > .irc-head {
+  display: block;
+  width: var(--chat-gutter);
+  margin-top: 15px;
+  text-align: right;
+}
+
+:root[data-chat-layout='gutter'] .chat > .irc-head .irc-time,
+:root[data-chat-layout='gutter'] .chat > .irc-head .irc-nick {
+  display: block;
+  line-height: 1.35;
+}
+
+/* Everything that is not a message lines up with the words, not with the nick:
+   the column is for who spoke, and none of these did. */
+:root[data-chat-layout='gutter'] .chat > .tool-run,
+:root[data-chat-layout='gutter'] .chat > .ag-group,
+:root[data-chat-layout='gutter'] .chat > .query-fold,
+:root[data-chat-layout='gutter'] .chat > .irc-sys,
+:root[data-chat-layout='gutter'] .chat > .irc-act,
+:root[data-chat-layout='gutter'] .chat > .irc-typing,
+:root[data-chat-layout='gutter'] .chat > .irc-queued {
+  margin-left: calc(var(--chat-gutter) + var(--chat-gutter-gap));
+}
+
+/* --- surfaces: your own turns get a well, the agents' stay flush ---------- */
+
+:root[data-chat-layout='surfaces'] .chat > .irc-entry {
+  margin-top: 10px;
+}
+
+:root[data-chat-layout='surfaces'] .chat > .irc-entry:first-child {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='surfaces'] .chat > .irc-entry[data-cont] {
+  margin-top: 3px;
+}
+
+/* Recessed and outlined, never a fill: a solid block would be the one thing
+   docs/ui-conventions.md rules out, and the point is only that YOUR side of
+   the conversation is a different object from everyone else's. */
+:root[data-chat-layout='surfaces'] .chat > .irc-entry[data-me] > .irc-body {
+  padding: 7px 11px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--nick-you);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+/* The agents keep the same left edge as the text inside the well, so the two
+   read as one column rather than two. The transparent border is what holds
+   that edge without drawing anything. */
+:root[data-chat-layout='surfaces'] .chat > .irc-entry:not([data-me]) > .irc-body {
+  padding: 0 11px;
+  border-left: 2px solid transparent;
+}
+
+/* Work hangs off the turn that ran it, behind a hairline. */
+:root[data-chat-layout='surfaces'] .chat > .tool-run,
+:root[data-chat-layout='surfaces'] .chat > .query-fold {
+  margin-left: 13px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-soft);
+}
+
+:root[data-chat-layout='surfaces'] .chat > .ag-group,
+:root[data-chat-layout='surfaces'] .chat > .irc-sys,
+:root[data-chat-layout='surfaces'] .chat > .irc-act,
+:root[data-chat-layout='surfaces'] .chat > .irc-typing,
+:root[data-chat-layout='surfaces'] .chat > .irc-queued {
+  margin-left: 13px;
+}
+
+/* --- ruled: a hairline and air at every speaker change -------------------- */
+
+:root[data-chat-layout='ruled'] .chat > .irc-entry,
+:root[data-chat-layout='ruled'] .chat > .irc-head,
+:root[data-chat-layout='ruled'] .chat > .irc-sys,
+:root[data-chat-layout='ruled'] .chat > .irc-typing {
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid var(--line-soft);
+}
+
+/* A continuation is the same voice still going: air, but never a rule — a line
+   drawn through one turn would group it with the wrong neighbour. */
+:root[data-chat-layout='ruled'] .chat > .irc-entry[data-cont] {
+  margin-top: 8px;
+  padding-top: 0;
+  border-top: 0;
+}
+
+:root[data-chat-layout='ruled'] .chat > :first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+/* --- rail: a timeline down the left, a dot per turn ----------------------- */
+
+:root[data-chat-layout='rail'] .chat {
+  padding-left: 22px;
+  /* What the dot is punched out of, so the rail appears to pass behind it. It
+     has to follow the panel: an unfocused panel is --panel and the focused one
+     is --panel-focused, and a dot filled with the wrong one reads as a grey
+     bead on the line — most visibly in light, where the gap is #f8f9fb on
+     #ffffff. */
+  --chat-surface: var(--panel);
+}
+
+:root[data-chat-layout='rail'] .panel[data-focused] .chat {
+  --chat-surface: var(--panel-focused);
+}
+
+:root[data-chat-layout='rail'] .chat > .irc-entry,
+:root[data-chat-layout='rail'] .chat > .irc-head,
+:root[data-chat-layout='rail'] .chat > .tool-run,
+:root[data-chat-layout='rail'] .chat > .ag-group,
+:root[data-chat-layout='rail'] .chat > .query-fold,
+:root[data-chat-layout='rail'] .chat > .irc-sys,
+:root[data-chat-layout='rail'] .chat > .irc-act,
+:root[data-chat-layout='rail'] .chat > .irc-typing,
+:root[data-chat-layout='rail'] .chat > .irc-queued {
+  position: relative;
+  padding-left: 17px;
+  border-left: 1px solid var(--line);
+}
+
+:root[data-chat-layout='rail'] .chat > .irc-entry,
+:root[data-chat-layout='rail'] .chat > .irc-head {
+  margin-top: 14px;
+}
+
+:root[data-chat-layout='rail'] .chat > .irc-entry[data-cont] {
+  margin-top: 4px;
+}
+
+:root[data-chat-layout='rail'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* The dot sits ON the line, punched out of the panel so the rail appears to
+   pass behind it. --nick is set per entry by the transcript; without one it
+   falls back to the plain edge rather than drawing nothing. */
+:root[data-chat-layout='rail'] .chat > .irc-entry::before,
+:root[data-chat-layout='rail'] .chat > .irc-head::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--chat-surface);
+  border: 1px solid var(--nick, var(--edge));
+}
+
+/* A continuation is the same turn still speaking — one dot per turn, not per
+   paragraph, or the rail counts the wrong thing. */
+:root[data-chat-layout='rail'] .chat > .irc-entry[data-cont]::before {
+  display: none;
+}
+
+/* Work is a tick off the rail, not a stop on it. */
+:root[data-chat-layout='rail'] .chat > .tool-run::before,
+:root[data-chat-layout='rail'] .chat > .ag-group::before,
+:root[data-chat-layout='rail'] .chat > .query-fold::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 9px;
+  width: 5px;
+  height: 1px;
+  background: var(--edge);
+}
+
+/* --- split: speech in the open, work in a band ---------------------------- */
+
+:root[data-chat-layout='split'] .chat > .irc-entry,
+:root[data-chat-layout='split'] .chat > .irc-head,
+:root[data-chat-layout='split'] .chat > .irc-sys,
+:root[data-chat-layout='split'] .chat > .irc-typing {
+  margin-top: 14px;
+}
+
+:root[data-chat-layout='split'] .chat > .irc-entry[data-cont] {
+  margin-top: 5px;
+}
+
+:root[data-chat-layout='split'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* Everything the session DID rather than said, on its own surface. */
+:root[data-chat-layout='split'] .chat > .tool-run,
+:root[data-chat-layout='split'] .chat > .ag-group,
+:root[data-chat-layout='split'] .chat > .query-fold {
+  margin: 9px 0;
+  padding: 5px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--wash-1);
+}
+
+/* A run of work is one band, not a stack of them: adjacent blocks close the
+   gap and share the hairline between them. */
+:root[data-chat-layout='split'] .chat > .tool-run + .tool-run,
+:root[data-chat-layout='split'] .chat > .tool-run + .ag-group,
+:root[data-chat-layout='split'] .chat > .ag-group + .ag-group,
+:root[data-chat-layout='split'] .chat > .ag-group + .tool-run,
+:root[data-chat-layout='split'] .chat > .query-fold + .query-fold {
+  margin-top: 0;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+:root[data-chat-layout='split'] .chat > .tool-run:has(+ .tool-run),
+:root[data-chat-layout='split'] .chat > .tool-run:has(+ .ag-group),
+:root[data-chat-layout='split'] .chat > .ag-group:has(+ .ag-group),
+:root[data-chat-layout='split'] .chat > .ag-group:has(+ .tool-run),
+:root[data-chat-layout='split'] .chat > .query-fold:has(+ .query-fold) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* --- labels: the nick on its own line above the words --------------------- */
+
+:root[data-chat-layout='labels'] .chat > .irc-entry,
+:root[data-chat-layout='labels'] .chat > .irc-head,
+:root[data-chat-layout='labels'] .chat > .irc-sys,
+:root[data-chat-layout='labels'] .chat > .irc-typing {
+  margin-top: 16px;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-entry[data-cont] {
+  margin-top: 7px;
+}
+
+:root[data-chat-layout='labels'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* Unfloated, so it is a line rather than an indent: no message is pushed in by
+   the width of its own header, and line one starts where line two does. */
+:root[data-chat-layout='labels'] .irc-lead {
+  float: none;
+  display: block;
+  margin: 0 0 2px;
+  line-height: 1.4;
+}
+
+:root[data-chat-layout='labels'] .irc-lead .irc-nick {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+:root[data-chat-layout='labels'] .irc-lead .irc-time {
+  margin-right: 7px;
+  font-size: 10px;
+}
+
+/* A measure rather than the panel's full width, and leaded to match. This is
+   the one layout that changes how the words themselves are set. */
+:root[data-chat-layout='labels'] .irc-body {
+  max-width: 80ch;
+  line-height: 1.8;
 }

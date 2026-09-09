@@ -46,6 +46,16 @@ export const FLOE_TOML = `# ====================================================
 # | colour). Each tone carries a dark and a light value, so the choice survives
 # | the theme flipping under it.
 # |
+# | \`chat-layout\` is how the transcript arranges a turn. \`classic\` is the
+# | IRC log the app shipped with — one column, no air between turns. The other
+# | six each pull one lever on it: \`gutter\` puts the time and nick in a fixed
+# | left column so every message starts at the same edge, \`surfaces\` gives
+# | your own messages a recessed well, \`ruled\` draws a hairline between
+# | speakers, \`rail\` hangs the turns off a timeline, \`split\` bands the tool
+# | work away from the speech, and \`labels\` puts the nick on its own line
+# | above the words. Every one of them is a block of CSS — the transcript
+# | renders the same either way.
+# |
 # ------------------------------------------------------------------------------
 
 [appearance]
@@ -54,6 +64,7 @@ font-size     = 13
 theme         = "system"
 penguin       = "classic"
 penguin-color = "accent"
+chat-layout   = "classic"
 
 
 # ------------------------------------------------------------------------------

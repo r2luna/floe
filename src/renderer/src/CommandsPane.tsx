@@ -1,5 +1,6 @@
 import { IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
 import type { OpenFn } from './panels'
+import type { ProjectCommand } from '../../main/commands'
 import type { CommandRunState, Commands } from './useCommands'
 import { Spinner } from './Spinner'
 
@@ -80,6 +81,26 @@ export function CommandsPane({
 
   const running = list.filter((c) => runOf(c.id)?.state === 'running').length
 
+  /* Up first, then everything else, with a heading before each block.
+     Flattened into ONE list — a heading is an entry like any row — because the
+     alternative nests a map inside a map and pushes the row markup two levels
+     further in for nothing.
+     Grouped on the same predicate the row uses to pick its spinner, so the
+     block a command lands in and the mark it carries cannot disagree.
+     `stopping` sits with the stopped and says so on the row: it is on its way. */
+  const isLive = (c: ProjectCommand): boolean => {
+    const s = runOf(c.id)?.state ?? 'idle'
+    return s === 'running' || s === 'starting'
+  }
+  type Item = { head: string } | { cmd: ProjectCommand; group: string }
+  const rows: Item[] = []
+  for (const group of ['running', 'stopped']) {
+    const block = list.filter((c) => isLive(c) === (group === 'running'))
+    if (!block.length) continue
+    rows.push({ head: group })
+    for (const cmd of block) rows.push({ cmd, group })
+  }
+
   return (
     <>
       <div className="changes-head">
@@ -117,7 +138,14 @@ export function CommandsPane({
           )}
         </span>
       </div>
-      {list.map((c) => {
+      {rows.map((r) => {
+        if ('head' in r)
+          return (
+            <div className="group-label" key={`head:${r.head}`}>
+              {r.head.toUpperCase()}
+            </div>
+          )
+        const c = r.cmd
         const run = runOf(c.id)
         const state = run?.state ?? 'idle'
         const live = state === 'running' || state === 'starting'
@@ -127,6 +155,7 @@ export function CommandsPane({
             key={c.id}
             className="row cmd-row"
             data-command={c.id}
+            data-live={live || undefined}
             title={c.command}
             onClick={() => onOpen({ kind: 'cmdlog', sub: `${worktreePath ?? ''}#${c.id}` })}
           >
@@ -146,9 +175,16 @@ export function CommandsPane({
               )}
               <span className="row-name">{c.name}</span>
               {c.scope === 'project' && <span className="cmd-scope">project</span>}
-              <span className="cmd-state" data-run={live ? '' : undefined}>
-                {LABEL[state]}
-              </span>
+              {/* Only a state the heading above does NOT already say. That
+                  leaves `starting` under RUNNING and `stopping` under STOPPED —
+                  the two transitions worth seeing. A crash loop loses nothing:
+                  LABEL calls it `stopped` and the reason is in the note, in the
+                  error tone. */}
+              {LABEL[state] !== r.group && (
+                <span className="cmd-state" data-run={live ? '' : undefined}>
+                  {LABEL[state]}
+                </span>
+              )}
             </span>
             <span className="cmd-l2">
               <span className="cmd-cmd">{c.command}</span>
@@ -157,49 +193,52 @@ export function CommandsPane({
                   {n.text}
                 </span>
               )}
-              <span className="cmd-acts">
-                {live ? (
-                  <>
-                    <span
-                      className="cmd-act"
-                      role="button"
-                      title="Restart"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        commands.restart(c.id)
-                      }}
-                    >
-                      <IconRefresh size={12} stroke={1.7} />
-                    </span>
-                    <span
-                      className="cmd-act"
-                      role="button"
-                      title="Stop (s)"
-                      onMouseDown={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        commands.stop(c.id)
-                      }}
-                    >
-                      <IconPlayerStop size={12} stroke={1.7} />
-                    </span>
-                  </>
-                ) : (
+            </span>
+            {/* The row's own second column, not part of the command line: inside
+                it the buttons sat after a note whose width changes per row, so
+                they landed at a different x on every one. */}
+            <span className="cmd-acts">
+              {live ? (
+                <>
                   <span
                     className="cmd-act"
                     role="button"
-                    title="Run (r)"
+                    title="Restart"
                     onMouseDown={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
-                      commands.start(c.id)
+                      commands.restart(c.id)
                     }}
                   >
-                    <IconPlayerPlay size={12} stroke={1.7} />
+                    <IconRefresh size={13} stroke={1.7} />
                   </span>
-                )}
-              </span>
+                  <span
+                    className="cmd-act"
+                    role="button"
+                    title="Stop (s)"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      commands.stop(c.id)
+                    }}
+                  >
+                    <IconPlayerStop size={13} stroke={1.7} />
+                  </span>
+                </>
+              ) : (
+                <span
+                  className="cmd-act"
+                  role="button"
+                  title="Run (r)"
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    commands.start(c.id)
+                  }}
+                >
+                  <IconPlayerPlay size={13} stroke={1.7} />
+                </span>
+              )}
             </span>
           </button>
         )

@@ -1,0 +1,212 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — commands pane layouts</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 80px; max-width:1240px; }
+h1 { font-size:14px; margin:0 0 4px; }
+.intro { color:var(--dim); font-size:11px; line-height:1.6; margin:0 0 8px; max-width:90ch; }
+.diag { margin:0 0 24px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); font-size:11px; line-height:1.75; color:var(--dim); max-width:90ch; }
+.diag b { color:var(--text-strong); }
+.diag code { padding:1px 5px; border-radius:var(--radius); background:var(--wash-4); color:var(--text-strong); }
+.grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:26px 24px; }
+.sec { min-width:0; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 8px; font-size:11px; color:var(--dim); line-height:1.55; }
+/* The pane, as it sits in a focused panel. */
+.pane { padding:6px 0; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+
+/* Every option makes the row actions VISIBLE — that is the complaint, not a
+   layout choice, so it is held constant and only the arrangement varies.
+   Quiet, not loud: the outline chip in the dim tone, so they sit at the edge
+   without competing with the name. */
+.cmd-acts { opacity:1; }
+.cmd-act { color:var(--dim); }
+
+/* ---- C1 · air + a hairline between rows --------------------------------- */
+.c1 .cmd-row { padding:7px 8px; }
+.c1 .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.c1 .cmd-l2 { margin-top:2px; }
+
+/* ---- C2 · a status column ------------------------------------------------ */
+.c2 .cmd-row { display:grid; grid-template-columns:100px 1fr auto; align-items:start; gap:0 10px; padding:7px 8px; }
+.c2 .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.c2 .cmd-status { grid-column:1; grid-row:1 / span 2; display:flex; align-items:center; gap:6px; padding-top:1px; }
+.c2 .cmd-status { min-width:0; }
+/* The longest state is `crash-looping`; the column is sized for it and the
+   label still truncates rather than running under the name beside it. */
+.c2 .cmd-status .cmd-state { min-width:0; margin-left:0; font-size:10px; letter-spacing:0.04em; text-transform:uppercase; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.c2 .cmd-l1 { grid-column:2; }
+.c2 .cmd-l2 { grid-column:2; padding-left:0; margin-top:2px; }
+.c2 .cmd-acts { grid-column:3; grid-row:1 / span 2; align-self:center; margin-left:0; }
+.c2 .cmd-l2 .cmd-note { margin-left:auto; }
+
+/* ---- C3 · one card per command ------------------------------------------ */
+.c3 { padding:8px; }
+.c3 .cmd-row { padding:8px 10px; border:1px solid var(--line-soft); border-radius:var(--radius); background:var(--panel); }
+.c3 .cmd-row + .cmd-row { margin-top:6px; }
+.c3 .cmd-l2 { margin-top:5px; padding-left:0; padding-top:5px; border-top:1px solid var(--line-soft); }
+
+/* ---- C4 · one line, the cursor row opens -------------------------------- */
+.c4 .cmd-row { display:flex; align-items:center; gap:8px; padding:5px 8px; }
+.c4 .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.c4 .cmd-l1 { flex:none; }
+.c4 .cmd-l2 { flex:1; min-width:0; padding-left:0; }
+.c4 .cmd-row:not([data-at]) .cmd-note { display:none; }
+/* Open, the row keeps its first line intact — the state and the buttons stay
+   beside the name, and only the command line drops underneath. A grid rather
+   than `display:block`, which let both of them wrap below the command. */
+.c4 .cmd-row[data-at] { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:0 8px; background:var(--wash-2); }
+/* Rows named explicitly: `cmd-l2` spans the full width, and without a row of
+   its own auto-placement pushes the state and the buttons onto a third line
+   below it instead of leaving them beside the name. */
+.c4 .cmd-row[data-at] .cmd-l1 { grid-column:1; grid-row:1; }
+.c4 .cmd-row[data-at] > .cmd-state { grid-column:2; grid-row:1; margin-left:0; }
+.c4 .cmd-row[data-at] > .cmd-acts { grid-column:3; grid-row:1; }
+.c4 .cmd-row[data-at] .cmd-l2 { grid-column:1 / -1; grid-row:2; margin-top:3px; padding-left:13px; }
+
+/* ---- C5 · grouped by state ---------------------------------------------- */
+.c5 .cmd-row { padding:7px 8px; }
+.c5 .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.c5 .cmd-l2 { margin-top:2px; }
+.c5 .group-label { padding:9px 8px 4px; color:var(--dim); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; }
+/* ---- C5b · grouped, actions in a right column --------------------------- */
+.c5b .cmd-row { display:grid; grid-template-columns:1fr auto; align-items:center; gap:0 10px; padding:7px 8px; }
+.c5b .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.c5b .cmd-l1 { grid-column:1; grid-row:1; }
+.c5b .cmd-l2 { grid-column:1; grid-row:2; margin-top:2px; }
+.c5b .cmd-acts { grid-column:2; grid-row:1 / span 2; margin-left:0; }
+.c5b .group-label { padding:9px 8px 4px; color:var(--dim); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; }
+.c5b .cmd-row[data-live] { border-left:2px solid color-mix(in srgb, var(--working) 55%, transparent); padding-left:6px; }
+
+/* The running block reads as live without a fill: a hairline in the working
+   tone down its left edge, the same way a turn in flight is marked elsewhere. */
+.c5 .cmd-row[data-live] { border-left:2px solid color-mix(in srgb, var(--working) 55%, transparent); padding-left:6px; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — the commands pane, five layouts</h1>
+<p class="intro">Same five processes, the app's real stylesheet. Option 0 is what ships today.</p>
+<p class="diag"><b>Why it reads the way it does.</b>
+<b>1.</b> The buttons are <code>opacity: 0</code> until the pointer is on the row (<code>.cmd-acts</code>, index.css:3326) — they are not hard to see, they are not drawn. Every option below makes them visible and quiet; that is held constant, not varied.
+<b>2.</b> A row is two lines with <code>padding: 5px 8px</code> and nothing between rows, so five commands are ten lines in one block — the two-line row has the separation of a one-line list.
+<b>3.</b> Three things claim <code>margin-left: auto</code> on the same row: the state on line one, the note on line two, then the actions after it. The right edge is decided per line rather than as a column.</p>
+<div class="grid" id="out"></div>
+</div>
+<script>
+var CMDS = [
+  { name:'dev',       cmd:'pnpm dev',                       state:'running', label:'running', note:'142 MB', scope:'project' },
+  { name:'queue',     cmd:'php artisan queue:work --tries=3',state:'running', label:'running', note:'88 MB' },
+  { name:'scheduler', cmd:'php artisan schedule:work',      state:'idle',    label:'stopped' },
+  { name:'vite',      cmd:'pnpm vite --host',               state:'err',     label:'crash-looping', note:'exited 1', err:true },
+  { name:'horizon',   cmd:'php artisan horizon',            state:'idle',    label:'stopped', scope:'project' }
+];
+var esc = function (t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+
+var PLAY = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M7 4v16l13-8z"/></svg>';
+var STOP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>';
+var REDO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/></svg>';
+
+function mark(c) {
+  if (c.state === 'running') return '<span class="spin">⠹</span>';
+  return '<span class="dot' + (c.state === 'err' ? ' dot-err' : '') + '"></span>';
+}
+function acts(c) {
+  return '<span class="cmd-acts">' + (c.state === 'running'
+    ? '<span class="cmd-act" role="button" title="Restart">' + REDO + '</span><span class="cmd-act" role="button" title="Stop (s)">' + STOP + '</span>'
+    : '<span class="cmd-act" role="button" title="Run (r)">' + PLAY + '</span>') + '</span>';
+}
+function state(c) { return '<span class="cmd-state"' + (c.state === 'running' ? ' data-run' : '') + '>' + c.label + '</span>'; }
+function scope(c) { return c.scope ? '<span class="cmd-scope">' + c.scope + '</span>' : ''; }
+function note(c) { return c.note ? '<span class="cmd-note"' + (c.err ? ' data-err="true"' : '') + '>' + c.note + '</span>' : ''; }
+function cmd(c) { return '<span class="cmd-cmd">' + esc(c.cmd) + '</span>'; }
+
+/* Today, and C1 / C3 / C5, all share the shipped two-line markup.
+   `grouped` drops the state word when a heading above already says it —
+   `running` and `stopped` are the heading; `crash-looping` is not, so it
+   stays. Losing it there would leave a red dot and no word for why. */
+var SAID_BY_HEADING = { running: true, stopped: true };
+function rowStd(c, extra, grouped) {
+  var st = grouped && SAID_BY_HEADING[c.label] ? '' : state(c);
+  return '<button class="row cmd-row"' + (extra || '') + '>' +
+    '<span class="cmd-l1">' + mark(c) + '<span class="row-name">' + c.name + '</span>' + scope(c) + st + '</span>' +
+    '<span class="cmd-l2">' + cmd(c) + note(c) + acts(c) + '</span></button>';
+}
+
+var head = function () {
+  return '<div class="changes-head"><span>2/5 running</span><span class="cmd-headacts">' +
+    '<span class="cmd-runall" role="button">Stop all</span>' +
+    '<span class="cmd-runall" role="button">Run all</span></span></div>';
+};
+
+var OPTS = [
+  ['c0', '0 · today', 'Two lines per command, no separation between rows, and the actions drawn only under the pointer. Shown here with the actions forced visible so the comparison is about layout alone.',
+    function () { return head() + CMDS.map(function (c) { return rowStd(c); }).join(''); }],
+
+  ['c1', '1 · air and a hairline', 'The smallest change that answers the complaint: 7px of padding and a rule between rows, so a two-line row is one object instead of two loose lines. Nothing moves.',
+    function () { return head() + CMDS.map(function (c) { return rowStd(c); }).join(''); }],
+
+  ['c2', '2 · a status column', 'The dot and the state word move into a fixed 100px column on the left (sized for `crash-looping`), and the actions into a fixed one on the right. The right edge becomes a column instead of three separate auto-margins — but that 100px comes out of the command line, which truncates first in a narrow panel.',
+    function () {
+      return head() + CMDS.map(function (c) {
+        return '<button class="row cmd-row">' +
+          '<span class="cmd-status">' + mark(c) + state(c) + '</span>' +
+          '<span class="cmd-l1"><span class="row-name">' + c.name + '</span>' + scope(c) + '</span>' +
+          '<span class="cmd-l2">' + cmd(c) + note(c) + '</span>' + acts(c) + '</button>';
+      }).join('');
+    }],
+
+  ['c3', '3 · one card per command', 'Each process is a bordered block: identity on top, the command line under a rule, actions on the right. The most separation and the most air — and the fewest processes on screen before it scrolls.',
+    function () { return head() + CMDS.map(function (c) { return rowStd(c); }).join(''); }],
+
+  ['c4', '4 · one line, the cursor row opens', 'Collapses to a single line — dot, name, command, state, actions — and only the row under the cursor takes the second line for its note. Twice the processes on screen; the command truncates sooner on a narrow panel.',
+    function () {
+      return head() + CMDS.map(function (c, i) {
+        return '<button class="row cmd-row"' + (i === 3 ? ' data-at' : '') + '>' +
+          '<span class="cmd-l1">' + mark(c) + '<span class="row-name">' + c.name + '</span>' + scope(c) + '</span>' +
+          '<span class="cmd-l2">' + cmd(c) + note(c) + '</span>' + state(c) + acts(c) + '</button>';
+      }).join('');
+    }],
+
+  ['c5', '5 · grouped by state', 'Running first under its own heading, with a hairline in the working tone down the live rows; stopped below. The per-row state word is gone — the heading says it. Only a state the heading does NOT cover survives, which is why vite still reads crash-looping.',
+    function () {
+      var live = CMDS.filter(function (c) { return c.state === 'running'; });
+      var down = CMDS.filter(function (c) { return c.state !== 'running'; });
+      return head() +
+        '<div class="group-label">running</div>' + live.map(function (c) { return rowStd(c, ' data-live', true); }).join('') +
+        '<div class="group-label">stopped</div>' + down.map(function (c) { return rowStd(c, '', true); }).join('');
+    }]
+];
+
+OPTS.push(['c5b', "5b · grouped, actions in the freed column",
+  'The same as 5, with the space the state word left over given to the buttons: they move out of the second line into a column of their own, centred across both. That also settles the third auto-margin — the right edge is now one column for every row instead of a different decision per line.',
+  function () {
+    var live = CMDS.filter(function (c) { return c.state === 'running'; });
+    var down = CMDS.filter(function (c) { return c.state !== 'running'; });
+    var row = function (c, extra) {
+      var st = SAID_BY_HEADING[c.label] ? '' : state(c);
+      return '<button class="row cmd-row"' + (extra || '') + '>' +
+        '<span class="cmd-l1">' + mark(c) + '<span class="row-name">' + c.name + '</span>' + scope(c) + st + '</span>' +
+        '<span class="cmd-l2">' + cmd(c) + note(c) + '</span>' + acts(c) + '</button>';
+    };
+    return head() +
+      '<div class="group-label">running</div>' + live.map(function (c) { return row(c, ' data-live'); }).join('') +
+      '<div class="group-label">stopped</div>' + down.map(function (c) { return row(c); }).join('');
+  }]);
+
+document.getElementById('out').innerHTML = OPTS.map(function (o) {
+  return '<div class="sec"><p class="lbl">' + o[1] + '</p><p class="sub">' + o[2] + '</p>' +
+    '<div class="pane ' + o[0] + '">' + o[3]() + '</div></div>';
+}).join('');
+
+/* ?only=c4 shows one option on its own; &w=420 sizes the pane like a real side
+   panel, which is where the truncation questions actually get answered. */
+var q = new URLSearchParams(location.search);
+if (q.get('only')) document.querySelectorAll('.sec').forEach(function (el) {
+  if (!el.querySelector('.pane').classList.contains(q.get('only'))) el.remove();
+});
+if (q.get('w')) document.querySelector('.grid').style.gridTemplateColumns = q.get('w') + 'px';
+if (q.get('nodiag')) { document.querySelector('.diag').remove(); document.querySelector('.intro').remove(); }
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+</script></body></html>

@@ -95,6 +95,22 @@ test('penguin-color takes only the named tones', () => {
   assert.equal(unknown.config.appearance.penguinColor, 'accent', 'an unknown tone falls back to the accent')
 })
 
+test('chat-layout takes only the known layouts, and defaults to classic', () => {
+  const picked = parseFloeConfig('[appearance]\nchat-layout = "gutter"\n', 'floe.toml')
+  assert.equal(picked.config.appearance.chatLayout, 'gutter')
+  assert.equal(picked.errors.length, 0)
+
+  // A layout the stylesheet has no rules for would render as `classic` anyway;
+  // falling back to it explicitly is what puts the typo in Settings' error list
+  // instead of leaving the user staring at a setting that did nothing.
+  const unknown = parseFloeConfig('[appearance]\nchat-layout = "bubbles"\n', 'floe.toml')
+  assert.equal(unknown.config.appearance.chatLayout, 'classic')
+  assert.match(unknown.errors[0].reason, /classic/)
+
+  const absent = parseFloeConfig('', 'floe.toml')
+  assert.equal(absent.config.appearance.chatLayout, 'classic', 'an old file keeps the log it had')
+})
+
 test('notification sound takes only the known sounds, off included', () => {
   const picked = parseFloeConfig('[notifications]\nsound = "tada"\n', 'floe.toml')
   assert.equal(picked.config.notifications.sound, 'tada')

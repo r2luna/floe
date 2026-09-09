@@ -64,6 +64,31 @@ export const PENGUIN_COLORS = [
 export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
 
 /**
+ * How the transcript arranges a turn — `[appearance] chat-layout`.
+ *
+ * Layout only: every one of these renders the same DOM, and the difference is
+ * a block of rules in index.css keyed off `data-chat-layout` on <html>. Nothing
+ * in the renderer branches on the value, which is why adding one is a stylesheet
+ * change rather than a component change.
+ *
+ * `classic` is the IRC log the app shipped with — one column, no air between
+ * turns. The other six each pull one lever on it: a nick gutter, a surface per
+ * turn, a rule between turns, a timeline rail, work banded away from speech,
+ * and the nick as a label line above the words.
+ */
+export const CHAT_LAYOUTS = [
+  'classic',
+  'gutter',
+  'surfaces',
+  'ruled',
+  'rail',
+  'split',
+  'labels'
+] as const
+
+export type ChatLayoutId = (typeof CHAT_LAYOUTS)[number]
+
+/**
  * The sounds a finished turn can play, in the order Settings cycles them.
  * Shared because `[notifications] sound` is validated against this list in main
  * and synthesized from it in the renderer (`renderer/src/sounds.ts`) — the

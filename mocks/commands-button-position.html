@@ -1,0 +1,129 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" />
+<title>Floe — where the row buttons sit</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body { margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; }
+.page { padding:22px 26px 80px; max-width:1240px; }
+h1 { font-size:14px; margin:0 0 4px; }
+.diag { margin:0 0 22px; padding:9px 12px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); font-size:11px; line-height:1.75; color:var(--dim); max-width:92ch; }
+.diag b { color:var(--text-strong); }
+.grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:24px; }
+.sec { min-width:0; }
+.lbl { margin:0 0 3px; font-size:12px; color:var(--text-strong); font-weight:700; }
+.sub { margin:0 0 8px; font-size:11px; color:var(--dim); line-height:1.55; }
+.pane { padding:6px 0; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+.theme { position:fixed; top:12px; right:16px; padding:4px 10px; border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text); font:inherit; font-size:11px; cursor:pointer; z-index:5; }
+
+/* 5b, held constant. Buttons at the B1/B4 size so POSITION is the only variable. */
+.pane .cmd-row { display:grid; grid-template-columns:1fr auto; gap:0 10px; padding:7px 8px; }
+.pane .cmd-row + .cmd-row { border-top:1px solid var(--line-soft); }
+.pane .cmd-l1 { grid-column:1; grid-row:1; }
+.pane .cmd-l2 { grid-column:1; grid-row:2; margin-top:2px; }
+.pane .cmd-acts { grid-column:2; margin-left:0; opacity:1; gap:4px; }
+.pane .cmd-act { padding:3px 6px; border-radius:var(--radius); }
+.pane .cmd-act svg { width:13px; height:13px; }
+.pane .group-label { padding:9px 8px 4px; color:var(--dim); font-size:10px; letter-spacing:0.08em; text-transform:uppercase; }
+.pane .cmd-row[data-live] { border-left:2px solid color-mix(in srgb, var(--working) 55%, transparent); padding-left:6px; }
+
+/* ---- P0 · today — centred between the two lines ------------------------- */
+.p0 .cmd-acts { grid-row:1 / span 2; align-self:center; }
+
+/* ---- P1 · on the first line -------------------------------------------- */
+.p1 .cmd-acts { grid-row:1; align-self:center; }
+
+/* ---- P2 · on the command line ------------------------------------------ */
+.p2 .cmd-acts { grid-row:2; align-self:center; }
+
+/* ---- P3 · one right column: buttons over the note ----------------------- */
+.p3 .cmd-acts { grid-column:2; grid-row:1; align-self:center; justify-self:end; }
+.p3 .cmd-note { grid-column:2; grid-row:2; align-self:center; justify-self:end; margin-left:0; }
+.p3 .cmd-l2 { padding-right:0; }
+
+/* ---- P4 · inline, after the note --------------------------------------- */
+/* The only option with no column: the buttons follow the note, so their x
+   moves with the length of the note beside them. */
+.p4 .cmd-row { display:block; }
+.p4 .cmd-l1, .p4 .cmd-l2 { display:flex; align-items:center; gap:8px; }
+.p4 .cmd-l2 { margin-top:2px; }
+.p4 .cmd-acts { margin-left:6px; }
+
+/* ---- P5 · its own cell, behind a divider -------------------------------- */
+.p5 .cmd-row { padding-right:0; }
+.p5 .cmd-acts { grid-row:1 / span 2; align-self:stretch; align-items:center; padding:0 8px; margin-left:0; border-left:1px solid var(--line-soft); }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+<div class="page">
+<h1>Floe — where the row buttons sit</h1>
+<p class="diag"><b>Why it looks wrong now.</b> The row has <b>two right edges</b>. The <code>project</code> chip and <code>142 MB</code> right-align inside the content column and stop there; the buttons then start a second right edge outside it. And centring them across both lines aligns them to <b>neither</b> — they float between the name and the command instead of belonging to a line. Each option below fixes one or both.</p>
+<div class="grid" id="out"></div>
+</div>
+<script>
+var CMDS = [
+  { name:'dev',       cmd:'pnpm dev',                        state:'running', label:'running', note:'142 MB', scope:'project' },
+  { name:'queue',     cmd:'php artisan queue:work --tries=3', state:'running', label:'running', note:'88 MB' },
+  { name:'scheduler', cmd:'php artisan schedule:work',       state:'idle',    label:'stopped' },
+  { name:'vite',      cmd:'pnpm vite --host',                state:'err',     label:'crash-looping', note:'exited 1', err:true },
+  { name:'horizon',   cmd:'php artisan horizon',             state:'idle',    label:'stopped', scope:'project' }
+];
+var esc = function (t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+var ico = function (d) { return '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7">' + d + '</svg>'; };
+var PLAY = ico('<path d="M7 4v16l13-8z"/>'), STOP = ico('<rect x="6" y="6" width="12" height="12" rx="1"/>'), REDO = ico('<path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/>');
+var SAID = { running:1, stopped:1 };
+
+function acts(c) {
+  var b = function (a, i, t) { return '<span class="cmd-act" role="button" data-act="' + a + '" title="' + t + '">' + i + '</span>'; };
+  return '<span class="cmd-acts">' + (c.state === 'running'
+    ? b('restart', REDO, 'Restart') + b('stop', STOP, 'Stop (s)')
+    : b('run', PLAY, 'Run (r)')) + '</span>';
+}
+function note(c) { return c.note ? '<span class="cmd-note"' + (c.err ? ' data-err="true"' : '') + '>' + c.note + '</span>' : ''; }
+
+/* `mode` decides where the buttons and the note go in the markup:
+     col    — buttons a sibling in the right column, note inside the command line
+     stack  — buttons AND note both in the right column, one under the other (P3)
+     inline — buttons inside the command line, right after the note (P4) */
+function row(c, mode) {
+  var st = SAID[c.label] ? '' : '<span class="cmd-state">' + c.label + '</span>';
+  var l2 = '<span class="cmd-l2"><span class="cmd-cmd">' + esc(c.cmd) + '</span>' +
+    (mode === 'stack' ? '' : note(c)) + (mode === 'inline' ? acts(c) : '') + '</span>';
+  return '<button class="row cmd-row"' + (c.state === 'running' ? ' data-live' : '') + '>' +
+    '<span class="cmd-l1">' +
+      (c.state === 'running' ? '<span class="spin">⠹</span>' : '<span class="dot' + (c.state === 'err' ? ' dot-err' : '') + '"></span>') +
+      '<span class="row-name">' + c.name + '</span>' +
+      (c.scope ? '<span class="cmd-scope">' + c.scope + '</span>' : '') + st +
+    '</span>' + l2 +
+    (mode === 'inline' ? '' : acts(c)) + (mode === 'stack' ? note(c) : '') +
+    '</button>';
+}
+
+function pane(mode) {
+  var live = CMDS.filter(function (c) { return c.state === 'running'; });
+  var down = CMDS.filter(function (c) { return c.state !== 'running'; });
+  return '<div class="changes-head"><span>2/5 running</span><span class="cmd-headacts">' +
+    '<span class="cmd-runall" role="button">Stop all</span><span class="cmd-runall" role="button">Run all</span></span></div>' +
+    '<div class="group-label">running</div>' + live.map(function (c) { return row(c, mode); }).join('') +
+    '<div class="group-label">stopped</div>' + down.map(function (c) { return row(c, mode); }).join('');
+}
+
+var OPTS = [
+  ['p0', '0 · today (5b)', 'Centred across both lines. Belongs to neither line, and leaves the second right edge the crop shows.', 'col'],
+  ['p1', '1 · on the name line', 'Top row, beside the name and the scope chip. The action sits with the thing it acts on — but the note below still ends short of it.', 'col'],
+  ['p2', '2 · on the command line', 'Bottom row, level with the note. The two right-hand items now share a baseline; the name line is left clean.', 'col'],
+  ['p3', '3 · one right column', 'The note moves out of the command line and under the buttons. One right edge for the whole row: buttons on top, the number directly beneath them.', 'stack'],
+  ['p4', '4 · inline after the note', 'No column at all — the buttons follow the note, so their x moves with the length of the note beside them. Nothing floats, but nothing lines up either.', 'inline'],
+  ['p5', '5 · its own cell, behind a divider', 'Full height of the row with a hairline separating it from the content, so the column is stated rather than implied.', 'col']
+];
+
+document.getElementById('out').innerHTML = OPTS.map(function (o) {
+  return '<div class="sec"><p class="lbl">' + o[1] + '</p><p class="sub">' + o[2] + '</p>' +
+    '<div class="pane ' + o[0] + '">' + pane(o[3]) + '</div></div>';
+}).join('');
+
+var q = new URLSearchParams(location.search);
+if (q.get('only')) document.querySelectorAll('.sec').forEach(function (el) {
+  if (!el.querySelector('.pane').classList.contains(q.get('only'))) el.remove();
+});
+if (q.get('w')) document.querySelector('.grid').style.gridTemplateColumns = q.get('w') + 'px';
+if (q.get('nodiag')) document.querySelector('.diag').remove();
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light';
+</script></body></html>

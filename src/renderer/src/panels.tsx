@@ -138,6 +138,7 @@ import type { Provision } from './useProvision'
 import type { ProjectSetup } from './useProjectSetup'
 import type { ClaudeSessionMeta, TranscriptItem } from '../../main/claudeSessions'
 import {
+  CHAT_LAYOUTS,
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
@@ -1075,6 +1076,7 @@ function Launcher({
         value={text}
         onChange={setText}
         draftKey={`branch:${cwd}`}
+        historyKey={cwd}
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
@@ -1662,6 +1664,7 @@ function ChatPanel({
         value={text}
         onChange={setText}
         draftKey={session?.id}
+        historyKey={cwd}
         onSend={(choice, attached) => {
           repin()
           // A line that OPENS with `@codex` is addressed to codex: that one
@@ -2096,8 +2099,11 @@ function Head({
         <span className="irc-lead">{said}</span>
       </>
     )
+  // --nick is inert in every layout but `rail`, where it colours the dot this
+  // head hangs on the timeline. A custom property rather than a class because
+  // the value is one of fourteen hues picked per nick at runtime.
   return (
-    <div className="irc-head">
+    <div className="irc-head" style={{ '--nick': nickColor(who.nick) } as CSSProperties}>
       {said}
       {turn}
     </div>
@@ -2119,14 +2125,25 @@ function Entry({
   cwd?: string
   streaming?: boolean
 }) {
+  const who = whoOf(item)
+  // You, not merely "the user role": a `from` on a user item is ANOTHER session
+  // typing into this channel, and the `surfaces` layout's well means "your own
+  // side of the conversation", which that is not.
+  const mine = item.role === 'user' && !item.from
   return (
-    <div className="irc-entry" data-cont={!isNew || undefined}>
+    <div
+      className="irc-entry"
+      data-cont={!isNew || undefined}
+      data-me={mine || undefined}
+      // Read by the `rail` layout for the dot's colour and ignored by the rest.
+      style={{ '--nick': nickColor(who.nick) } as CSSProperties}
+    >
       <div className="irc-body">
         {/* Inside the body, not above it: the time and the nick open the same
             line the message does, and the words wrap back under them. */}
         {isNew && (
           <Head
-            who={whoOf(item)}
+            who={who}
             at={item.at}
             peer={item.from ? (item.role === 'user' ? 'session' : 'agent') : undefined}
             cost={cost}
@@ -4660,7 +4677,9 @@ function SessionMark({
     )
   if (working) return <Spinner />
   return (
-    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
+    // "unread", not "unread reply": the mark is also one you put there
+    // yourself, on a chat you decided to read later.
+    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread' : undefined} />
   )
 }
 
@@ -4674,6 +4693,11 @@ function SessionMark({
  */
 function namesOf(s: ClaudeSessionMeta): string[] {
   return s.claudeId && s.claudeId !== s.id ? [s.id, s.claudeId] : [s.id]
+}
+
+/** The same question, asked of a DOM row — what the right-click menu has. */
+function rowUnread(row: HTMLElement, unread: ReadonlySet<string>): boolean {
+  return [row.dataset.session, row.dataset.claude].some((n) => !!n && unread.has(n))
 }
 
 /**
@@ -5031,6 +5055,13 @@ function WorktreesList({
       run: () => onCommand?.('session.markClear')
     },
     {
+      // Reads the live set, so the item says which way the toggle will go —
+      // the row it was opened on is the one the command will act on.
+      label: menu && rowUnread(menu.row, unread) ? 'Mark as read' : 'Mark as unread',
+      keys: 'u',
+      run: () => onCommand?.('session.unread')
+    },
+    {
       // Says how many, because with a selection open `d` is not about the row
       // you right-clicked — and a menu reading "Delete session…" over four
       // ticked sessions would be describing the wrong thing.
@@ -5145,6 +5176,10 @@ function WorktreesList({
               // cursor is on — `x` and `d` read these rather than counting rows,
               // which a folded branch would throw off.
               data-session={s.id}
+              // The other name. The unread mark can be keyed by either (the
+              // events carry whichever the conn spawned with), so `u` has to be
+              // able to take it off under both — see unreadTarget.
+              data-claude={s.claudeId ?? undefined}
               data-worktree={worktree.path}
               // Work another chat set running, not a session of its own. The
               // mark is on every spawned row; the indent only on one whose
@@ -5853,6 +5888,18 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           label: 'Avatar colour',
           value: config.appearance.penguinColor,
           hint: 'every tone carries a dark and a light value'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'chat-layout',
+          label: 'Chat layout',
+          value: config.appearance.chatLayout,
+          // Spread from the shared list rather than retyped: the reader
+          // validates against the same array, so a row offering a value the
+          // file would reject cannot happen.
+          options: [...CHAT_LAYOUTS],
+          hint: 'how a turn is arranged — classic is the log the app shipped with'
         }
       ]
     },

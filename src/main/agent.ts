@@ -145,7 +145,8 @@ function pushTranscript(conn: Conn, line: string): void {
 // stdin/stdout (bidirectional → real multi-turn + interactive prompts).
 const conns = new Map<string, Conn>()
 
-function permissionArgs(mode: PermissionMode): string[] {
+/** How a `claude` argv spells a mode. Shared with the peer runner (peer.ts). */
+export function permissionArgs(mode: PermissionMode): string[] {
   if (mode === 'skip') return ['--dangerously-skip-permissions']
   return ['--permission-mode', mode]
 }

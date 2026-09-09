@@ -17,7 +17,13 @@ import { TableReader, subTable } from './read'
 import { editToml, keyLine, parseToml, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
 import { FLOE_TOML } from './template'
-import { DEFAULT_GROUP, NOTIFY_SOUNDS, PENGUIN_COLORS, PENGUIN_HEADS } from '../../shared/types'
+import {
+  CHAT_LAYOUTS,
+  DEFAULT_GROUP,
+  NOTIFY_SOUNDS,
+  PENGUIN_COLORS,
+  PENGUIN_HEADS
+} from '../../shared/types'
 import { HARNESSES } from '../../shared/modes'
 import { EFFORTS } from '../../shared/types'
 
@@ -54,6 +60,8 @@ export interface FloeConfig {
     theme: (typeof THEMES)[number]
     penguin: (typeof PENGUIN_HEADS)[number]
     penguinColor: (typeof PENGUIN_COLORS)[number]
+    /** How the transcript arranges a turn. Pure CSS — see CHAT_LAYOUTS. */
+    chatLayout: (typeof CHAT_LAYOUTS)[number]
   }
   agent: {
     model: (typeof MODELS)[number]
@@ -105,7 +113,16 @@ export const DEFAULTS: FloeConfig = {
   // `dark` rather than `system`: dark is what the app has always been and what
   // it is designed at, so following the OS by default would flip an existing
   // user into light on the next launch without them asking for it.
-  appearance: { fontFamily: undefined, fontSize: 13, theme: 'system', penguin: 'classic', penguinColor: 'accent' },
+  appearance: {
+    fontFamily: undefined,
+    fontSize: 13,
+    theme: 'system',
+    penguin: 'classic',
+    penguinColor: 'accent',
+    // The log the app shipped with. A layout is a matter of taste, so nobody
+    // gets moved off the one they already know by installing an update.
+    chatLayout: 'classic'
+  },
   agent: {
     model: 'opus',
     effort: 'high',
@@ -244,7 +261,10 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         penguin: appearance?.oneOf('penguin', PENGUIN_HEADS, d.appearance.penguin) ?? d.appearance.penguin,
         penguinColor:
           appearance?.oneOf('penguin-color', PENGUIN_COLORS, d.appearance.penguinColor) ??
-          d.appearance.penguinColor
+          d.appearance.penguinColor,
+        chatLayout:
+          appearance?.oneOf('chat-layout', CHAT_LAYOUTS, d.appearance.chatLayout) ??
+          d.appearance.chatLayout
       },
       agent: {
         model: agent?.oneOf('model', MODELS, d.agent.model) ?? d.agent.model,

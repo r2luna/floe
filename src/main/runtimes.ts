@@ -11,6 +11,8 @@ import { markTurnStart, sendAgentEvent } from './agent'
 import { seedFor } from './handoff'
 import { lmStudioServerModels } from './localAgents'
 import { harnessMcp } from './mcpHarness'
+import { forgetHouseRules, houseRulesFor } from './houseRules'
+import { forgetThreads, rememberThread, threadFor } from './threads'
 
 // Running a turn on something other than Claude.
 //
@@ -66,9 +68,17 @@ interface Thread {
 
 const threads = new Map<string, Thread>()
 
-/** Forget a chat's continuity — used when a session is closed. */
+/**
+ * Forget a chat's continuity — used when a query closes or a thread is reset.
+ *
+ * All three halves of it: the in-memory thread, the id written down for a
+ * restart (threads.ts), and the record of having delivered the house rules —
+ * the next thread is a new one and starts with them again.
+ */
 export function forgetThread(key: string): void {
   threads.delete(key)
+  forgetThreads(key)
+  forgetHouseRules(key)
 }
 
 /** Run a command, hand back stdout. Rejects with stderr's last line. */
@@ -86,7 +96,7 @@ const killTree = (child: { pid?: number; kill: (s?: NodeJS.Signals) => boolean }
   }
 }
 
-function run(
+export function run(
   bin: string,
   args: string[],
   cwd: string,
@@ -193,7 +203,7 @@ async function resolveLmStudioModel(wanted: string): Promise<string> {
 }
 
 /** POST a chat completion to an OpenAI-compatible local server. */
-async function openAiChat(
+export async function openAiChat(
   base: string,
   model: string,
   messages: { role: string; content: string }[]
@@ -234,6 +244,29 @@ async function openAiChat(
 }
 
 /**
+ * One call to a local OpenAI-compatible server, whoever is asking.
+ *
+ * Shared with the peer runner (peer.ts): the endpoint, the "start LM Studio if
+ * it is down" side effect and the on-disk-vs-http model id reconciliation are
+ * facts about the runtime, not about who is talking to it. Answers with the id
+ * it actually ran, which is what the caller has to label the reply with.
+ */
+export async function askLocalModel(
+  runtime: string,
+  model: string | undefined,
+  messages: { role: 'user' | 'assistant'; content: string }[]
+): Promise<{ text: string; tokens: number; model: string }> {
+  const base = runtime === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434/v1'
+  let id = model ?? ''
+  if (runtime === 'lmstudio') {
+    await ensureLmStudio()
+    id = await resolveLmStudioModel(id)
+  }
+  const { text, tokens } = await openAiChat(base, id, messages)
+  return { text, tokens, model: id }
+}
+
+/**
  * Pull the reply out of a CLI's JSON output.
  *
  * Both `gemini -o json` and `opencode run --format json` print JSON, but not
@@ -241,7 +274,7 @@ async function openAiChat(
  * takes the last thing that looks like assistant text either way, so a change
  * in the surrounding envelope does not silently return an empty answer.
  */
-function textFromJson(raw: string): { text: string; sessionId?: string } {
+export function textFromJson(raw: string): { text: string; sessionId?: string } {
   const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean)
   let text = ''
   let sessionId: string | undefined
@@ -304,7 +337,12 @@ export async function runRuntime(
   // Same rule for the `@codex` that addressed this runtime — the log is the
   // conversation, and the conversation is what was written.
   logTurn(key, { role: 'user', text: shown ?? prompt })
+  // The user's standing instructions, once per thread. Above the packet on
+  // purpose: the packet is data this turn is about, and an instruction placed
+  // under the data it governs is read as part of it (see handoff.ts).
+  const rules = houseRulesFor(key, runtime)
   if (seed) prompt = seed + prompt
+  if (rules) prompt = rules + prompt
   // Codex already has a home: the app-server session (codexServer.ts), which
   // is also the only channel that can surface its request_user_input questions.
   // Snapped here rather than trusted: the picker snaps too, but a scheduled run
@@ -319,16 +357,9 @@ export async function runRuntime(
 
   try {
     if (runtime === 'lmstudio' || runtime === 'ollama') {
-      const base =
-        runtime === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434/v1'
-      let id = model ?? ''
-      if (runtime === 'lmstudio') {
-        await ensureLmStudio()
-        id = await resolveLmStudioModel(id)
-      }
       // We keep the conversation, so these are genuinely multi-turn.
       thread.messages = [...(thread.messages ?? []), { role: 'user', content: prompt }]
-      const { text, tokens } = await openAiChat(base, id, thread.messages)
+      const { text, tokens, model: id } = await askLocalModel(runtime, model, thread.messages)
       thread.messages.push({ role: 'assistant', content: text })
       if (text) say(win, key, text, { model: id, effort, provider: runtime })
       // A reasoning model that spent its whole budget thinking answers with
@@ -354,6 +385,10 @@ export async function runRuntime(
       // run instead of being ignored. Map them per provider if it ever matters.
       // Continue the same session, so the chat is a conversation and not a
       // series of strangers.
+      // Written down as well as held: opencode's session outlives our process,
+      // and after a restart resuming it is the difference between a
+      // conversation and a stranger (threads.ts).
+      thread.sessionId = thread.sessionId ?? threadFor(key, 'opencode')
       if (thread.sessionId) args.push('-s', thread.sessionId)
       args.push(prompt)
       // Floe's own tools plus its MCP registry, in opencode's dialect: a JSON
@@ -362,7 +397,10 @@ export async function runRuntime(
       const { text, sessionId } = textFromJson(
         await run('opencode', args, worktreePath, 3 * 60 * 1000, harnessMcp('opencode', key, worktreePath))
       )
-      if (sessionId) thread.sessionId = sessionId
+      if (sessionId) {
+        thread.sessionId = sessionId
+        rememberThread(key, 'opencode', sessionId)
+      }
       if (text) say(win, key, text, { model, effort, provider: runtime })
       emit(win, key, { kind: 'done', ok: true })
       return
@@ -390,6 +428,10 @@ export async function runRuntime(
     throw new Error(`no runtime for "${runtime}"`)
   } catch (e) {
     const raw = (e as Error).message
+    // The turn never landed, so the standing instructions never landed either:
+    // put them back on the pile or the next (working) turn would run without
+    // them, because this one was counted as having delivered them.
+    forgetHouseRules(key, runtime)
     // "Opening authentication page…" is not an error message, it is a symptom.
     // Say what it means for the thing the user actually pressed.
     const auth = /authenticat|sign in|log ?in|credential|api key/i.test(raw)

@@ -72,6 +72,7 @@ export const COMMAND_IDS: string[] = [
   'group.delete',
   'auth.account',
   'settings.open',
+  'chat.layout',
   'commands.open',
   'skills.open',
   'skill.new',
@@ -115,6 +116,7 @@ export const COMMAND_IDS: string[] = [
   'session.mark',
   'session.markClear',
   'session.deleteMarked',
+  'session.unread',
   // Queries (a side conversation running beside the chat)
   'query.open',
   'query.focus',
