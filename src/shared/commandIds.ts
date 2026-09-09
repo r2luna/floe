@@ -38,6 +38,7 @@ export const COMMAND_IDS: string[] = [
   'files.move',
   'files.delete',
   'editor.open',
+  'file.open',
   'files.collapse',
   'files.root',
   'files.unroot',
@@ -115,6 +116,7 @@ export const COMMAND_IDS: string[] = [
   'session.mark',
   'session.markClear',
   'session.deleteMarked',
+  'session.unread',
   // Queries (a side conversation running beside the chat)
   'query.open',
   'query.focus',

@@ -3,6 +3,7 @@ import {
   IconMenu2,
   IconLayoutColumns,
   IconLayoutRows,
+  IconPlus,
   IconTrash,
   IconX
 } from '@tabler/icons-react'
@@ -2304,10 +2305,13 @@ export default function App() {
     <div className="app">
       {/* Narrow only: the lane is a screen wide, so everything open but the
           panel you are on is off-screen. What is open is listed in lane order —
-          the row is the map of a lane you cannot see — after the one button
-          that opens everything else. Nothing new is reachable from here:
-          tapping a tab is ⌘[ / ⌘] arriving at that panel, and the ✕ is the
-          header's own close. */}
+          the row is the map of a lane you cannot see — after the two buttons
+          that are always there. Tapping a tab is ⌘[ / ⌘] arriving at that
+          panel, and the ✕ is the header's own close.
+
+          The bar navigates, with one exception: starting a chat. ⌘T is how that
+          is asked for everywhere else, and a phone has no ⌘ — leaving the
+          palette as the only way in, which is not a way anyone finds. */}
       {narrow && (
         <div className="lane-bar">
           {/* The rail, folded into one button — see RailMenu. Outside the tab
@@ -2321,6 +2325,24 @@ export default function App() {
             onClick={() => setRailMenu((up) => !up)}
           >
             <IconMenu2 size={17} stroke={1.5} />
+          </button>
+          {/* ⌘T, as a button. Runs the same command the palette offers rather
+              than opening the launcher itself — a second create flow here would
+              be free to drift from the one the keyboard uses. Beside the
+              hamburger for the same reason it is: the tabs scroll, and the way
+              to a new chat must not be able to scroll off the screen.
+
+              Disabled with no worktree, matching `session.new`'s own guard: a
+              chat has to start somewhere, and the launcher would have no branch
+              to name. */}
+          <button
+            className="lane-new"
+            aria-label="New chat"
+            title="New chat"
+            disabled={!here}
+            onClick={() => runCommand(REGISTRY, ctxRef.current, 'session.new')}
+          >
+            <IconPlus size={17} stroke={1.6} />
           </button>
           {columns.length > 0 && (
             <nav className="lane-tabs" ref={tabsRef} aria-label="open panels">

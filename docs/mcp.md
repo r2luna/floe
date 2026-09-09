@@ -37,8 +37,10 @@ Two things are not obvious, and both were checked against the real CLIs
   token. (Verified: `-c mcp_servers={}` leaves inherited servers standing,
   `-c mcp_servers.<name>.enabled=false` takes one down.)
 
-`ask_codex` — the `@codex` second pair of eyes — gets no Floe tools either. It
-reads code; it does not drive the app.
+`ask_peer` — one agent consulting another — gets no Floe tools either, in
+either direction. It reads code; it does not drive the app. Same rule, same
+reason: a peer answering inside someone else's session must not be able to act
+as that session under a token it was lent (`peerMcp`).
 
 ## How callers connect
 
@@ -74,10 +76,12 @@ reads code; it does not drive the app.
    `worktree_status`, `list_branches`, `changed_files`, `file_diff`,
    `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with
-   `wait=true` for synchronous session-to-session calls), `ask_codex` (the local
-   Codex CLI as a second pair of eyes — read-only in the caller's worktree, one
-   resumable thread per session, capped at five exchanges before the agent has
-   to check in; it joins the chat as `@codex`, see `main/codex.ts`),
+   `wait=true` for synchronous session-to-session calls), `ask_peer` (ask
+   another harness — any of them, from any of them: read-only unless asked
+   otherwise and never wider than the calling session's own mode, one resumable
+   thread per pair, capped at five exchanges per pair before the agent has to
+   check in; it joins the chat as a subagent row, see `main/peer.ts`.
+   `ask_codex` remains as a deprecated alias for `harness: "codex"`),
    `read_session_output`,
    `stop_session`, `select_session`, `create_followup` / `list_followups` /
    `cancel_followup`, `list_plans`, `read_plan`, `open_plan`,

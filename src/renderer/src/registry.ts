@@ -29,6 +29,7 @@ import { sendToTerminal } from './terminalBus.ts'
 import { startSkillDraft } from './skillDraft.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
+import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { CHAT_LAYOUTS, type FileOp } from '../../shared/types.ts'
 
@@ -199,6 +200,34 @@ function sessionOnRow(c: CommandContext): { id: string; worktreePath: string } |
   const id = row?.dataset.session
   const worktreePath = row?.dataset.worktree
   return id && worktreePath ? { id, worktreePath } : null
+}
+
+/**
+ * What `session.unread` marks: the row the cursor is on, or — with the cursor
+ * anywhere else — the chat the lane is showing.
+ *
+ * Both names, always. A session answers to Floe's id and to the claudeId, the
+ * marks are keyed by whichever the events carried, and the sidebar row asks
+ * about both — so a mark set under one name and looked for under the other is
+ * a mark that never appears, or one that `u` cannot take off again.
+ *
+ * `open` says the target IS the chat on screen, which is what lets the mark
+ * survive it (see unreadStore's hold) instead of being wiped by the very panel
+ * you are looking at.
+ */
+function unreadTarget(c: CommandContext): { keys: string[]; open: boolean } | null {
+  const openId = chatOf(c)?.session?.id
+  const panel = c.lane.panels[c.lane.focus]
+  const row =
+    panel?.kind === 'worktrees'
+      ? c.rowsOf(c.panelEl(c.lane.focus))[panel.cursor ?? -1]
+      : undefined
+  const id = row?.dataset.session
+  if (id) {
+    const keys = [id, row?.dataset.claude].filter((k): k is string => !!k)
+    return { keys, open: !!openId && keys.includes(openId) }
+  }
+  return openId ? { keys: [openId], open: true } : null
 }
 
 /**
@@ -439,6 +468,17 @@ function editTargetOf(c: CommandContext): { path: string; line?: number } | null
     return { path, line: row?.newNo }
   }
   return null
+}
+
+/**
+ * The file `o` hands to the OS: the row under the cursor in the tree or in the
+ * changes list. A directory has no `data-file`, so the key stays unavailable on
+ * one rather than opening the folder in a file manager.
+ */
+function openTargetOf(c: CommandContext): string | null {
+  const kind = c.lane.panels[c.lane.focus]?.kind
+  if (kind !== 'files' && kind !== 'changes') return null
+  return fileRow(c)?.dataset.file ?? null
 }
 
 function commentOnSelection(c: CommandContext): void {
@@ -904,6 +944,24 @@ export const REGISTRY: Map<string, Command> = new Map(
             if (result.mode !== 'panel') return
             c.setLane((l) => open(l, c.makePanel('edit', editSub(target.path, target.line))))
           })
+        }
+      },
+      {
+        // `e` opens a file in your editor; this opens it in whatever the OS
+        // thinks it is FOR — the browser for .html, the image viewer for a
+        // .png, the spreadsheet for a .xlsx. Both lists mark their rows with
+        // `data-file`, so the tree and the changes list share one command.
+        id: 'file.open',
+        title: 'Open in the default app',
+        group: 'Files',
+        keys: 'o',
+        enabled: (c) => !!c.worktree && !!openTargetOf(c),
+        unavailable: () => 'put the cursor on a file first',
+        run: (c) => {
+          const path = openTargetOf(c)
+          const root = c.worktree?.path
+          if (!path || !root) return
+          void window.floe.files.open(root, path).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {
@@ -1619,6 +1677,33 @@ export const REGISTRY: Map<string, Command> = new Map(
         keys: '⌃O',
         enabled: (c) => !!c.worktree,
         run: (c) => c.cycleSession(1)
+      },
+      {
+        // Read it later. The dot the sidebar already draws for an answer that
+        // arrived while you were elsewhere is the same dot — this just lets you
+        // put it back by hand, on a chat you opened, skimmed and cannot deal
+        // with yet.
+        //
+        // A toggle, because the mark has exactly two states and one key for
+        // both is how `x` behaves two rows down. Marking the chat that is OPEN
+        // is the common case, and it survives being open — see unreadStore's
+        // hold — until you go somewhere else.
+        id: 'session.unread',
+        title: 'Mark this chat unread, or read',
+        group: 'Sessions',
+        keys: 'u / ⌘⇧U',
+        enabled: (c) => !!unreadTarget(c),
+        unavailable: () => 'put the cursor on a session, or open a chat',
+        run: (c) => {
+          const at = unreadTarget(c)
+          if (!at) return
+          if (isUnread(at.keys)) return markRead(at.keys)
+          markUnread(at.keys, { open: at.open })
+          // Only for the chat you are IN: there the dot lands on a row you are
+          // not looking at, and may not even be on screen. Marking a row in the
+          // list needs no toast — the dot appears under the cursor.
+          if (at.open) c.say('marked unread — read it later')
+        }
       },
       {
         // "Delete" is Floe's record of the session, not the conversation:

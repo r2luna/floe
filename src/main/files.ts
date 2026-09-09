@@ -87,7 +87,11 @@ const MAX_PDF_BYTES = 50 * 1024 * 1024
 // Resolve a worktree-relative path safely. Mirrors terminal.ts's safeEditorFile:
 // the path comes from a filesystem walk (attacker-controllable in a cloned repo),
 // so reject control characters and anything resolving outside the worktree.
-function safeResolve(worktreePath: string, relPath: string): string {
+//
+// Exported because `o` hands a path to the OS (index.ts) rather than reading it
+// here: the file never leaves the worktree either way, so it goes through the
+// same check every read does.
+export function safeResolve(worktreePath: string, relPath: string): string {
   if (/[\x00-\x1f\x7f]/.test(relPath)) {
     throw new Error('Refusing to read a file with control characters in its name')
   }

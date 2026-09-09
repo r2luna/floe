@@ -3,8 +3,10 @@ import type { BrowserWindow } from 'electron'
 import type { AgentQuestion, PermissionMode } from '../shared/types'
 import { dropSettled, sendAgentEvent } from './agent'
 import { codexThreadConfig } from './mcpHarness'
-import { resolveModel } from './codex'
+import { codexPosture, resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
+import { forgetThreads, rememberThread, threadFor } from './threads'
+import { forgetHouseRules } from './houseRules'
 
 // Codex chat over `codex app-server` (JSON-RPC on stdio) instead of one-shot
 // `codex exec`: a live session is the only channel that can answer the model's
@@ -46,7 +48,9 @@ let rpcId = 0
 let ready: Promise<void> | null = null
 const pending = new Map<number, Pending>()
 const turnsByThread = new Map<string, TurnCtx>()
-const threadBySession = new Map<string, string>()
+// Which codex thread each session is holding. Written down rather than held in
+// a Map: codex keeps the rollout on disk, so a thread outlives both our process
+// and its app-server — see threads.ts.
 // The mode each live thread was last configured for. A thread carries its
 // sandbox from thread/start, so a mode picked afterwards has to be pushed at it
 // — and pushing the same one on every turn would be a round trip per message.
@@ -299,12 +303,6 @@ function finishTurn(ctx: TurnCtx, error?: string): void {
  * "ask" is not here because codex cannot do it; shared/modes.ts leaves it off
  * codex's list, and runtimes.ts snaps anything that still arrives.
  */
-function codexPosture(mode: PermissionMode): { sandbox: string; collaboration: string } {
-  if (mode === 'skip') return { sandbox: 'danger-full-access', collaboration: 'default' }
-  if (mode === 'acceptEdits') return { sandbox: 'workspace-write', collaboration: 'default' }
-  return { sandbox: 'read-only', collaboration: 'plan' }
-}
-
 // Floe's five effort levels → codex's three (same mapping as codex.ts).
 function mapEffort(effort?: string): string | undefined {
   if (!effort) return undefined
@@ -332,7 +330,7 @@ export async function chatWithCodexServer(
   try {
     await ensureServer()
 
-    let threadId = threadBySession.get(key)
+    let threadId = threadFor(key, 'codex')
     if (threadId && !turnsByThread.has(threadId)) {
       // Thread known but maybe from a previous server process — resume is
       // idempotent for a running thread, so just always rejoin it.
@@ -346,7 +344,10 @@ export async function chatWithCodexServer(
           config: codexThreadConfig(key, worktreePath)
         })
       } catch {
-        threadId = undefined // rollout gone — start over
+        // Rollout gone (an old id from a previous machine state, a pruned
+        // rollout) — drop it and start over rather than resume forever.
+        threadId = undefined
+        forgetThreads(key, 'codex')
       }
     }
     if (!threadId) {
@@ -363,7 +364,7 @@ export async function chatWithCodexServer(
       })
       threadId = String((started.thread as { id?: string })?.id ?? '')
       if (!threadId) throw new Error('codex thread/start returned no thread id.')
-      threadBySession.set(key, threadId)
+      rememberThread(key, 'codex', threadId)
       // Plan's collaboration mode is also the gate on requestUserInput.
       // Best-effort: an older codex without the method still chats.
       await request('thread/settings/update', {
@@ -399,6 +400,9 @@ export async function chatWithCodexServer(
     })
     // Completion arrives as the turn/completed notification → finishTurn.
   } catch (e) {
+    // Same rule as the other runtimes (runtimes.ts): a turn that did not happen
+    // has not delivered the house rules it was carrying.
+    forgetHouseRules(key, 'codex')
     sendAgentEvent(win, key, { kind: 'error', message: (e as Error).message })
     sendAgentEvent(win, key, { kind: 'done', ok: false })
   }

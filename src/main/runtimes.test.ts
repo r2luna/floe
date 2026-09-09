@@ -18,6 +18,13 @@ mkdirSync(BIN, { recursive: true })
 const realPath = process.env.PATH ?? ''
 process.env.PATH = `${BIN}:${realPath}`
 
+// The house rules come out of `configDir()`, which honours XDG_CONFIG_HOME.
+// Pointed at the scratch dir so a turn never picks up the real
+// ~/.config/floe/system-prompt.md — the user's own instructions in the middle
+// of an argv assertion.
+const CONFIG = join(HOME, 'config')
+process.env.XDG_CONFIG_HOME = CONFIG
+
 const ARGV = join(HOME, 'argv.log')
 process.env.FAKE_ARGV = ARGV
 
@@ -321,6 +328,54 @@ test('gemini: -o json, the prompt, and our mode in its own spelling', async () =
     assert.deepEqual(args.slice(0, 6), ['-p', 'hi', '-o', 'json', '--approval-mode', approval])
     assert.deepEqual(args.slice(6), ['-m', 'gemini-3-pro'])
   }
+})
+
+// ── the house rules ─────────────────────────────────────────────────────────
+
+test('the standing instructions ride on the first message of a thread, once', async () => {
+  const promptFile = join(CONFIG, 'floe', 'system-prompt.md')
+  mkdirSync(join(CONFIG, 'floe'), { recursive: true })
+  writeFileSync(promptFile, '<!-- a comment, never sent -->\nAnswer in Portuguese.\n')
+  const k = key()
+  const { win } = fakeWin()
+
+  // The fake CLI logs one line per argv entry, so a multi-line prompt arrives
+  // split: what was sent is everything after the last flag, rejoined.
+  const sent = (): string => {
+    const args = argv()[0]
+    return args.slice(args.indexOf('--print-logs') + 1).join('\n')
+  }
+
+  cli('{"sessionID":"ses_rules","part":{"type":"text","text":"claro"}}')
+  await runRuntime(win, k, worktree, 'oi', 'opencode')
+  const first = sent()
+  assert.match(first, /<!-- floe:house-rules:v1 -->/, 'the block rides at the top')
+  assert.match(first, /Answer in Portuguese\./)
+  assert.ok(!first.includes('a comment, never sent'), 'HTML comments are stripped')
+  assert.ok(first.endsWith('oi'), 'the user prompt still comes last')
+
+  // Second turn on the same thread: opencode has them already, and repeating
+  // them every turn is a paragraph of noise per message.
+  cli('{"type":"text","text":"de novo"}')
+  await runRuntime(win, k, worktree, 'e agora', 'opencode')
+  assert.equal(sent().includes('floe:house-rules'), false)
+  assert.ok(sent().endsWith('e agora'))
+
+  // A reset thread is a new one, so they go again.
+  forgetThread(k)
+  cli('{"type":"text","text":"outra vez"}')
+  await runRuntime(win, k, worktree, 'de novo', 'opencode')
+  assert.match(sent(), /<!-- floe:house-rules:v1 -->/)
+
+  // A turn that failed delivered nothing, so the rules go with the retry.
+  const k2 = key()
+  cli('', { stderr: 'Error: provider unreachable', code: 2 })
+  await runRuntime(win, k2, worktree, 'oi', 'opencode')
+  cli('{"type":"text","text":"agora vai"}')
+  await runRuntime(win, k2, worktree, 'oi', 'opencode')
+  assert.match(sent(), /<!-- floe:house-rules:v1 -->/)
+
+  rmSync(promptFile, { force: true })
 })
 
 test('a CLI that exits non-zero fails the turn with its last stderr line', async () => {

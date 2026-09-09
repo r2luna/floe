@@ -133,13 +133,37 @@ function layoutOf(panel: Panel): Partial<Panel> {
 }
 
 /**
+ * Panels married to another one, dependent → the kind it belongs to.
+ *
+ * The diff is only ever a row of the changes list — nothing else opens one — so
+ * the two are one thing in two columns: the diff lands immediately right of the
+ * list whatever else is open, and closing the list takes the diff with it. A
+ * diff sitting three panels away from the rows that drive it, or left behind
+ * with no way to pick the next file, is the list broken in half.
+ *
+ * The file reader is deliberately not here: the tree opens it, and the tree is
+ * not the only door.
+ */
+const MARRIED_TO: Record<string, string> = { diff: 'changes' }
+
+/** Where a married panel goes — right of its partner, or null if it is closed. */
+function besidePartner(panels: Panel[], kind: string): number | null {
+  const partner = MARRIED_TO[kind]
+  if (!partner) return null
+  const at = panels.findIndex((p) => p.kind === partner)
+  return at === -1 ? null : at + 1
+}
+
+/**
  * Put `panel` in the lane and focus it.
  *
- * Two rules, both about keeping the lane readable rather than merely correct:
+ * Three rules, all about keeping the lane readable rather than merely correct:
  *
  *  - It lands at its `order`, not at the end. The lane reads left to right as
  *    projects → worktrees → chat → what the session opened, and reopening a
  *    panel must restore that reading, not append to it.
+ *  - Unless it is married to a panel that is open, which overrides the order:
+ *    it lands right of its partner (see MARRIED_TO).
  *  - A panel taking the same SLOT is replaced. Usually that means the same kind
  *    — picking a second session swaps the chat instead of stacking two, which
  *    is what stops the lane growing a column per click — but two kinds can
@@ -161,32 +185,44 @@ export function open(lane: Lane, panel: Panel): Lane {
   const slot = panel.slot ?? panel.kind
   const taken = panels.findIndex((p) => (p.slot ?? p.kind) === slot)
   if (taken !== -1) {
-    panels[taken] = { ...panel, ...layoutOf(panels[taken]) }
-    return { panels, focus: taken }
+    // Lifted out rather than overwritten in place, so a married panel taking a
+    // slot held elsewhere in the lane — the diff replacing the file reader the
+    // tree opened — still lands beside its partner. `taken` is where it goes
+    // back when it has none: in the shortened list that is the same position.
+    const landing = { ...panel, ...layoutOf(panels[taken]) }
+    panels.splice(taken, 1)
+    const at = besidePartner(panels, landing.kind) ?? taken
+    panels.splice(at, 0, landing)
+    return { panels, focus: at }
   }
 
   const rank = panel.order ?? 0
   const before = panels.findIndex((p) => (p.order ?? 0) > rank)
-  const at = before === -1 ? panels.length : before
+  const at = besidePartner(panels, panel.kind) ?? (before === -1 ? panels.length : before)
   panels.splice(at, 0, panel)
   return { panels, focus: at }
 }
 
 /**
- * Close one panel. Not its neighbours: every panel in the lane is a thing you
- * asked for, and closing the leftmost to reclaim room must not take the work to
- * its right with it. Accumulation is prevented in `open`, by replacing a panel
- * of the same kind — not here.
+ * Close one panel, and whatever was married to it (see MARRIED_TO). Not its
+ * neighbours: every panel in the lane is a thing you asked for, and closing the
+ * leftmost to reclaim room must not take the work to its right with it.
+ * Accumulation is prevented in `open`, by replacing a panel of the same kind —
+ * not here.
  *
  * The lane may end up empty; the rail and the goto bindings are how you get
  * back, so it is a state you can leave, not a dead end.
  */
 export function close(lane: Lane, index: number): Lane {
   if (index < 0 || index >= lane.panels.length) return lane
-  const panels = lane.panels.filter((_, i) => i !== index)
+  const closing = lane.panels[index].kind
+  const gone = new Set(
+    lane.panels.flatMap((p, i) => (i === index || MARRIED_TO[p.kind] === closing ? [i] : []))
+  )
+  const panels = lane.panels.filter((_, i) => !gone.has(i))
   // Closing a panel to the LEFT of the focused one shifts every index after it,
   // so the focus has to follow or it would silently jump to a different panel.
-  const focus = lane.focus > index ? lane.focus - 1 : lane.focus
+  const focus = lane.focus - [...gone].filter((i) => i < lane.focus).length
   // max(0, …) because an emptied lane has no last index to clamp against.
   return { panels, focus: clamp(focus, Math.max(0, panels.length - 1)) }
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { modeFromLabel, modeLabel, modesFor, nearestMode, supportsMode } from './modes.ts'
+import { clampMode, modeFromLabel, modeLabel, modesFor, nearestMode, supportsMode } from './modes.ts'
 
 test('every runtime offers only what it can do', () => {
   assert.deepEqual(modesFor('claude'), ['plan', 'default', 'acceptEdits', 'skip'])
@@ -36,4 +36,14 @@ test('labels replace Claude jargon', () => {
 test('the old "full" label still reads as skip', () => {
   assert.equal(modeFromLabel('full'), 'skip')
   assert.equal(modeFromLabel('bypass'), 'skip')
+})
+
+test('clampMode gives a peer no more than the session that asked for it', () => {
+  // Asking for more than the caller has is answered with what the caller has.
+  assert.equal(clampMode('skip', 'plan'), 'plan')
+  assert.equal(clampMode('acceptEdits', 'default'), 'default')
+  // Asking for less is honoured: a bypass session may still open a read-only
+  // consult, and usually should.
+  assert.equal(clampMode('plan', 'skip'), 'plan')
+  assert.equal(clampMode('default', 'default'), 'default')
 })

@@ -41,7 +41,7 @@ import { eraseElements, expandSkeletons, moveElements } from './draw/skeleton'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion, type TranscriptItem } from './claudeSessions'
 // Circular with codex (it emits through agent, which imports this file) — safe:
 // every side only calls the others' functions at runtime, never at module top.
-import { askCodex, MAX_EXCHANGES } from './codex'
+import { askPeer, MAX_EXCHANGES, type PeerSpec } from './peer'
 import {
   addCreatedSession,
   getAllCreatedSessions,
@@ -813,19 +813,19 @@ async function sendMessageTool(a: SendMessageArgs): Promise<ToolResult> {
   }
 }
 
-async function askCodexTool(token: string, prompt: string, newTopic: boolean): Promise<ToolResult> {
+async function askPeerTool(token: string, spec: PeerSpec): Promise<ToolResult> {
   try {
-    // The caller's own session: Codex answers into THIS chat (that is what
+    // The caller's own session: the peer answers into THIS chat (that is what
     // makes it a participant), and runs in the worktree being talked about.
     const caller = findSessionAny(token)
-    if (!caller) return textResult({ error: 'ask_codex must be called from a Floe session.' })
+    if (!caller) return textResult({ error: 'ask_peer must be called from a Floe session.' })
     const win = getWindow()
-    if (!win) return textResult({ error: 'No window available to run Codex.' })
-    const result = await askCodex(win, connKeyFor(caller), caller.worktreePath, prompt, newTopic)
+    if (!win) return textResult({ error: `No window available to run ${spec.harness}.` })
+    const result = await askPeer(win, connKeyFor(caller), caller.worktreePath, spec)
     if (result.capped)
       return textResult({
         capped: true,
-        note: `${MAX_EXCHANGES} exchanges used — check in with your user before continuing this thread.`
+        note: `${MAX_EXCHANGES} exchanges used with ${spec.harness} — check in with your user before continuing this thread.`
       })
     if (result.error) return textResult({ error: result.error })
     return textResult({ reply: result.reply, exchange: result.exchange })
@@ -923,13 +923,42 @@ function registerSessionTools(server: McpServer, token: string): void {
   )
 
   server.tool(
-    'ask_codex',
-    'Ask the local Codex CLI, as a second pair of eyes on the code. Codex runs read-only in this session\'s worktree, joins the chat as @codex (a subagent row plus its answer in the channel), and keeps one thread across calls — call it again to continue the same conversation.',
+    'ask_peer',
+    "Ask another agent — whichever harness you are, whichever one you want. It runs in this session's worktree, joins the chat as a subagent row plus its answer, and keeps one thread per harness across calls, so calling it again continues the same conversation. Read-only unless you ask for more, and never more than this session itself may do.",
     {
-      prompt: z.string().describe('What to ask Codex. It is another model, not a human: lead with the delta, use file:line, skip the pleasantries.'),
+      harness: z
+        .enum(HARNESSES as [string, ...string[]])
+        .describe('Who to ask: claude, codex, gemini, opencode, lmstudio or ollama.'),
+      prompt: z
+        .string()
+        .describe('What to ask. It is another agent, not a human: lead with the delta, use file:line, skip the pleasantries.'),
+      new_topic: z.boolean().optional().describe('Start a fresh thread with that harness instead of continuing the current one.'),
+      mode: z
+        .enum(MODES.map((m) => m.id) as [PermissionMode, ...PermissionMode[]])
+        .optional()
+        .describe('How much the peer may do. Default plan (read-only); clamped to this session\'s own mode.'),
+      model: z.string().optional().describe("That harness's own slug. Required for lmstudio and ollama, which have no default."),
+      effort: z.enum(EFFORTS).optional().describe('How hard the peer should think.')
+    },
+    async (a) =>
+      askPeerTool(token, {
+        harness: a.harness,
+        prompt: a.prompt,
+        newTopic: a.new_topic === true,
+        mode: a.mode,
+        model: a.model,
+        effort: a.effort
+      })
+  )
+
+  server.tool(
+    'ask_codex',
+    'Deprecated: `ask_peer` with harness="codex". Kept so sessions and skills written against the old name keep working.',
+    {
+      prompt: z.string().describe('What to ask Codex.'),
       new_topic: z.boolean().optional().describe('Start a fresh Codex thread instead of continuing the current one.')
     },
-    async (a) => askCodexTool(token, a.prompt, a.new_topic === true)
+    async (a) => askPeerTool(token, { harness: 'codex', prompt: a.prompt, newTopic: a.new_topic === true })
   )
 
   server.tool(

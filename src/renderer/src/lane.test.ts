@@ -73,6 +73,50 @@ test('closing shifts focus so it still points at the same panel', () => {
   assert.equal(lane.focus, 1, 'still on b')
 })
 
+test('the diff lands beside the changes list, whatever else is open', () => {
+  let lane = laneOf(ranked('chat', 'chat', 30))
+  lane = open(lane, ranked('changes', 'changes', 40))
+  lane = open(lane, ranked('files', 'files', 42))
+  lane = open(lane, ranked('plans', 'plans', 44))
+  lane = open(lane, ranked('diff:a.ts', 'diff', 50))
+  assert.deepEqual(ids(lane), ['chat', 'changes', 'diff:a.ts', 'files', 'plans'])
+  assert.equal(lane.focus, 2)
+})
+
+test('a diff taking the reader slot moves to its partner', () => {
+  let lane = laneOf(ranked('chat', 'chat', 30))
+  lane = open(lane, ranked('changes', 'changes', 40))
+  lane = open(lane, ranked('files', 'files', 42))
+  lane = open(lane, { ...ranked('file:a.ts', 'file', 50), slot: 'diff', width: 900 })
+  lane = open(lane, ranked('diff:a.ts', 'diff', 50))
+  assert.deepEqual(ids(lane), ['chat', 'changes', 'diff:a.ts', 'files'])
+  assert.equal(lane.panels[2].width, 900, 'and keeps the width the reader had')
+})
+
+test('with no changes list open the diff falls back to its order', () => {
+  let lane = laneOf(ranked('chat', 'chat', 30))
+  lane = open(lane, ranked('files', 'files', 42))
+  lane = open(lane, ranked('diff:a.ts', 'diff', 50))
+  assert.deepEqual(ids(lane), ['chat', 'files', 'diff:a.ts'])
+})
+
+test('closing the changes list closes the diff it opened', () => {
+  let lane = laneOf(ranked('chat', 'chat', 30))
+  lane = open(lane, ranked('changes', 'changes', 40))
+  lane = open(lane, ranked('diff:a.ts', 'diff', 50))
+  lane = close(lane, 1)
+  assert.deepEqual(ids(lane), ['chat'], 'the diff has no door of its own')
+  assert.equal(lane.focus, 0)
+})
+
+test('closing the changes list leaves a file panel alone', () => {
+  let lane = laneOf(ranked('chat', 'chat', 30))
+  lane = open(lane, ranked('changes', 'changes', 40))
+  lane = open(lane, ranked('file:a.ts', 'file', 50))
+  lane = close(lane, 1)
+  assert.deepEqual(ids(lane), ['chat', 'file:a.ts'], 'the tree opens that one too')
+})
+
 test('the lane can be emptied', () => {
   const lane = close(laneOf(p('root')), 0)
   assert.deepEqual(ids(lane), [])

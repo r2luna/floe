@@ -65,7 +65,11 @@ writeFileSync(
 process.env.HOME = home
 process.env.FLOE_TEST_USERDATA = mkdtempSync(join(tmpdir(), 'floe-codexsrv-data-'))
 
+const { setSharedDataDir } = await import('./dataDir.ts')
+setSharedDataDir(mkdtempSync(join(tmpdir(), 'floe-codexsrv-store-')))
 const { chatWithCodexServer, answerCodexQuestion, codexWaitingKeys } = await import('./codexServer.ts')
+const { addCreatedSession } = await import('./sessionStore.ts')
+const { threadFor } = await import('./threads.ts')
 const { readRuntimeTranscript } = await import('./runtimeLog.ts')
 
 // ---------------------------------------------------------------- the fake app-server
@@ -300,6 +304,18 @@ test('a rollout codex can no longer resume starts a fresh thread', async () => {
   push({ method: 'turn/completed', params: { threadId: 'th-2', turn: {} } })
   assert.deepEqual(kinds(events), ['done'])
   assert.equal((events[0] as { ok: boolean }).ok, true, 'a turn with no reply still closes cleanly')
+})
+
+test("a session's codex thread is written down, not just held", async () => {
+  // The Map this used to live in died with the process: quit Floe and codex
+  // answered your next message having read none of the conversation it still
+  // had a rollout for. It belongs beside the session (threads.ts).
+  resetReplies('th-store')
+  addCreatedSession({ id: 'k-store', worktreePath: '/work/tree' })
+  const { win } = fakeWin()
+  await chatWithCodexServer(win, 'k-store', '/work/tree', 'hello', 'gpt-5.5')
+  push({ method: 'turn/completed', params: { threadId: 'th-store', turn: {} } })
+  assert.equal(threadFor('k-store', 'codex'), 'th-store')
 })
 
 test('a thread/start with no id fails the turn instead of running headless', async () => {

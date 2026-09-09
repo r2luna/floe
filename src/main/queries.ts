@@ -28,6 +28,7 @@ import { activeTurnKeys, onceTurnDone, sendAgentEvent, stopAgent } from './agent
 import { dropRuntimeTranscript, logTurn } from './runtimeLog'
 import { forgetRead, forgetSeen, packetFrom } from './handoff'
 import { forgetThread } from './runtimes'
+import { forgetPeers } from './peer'
 import { queryPrompt, relayMark } from '../shared/relay'
 // Circular with turn.ts (it opens the queries this starts turns for) — safe on
 // the same terms as relay↔turn: neither side runs the other at import.
@@ -381,6 +382,7 @@ function release(win: BrowserWindow | null, qkey: string): void {
   if (win && !win.isDestroyed()) stopAgent(win, qkey)
   for (const name of agentIdentityNames(qkey)) {
     forgetThread(name)
+    forgetPeers(name)
     forgetSeen(name)
   }
 }

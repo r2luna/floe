@@ -1,33 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { AgentEvent, AgentEventEnvelope, NotifySoundId } from '../../shared/types'
 import { isQueryKey } from '../../shared/queries.ts'
 import { playDoneSound } from './sounds.ts'
-
-// Sessions with an answer you have not seen. Kept in the same store as the
-// drafts and the lane — a reply that landed before you quit is still unread
-// when you come back, or the mark would only live as long as the window.
-const KEY = 'floe.unread'
-
-// ponytail: 200 keys, oldest dropped. Reading one removes it, so this only
-// fills up if you leave 200 sessions unopened.
-const MAX = 200
-
-function readUnread(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : []
-  } catch {
-    return []
-  }
-}
-
-function writeUnread(keys: Set<string>): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify([...keys].slice(-MAX)))
-  } catch {
-    /* quota or private mode — a mark is a convenience, never a requirement */
-  }
-}
+import { markUnread, readOpen, subscribeUnread, unreadMarks } from './unreadStore.ts'
 
 // How long an event-driven `busy` entry is trusted over the server's answer. A
 // poll in flight when a turn starts would otherwise erase the spinner it raced:
@@ -66,8 +41,9 @@ export interface SessionActivity {
   busy: Set<string>
   /** Sessions blocked on YOU — an unanswered question or permission prompt. */
   waiting: Set<string>
-  /** Sessions whose turn ended while you were looking somewhere else. */
-  unread: Set<string>
+  /** Sessions whose turn ended while you were looking somewhere else — or that
+   *  you marked unread yourself. Owned by unreadStore.ts, hence read-only. */
+  unread: ReadonlySet<string>
 }
 
 // The events that stop the turn until the user answers. Everything else a live
@@ -94,7 +70,10 @@ export function isWaitingEvent(kind: AgentEvent['kind']): boolean {
 export function useSessionActivity(openKeys: readonly string[] = []): SessionActivity {
   const [busy, setBusy] = useState<Set<string>>(() => new Set())
   const [waiting, setWaiting] = useState<Set<string>>(() => new Set())
-  const [unread, setUnread] = useState<Set<string>>(() => new Set(readUnread()))
+  // The one set this hook does not own: the user marks chats unread too (`u`,
+  // "read later"), from a command that has no way into React state. See
+  // unreadStore.ts.
+  const unread = useSyncExternalStore(subscribeUnread, unreadMarks)
 
   // EVERY name the open session answers to, not just the one the panel was
   // opened with: a session has two (Floe's id and the claudeId), the conn is
@@ -165,7 +144,7 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
         })
         // A turn ended somewhere you were not looking.
         if (live || open.current.includes(key)) return
-        setUnread((prev) => (prev.has(key) ? prev : new Set(prev).add(key)))
+        markUnread([key])
       }),
     []
   )
@@ -174,17 +153,11 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
   // while you watch, since the mark is only ever set for another session.
   // Under both names: a mark left under the id the panel is NOT keyed by would
   // otherwise sit on the row of the chat that is open in front of you.
+  //
+  // The one exception is a mark you put there yourself on this very chat, which
+  // the store holds until you leave — see `held` in unreadStore.ts.
   const openKey = openKeys.join(' ')
-  useEffect(() => {
-    const keys = openKey.split(' ').filter(Boolean)
-    if (!keys.length) return
-    setUnread((prev) => {
-      if (!keys.some((k) => prev.has(k))) return prev
-      const next = new Set(prev)
-      for (const k of keys) next.delete(k)
-      return next
-    })
-  }, [openKey])
+  useEffect(() => readOpen(openKey.split(' ').filter(Boolean)), [openKey])
 
   // The correction. Both sets are built from events, and an event that never
   // arrives cannot be waited for: ask the main process who is actually working
@@ -219,8 +192,6 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
       document.removeEventListener('visibilitychange', onVisible)
     }
   }, [])
-
-  useEffect(() => writeUnread(unread), [unread])
 
   return { busy, waiting, unread }
 }
