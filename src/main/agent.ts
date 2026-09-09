@@ -207,7 +207,26 @@ const replays = new Map<string, AgentReplay>()
 // an AgentReplay crosses the IPC boundary, and a BrowserWindow does not.
 const replayWins = new Map<string, BrowserWindow>()
 
-export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?: BrowserWindow): void {
+export function markTurnStart(
+  key: string,
+  choice?: AgentReplay['choice'],
+  win?: BrowserWindow,
+  /**
+   * The line that opened the turn, for every viewer that did not type it.
+   *
+   * Passed here rather than emitted at each send site because this is the one
+   * function every runtime calls (see activeTurnKeys) — Claude, codex, the
+   * local models. Emitting it per runtime is how one of them ends up silent on
+   * the other machine.
+   *
+   * Wire only: it is NOT recorded for replay (see `replays`). The CLI writes
+   * the opening prompt to the JSONL at submit, so a panel mounting mid-turn
+   * already reads it off disk — replaying it too would risk a second copy of
+   * the line whenever `shown` and what was sent differ, as they do for a
+   * message addressed to another harness.
+   */
+  said?: { text: string; panel?: string }
+): void {
   // Last turn's answer is not this one's — a waiter parked now must not be
   // handed the reply to the question before it.
   runtimeText.delete(key)
@@ -226,6 +245,16 @@ export function markTurnStart(key: string, choice?: AgentReplay['choice'], win?:
   // turn — an agent can send into a chat someone is reading — so its picker is
   // not the answer to who is working.
   if (win && choice) sendAgentEvent(win, key, { kind: 'turn', ...choice })
+  // Under the turn header, so a panel that mounts here reads the question
+  // before whatever answers it. Skipped when there is nothing to say: a turn
+  // resumed by a tool has no user line to show.
+  if (win && said?.text)
+    sendAgentEvent(win, key, {
+      kind: 'steer',
+      text: said.text,
+      at: Date.now(),
+      panel: said.panel
+    })
 }
 
 /**
@@ -717,13 +746,21 @@ export function sendToAgent(
     conn.lastActivityAt = Date.now()
     log('turn-steer', { key, connKey, promptLen: prompt.length, images: images.length, files: files.length })
     pushTranscript(conn, `user: ${prompt}`)
-    // Into the replay, not onto the wire: the panel that typed it is already
-    // showing it, and every other viewer of this session gets it when the CLI
-    // absorbs it into the JSONL. That write only happens at the end of the tool
-    // call in flight, so until then the replay is the only place a panel
-    // mounting mid-turn can read what was said.
+    // Into the replay, for the panel that mounts mid-turn: the CLI only writes
+    // a steer to the JSONL when it absorbs it, which can be a whole tool call
+    // later. No `panel` on this copy — it is what was said, not who echoed it.
     const replay = replays.get(connKey)
     if (replay?.running) replay.events.push({ kind: 'steer', text: options.shown ?? prompt, at: Date.now() })
+    // And onto the wire, for the panels already open. Every other viewer — a
+    // second window, another machine over the gate — has nothing on screen
+    // until this arrives; `panel` is what stops the one that typed it from
+    // showing the line twice.
+    send(win, connKey, {
+      kind: 'steer',
+      text: options.shown ?? prompt,
+      at: Date.now(),
+      panel: options.panel
+    })
     write(conn, { type: 'user', message: { role: 'user', content: buildContent(prompt, images, files) } })
     return
   }
@@ -754,7 +791,12 @@ export function sendToAgent(
   // and its `done` — will arrive under (spawnConn captured it). Marked under
   // the panel's name instead, a turn steered into an aliased conn would open a
   // replay nothing ever closes. replaySnapshot resolves the alias for readers.
-  markTurnStart(connKey, { provider: 'claude', effort: options.effort, mode: options.permissionMode }, win)
+  markTurnStart(
+    connKey,
+    { provider: 'claude', effort: options.effort, mode: options.permissionMode },
+    win,
+    { text: options.shown ?? prompt, panel: options.panel }
+  )
   conn.turnActive = true
   conn.turnClosed = false
   conn.turnStartedAt = Date.now()

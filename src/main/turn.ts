@@ -156,7 +156,8 @@ export function startTurn(
       options.model,
       options.effort,
       options.permissionMode,
-      options.shown
+      options.shown,
+      options.panel
     )
     return
   }

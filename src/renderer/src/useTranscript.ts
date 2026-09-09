@@ -145,6 +145,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // numbers the turn footer needs are mirrored here for it to read on `done`.
   const startedRef = useRef<number | undefined>(undefined)
   const tokensRef = useRef(0)
+  // This panel's name on the wire, so main can stamp the user line it emits and
+  // this one can tell its own echo from a line typed somewhere else. Per PANEL,
+  // not per window: two panels in one window watching the same session are two
+  // viewers, and only one of them typed.
+  const panelId = useRef(crypto.randomUUID()).current
   // Starts true when there is something to read: on a fresh mount the effect
   // that fetches has not run yet, and a `false` here says "nothing is coming"
   // to everything downstream.
@@ -324,9 +329,16 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         }
       })
     } else if (event.kind === 'steer') {
-      // A message typed into this turn while it ran, replayed to a panel that
-      // mounted after it was said. It is a line of yours like any other; the
-      // reducer drops the JSONL copy if the CLI has already written one.
+      // What the user said, from main. It is a line of yours like any other;
+      // the reducer drops the JSONL copy if the CLI has already written one.
+      //
+      // Except when this panel is the one that said it: `deliver` already put
+      // it on screen at submit, and the reducer's dedupe is against the DISK
+      // copy, not against a second live push — so the echo would stand as a
+      // duplicate line. Every other viewer (a second window, another machine
+      // over the gate) has shown nothing yet, and this is the only thing that
+      // tells them.
+      if (event.panel && event.panel === panelId) return
       dispatch({ type: 'push', item: { role: 'user', text: event.text, at: event.at } })
     } else if (event.kind === 'fanout') {
       // One column of an `@all` comparison. Pushed as a settled assistant line
@@ -615,8 +627,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           prompt,
           // `optionsKey` in the main process is built from these, so changing
           // the picker restarts the CLI rather than silently keeping the old
-          // model — or the old mode — for the rest of the session.
-          { ...choice, permissionMode: choice.mode ?? DEFAULT_MODE, shown },
+          // model — or the old mode — for the rest of the session. `panel` is
+          // deliberately NOT part of that key: it names the viewer, not the
+          // spawn, and keying on it would respawn the CLI per panel.
+          { ...choice, permissionMode: choice.mode ?? DEFAULT_MODE, shown, panel: panelId },
           images ?? [],
           files ?? []
         )

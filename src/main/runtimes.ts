@@ -318,7 +318,9 @@ export async function runRuntime(
   effort?: string,
   mode: PermissionMode = DEFAULT_MODE,
   /** The line as typed, when the handle addressing this runtime came off it. */
-  shown?: string
+  shown?: string,
+  /** The panel that typed it — it is already showing the line (AgentRunOptions). */
+  panel?: string
 ): Promise<void> {
   // These runtimes write no transcript, so nothing on disk would say this
   // session was ever used. Stamp it, or the sidebar sorts it by the day it was
@@ -326,7 +328,10 @@ export async function runRuntime(
   touchCreatedSession(key)
   // Same turn bookkeeping as Claude's sendToAgent: a panel opening mid-turn
   // asks agent.replay for what it missed, whoever is answering.
-  markTurnStart(key, { provider: runtime, model, effort, mode }, win)
+  markTurnStart(key, { provider: runtime, model, effort, mode }, win, {
+    text: shown ?? prompt,
+    panel
+  })
   // What this runtime has not seen — the turns another harness answered, or its
   // own from before the restart that emptied its thread. Read BEFORE the prompt
   // is logged, or the message being sent would come back inside its own packet.
