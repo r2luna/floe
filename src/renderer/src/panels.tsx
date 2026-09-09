@@ -58,6 +58,7 @@ import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
 import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
+import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
@@ -3354,7 +3355,7 @@ function FilesTree({
               data-file={path}
               onClick={() => onOpen({ kind: panelForFile(path), sub: path })}
             >
-              <span className="file-mark" />
+              <FileIcon path={path} />
               {/* Name first, path after — the name is what you typed and must
                   never be the part that gets cut off. The directory follows in
                   grey and gives way when the panel is narrow, which is exactly
@@ -3439,7 +3440,7 @@ function FilesTree({
                 <IconChevronRight size={13} stroke={1.8} className="file-mark" />
               )
             ) : (
-              <span className="file-mark" />
+              <FileIcon path={node.relPath} />
             )}
             <span className="row-name">{node.name}</span>
           </button>
