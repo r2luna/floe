@@ -58,6 +58,7 @@ import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
 import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
+import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
@@ -1068,6 +1069,7 @@ function Launcher({
         value={text}
         onChange={setText}
         draftKey={`branch:${cwd}`}
+        historyKey={cwd}
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
@@ -1655,6 +1657,7 @@ function ChatPanel({
         value={text}
         onChange={setText}
         draftKey={session?.id}
+        historyKey={cwd}
         onSend={(choice, attached) => {
           repin()
           // A line that OPENS with `@codex` is addressed to codex: that one
@@ -2918,6 +2921,9 @@ function ChangesList({
           className="row change-row"
           key={f.relPath}
           title={f.relPath}
+          // What `o` reads to know which file to hand the OS — the same marker
+          // the tree's rows carry, so one command covers both lists.
+          data-file={f.relPath}
           onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
           // The cursor IS the DOM focus here — j/k focus the row — so focusing
           // is the only signal that the selected file changed. The preview must
@@ -3351,7 +3357,7 @@ function FilesTree({
               data-file={path}
               onClick={() => onOpen({ kind: panelForFile(path), sub: path })}
             >
-              <span className="file-mark" />
+              <FileIcon path={path} />
               {/* Name first, path after — the name is what you typed and must
                   never be the part that gets cut off. The directory follows in
                   grey and gives way when the panel is narrow, which is exactly
@@ -3387,7 +3393,10 @@ function FilesTree({
   const menuFor = (node: FileNode): MenuAction[] => [
     ...(node.type === 'dir'
       ? [{ label: 'Open folder here', keys: '.', run: () => onCommand?.('files.root') }]
-      : [{ label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('editor.open') }]),
+      : [
+          { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('editor.open') },
+          { label: 'Open in the default app', keys: 'o', run: () => onCommand?.('file.open') }
+        ]),
     // Only while there is somewhere to come back out to.
     ...(base ? [{ label: 'Leave folder', keys: '-', run: () => onCommand?.('files.unroot') }] : []),
     { label: 'Rename…', keys: 'r', run: () => onCommand?.('files.rename') },
@@ -3433,7 +3442,7 @@ function FilesTree({
                 <IconChevronRight size={13} stroke={1.8} className="file-mark" />
               )
             ) : (
-              <span className="file-mark" />
+              <FileIcon path={node.relPath} />
             )}
             <span className="row-name">{node.name}</span>
           </button>
@@ -4647,7 +4656,9 @@ function SessionMark({
     )
   if (working) return <Spinner />
   return (
-    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread reply' : undefined} />
+    // "unread", not "unread reply": the mark is also one you put there
+    // yourself, on a chat you decided to read later.
+    <span className={`dot${seen ? ' dot-unread' : ''}`} title={seen ? 'unread' : undefined} />
   )
 }
 
@@ -4661,6 +4672,11 @@ function SessionMark({
  */
 function namesOf(s: ClaudeSessionMeta): string[] {
   return s.claudeId && s.claudeId !== s.id ? [s.id, s.claudeId] : [s.id]
+}
+
+/** The same question, asked of a DOM row — what the right-click menu has. */
+function rowUnread(row: HTMLElement, unread: ReadonlySet<string>): boolean {
+  return [row.dataset.session, row.dataset.claude].some((n) => !!n && unread.has(n))
 }
 
 /**
@@ -5018,6 +5034,13 @@ function WorktreesList({
       run: () => onCommand?.('session.markClear')
     },
     {
+      // Reads the live set, so the item says which way the toggle will go —
+      // the row it was opened on is the one the command will act on.
+      label: menu && rowUnread(menu.row, unread) ? 'Mark as read' : 'Mark as unread',
+      keys: 'u',
+      run: () => onCommand?.('session.unread')
+    },
+    {
       // Says how many, because with a selection open `d` is not about the row
       // you right-clicked — and a menu reading "Delete session…" over four
       // ticked sessions would be describing the wrong thing.
@@ -5132,6 +5155,10 @@ function WorktreesList({
               // cursor is on — `x` and `d` read these rather than counting rows,
               // which a folded branch would throw off.
               data-session={s.id}
+              // The other name. The unread mark can be keyed by either (the
+              // events carry whichever the conn spawned with), so `u` has to be
+              // able to take it off under both — see unreadTarget.
+              data-claude={s.claudeId ?? undefined}
               data-worktree={worktree.path}
               // Work another chat set running, not a session of its own. The
               // mark is on every spawned row; the indent only on one whose

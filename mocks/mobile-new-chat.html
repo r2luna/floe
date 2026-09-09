@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en" data-narrow data-touch>
+<head><meta charset="utf-8" /><title>Floe — a button to start a chat on a phone</title>
+<!-- The app's real stylesheet. Nothing here re-declares an app rule: the only
+     new class is .panel-act-new / .lane-new / .row-new, which is what these
+     three options are ASKING for. Everything else is the app as it ships. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: #0b0d10; color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { display: flex; gap: 26px; padding: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .lbl { margin: 0 0 4px; color: var(--text-strong); font-size: 12px; }
+  .note { margin: 0 0 8px; max-width: 390px; color: var(--dim); font-size: 11px; line-height: 1.5; }
+  .phone { position: relative; width: 390px; height: 700px; overflow: hidden; border: 1px solid var(--line); background: var(--bg); }
+  .desk { width: 640px; border: 1px solid var(--line); background: var(--bg); }
+  .theme { position: fixed; top: 14px; right: 18px; padding: 4px 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; z-index: 99; }
+  /* What is being proposed, drawn so you can find it: a dotted ring around the
+     new control only. Not part of any option — remove it and the mock is the
+     real thing. */
+  .ring { outline: 2px dashed var(--nick-you); outline-offset: 3px; border-radius: var(--radius); }
+  h2 { margin: 26px 22px 0; font-size: 13px; color: var(--dim); font-weight: normal; }
+</style></head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button>
+
+<h2>Placement — where the button to start a chat lives</h2>
+<div class="page">
+
+<!-- ============================================================ O1 -->
+<div>
+  <p class="lbl"><b>O1 · chat header, beside the trash</b></p>
+  <p class="note">Runs <code>session.new</code> (⌘T). Same pattern as “Add project…” and
+  “New worktree…”: a header button that dispatches a command id. The chat’s one
+  <code>action</code> slot is already the trash, so the slot has to take two.
+  Only reachable while you are looking at a chat.</p>
+  <div class="phone"><div class="app">
+    <div class="lane-bar">
+      <button class="lane-menu" aria-label="Panels"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <nav class="lane-tabs" aria-label="open panels">
+        <span class="lane-tab"><button class="lane-tab-go">worktrees</button></span>
+        <span class="lane-tab" data-on><button class="lane-tab-go">chat</button><button class="lane-tab-x">✕</button></span>
+      </nav>
+    </div>
+    <div class="workspace">
+      <div class="lane"><div class="lane-col"><section class="panel" data-focused>
+        <div class="panel-head">
+          <span class="panel-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 9h8M8 13h5M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="panel-name">chat</span>
+          <span class="panel-sub">bug-blocked-thread</span>
+          <button class="panel-act ring" title="New session (⌘T)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          <button class="panel-act" title="Delete session…"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
+        </div>
+        <div class="panel-body"><div class="chat">
+          <div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-you)">pinguim</span></span>o worktree está bloqueado de novo</div></div>
+          <div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Achei — o lock ficou do merge anterior. Removendo.</p></div></div></div>
+        </div></div>
+      </section></div></div>
+      <div class="keybar">
+        <button class="key" data-wide>⇧⌘P</button><button class="key" data-wide>esc</button><button class="key" data-wide>tab</button><button class="key">↑</button><button class="key">↓</button><button class="key" data-wide>⇧⏎</button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<!-- ============================================================ O2 -->
+<div>
+  <p class="lbl"><b>O2 · the lane bar, next to the hamburger</b></p>
+  <p class="note">Visible from every panel, not only from a chat — the bar never
+  scrolls off. Costs the bar’s current rule, written in <code>App.tsx</code>:
+  “Nothing new is reachable from here.” Today the bar only navigates; this makes
+  it create.</p>
+  <div class="phone"><div class="app">
+    <div class="lane-bar">
+      <button class="lane-menu" aria-label="Panels"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <button class="lane-new ring" title="New chat"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <button class="lane-new" title="New chat" disabled><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+      <nav class="lane-tabs" aria-label="open panels">
+        <span class="lane-tab"><button class="lane-tab-go">worktrees</button></span>
+        <span class="lane-tab" data-on><button class="lane-tab-go">chat</button><button class="lane-tab-x">✕</button></span>
+        <span class="lane-tab"><button class="lane-tab-go">terminal</button></span>
+      </nav>
+    </div>
+    <div class="workspace">
+      <div class="lane"><div class="lane-col"><section class="panel" data-focused>
+        <div class="panel-head">
+          <span class="panel-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 9h8M8 13h5M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+          <span class="panel-name">chat</span>
+          <span class="panel-sub">bug-blocked-thread</span>
+          <button class="panel-act" title="Delete session…"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
+        </div>
+        <div class="panel-body"><div class="chat">
+          <div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-you)">pinguim</span></span>o worktree está bloqueado de novo</div></div>
+          <div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Achei — o lock ficou do merge anterior. Removendo.</p></div></div></div>
+        </div></div>
+      </section></div></div>
+      <div class="keybar">
+        <button class="key" data-wide>⇧⌘P</button><button class="key" data-wide>esc</button><button class="key" data-wide>tab</button><button class="key">↑</button><button class="key">↓</button><button class="key" data-wide>⇧⏎</button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+<!-- ============================================================ O3 -->
+<div>
+  <p class="lbl"><b>O3 · one per branch, in the worktrees list</b></p>
+  <p class="note">The most literal reading of “start a chat inside a worktree”:
+  you pick the branch and start there, without first landing in some other chat.
+  Costs a control on every branch row — and the row is already a button, so the
+  “+” has to sit inside one.</p>
+  <div class="phone"><div class="app">
+    <div class="lane-bar">
+      <button class="lane-menu" aria-label="Panels"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <nav class="lane-tabs" aria-label="open panels">
+        <span class="lane-tab" data-on><button class="lane-tab-go">worktrees</button></span>
+        <span class="lane-tab"><button class="lane-tab-go">chat</button></span>
+      </nav>
+    </div>
+    <div class="workspace">
+      <div class="lane"><div class="lane-col"><section class="panel" data-focused>
+        <div class="panel-head">
+          <span class="panel-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 2-6 6"/></svg></span>
+          <span class="panel-name">worktrees</span>
+          <span class="panel-sub">floe</span>
+          <button class="panel-act" title="New worktree…"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        </div>
+        <div class="panel-body">
+          <div class="group">
+            <button class="row row-branch" data-active>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+              <span class="row-name">master</span>
+              <span class="wt-dirt"><span class="wt-dirt-g"><span class="wt-add">+3</span><span class="wt-mod">~1</span></span></span>
+              <span class="panel-act ring" title="New session (⌘T)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+            </button>
+          </div>
+          <div class="group">
+            <button class="row row-branch" aria-expanded="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+              <span class="row-name">bug-blocked-thread</span>
+              <span class="panel-act ring" title="New session (⌘T)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+            </button>
+            <button class="row row-session"><span class="row-name">o worktree está bloqueado de novo</span></button>
+            <button class="row row-session"><span class="row-name">revisar o dock de queries</span></button>
+          </div>
+          <div class="group">
+            <button class="row row-branch">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+              <span class="row-name">plugin-v2</span>
+              <span class="panel-act ring" title="New session (⌘T)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>
+            </button>
+          </div>
+        </div>
+      </section></div></div>
+      <div class="keybar">
+        <button class="key" data-wide>⇧⌘P</button><button class="key" data-wide>esc</button><button class="key" data-wide>tab</button><button class="key">↑</button><button class="key">↓</button><button class="key" data-wide>⇧⏎</button>
+      </div>
+    </div>
+  </div></div>
+</div>
+
+</div>
+
+<h2>Scope — does the same button show on a desktop window, where ⌘T already works</h2>
+<div class="page">
+  <div>
+    <p class="lbl"><b>S1 · both</b> — one button, always there</p>
+    <p class="note">The header reads the same on every screen size; ⌘T stays the
+    fast path for anyone with a keyboard.</p>
+    <div class="desk"><section class="panel" data-focused>
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 9h8M8 13h5M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+        <span class="panel-name">chat</span>
+        <span class="panel-sub">bug-blocked-thread</span>
+        <button class="panel-act ring" title="New session (⌘T)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button class="panel-act" title="Delete session…"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
+      </div>
+      <div class="panel-body"><div class="chat"><div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Achei — o lock ficou do merge anterior.</p></div></div></div></div></div>
+    </section></div>
+  </div>
+  <div>
+    <p class="lbl"><b>S2 · narrow only</b> — the desktop header is untouched</p>
+    <p class="note">Gated on <code>data-narrow</code>. The button exists only where
+    there is no ⌘T to press, so nothing is added to a screen that already had a
+    way in.</p>
+    <div class="desk"><section class="panel" data-focused>
+      <div class="panel-head">
+        <span class="panel-icon"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 9h8M8 13h5M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+        <span class="panel-name">chat</span>
+        <span class="panel-sub">bug-blocked-thread</span>
+        <button class="panel-act" title="Delete session…"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 13h12l1-13M9 7V4h6v3"/></svg></button>
+      </div>
+      <div class="panel-body"><div class="chat"><div class="irc-entry"><div class="irc-body"><span class="irc-lead"><span class="irc-time">17:20</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Achei — o lock ficou do merge anterior.</p></div></div></div></div></div>
+    </section></div>
+  </div>
+</div>
+
+</body></html>

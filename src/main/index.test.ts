@@ -277,6 +277,7 @@ const CHANNELS = [
   'media:copyImage',
   'files:resolveLink',
   'files:apply',
+  'files:open',
   'review:changedFiles',
   'review:lastCommit',
   'review:fileDiff',
