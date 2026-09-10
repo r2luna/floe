@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickFlow, type MergeFlow } from './useMerge.ts'
+import { pickFlow, writeFlow, type MergeFlow } from './useMerge.ts'
 
 const ROOT = '/repo'
 
@@ -67,4 +67,29 @@ test('the others line lists the project flows newest first', () => {
 
 test('nothing running is nothing shown', () => {
   assert.deepEqual(pickFlow({}, ROOT, '/wt/a'), { flow: null, mine: [] })
+})
+
+// --- writeFlow -------------------------------------------------------------
+
+test('a new flow is readable before the next render', () => {
+  // The bug this exists for: start() created the flow and called preflight in
+  // the same tick. The ref only caught up on render, so preflight read back a
+  // flow that was not there yet, returned, and the checklist span forever.
+  const ref = { current: {} as Record<string, MergeFlow> }
+  const rendered = writeFlow(ref, '/wt/a', flow('/wt/a'))
+  assert.equal(ref.current['/wt/a']?.branch, 'a')
+  assert.deepEqual(rendered, ref.current)
+})
+
+test('a patch sees what the write before it did', () => {
+  const ref = { current: {} as Record<string, MergeFlow> }
+  writeFlow(ref, '/wt/a', flow('/wt/a'))
+  writeFlow(ref, '/wt/a', (f) => (f ? { ...f, base: 'main' } : f))
+  assert.equal(ref.current['/wt/a']?.base, 'main')
+})
+
+test('writing null drops the flow and leaves the others alone', () => {
+  const ref = { current: map(flow('/wt/a'), flow('/wt/b')) }
+  writeFlow(ref, '/wt/a', null)
+  assert.deepEqual(Object.keys(ref.current), ['/wt/b'])
 })
