@@ -7,16 +7,17 @@
 // message of every new chat until it stops being retyped and the model starts
 // guessing.
 //
-// So a fresh worktree is interviewed while it provisions (provision.ts's premise
-// step), and the answers are written to `.floe/premise.md` in a fixed shape. The
-// file is the contract, not the conversation: `seedFor` (handoff.ts) prepends it
-// to the FIRST turn of every session in this worktree, whichever harness answers,
-// which is why the word cap below is part of the design rather than a nicety.
+// So a fresh worktree is asked one question while it provisions (provision.ts's
+// premise step), and the answer is written to `.floe/premise.md` in a fixed
+// shape. The file is the contract, not the conversation: `seedFor` (handoff.ts)
+// prepends it to the FIRST turn of every session in this worktree, whichever
+// harness answers, which is why the word cap below is part of the design rather
+// than a nicety.
 //
-// Two model calls, both headless print-mode with no tools, so claude and codex
-// run the same flow (config `[premise] provider`). Both have deterministic
-// fallbacks: a machine without the CLI, or an interview the user skipped, still
-// writes a usable file from the raw answers.
+// One model call — composing the file — headless print-mode with no tools, so
+// claude and codex run the same flow (config `[premise] provider`). It has a
+// deterministic fallback: a machine without the CLI still writes a usable file
+// from the raw answer.
 
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -27,14 +28,11 @@ import { log } from './log'
 /** Where a worktree keeps its premise, relative to the worktree root. */
 export const PREMISE_REL = join('.floe', 'premise.md')
 
-/** How long either model call gets before the flow falls back. */
+/** How long the model call gets before the flow falls back. */
 const CALL_TIMEOUT_MS = 45_000
 
 /** The cap the composer is told about, and the cap enforced on the way in. */
 const MAX_WORDS = 200
-
-/** How many questions the interview may ask. Three fit on the checklist. */
-const MAX_QUESTIONS = 3
 
 export const premisePath = (worktreePath: string): string => join(worktreePath, PREMISE_REL)
 
@@ -57,16 +55,22 @@ export interface PremiseAnswer {
   answer: string
 }
 
-/** The fallback interview: what to ask when the model cannot be reached. */
-const FALLBACK_QUESTIONS: PremiseQuestion[] = [
-  { id: 'goal', question: 'In one sentence, what does this worktree have to deliver?' },
-  {
-    id: 'kind',
-    question: 'What kind of change is it?',
-    options: ['new feature', 'refactor', 'bug fix', 'spike / investigation']
-  },
-  { id: 'done', question: 'What has to be true for it to be done?' }
-]
+/**
+ * The one question a new worktree is asked.
+ *
+ * Fixed rather than generated per branch: working the question out took a model
+ * call in front of the interview, so the user waited on a spinner before being
+ * asked anything, and the goal is the only answer the composer actually needs.
+ */
+export const INTERVIEW_QUESTION: PremiseQuestion = {
+  id: 'goal',
+  question: 'In one sentence, what does this worktree have to deliver?'
+}
+
+/** The interview, or nothing when the config has it switched off. */
+export function interviewQuestions(): PremiseQuestion[] {
+  return floeConfig().premise.enabled ? [INTERVIEW_QUESTION] : []
+}
 
 export function readPremise(worktreePath: string): string | undefined {
   try {
@@ -131,7 +135,7 @@ export function premiseSeed(worktreePath: string): string {
   )
 }
 
-// --- the two model calls ----------------------------------------------------
+// --- the model call ---------------------------------------------------------
 
 /**
  * Ask the configured premise model one question and get plain text back.
@@ -228,78 +232,6 @@ function agentMessage(line: string): string | null {
   } catch {
     return null
   }
-}
-
-/**
- * The questions to ask about a brand-new worktree.
- *
- * Generated rather than fixed because the branch usually already answers one of
- * them: on `fix/DOS-292-timeout` there is no point asking whether this is a bug.
- * The model is given what the worktree can be read off disk and asked for the
- * gaps — and when it cannot answer, FALLBACK_QUESTIONS still make an interview.
- */
-export async function interviewQuestions(
-  worktreePath: string,
-  branch: string,
-  base?: string
-): Promise<PremiseQuestion[]> {
-  if (!floeConfig().premise.enabled) return []
-  const prompt =
-    'A developer just created a git worktree. You are writing the 2-3 questions ' +
-    'that will be asked to capture what it is FOR, so that every AI session ' +
-    'started in it can be given that context up front.\n\n' +
-    `Branch: ${branch}\n` +
-    (base ? `Forked from: ${base}\n` : '') +
-    '\nRules:\n' +
-    `- At most ${MAX_QUESTIONS} questions, ordered most important first.\n` +
-    '- Ask only what the branch name does NOT already answer.\n' +
-    '- Always cover the goal. Cover scope limits and "done" if there is room.\n' +
-    '- Short questions, one line each, plain language, no preamble.\n' +
-    '- Give `options` (3-4 short ones) only when the answer is a genuine ' +
-    'multiple choice; leave it out when it needs prose.\n\n' +
-    'Reply with ONLY a JSON array, no fence, no commentary. Shape:\n' +
-    '[{"id":"goal","question":"…","options":["…"]}]'
-
-  const raw = await askPremiseModel(prompt, worktreePath)
-  return parseQuestions(raw) ?? FALLBACK_QUESTIONS
-}
-
-/**
- * The model's JSON, or null if it isn't usable.
- *
- * Tolerant of a fenced block and of prose around the array, because a small
- * model told "ONLY JSON" still occasionally says "Here you go:". Anything past
- * that — a bad shape, a missing question — is not repaired: a half-parsed
- * interview asks worse questions than the fixed one.
- */
-export function parseQuestions(raw: string | null): PremiseQuestion[] | null {
-  if (!raw) return null
-  const start = raw.indexOf('[')
-  const end = raw.lastIndexOf(']')
-  if (start < 0 || end <= start) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1))
-  } catch {
-    return null
-  }
-  if (!Array.isArray(parsed)) return null
-  const out: PremiseQuestion[] = []
-  for (const [i, entry] of parsed.entries()) {
-    if (!entry || typeof entry !== 'object') continue
-    const q = entry as { id?: unknown; question?: unknown; options?: unknown }
-    const question = typeof q.question === 'string' ? q.question.trim() : ''
-    if (!question) continue
-    const options = Array.isArray(q.options)
-      ? q.options.filter((o): o is string => typeof o === 'string' && !!o.trim()).slice(0, 4)
-      : undefined
-    out.push({
-      id: typeof q.id === 'string' && q.id.trim() ? q.id.trim() : `q${i + 1}`,
-      question,
-      options: options?.length ? options : undefined
-    })
-  }
-  return out.length ? out.slice(0, MAX_QUESTIONS) : null
 }
 
 /**
