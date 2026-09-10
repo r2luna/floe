@@ -3,6 +3,9 @@ import type { PaletteItem } from './fuzzy.ts'
 import type { Trigger } from './trigger.ts'
 import type { WorktreeRow, Worktrees } from './useWorktrees.ts'
 import type { Skill } from '../../main/config/skills.ts'
+// The slug rule is shared with main, which resolves it back to the session:
+// two spellings of the same rule would write tokens that name nothing.
+import { sessionSlug } from '../../shared/sessionRefs.ts'
 
 /**
  * Every session in the project, named the way the menu shows them — one row per
@@ -18,8 +21,10 @@ export function sessionMentions(rows: WorktreeRow[]): PaletteItem[] {
   for (const row of rows) {
     for (const s of row.sessions) {
       // The id is what gets inserted into the message, so it reads as
-      // something a person would write, not as a UUID.
-      const id = `#${s.title.replace(/\s+/g, '-')}`
+      // something a person would write, not as a UUID. What the model gets is
+      // the UUID and the harness — see shared/sessionRefs.ts, which expands
+      // this token on the way out.
+      const id = `#${sessionSlug(s.title)}`
       if (seen.has(id)) continue
       seen.add(id)
       out.push({ id, title: s.title, detail: row.worktree.branch, group: 'sessions' })

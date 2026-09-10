@@ -1,8 +1,7 @@
 import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
-import type { TranscriptItem } from './claudeSessions'
-import { collapseSkills, hasSkill } from '../shared/skills'
+import { collapseFloe, type TranscriptItem } from './claudeSessions'
 
 // The conversation, for runtimes that keep none.
 //
@@ -70,10 +69,9 @@ export function readRuntimeTranscript(sessionId: string): TranscriptItem[] {
       })
       .filter((i): i is TranscriptItem => !!i)
       // Same collapse the Claude transcript does: the log holds what the model
-      // was sent, and a skill was sent in full. What you typed was one token.
-      .map((i) =>
-        i.role === 'user' && i.text && hasSkill(i.text) ? { ...i, text: collapseSkills(i.text) } : i
-      )
+      // was sent, and a skill went in full, a `#session` as an address. What you
+      // typed was one token.
+      .map((i) => (i.role === 'user' && i.text ? { ...i, text: collapseFloe(i.text) } : i))
   } catch {
     return []
   }

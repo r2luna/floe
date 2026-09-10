@@ -2,11 +2,12 @@ import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getSessionMeta, getCreatedSessions } from './sessionStore'
+import { getSessionMeta, getCreatedSessions, type CreatedSession, type SessionMeta } from './sessionStore'
 import { findSpecSummarySource } from './plans'
 
 import { contextTokens } from '../shared/types'
 import { collapseSkills, hasSkill } from '../shared/skills'
+import { collapseSessionRefs, hasSessionRef } from '../shared/sessionRefs'
 import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
 import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
@@ -335,6 +336,16 @@ function shortLabel(raw: string): string {
   return (sp > 20 ? cut.slice(0, sp) : cut) + '…'
 }
 
+/**
+ * What a session is CALLED: its rename, then the title it was opened with, then
+ * a shortened id. The sidebar reads it, and so does the `#` reference resolver
+ * — a slug is matched against this title, so the two have to be the same rule
+ * or the name you picked out of the menu would resolve to nothing.
+ */
+export function sessionTitle(c: CreatedSession, meta: Record<string, SessionMeta> = getSessionMeta()): string {
+  return (c.claudeId ? meta[c.claudeId]?.title : undefined) || c.title || c.claudeId?.slice(0, 8) || 'Session'
+}
+
 // The sidebar's session list: *only* the sessions Floe knows about (opened
 // with ⌘T, or pulled in via Resume) — never the full on-disk history. Enriched
 // with each session's real mtime / active state and any stored rename.
@@ -364,7 +375,7 @@ export function listClaudeSessions(worktreePath: string): ClaudeSessionMeta[] {
     return {
       id: c.id,
       claudeId: c.claudeId,
-      title: (c.claudeId ? meta[c.claudeId]?.title : undefined) || c.title || c.claudeId?.slice(0, 8) || 'Session',
+      title: sessionTitle(c, meta),
       mtime,
       active,
       permissionMode: c.permissionMode,
@@ -628,6 +639,20 @@ export function parsePeerMessage(text: string): { from: string; body: string } |
   return { from: name || 'peer', body: m[2].trim() }
 }
 
+/**
+ * Undo whatever Floe expanded into this prompt before it was sent.
+ *
+ * One function because both kinds arrive the same way — echoed back by the
+ * harness in its own log — and a reader that knew about one of them would print
+ * the other as raw markup.
+ */
+export function collapseFloe(text: string): string {
+  let out = text
+  if (hasSkill(out)) out = collapseSkills(out)
+  if (hasSessionRef(out)) out = collapseSessionRefs(out)
+  return out
+}
+
 // Prettify Claude Code's local slash-command markers that show up in user
 // messages: drop the internal caveat, render the command as a chip, and the
 // command output as a code block.
@@ -656,15 +681,12 @@ function expandUserText(text: string): TranscriptItem[] {
     return out ? [{ role: 'assistant', text: '```\n' + out + '\n```' }] : []
   }
 
-  // A Floe skill the harness echoed back. Collapsed to the token that was
+  // A Floe expansion the harness echoed back — a skill's instructions, or the
+  // address of a session you named with `#`. Collapsed to the token that was
   // typed, so a transcript reopened tomorrow reads the way it did when it was
-  // written — the instructions went to the model, not to you.
-  if (hasSkill(stripped)) {
-    const collapsed = collapseSkills(stripped)
-    return collapsed ? [{ role: 'user', text: collapsed }] : []
-  }
-
-  return [{ role: 'user', text: stripped }]
+  // written: the expansion went to the model, not to you.
+  const collapsed = collapseFloe(stripped)
+  return collapsed ? [{ role: 'user', text: collapsed }] : []
 }
 
 /**

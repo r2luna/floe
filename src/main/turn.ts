@@ -23,6 +23,8 @@ import { armAddress, armRelay } from './relay'
 import { armSpawnedClose } from './spawned'
 import { runRuntime } from './runtimes'
 import { expandSkills } from '../shared/skills'
+import { expandSessionRefs } from '../shared/sessionRefs'
+import { resolveSessionRef } from './sessionRefs'
 import { readSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
 import { floeConfig } from './config/floe'
@@ -101,9 +103,10 @@ export function optionsForSession(key: string): AgentRunOptions {
 /**
  * Run one turn.
  *
- * Skills expand ABOVE the provider split, because that is the whole reason they
- * live in Floe's config: `/deploy` has to mean the same thing whichever CLI
- * answers. Expanding per runtime would be four copies of one rule.
+ * Skills and `#session` references expand ABOVE the provider split, because
+ * that is the whole reason they live in Floe's config: `/deploy` and the
+ * session you pointed at have to mean the same thing whichever CLI answers.
+ * Expanding per runtime would be four copies of one rule.
  *
  * Every turn is watched for where it should go next. Handed to a harness the
  * session does NOT answer as, the answer comes back to the session's own model,
@@ -121,7 +124,13 @@ export function startTurn(
   images: ImageAttachment[] = [],
   files: FileAttachment[] = []
 ): void {
-  const expanded = expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined))
+  // Skills first, then the `#session` references — including any the skill's
+  // own text turned out to contain, which is the right way round: a skill that
+  // names a session means that session.
+  const expanded = expandSessionRefs(
+    expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined)),
+    (slug) => resolveSessionRef(slug, worktreePath)
+  )
   // Anything but Claude runs on the machine's own runtime and answers over the
   // same agent:event channel. The provider is stated by the caller;
   // `isCodexModel` stays only as the fallback for a choice made before
