@@ -37,6 +37,8 @@ export const TASK_KINDS: TaskKind[] = ['feat', 'fix', 'chore']
 export interface TaskVisit {
   at: number
   stage: string
+  /** The session that step ran in — one per step, so the transcript is per visit. */
+  sessionId?: string
   /** What the lane's hand-off line said. `none` is a turn that ended without one. */
   verdict: 'pass' | 'return' | 'stop' | 'none'
   why?: string
@@ -56,7 +58,11 @@ export interface ColonyTask {
   /** Set when the task is released from the backlog and its tree is cut. */
   branch?: string
   worktreePath?: string
-  /** The task's own chat — the session every lane runs its turn in. */
+  /**
+   * The card's chat: the session of the step running now, or of the last one
+   * that ran. Every step mints its own (see runner's `startLane`), so this moves
+   * with the card — the earlier ones are on `visits`.
+   */
   sessionId?: string
   /** A stage name, or the two ends: `inbox`, `done`. */
   stage: string

@@ -46,6 +46,12 @@ task in `needs you` and holds a spot in the lane until someone answers. Do not
 call `AskUserQuestion`, and do not end a turn with a question in prose either;
 prose questions stall the task without even showing up as blocked.
 
+LANGUAGE: English, always. Every artifact, commit message, branch name, code
+comment and message you write is in English, even when the task brief, the issue
+behind it or the user's own words are in another language. Translate; never echo
+the other language into the repo. It is the whole board's common language: the
+next lane, the reviewer and the git history all read one.
+
 STYLE: terse and concrete. Drop filler and hedging. Keep code, paths, commands
 and tables exact.
 

@@ -1,6 +1,6 @@
 // What actually moves a card: admit a task into a free spot, run the stage's
-// skill in the task's own session, read the hand-off line off the last message,
-// and move it on.
+// skill in a session minted for that step, read the hand-off line off the last
+// message, and move it on.
 //
 // One rule keeps the scheduler honest: ONLY `working` AND `blocked` TAKE A SPOT.
 // A task holding at a full stage's door costs nothing, which is why a jam at one
@@ -13,7 +13,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
 import { capOf, colonyConfig, columnsFor, DONE, INBOX, type ColonyStage } from '../config/colony'
-import { addCreatedSession, getAllCreatedSessions } from '../sessionStore'
+import { addCreatedSession, closeSession, getAllCreatedSessions } from '../sessionStore'
 import { sessionRuntime, onceTurnDone, hasActiveTurn } from '../agent'
 import { startTurn } from '../turn'
 import { createWorktree } from '../git'
@@ -231,32 +231,42 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
     return false
   }
 
-  // One session per TASK, not per lane: the card's chat is the task's whole
-  // history, and a session per stage would mean six chats behind one card and no
-  // answer to "which one does ⏎ open?".
-  let sessionId = task.sessionId
-  if (!sessionId || !getAllCreatedSessions().some((s) => s.id === sessionId)) {
-    sessionId = randomUUID()
-    addCreatedSession({ id: sessionId, worktreePath: task.worktreePath, title: task.name })
-    // Deliberately NOT marked `spawnedBy`, though a lane is agent-driven and the
-    // flag looks like it fits. `spawnedBy` means "no human can see this
-    // session", so agent.ts answers the child's AskUserQuestion itself with
-    // CHILD_ANSWERS_ITSELF and never shows a card — which is right for a session
-    // an agent opened for its own background work, and wrong here. A lane's
-    // question is the ONE thing this board is built to show: it is the needs-you
-    // band, the attention strip and the only use of the accent colour. Marked
-    // spawned, that band could never fill and a card could never ask.
-  }
-
-  const key = connKeyFor(sessionId)
-  // The card's session is mid-turn — you are talking to it. Wait for that turn
-  // rather than queueing the lane behind your sentence, and ask the board to
-  // look again when it ends: nothing else would. Without this the card holds at
-  // the door until some unrelated change happens to tick the board.
-  if (hasActiveTurn(key)) {
-    onceTurnDone(key, () => tick(win, task.project))
+  // The session the card is pointing at right now — the lane that ran last, or
+  // the chat you have been having with it. It is mid-turn when you are talking
+  // to it, and the step about to start would be a SECOND agent in the same
+  // worktree. Wait for that turn instead, and ask the board to look again when
+  // it ends: nothing else would. Without this the card holds at the door until
+  // some unrelated change happens to tick the board.
+  const held = task.sessionId ? connKeyFor(task.sessionId) : undefined
+  if (held && hasActiveTurn(held)) {
+    onceTurnDone(held, () => tick(win, task.project))
     return false
   }
+
+  // ONE SESSION PER STEP, not per task (D28). LANE-CONTRACT opens every lane
+  // with "you are a new session with no memory of the lanes that ran before",
+  // and a session shared across stages made that a lie: the coder inherited the
+  // specifier's whole conversation instead of reading the artifacts off disk,
+  // which is the hand-off this board is built on. It also means a lane's context
+  // is its own step, not five steps of transcript it never needed.
+  //
+  // The card still has ONE chat behind ⏎ — `sessionId` is whichever lane is on
+  // it now, or the last one that was. The earlier ones stay in the worktree's
+  // session list, which is where a finished lane's transcript belongs.
+  const sessionId = randomUUID()
+  addCreatedSession({
+    id: sessionId,
+    worktreePath: task.worktreePath,
+    title: `${task.name} · ${stage.name}`
+  })
+  // Deliberately NOT marked `spawnedBy`, though a lane is agent-driven and the
+  // flag looks like it fits. `spawnedBy` means "no human can see this session",
+  // so agent.ts answers the child's AskUserQuestion itself with
+  // CHILD_ANSWERS_ITSELF and never shows a card — which is right for a session
+  // an agent opened for its own background work, and wrong here. A lane's
+  // question is the ONE thing this board is built to show: it is the needs-you
+  // band, the attention strip and the only use of the accent colour. Marked
+  // spawned, that band could never fill and a card could never ask.
 
   patchTask(task.id, {
     sessionId,
@@ -271,7 +281,9 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
   const prompt = `/${stage.skill}\n\nTask: ${task.name} (${task.kind})\nArtifacts: ${taskDirFor(task.branch ?? task.name)}/\n\n${task.brief.trim()}`
 
   try {
-    startTurn(win, key, task.worktreePath, prompt, {
+    // The session id itself is the key: one minted a moment ago has no claudeId
+    // yet and no live connection sitting under another name.
+    startTurn(win, sessionId, task.worktreePath, prompt, {
       permissionMode: 'skip',
       model: stage.model,
       provider: stage.harness
@@ -279,7 +291,13 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
   } catch (err) {
     // Back to the door rather than stuck at `working`: nobody would be listening
     // for a turn that never started, so the card would hold a spot forever.
+    //
+    // The session minted for this step goes with it. A turn that never started
+    // leaves an empty chat, and one per failed attempt would pile up in the
+    // tree's session list — so the card points back at the last step that ran.
+    closeSession({ id: sessionId, worktreePath: task.worktreePath })
     patchTask(task.id, {
+      sessionId: task.sessionId,
       status: 'holding',
       line: undefined,
       warn: `${stage.name} could not start: ${(err as Error).message}`
@@ -291,7 +309,7 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
   // it would fire on whatever turn ran in this session next and move the card on
   // a verdict from another conversation. The done event can only arrive on a
   // later tick, so there is no turn to miss by registering here.
-  onceTurnDone(key, (text) => finishLane(win, task.id, stage.name, text))
+  onceTurnDone(sessionId, (text) => finishLane(win, task.id, stage.name, text))
   return true
 }
 
@@ -311,8 +329,12 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
   const handoff = parseHandoff(text)
   const at = Date.now()
 
+  // The step's own session goes on the visit: with one session per step, that
+  // pointer is the only way back to the transcript that produced this verdict.
+  const sessionId = task.sessionId
+
   if (handoff?.verdict === 'stop') {
-    recordVisit(id, { at, stage, verdict: 'stop', why: handoff.why }, {
+    recordVisit(id, { at, stage, sessionId, verdict: 'stop', why: handoff.why }, {
       stage: INBOX,
       status: 'holding',
       line: handoff.why || 'stopped'
@@ -322,7 +344,7 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
     // what the card prints, and a task bouncing between two lanes is the signal
     // that something is wrong with the task rather than with the lane.
     const back = colonyConfig(task.project).stages.find((s) => s.name === handoff.lane)
-    recordVisit(id, { at, stage, verdict: 'return', why: handoff.why }, {
+    recordVisit(id, { at, stage, sessionId, verdict: 'return', why: handoff.why }, {
       // A lane that names a stage nobody has is not a reason to lose the task —
       // park it as a question instead.
       stage: back ? back.name : stage,
@@ -331,7 +353,7 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
     })
   } else {
     const next = nextStage(task.project, stage) ?? DONE
-    recordVisit(id, { at, stage, verdict: handoff ? 'pass' : 'none' }, {
+    recordVisit(id, { at, stage, sessionId, verdict: handoff ? 'pass' : 'none' }, {
       stage: next,
       status: next === DONE ? 'settled' : 'holding',
       passes: task.passes + 1,

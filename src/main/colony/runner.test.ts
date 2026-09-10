@@ -257,7 +257,7 @@ test('releasing a backlog card cuts its tree, writes the brief and starts the fi
   assert.match(turn?.prompt ?? '', /^\/colony-implement\n/)
   assert.match(turn?.prompt ?? '', /Artifacts: specs\/fix-backgrounded-polling\//)
   assert.equal(turn?.options.permissionMode, 'skip')
-  // One session per TASK, opened in the task's tree.
+  // The step's own session, opened in the task's tree.
   assert.equal(getAllCreatedSessions().find((s) => s.id === after?.sessionId)?.worktreePath, worktree)
 })
 
@@ -342,6 +342,55 @@ test('a lane waits for the turn you are having, and the board looks again when i
   assert.equal(stubs.turns.length, turns + 1)
 })
 
+test('every step gets its own session, and the card points at the one running now', () => {
+  const root = project()
+  const id = holdingAt(root, 'coder', 'per-step')
+
+  tick(win, root)
+  const first = getTask(id)?.sessionId
+  assert.ok(first)
+
+  lastListener()('COLONY: pass')
+
+  // The next stage runs in a session of its own: LANE-CONTRACT promises each
+  // lane no memory of the ones before it, and a shared session broke that.
+  const after = getTask(id)
+  assert.equal(after?.stage, 'qa')
+  assert.equal(after?.status, 'working')
+  assert.ok(after?.sessionId)
+  assert.notEqual(after?.sessionId, first)
+
+  // Both in the task's tree, and the finished one is still there to read back.
+  const sessions = getAllCreatedSessions()
+  const worktree = after?.worktreePath
+  assert.equal(sessions.find((s) => s.id === first)?.worktreePath, worktree)
+  assert.equal(sessions.find((s) => s.id === after?.sessionId)?.worktreePath, worktree)
+  // Titled by step, or six sessions in one tree are six chats with one name.
+  assert.equal(sessions.find((s) => s.id === first)?.title, 'per-step \u00b7 coder')
+  assert.equal(sessions.find((s) => s.id === after?.sessionId)?.title, 'per-step \u00b7 qa')
+
+  // And the visit points back at the session whose verdict moved the card.
+  assert.equal(after?.visits.at(-1)?.stage, 'coder')
+  assert.equal(after?.visits.at(-1)?.sessionId, first)
+})
+
+test('a re-run of the same stage is a new session too, not the interrupted one', () => {
+  const root = project(ONE_STAGE)
+  const id = holdingAt(root, 'coder', 'rerun')
+
+  tick(win, root)
+  const first = getTask(id)?.sessionId
+  assert.ok(first)
+
+  // The app went away mid-lane: nobody is left to read the hand-off line.
+  reconcileColony(win)
+
+  const after = getTask(id)
+  assert.equal(after?.stage, 'coder')
+  assert.equal(after?.status, 'working')
+  assert.notEqual(after?.sessionId, first)
+})
+
 test('a turn that could not start puts the card back at the door instead of holding a spot', () => {
   const root = project()
   const id = holdingAt(root, 'coder', 'no-harness')
@@ -356,6 +405,10 @@ test('a turn that could not start puts the card back at the door instead of hold
   assert.equal(after?.status, 'holding')
   assert.equal(after?.line, undefined)
   assert.match(after?.warn ?? '', /coder could not start: codex is not installed/)
+  // The step's session goes with the step: a turn that never started leaves an
+  // empty chat, and one per failed attempt would pile up in the tree.
+  assert.equal(after?.sessionId, undefined)
+  assert.equal(getAllCreatedSessions().some((s) => s.worktreePath === tree('no-harness')), false)
 
   // Nobody was listening for a turn that never started, so the spot is free and
   // the next tick can use it.
@@ -473,6 +526,9 @@ test('COLONY: stop parks the card back in the backlog with the reason on it', ()
   assert.deepEqual(after?.visits.at(-1), {
     at: after?.visits.at(-1)?.at ?? 0,
     stage: 'coder',
+    // The visit carries the session that step ran in — with one session per
+    // step, that pointer is the only way back to the transcript behind the stop.
+    sessionId: after?.sessionId,
     verdict: 'stop',
     why: 'the spec contradicts itself'
   })
