@@ -201,7 +201,7 @@ import {
   safeResolve,
   searchableFiles
 } from './files'
-import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia } from './media'
+import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTask, tick } from './colony/runner'
 import { addTask, removeTask, type NewTask } from './colony/store'
@@ -998,6 +998,12 @@ export function registerFileIpc(): void {
   // never come back through IPC — only the `floe-media://` URL that streams
   // them (see media.ts).
   handle('media:probe', (_event, path: string, cwd?: string) => probeMedia(path, cwd))
+  // The exception to that: a browser tab can only fetch from the daemon that
+  // served the page, so a recording on ANOTHER paired machine is pulled over
+  // the gate in slices and re-served there. Nothing local calls this.
+  handle('media:read', (_event, path: string, start: number, length: number) =>
+    readMediaChunk(path, start, length)
+  )
   // The lightbox's `c`: the same clipboard write the right-click menu does, but
   // driven from the keyboard, where the pointer's coordinates don't exist.
   handle('media:copyImage', (_event, dataUrl: string) => {

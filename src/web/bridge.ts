@@ -207,20 +207,30 @@ export function webIpc(
   handlers: Record<string, (...args: any[]) => Promise<any>>,
   local: Map<string, Set<Listener>>
 ): IpcLike {
-  const routeFor = (channel: string): IpcLike =>
-    table.current !== 'local' && !PINNED_CHANNELS.has(channel)
-      ? (table.remotes.get(table.current)?.ipc ?? socket)
-      : socket
+  // Which machine a channel lands on. Named rather than resolved straight to a
+  // socket because a media answer has to say WHERE it came from, and the rail
+  // can be moved while the invoke is still in flight.
+  const backendFor = (channel: string): string =>
+    table.current !== 'local' &&
+    !PINNED_CHANNELS.has(channel) &&
+    table.remotes.has(table.current)
+      ? table.current
+      : 'local'
 
   return {
     invoke: (channel, ...args) => {
       const handler = handlers[channel]
       if (handler) return handler(...args)
-      const answer = routeFor(channel).invoke(channel, ...args)
+      const on = backendFor(channel)
+      const answer = (on === 'local' ? socket : table.remotes.get(on)!.ipc).invoke(
+        channel,
+        ...args
+      )
       // The one answer whose CONTENT is host-specific: a `floe-media://` address
-      // means nothing to a tab. Rewritten here so the renderer never learns that
-      // a web build exists — see mediaRewrite.ts.
-      return channel === 'media:probe' ? answer.then(rewriteProbe) : answer
+      // means nothing to a tab. Rewritten here — with the machine that answered,
+      // since that is the only one holding the file — so the renderer never
+      // learns that a web build exists. See mediaRewrite.ts.
+      return channel === 'media:probe' ? answer.then((r) => rewriteProbe(r, on)) : answer
     },
     on: (channel, listener) => {
       if (!local.has(channel)) local.set(channel, new Set())

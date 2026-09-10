@@ -162,8 +162,24 @@ test('media:probe comes back with a url the tab can fetch', async () => {
 
   assert.deepEqual(await ipc.invoke('media:probe', '/srv/rec/a.mp4'), {
     kind: 'video',
-    url: '/media/srv/rec/a.mp4'
+    url: '/media/local/srv/rec/a.mp4'
   })
+  socket.close()
+})
+
+test('a video on another machine is fetched under that machine, not this one', async () => {
+  answers.set('backends:get', () => [
+    { id: 'mac', label: 'cypher', url: 'ws://cypher.leopon-sole.ts.net:443', token: 'k1' }
+  ])
+  answers.set('media:probe', () => ({ kind: 'video', url: 'floe-media://file/tmp/a.mp4' }))
+  const { ipc, host, socket } = createWebBridge(boot)
+  await settle()
+
+  host.backendsCtl!.use('mac')
+  const found = (await ipc.invoke('media:probe', '/tmp/a.mp4')) as { url: string }
+  // The mac answered, so the daemon has to go and get it from the mac — the
+  // same path on the daemon's own disk is a different file, or none.
+  assert.equal(found.url, '/media/mac/tmp/a.mp4')
   socket.close()
 })
 

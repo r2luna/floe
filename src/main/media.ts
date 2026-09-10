@@ -12,10 +12,11 @@
 // testable with plain node.
 
 import { createReadStream, statSync } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isAbsolute, resolve, basename } from 'node:path'
 import { Readable } from 'node:stream'
-import type { MediaFile } from '../shared/types'
+import type { MediaChunk, MediaFile } from '../shared/types'
 
 export const SCHEME = 'floe-media'
 
@@ -150,4 +151,57 @@ export function mediaResponse(url: string, range: string | null): Response {
       ...(want ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {})
     }
   })
+}
+
+/**
+ * How much of a file one `media:read` answers.
+ *
+ * A gate frame is a whole message in memory on both ends, and base64 makes it a
+ * third bigger again — so a recording crosses in slices, and a 200 MB one never
+ * becomes a 270 MB string.
+ */
+export const CHUNK_LIMIT = 1024 * 1024
+
+const clamp = (n: unknown, max: number): number =>
+  typeof n === 'number' && Number.isFinite(n) ? Math.min(Math.max(0, Math.trunc(n)), max) : 0
+
+/**
+ * A slice of a video, as base64 — the only path by which a recording's bytes
+ * ever leave this process on the wire.
+ *
+ * It exists for one case: a browser tab can only fetch from the daemon that
+ * served it, so a video that lives on ANOTHER paired machine cannot be reached
+ * over HTTP at all. The serving daemon pulls it over the gate with this and
+ * re-serves it (server plugin, `/media/<backend>/…`). Locally nothing calls it:
+ * `floe-media://` and `/media/local/…` both read the file directly.
+ *
+ * Same policy as `probeMedia` — it answers for a video that is really there,
+ * and null for anything else, so a caller cannot read `/etc/passwd` by naming
+ * it here.
+ */
+export async function readMediaChunk(
+  candidate: string,
+  start: number,
+  length: number
+): Promise<MediaChunk | null> {
+  const media = probeMedia(candidate)
+  if (!media) return null
+
+  const from = clamp(start, media.size)
+  const want = Math.min(clamp(length, CHUNK_LIMIT), media.size - from)
+  const buf = Buffer.alloc(want)
+
+  const file = await open(media.path, 'r')
+  try {
+    const { bytesRead } = await file.read(buf, 0, want, from)
+    return {
+      mediaType: media.mediaType,
+      size: media.size,
+      start: from,
+      end: from + bytesRead - 1,
+      base64: buf.subarray(0, bytesRead).toString('base64')
+    }
+  } finally {
+    await file.close()
+  }
 }

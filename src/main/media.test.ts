@@ -3,7 +3,16 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
 import { join } from 'node:path'
-import { mediaResponse, mediaUrl, parseRange, pathFromMediaUrl, probeMedia, resolveMediaPath } from './media.ts'
+import {
+  CHUNK_LIMIT,
+  mediaResponse,
+  mediaUrl,
+  parseRange,
+  pathFromMediaUrl,
+  probeMedia,
+  readMediaChunk,
+  resolveMediaPath
+} from './media.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'floe-media-'))
 const video = join(dir, 'demo.mp4')
@@ -68,4 +77,32 @@ test('no range means the whole file, and seeking is still offered', async () => 
 
 test('a missing file is a 404, not a hang', () => {
   assert.equal(mediaResponse(mediaUrl(join(dir, 'gone.mp4')), null).status, 404)
+})
+
+test('a chunk is the slice that was asked for, and says how big the file is', async () => {
+  const chunk = await readMediaChunk(video, 2, 3)
+  assert.equal(chunk?.size, 10)
+  assert.equal(chunk?.mediaType, 'video/mp4')
+  assert.equal(chunk?.start, 2)
+  assert.equal(chunk?.end, 4)
+  assert.equal(Buffer.from(chunk!.base64, 'base64').toString(), '234')
+})
+
+test('a chunk stops at the end of the file, and at the frame limit', async () => {
+  const tail = await readMediaChunk(video, 8, 999)
+  assert.equal(Buffer.from(tail!.base64, 'base64').toString(), '89')
+  assert.equal(tail?.end, 9)
+  // Past the end there is nothing to send, and `end` says so rather than lying.
+  const past = await readMediaChunk(video, 10, 4)
+  assert.equal(past?.base64, '')
+  assert.equal(past?.end, 9)
+  assert.ok(CHUNK_LIMIT >= 1024)
+})
+
+test('a chunk of something that is not a playable video is refused', async () => {
+  assert.equal(await readMediaChunk(join(dir, 'notes.txt'), 0, 4), null)
+  assert.equal(await readMediaChunk(join(dir, 'nope.mp4'), 0, 4), null)
+  // Junk offsets read from the start rather than throwing at the caller.
+  const odd = await readMediaChunk(video, Number.NaN, 2)
+  assert.equal(odd?.start, 0)
 })

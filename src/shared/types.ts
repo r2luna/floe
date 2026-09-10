@@ -458,6 +458,21 @@ export interface MediaFile {
   path: string
 }
 
+// A slice of that same video, carried instead of served — the one case where
+// the bytes DO come through the wire. A browser tab can only fetch from the
+// daemon that served the page, so a recording that lives on another paired
+// machine is pulled off it in chunks and re-served (see main/media.ts's
+// `readMediaChunk` and the server plugin's `/media/<backend>/…`).
+export interface MediaChunk {
+  mediaType: string
+  /** The whole file's size, so a range answer can name a total. */
+  size: number
+  start: number
+  /** Inclusive, and `start - 1` when the slice came back empty. */
+  end: number
+  base64: string
+}
+
 // --- Review (changed files + diff comments) --------------------------------
 
 // One entry in the changed-files review list — a file that differs from the

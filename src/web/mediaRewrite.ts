@@ -9,16 +9,24 @@
 // web build exists: `Video.tsx` renders `file.url` and is right on both hosts,
 // because by the time it sees the url it is already the right one.
 //
-// The path is not re-encoded: `/media` + the url's own pathname is byte-for-byte
-// what `mediaUrl()` produced, and the daemon hands that straight back to the
-// same parser. One encoding rule, one place.
+// The path is not re-encoded: `/media/<backend>` + the url's own pathname is
+// byte-for-byte what `mediaUrl()` produced, and the daemon hands that straight
+// back to the same parser. One encoding rule, one place.
+//
+// The backend id is in the url because a tab has exactly one origin and Floe
+// has many machines: the probe was answered by whichever backend the rail
+// points at, and the file only exists THERE. Without the id the daemon would
+// look for someone else's recording on its own disk and answer 404.
 
 const SCHEME_PREFIX = 'floe-media://file'
 
-/** The same address, as the page can fetch it. Anything else passes through. */
-export function toHttpMediaUrl(url: string): string {
+/**
+ * The same address, as the page can fetch it: `/media/<backend>/<path>`.
+ * Anything else passes through.
+ */
+export function toHttpMediaUrl(url: string, backendId: string): string {
   if (!url.startsWith(SCHEME_PREFIX)) return url
-  return `/media${url.slice(SCHEME_PREFIX.length)}`
+  return `/media/${encodeURIComponent(backendId)}${url.slice(SCHEME_PREFIX.length)}`
 }
 
 /**
@@ -27,9 +35,9 @@ export function toHttpMediaUrl(url: string): string {
  * Null and malformed answers pass through untouched — this is a rewrite, not a
  * validator, and inventing a shape here would hide a real bug from the caller.
  */
-export function rewriteProbe(result: unknown): unknown {
+export function rewriteProbe(result: unknown, backendId: string): unknown {
   if (!result || typeof result !== 'object') return result
   const file = result as { url?: unknown }
   if (typeof file.url !== 'string') return result
-  return { ...file, url: toHttpMediaUrl(file.url) }
+  return { ...file, url: toHttpMediaUrl(file.url, backendId) }
 }
