@@ -90,15 +90,16 @@ has to work while the composer has focus, which is most of the time.
 
 \`⌃J\` and \`⌃K\` do double duty: they move within a stack where there is one, and
 scroll where there isn't — two entries sharing a chord, split by \`when\`, with
-the narrower one first. \`⌘1\`–\`⌘9\` jump straight to a panel by position, and
-\`⌘K /\` flips the focused panel between docked beside and docked below.`,
+the narrower one first. \`⌃1\`–\`⌃9\` jump straight to a panel by position, on the
+same modifier as everything else here — \`⌘1\`–\`⌘9\` are the worktrees now. \`⌘K /\`
+flips the focused panel between docked beside and docked below.`,
     binds: [
       { key: 'ctrl+h', command: 'panel.left' },
       { key: 'ctrl+l', command: 'panel.right' },
       { key: 'ctrl+j', command: 'panel.down', when: 'stack-below' },
       { key: 'ctrl+k', command: 'panel.up', when: 'stack-above' },
       ...Array.from({ length: 9 }, (_, n) => ({
-        key: `super+${n + 1}`,
+        key: `ctrl+${n + 1}`,
         command: 'panel.focusAt',
         arg: String(n)
       })),
@@ -467,7 +468,14 @@ is where you are when you want to go back.
 
 \`⌘⇧W\` forgets the open session: shift on \`⌘W\`, which closes the panel, so
 the pair reads as "close this" and "close this for good". It asks first, and
-what it deletes is Floe's record — the transcript stays on disk.`,
+what it deletes is Floe's record — the transcript stays on disk.
+
+\`⌘1\`–\`⌘9\` go straight to a branch by its position in the worktree list — the
+number you press is the row you can see, whether or not the list is on screen.
+Landing is the sidebar's own: the chat you left that branch on comes back, and
+a branch nobody has opened yet gets its launcher. Panels moved to \`⌃1\`–\`⌃9\`
+for this, because crossing branches is the switch you make all day and moving
+between panels already lives on ctrl.`,
     binds: [
       { key: 'super+t', command: 'session.new' },
       { key: 'super+shift+w', command: 'session.delete' },
@@ -475,7 +483,12 @@ what it deletes is Floe's record — the transcript stays on disk.`,
       { key: 'ctrl+o', command: 'session.next' },
       { key: 'ctrl+w', command: 'session.alternate' },
       { key: 'alt+a', command: 'subagents.toggle' },
-      { key: 'super+n', command: 'worktree.new' }
+      { key: 'super+n', command: 'worktree.new' },
+      ...Array.from({ length: 9 }, (_, n) => ({
+        key: `super+${n + 1}`,
+        command: 'worktree.focusAt',
+        arg: String(n)
+      }))
     ]
   },
   {
