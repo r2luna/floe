@@ -613,14 +613,11 @@ function currentAsk(events: ProvisionEvent[]): Extract<ProvisionEvent, { kind: '
 /** Let the interview's pending model call / await settle. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
-test('the interview asks, then writes the premise the answers compose', async () => {
+test('the interview asks, then writes the premise the answer composes', async () => {
   reset()
-  // Two model calls in order: the questions, then the composed file.
-  const answers = [
-    '[{"id":"goal","question":"What ships?"},{"id":"kind","question":"Which kind?","options":["feature","bug"]}]',
-    '## Goal\nShip the premise flow.'
-  ]
-  globalThis.__provSpawnPlan = (cmd) => (cmd === 'claude' ? { stdout: answers.shift() ?? '' } : { code: 0 })
+  // One model call: the composed file. The question itself is fixed.
+  globalThis.__provSpawnPlan = (cmd) =>
+    cmd === 'claude' ? { stdout: '## Goal\nShip the premise flow.' } : { code: 0 }
 
   const root = checkout('floe-root-', { 'README.md': '#\n' })
   const wt = checkout('floe-wt-', { 'README.md': '#\n' })
@@ -630,17 +627,13 @@ test('the interview asks, then writes the premise the answers compose', async ()
     assert.deepEqual(planIds(events), ['premise'], 'the row is on the checklist even with no stack')
 
     await settle()
-    const first = currentAsk(events)
-    assert.equal(first?.question, 'What ships?')
-    assert.equal(first?.index, 1)
-    assert.equal(first?.total, 2)
+    const ask = currentAsk(events)
+    assert.match(ask!.question, /deliver/)
+    assert.equal(ask?.index, 1)
+    assert.equal(ask?.total, 1)
+    assert.deepEqual(globalThis.__provSpawns, [], 'the question costs no model call')
 
-    answerProvisionAsk(first!.requestId, 'the premise flow')
-    await settle()
-    const second = currentAsk(events)
-    assert.deepEqual(second?.options, ['feature', 'bug'])
-
-    answerProvisionAsk(second!.requestId, 'feature')
+    answerProvisionAsk(ask!.requestId, 'the premise flow')
     await settle()
     await settle()
 
@@ -652,8 +645,7 @@ test('the interview asks, then writes the premise the answers compose', async ()
 
 test('skipping the interview leaves no premise and no more questions', async () => {
   reset()
-  globalThis.__provSpawnPlan = (cmd) =>
-    cmd === 'claude' ? { stdout: '[{"question":"What ships?"},{"question":"Which kind?"}]' } : { code: 0 }
+  globalThis.__provSpawnPlan = (cmd) => (cmd === 'claude' ? { stdout: '## Goal\nUnused.' } : { code: 0 })
 
   const root = checkout('floe-root-', { 'README.md': '#\n' })
   const wt = checkout('floe-wt-', { 'README.md': '#\n' })
@@ -669,7 +661,7 @@ test('skipping the interview leaves no premise and no more questions', async () 
 
     assert.equal(currentAsk(events), null)
     assert.equal(status(events, 'premise'), 'skipped')
-    assert.equal(existsSync(join(wt, '.floe', 'premise.md')), false, 'half an interview writes nothing')
+    assert.equal(existsSync(join(wt, '.floe', 'premise.md')), false, 'a refused interview writes nothing')
   })
 })
 

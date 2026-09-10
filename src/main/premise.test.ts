@@ -97,8 +97,8 @@ const {
   ensurePremiseFile,
   fallbackPremise,
   hasPremise,
+  INTERVIEW_QUESTION,
   interviewQuestions,
-  parseQuestions,
   premisePath,
   premiseSeed,
   readPremise,
@@ -153,42 +153,6 @@ test('no premise means nothing is prepended — not an empty block', () => {
   assert.equal(premiseSeed(worktree()), '')
 })
 
-// --- the model's JSON -------------------------------------------------------
-
-test('questions survive a fence and a chatty preamble', () => {
-  const parsed = parseQuestions(
-    'Sure! Here they are:\n```json\n[{"id":"goal","question":"What ships?"},' +
-      '{"id":"kind","question":"Which kind?","options":["feature","bug"]}]\n```'
-  )
-  assert.equal(parsed?.length, 2)
-  assert.equal(parsed?.[0].question, 'What ships?')
-  assert.deepEqual(parsed?.[1].options, ['feature', 'bug'])
-})
-
-test('entries with no question are dropped, and a missing id is filled in', () => {
-  const parsed = parseQuestions('[{"question":""},{"question":"Real one?"}]')
-  assert.equal(parsed?.length, 1)
-  assert.equal(parsed?.[0].id, 'q2', 'the id comes from the entry’s own position')
-})
-
-test('more than three questions are cut to three', () => {
-  const many = JSON.stringify([1, 2, 3, 4, 5].map((n) => ({ question: `Q${n}?` })))
-  assert.equal(parseQuestions(many)?.length, 3)
-})
-
-test('empty options are dropped rather than drawn as a pick with no choices', () => {
-  const parsed = parseQuestions('[{"question":"Why?","options":[]}]')
-  assert.equal(parsed?.[0].options, undefined)
-})
-
-test('junk, prose and non-arrays parse to nothing', () => {
-  assert.equal(parseQuestions(null), null)
-  assert.equal(parseQuestions('no json here'), null)
-  assert.equal(parseQuestions('[not json]'), null)
-  assert.equal(parseQuestions('{"question":"an object, not a list"}'), null)
-  assert.equal(parseQuestions('[]'), null)
-})
-
 // --- the composed file ------------------------------------------------------
 
 test('a fence and a preamble are stripped down to the first heading', () => {
@@ -218,33 +182,14 @@ test('the fallback keeps every answer, with the first one as the goal', () => {
   assert.match(text, /Out of scope\? The sidebar subtitle\./)
 })
 
-// --- the two calls ----------------------------------------------------------
+// --- the interview and the composer -----------------------------------------
 
-test('the interview asks the configured model, in the worktree', async () => {
+test('the interview is one fixed question, asked without a model call first', () => {
   globalThis.__premiseCalls = []
-  globalThis.__premisePlan = [{ stdout: '[{"id":"goal","question":"What ships?"}]' }]
-  const wt = worktree()
-
-  const questions = await interviewQuestions(wt, 'feat/premise', 'master')
-
-  assert.deepEqual(
-    questions.map((q) => q.question),
-    ['What ships?']
-  )
-  const call = globalThis.__premiseCalls[0]
-  assert.equal(call.cmd, 'claude')
-  assert.equal(call.cwd, wt, 'runs in the worktree it is asking about')
-  assert.deepEqual(call.args.slice(-2), ['--model', 'sonnet'])
-  assert.match(call.args[1], /feat\/premise/, 'the branch is in the prompt')
-  assert.match(call.args[1], /master/, 'so is the base')
-})
-
-test('a model that cannot answer still leaves an interview to run', async () => {
-  globalThis.__premiseCalls = []
-  globalThis.__premisePlan = [{ error: 'claude not found' }]
-  const questions = await interviewQuestions(worktree(), 'feat/premise')
-  assert.ok(questions.length >= 2, 'the fixed questions stand in')
+  const questions = interviewQuestions()
+  assert.equal(questions.length, 1)
   assert.match(questions[0].question, /deliver/)
+  assert.equal(globalThis.__premiseCalls.length, 0, 'nothing is asked of the model to work it out')
 })
 
 test('composing writes what the model returned, cleaned', async () => {
@@ -282,7 +227,7 @@ test('the interview is off when the config says so', async () => {
   invalidateFloeConfig()
   try {
     globalThis.__premiseCalls = []
-    assert.deepEqual(await interviewQuestions(worktree(), 'feat/premise'), [])
+    assert.deepEqual(interviewQuestions(), [])
     assert.equal(globalThis.__premiseCalls.length, 0, 'nothing is asked of the model either')
   } finally {
     writeFileSync(path, '[premise]\nenabled = true\nprovider = "claude"\nmodel = "sonnet"\n')
@@ -366,14 +311,13 @@ test('a codex that never answers is a null, not a crash', async () => {
   })
 })
 
-test('the interview runs end to end on codex too', async () => {
+test('the premise is composed end to end on codex too', async () => {
   await asCodex(async () => {
     globalThis.__premiseCalls = []
-    globalThis.__premisePlan = [{ chunks: [agentMessage('[{"question":"What ships?"}]')] }]
-    const questions = await interviewQuestions(worktree(), 'feat/premise')
-    assert.deepEqual(
-      questions.map((q) => q.question),
-      ['What ships?']
-    )
+    globalThis.__premisePlan = [{ chunks: [agentMessage('## Goal\nWrite the premise once.')] }]
+    const body = await composePremise(worktree(), 'feat/premise', [
+      { question: INTERVIEW_QUESTION.question, answer: 'the premise flow' }
+    ])
+    assert.equal(body, '## Goal\nWrite the premise once.')
   })
 })

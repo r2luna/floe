@@ -6,7 +6,6 @@ import type { BrowserWindow } from 'electron'
 import type { ProjectEnvConfig, ProvisionEvent, ProvisionStep } from '../shared/types'
 import { randomUUID } from 'node:crypto'
 import { detectPackageManager } from './devServer'
-import { readBase } from './git'
 import { floeConfig } from './config/floe'
 import {
   composePremise,
@@ -884,9 +883,9 @@ async function runInterview(worktreePath: string, branch: string, emit: Emit): P
     emit({ kind: 'step', id: PREMISE_STEP_ID, status, detail })
   const clear = (): void => emit({ kind: 'ask', ask: null })
 
-  step('running', 'working out what to ask')
-  const questions = await interviewQuestions(worktreePath, branch, readBase(worktreePath))
+  const questions = interviewQuestions()
   if (!questions.length) return step('skipped')
+  step('running')
 
   const answers: PremiseAnswer[] = []
   for (const [i, q] of questions.entries()) {

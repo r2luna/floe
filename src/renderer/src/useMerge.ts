@@ -86,6 +86,29 @@ export function pickFlow(
   return { flow: (here?.root === root ? here : null) ?? mine[0] ?? null, mine }
 }
 
+/**
+ * Write one flow into the chain's map, in the ref, now.
+ *
+ * The steps run async and read their flow back through the ref before touching
+ * it, so the write has to land before the next line runs — `start` creates the
+ * flow and calls preflight in the same tick, and React state is a render away.
+ * Returns the new map, which is what the component renders.
+ */
+export function writeFlow(
+  ref: { current: Record<string, MergeFlow> },
+  key: string,
+  arg: MergeFlow | null | ((f: MergeFlow | null) => MergeFlow | null)
+): Record<string, MergeFlow> {
+  const all = ref.current
+  const cur = all[key] ?? null
+  const next = typeof arg === 'function' ? arg(cur) : arg
+  const copy = { ...all }
+  if (next) copy[key] = next
+  else delete copy[key]
+  ref.current = copy
+  return copy
+}
+
 export interface Merge {
   /** The flow on screen: the one for the tree the app is in, else the newest of the open project. */
   flow: MergeFlow | null
@@ -135,9 +158,13 @@ export function useMerge(deps: {
   // Keyed by worktree path: every merge is its own chain, and the key is also
   // the flow's identity — the steps thread it around instead of writing to
   // whichever one happened to start last.
+  // The ref is the chain's copy and it leads the state: `start` writes the new
+  // flow and calls the first step in the same tick, so a ref that only caught up
+  // on the next render would hand that step a flow that does not exist yet — and
+  // every step reads its flow back before doing anything, so the checklist would
+  // sit on a spinner forever. setFlows mirrors the ref for rendering.
   const [flows, setFlows] = useState<Record<string, MergeFlow>>({})
   const flowsRef = useRef(flows)
-  flowsRef.current = flows
 
   const { flow, mine } = pickFlow(flows, root, worktreePath)
 
@@ -152,14 +179,7 @@ export function useMerge(deps: {
     key: string,
     arg: MergeFlow | null | ((f: MergeFlow | null) => MergeFlow | null)
   ): void {
-    setFlows((all) => {
-      const cur = all[key] ?? null
-      const next = typeof arg === 'function' ? arg(cur) : arg
-      const copy = { ...all }
-      if (next) copy[key] = next
-      else delete copy[key]
-      return copy
-    })
+    setFlows(writeFlow(flowsRef, key, arg))
   }
 
   function step(key: string, id: MergeStepId, patch: Partial<MergeStep>): void {
