@@ -36,7 +36,9 @@ import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
   load as loadLane,
+  projectRailOf,
   remember,
+  rememberRail,
   rememberSession,
   rememberWorktree,
   save as saveLane,
@@ -356,6 +358,10 @@ export default function App() {
   // chat each branch was left showing. Refs rather than state — nothing renders
   // from them, they are read at the moment a switch happens.
   const byProject = useRef(restored.current?.byProject ?? {})
+  // And which project-bound rail panels it had up — today, the colony board.
+  // The board belongs to a repo root, so it is remembered next to the branch
+  // rather than left standing when you walk into another project.
+  const railByProject = useRef(restored.current?.railByProject ?? {})
   const byWorktree = useRef(restored.current?.byWorktree ?? {})
   // The chat panel you were on before this one (vim's ⌃^). The whole panel, not
   // just an id: it carries the worktree the session lives in, so the jump works
@@ -654,6 +660,10 @@ export default function App() {
     const project = worktrees.repo === projects.current?.path ? projects.current?.path : undefined
     if (project && worktrees.currentPath)
       byProject.current = rememberWorktree(byProject.current, project, worktrees.currentPath)
+    // Same guard, same reason: filed only while the lane on screen is this
+    // project's, or a switch would tell the project you just left that it holds
+    // the board you are about to open in the new one.
+    if (project) railByProject.current = rememberRail(railByProject.current, project, projectRailOf(lane))
     // Which chat this branch is showing — `null` when it is showing none, which
     // is a thing to remember rather than an absence of one. Keyed off the OPEN
     // CHAT's own worktree, not the sidebar selection: for one render after a
@@ -671,6 +681,7 @@ export default function App() {
       lane,
       bySession: by,
       byProject: byProject.current,
+      railByProject: railByProject.current,
       byWorktree: byWorktree.current,
       project,
       worktree: worktrees.currentPath
@@ -990,7 +1001,20 @@ export default function App() {
     // Switching project is only ever a step towards a worktree, so the list
     // comes with you rather than leaving you on whatever was on screen.
     const name = projects.all.find((p) => p.path === path)?.name
-    setLane((l) => open(leaving ? withoutProject(l) : l, panelOf('worktrees', name)))
+    const list = panelOf('worktrees', name)
+    setLane((l) => {
+      const base = open(leaving ? withoutProject(l) : l, list)
+      if (!leaving) return base
+      // The board went out with the old project; the new one gets its own back,
+      // open or closed as it was left. Focus stays on the worktree list — the
+      // switch is a step towards a branch, and a restored panel is not where you
+      // were headed.
+      const back = (railByProject.current[path] ?? []).reduce(
+        (acc, kind) => open(acc, panelOf(kind as PanelKind)),
+        base
+      )
+      return focusAt(back, back.panels.findIndex((p) => p.id === list.id))
+    })
   }
 
   // The wait `pending` describes, resolved: the worktrees are here, so land on

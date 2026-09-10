@@ -65,3 +65,54 @@ test('projects.addByPath reads the path on the backend it names', async () => {
   assert.equal(remote.length, 1)
   assert.equal(here.project?.path, '/here/repo')
 })
+
+// `o` on a file row is a path handed to the OS, which only means anything on
+// the machine that HOLDS the file. The api answers which case it is, so the
+// renderer can copy the file over instead of opening it on someone else's desk.
+test('the api says whether the current backend is this machine', () => {
+  const ipc: IpcLike = { invoke: async () => undefined, on: () => {}, removeListener: () => {} }
+
+  // No router at all: a plain desktop window, always local.
+  assert.equal(buildFloeApi(ipc, host).backends.onThisMachine(), true)
+
+  let current = 'local'
+  const attached: FloeHost = {
+    ...host,
+    backendsCtl: {
+      list: () => [],
+      current: () => current,
+      use: () => true,
+      state: () => 'open',
+      invokeOn: async () => undefined
+    }
+  }
+  const api = buildFloeApi(ipc, attached)
+  assert.equal(api.backends.onThisMachine(), true)
+  current = 'mac'
+  assert.equal(api.backends.onThisMachine(), false)
+
+  // A tab overrules the pointer: the daemon called "local" is still not the
+  // computer the browser is running on.
+  assert.equal(buildFloeApi(ipc, { ...host, onThisMachine: () => false }).backends.onThisMachine(), false)
+})
+
+test('a file comes across in slices and lands with openDownload', async () => {
+  const calls: Array<[string, unknown[]]> = []
+  const ipc: IpcLike = {
+    invoke: async (channel, ...args) => {
+      calls.push([channel, args])
+      return channel === 'files:openDownload' ? '/home/x/Downloads/demo.mp4' : null
+    },
+    on: () => {},
+    removeListener: () => {}
+  }
+  const api = buildFloeApi(ipc, host)
+
+  await api.files.readChunk('/w', 'demo.mp4', 0, 1024)
+  const saved = await api.files.openDownload('demo.mp4', 'AAAA')
+  assert.equal(saved, '/home/x/Downloads/demo.mp4')
+  assert.deepEqual(calls, [
+    ['files:readChunk', ['/w', 'demo.mp4', 0, 1024]],
+    ['files:openDownload', ['demo.mp4', 'AAAA']]
+  ])
+})

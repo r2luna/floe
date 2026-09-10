@@ -195,12 +195,14 @@ import {
 import {
   applyFileOps,
   listDir,
+  readFileChunk,
   readFileContent,
   renderDocument,
   resolveWikiLink,
   safeResolve,
   searchableFiles
 } from './files'
+import { saveDownload } from './downloads'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTask, tick } from './colony/runner'
@@ -1029,6 +1031,19 @@ export function registerFileIpc(): void {
     // openPath resolves with the OS's complaint instead of rejecting, and a
     // silent no-op is the one thing a keybinding must never be.
     if (failure) throw new Error(failure)
+  })
+  // The other half of `o`, for when the file is NOT on this machine: the window
+  // reads it across in slices and opens the copy here. `files:readChunk` runs
+  // where the file is; `files:openDownload` is pinned to the machine the window
+  // is on, because that is the desk the document has to appear on.
+  handle('files:readChunk', (_event, worktreePath: string, relPath: string, start: number, length: number) =>
+    readFileChunk(worktreePath, relPath, start, length)
+  )
+  handle('files:openDownload', async (_event, name: string, base64: string) => {
+    const path = saveDownload(name, base64)
+    const failure = await shell.openPath(path)
+    if (failure) throw new Error(failure)
+    return path
   })
   handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
   handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))

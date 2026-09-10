@@ -63,9 +63,12 @@ canal cai num de dois lados, e não há terceiro:
   `user:name`) → vai pelo socket como todo o resto; o daemon é a única máquina
   que existe, e o pin simplesmente não se aplica;
 - **descreve uma janela nativa** (`window:*`, `app:*LoginItem`, `update:*`,
-  `notify:show`, `theme:get`, `open:external`) → a aba responde sozinha, com
-  API de browser quando existe uma. O daemon shima esses num no-op, e responder
-  de lá seria mentira.
+  `notify:show`, `theme:get`, `open:external`, `files:openDownload`) → a aba
+  responde sozinha, com API de browser quando existe uma. O daemon shima esses
+  num no-op, e responder de lá seria mentira. `files:openDownload` é o caso mais
+  claro: `o` num arquivo abre um caminho, e o caminho só existe na máquina que
+  guarda o arquivo — então a aba lê os bytes em fatias (`files:readChunk`, que
+  vai pelo socket) e vira download do browser.
 
 `backends:get` é a exceção que confirma a regra: ele descreve o workspace, então
 vai pelo socket — e é assim que a página enxerga as outras máquinas. Ver

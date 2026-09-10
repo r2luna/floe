@@ -31,6 +31,7 @@ import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
+import { downloadAndOpen } from './download.ts'
 import { CHAT_LAYOUTS, type FileOp } from '../../shared/types.ts'
 
 /**
@@ -961,7 +962,18 @@ export const REGISTRY: Map<string, Command> = new Map(
           const path = openTargetOf(c)
           const root = c.worktree?.path
           if (!path || !root) return
-          void window.floe.files.open(root, path).catch((err: unknown) => c.say(reason(err)))
+          // A path is only openable on the machine that holds the file. When
+          // that is somewhere else — attached to another machine, or in a tab,
+          // where it always is — the file comes here first and this opens the
+          // copy. See download.ts.
+          if (window.floe.backends.onThisMachine()) {
+            void window.floe.files.open(root, path).catch((err: unknown) => c.say(reason(err)))
+            return
+          }
+          c.say(`bringing ${path.split('/').pop()} over…`)
+          void downloadAndOpen(root, path)
+            .then((saved) => c.say(saved ? `opened ${saved}` : `downloaded ${path.split('/').pop()}`))
+            .catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

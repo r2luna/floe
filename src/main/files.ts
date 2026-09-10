@@ -11,9 +11,10 @@ import {
   type Dirent
 } from 'node:fs'
 import { execFile } from 'node:child_process'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { open } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
-import type { FileContent, FileNode, FileOp } from '../shared/types'
+import type { FileChunk, FileContent, FileNode, FileOp } from '../shared/types'
 import { convertToPdf, pdfDataUrl, pptxSlides } from './office.ts'
 
 const execFileAsync = promisify(execFile)
@@ -324,4 +325,70 @@ function walkFiles(root: string): string[] {
     }
   }
   return out.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+}
+
+// --- Handing a file to the machine the user is at ---------------------------
+
+/**
+ * How much of a file one `files:readChunk` answers. Same reasoning as
+ * media.ts's limit: a gate frame is a whole message in memory on both ends,
+ * and base64 makes it a third bigger again.
+ */
+export const FILE_CHUNK_LIMIT = 1024 * 1024
+
+/** The most a download will assemble. A file past this is one you want a real
+    transfer for, not a chat panel — and the renderer holds it all at once. */
+export const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
+
+const clamp = (n: unknown, max: number): number =>
+  typeof n === 'number' && Number.isFinite(n) ? Math.min(Math.max(0, Math.trunc(n)), max) : 0
+
+/**
+ * A slice of a file, as base64 — the bytes of `o` when the file is on another
+ * machine.
+ *
+ * `files:open` hands a path to the OS, which only means something on the
+ * machine that HOLDS the file. Attached to another machine (or in a tab) that
+ * opens the document on a desk nobody is sitting at, so the window pulls the
+ * file over instead, a slice at a time, and opens the copy. Null when the path
+ * names no file.
+ *
+ * The same worktree check every read here does: `safeResolve` throws for a path
+ * that leaves the tree, so this cannot be turned into "read any file on that
+ * machine" by asking for `../../.ssh/id_rsa`.
+ */
+export async function readFileChunk(
+  worktreePath: string,
+  relPath: string,
+  start: number,
+  length: number
+): Promise<FileChunk | null> {
+  const abs = safeResolve(worktreePath, relPath)
+
+  let size = 0
+  try {
+    const stat = statSync(abs)
+    if (!stat.isFile()) return null
+    size = stat.size
+  } catch {
+    return null
+  }
+
+  const from = clamp(start, size)
+  const want = Math.min(clamp(length, FILE_CHUNK_LIMIT), size - from)
+  const buf = Buffer.alloc(want)
+
+  const file = await open(abs, 'r')
+  try {
+    const { bytesRead } = await file.read(buf, 0, want, from)
+    return {
+      name: basename(abs),
+      size,
+      start: from,
+      end: from + bytesRead - 1,
+      base64: buf.subarray(0, bytesRead).toString('base64')
+    }
+  } finally {
+    await file.close()
+  }
 }

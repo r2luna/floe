@@ -6119,6 +6119,17 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           <span className="badge">one dir each</span>
         </button>
       </div>
+
+      {/* Which build this is. A div and not a button: there is nothing to
+          activate, so the lane's cursor walks past it rather than stopping on a
+          row that answers Enter with silence. */}
+      <div className="group">
+        <div className="group-label">ABOUT</div>
+        <div className="row settings-row">
+          <span className="row-name">Version</span>
+          <span className="settings-value">{window.floe.appVersion}</span>
+        </div>
+      </div>
     </div>
   )
 }

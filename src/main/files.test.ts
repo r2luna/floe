@@ -12,7 +12,14 @@ import {
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { applyFileOps, listDir, readFileContent, resolveWikiLink, searchableFiles } from './files.ts'
+import {
+  applyFileOps,
+  listDir,
+  readFileChunk,
+  readFileContent,
+  resolveWikiLink,
+  searchableFiles
+} from './files.ts'
 import { makeGitRepo } from './gitFixture.test-helper.ts'
 
 // `searchableFiles` spawns `git ls-files` with the ambient environment, and this
@@ -270,4 +277,39 @@ test('resolveWikiLink will not resolve to a directory', () => {
     mkdirSync(join(root, 'folder'))
     assert.equal(resolveWikiLink(root, 'from.md', 'folder'), null)
   })
+})
+
+// --- reading a file across to another machine -------------------------------
+
+test('a chunk is the slice asked for, and says how big the file is', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-chunk-'))
+  writeFileSync(join(root, 'demo.bin'), '0123456789')
+
+  const head = await readFileChunk(root, 'demo.bin', 0, 4)
+  assert.equal(head?.name, 'demo.bin')
+  assert.equal(head?.size, 10)
+  assert.equal(Buffer.from(head!.base64, 'base64').toString(), '0123')
+
+  // Short at the end of the file, and empty past it — which is how the pull
+  // loop knows to stop rather than asking forever.
+  const tail = await readFileChunk(root, 'demo.bin', 8, 999)
+  assert.equal(Buffer.from(tail!.base64, 'base64').toString(), '89')
+  assert.equal(tail?.end, 9)
+  const past = await readFileChunk(root, 'demo.bin', 10, 4)
+  assert.equal(past?.base64, '')
+  assert.equal(past?.end, 9)
+
+  rmSync(root, { recursive: true, force: true })
+})
+
+test('a chunk cannot be used to read outside the worktree', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'floe-chunk-'))
+  writeFileSync(join(root, '..', 'secret.txt'), 'no')
+  await assert.rejects(readFileChunk(root, '../secret.txt', 0, 4), /outside the worktree/)
+  // A directory is not a file, and a missing path is not an error the caller
+  // has to distinguish — both are "there is nothing to bring across".
+  mkdirSync(join(root, 'sub'))
+  assert.equal(await readFileChunk(root, 'sub', 0, 4), null)
+  assert.equal(await readFileChunk(root, 'nope.txt', 0, 4), null)
+  rmSync(root, { recursive: true, force: true })
 })

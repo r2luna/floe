@@ -33,6 +33,7 @@ import type {
   CodexModel,
   Effort,
   FileAttachment,
+  FileChunk,
   FileContent,
   FileNode,
   ImageAttachment,
@@ -98,6 +99,14 @@ export interface FloeHost {
   worktreeTag: string | null
   /** The preload's multi-backend router controls; absent means local-only. */
   backendsCtl?: BackendsCtl
+  /**
+   * Does the machine answering workspace calls happen to BE this machine?
+   *
+   * A tab says no whatever backend it points at — the daemon is never the
+   * computer the browser is on. Left out on the desktop, where the pointer
+   * already answers it.
+   */
+  onThisMachine?: () => boolean
 }
 
 /** How the api layer steers the preload's backend router (see preload/index.ts). */
@@ -170,7 +179,14 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       invokeOn: (id: string, channel: string, ...args: unknown[]): Promise<unknown> =>
         host.backendsCtl
           ? host.backendsCtl.invokeOn(id, channel, ...args)
-          : ipcRenderer.invoke(channel, ...args)
+          : ipcRenderer.invoke(channel, ...args),
+      /**
+       * Is the current backend this very machine? What `o` asks before handing
+       * a path to the OS: a file on another machine has to be copied here
+       * first, and in a tab that is true even of the daemon called "local".
+       */
+      onThisMachine: (): boolean =>
+        host.onThisMachine?.() ?? (host.backendsCtl ? host.backendsCtl.current() === 'local' : true)
     },
     // Runtime plugins (main/plugins/host.ts): the palette merges `commands`
     // into the registry as `plugin:<name>:<id>` rows whose run dispatches back
@@ -831,6 +847,25 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
        */
       open: (worktreePath: string, relPath: string): Promise<void> =>
         ipcRenderer.invoke('files:open', worktreePath, relPath),
+      /**
+       * A slice of a file, from the machine that holds it — how `o` brings a
+       * document across when that machine is not this one. Null when the path
+       * names no file. See renderer/src/download.ts for the loop.
+       */
+      readChunk: (
+        worktreePath: string,
+        relPath: string,
+        start: number,
+        length: number
+      ): Promise<FileChunk | null> =>
+        ipcRenderer.invoke('files:readChunk', worktreePath, relPath, start, length),
+      /**
+       * Land those bytes on THIS machine and open them. Answers where the copy
+       * went, or null in a tab — there the browser owns the download and only
+       * it knows where the file ended up.
+       */
+      openDownload: (name: string, base64: string): Promise<string | null> =>
+        ipcRenderer.invoke('files:openDownload', name, base64),
       /**
        * Fires when anything in the worktree lands on disk — including the
        * gitignored files (`.floe/plans/…`) the review event skips, because the

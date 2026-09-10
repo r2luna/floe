@@ -72,8 +72,31 @@ Object.defineProperty(globalThis, 'navigator', {
   configurable: true,
   writable: true
 })
+/** What `files:openDownload` did in the tab: the anchor it clicked. */
+let downloaded: Array<{ name: string; bytes: number }> = []
+let lastBlobSize = 0
+
+// The real URL class stays: bridge.ts parses backend addresses with it. Only
+// the two blob methods a tab would have are added.
+Object.assign(URL, { createObjectURL: () => 'blob:x', revokeObjectURL: () => {} })
+
 Object.assign(globalThis, {
   WebSocket: FakeSocket,
+  Blob: class {
+    constructor(parts: Uint8Array[]) {
+      lastBlobSize = parts.reduce((n, p) => n + p.length, 0)
+    }
+  },
+  atob: (b64: string) => Buffer.from(b64, 'base64').toString('binary'),
+  document: {
+    createElement: () => ({
+      href: '',
+      download: '',
+      click(this: { download: string }) {
+        downloaded.push({ name: this.download, bytes: lastBlobSize })
+      }
+    })
+  },
   location: { protocol: 'https:', host: 'floe.pinguim.io' },
   matchMedia: () => ({
     matches: prefersDark,
@@ -103,6 +126,8 @@ beforeEach(() => {
   answers.clear()
   opened = []
   mediaHandlers = []
+  downloaded = []
+  lastBlobSize = 0
   openedCalls.length = 0
   prefersDark = false
 })
@@ -164,6 +189,27 @@ test('media:probe comes back with a url the tab can fetch', async () => {
     kind: 'video',
     url: '/media/local/srv/rec/a.mp4'
   })
+  socket.close()
+})
+
+test('a tab is never the machine the files are on', async () => {
+  const { host, socket } = createWebBridge(boot)
+  await settle()
+  // Not even for the daemon it is talking to: `o` has to put the file on the
+  // computer the browser runs on, which is never the one answering.
+  assert.equal(host.onThisMachine!(), false)
+  socket.close()
+})
+
+test('opening a downloaded file in a tab is the browser saving it', async () => {
+  const { ipc, socket } = createWebBridge(boot)
+  await settle()
+
+  const saved = await ipc.invoke('files:openDownload', 'demo.mp4', Buffer.from('0123456789').toString('base64'))
+  // Null: where it landed is the browser's business. The daemon never sees it.
+  assert.equal(saved, null)
+  assert.deepEqual(downloaded, [{ name: 'demo.mp4', bytes: 10 }])
+  assert.equal(opened[0].invokes.some((i) => i.channel === 'files:openDownload'), false)
   socket.close()
 })
 

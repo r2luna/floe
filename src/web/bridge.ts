@@ -103,7 +103,25 @@ export function browserHandlers(
     // Revealing a file in a file manager would open it on the daemon's desktop,
     // which nobody is sitting at.
     'config:reveal': async () => undefined,
-    'keybindings:reveal': async () => undefined
+    'keybindings:reveal': async () => undefined,
+
+    // The same reason `o` never opens a path here: the machine that holds the
+    // file is not the one the browser is on. The renderer has already read the
+    // bytes across (renderer/src/download.ts), so this is where they become a
+    // download — the tab's only way to put a file on the user's computer.
+    // Answers null: where it landed is the browser's business, not ours.
+    'files:openDownload': async (name: string, base64: string) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
+      const url = URL.createObjectURL(new Blob([bytes]))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = name
+      link.click()
+      // Revoked on the next tick, not now: Chromium reads the blob after the
+      // click returns, and a url pulled out from under it downloads nothing.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+      return null
+    }
     // `backends:get` is NOT here: it is the serving daemon's own machine list,
     // and the router below asks it over the socket like the preload asks main.
   }
@@ -255,6 +273,10 @@ export function webIpc(
 /** What the tab knows about itself, plus the controls the rail steers with. */
 export function webHost(boot: FloeBoot, table: BackendTable, socket: SocketIpc): FloeHost {
   return {
+    // Never — whichever machine the rail points at, it is not the computer the
+    // browser is running on. `o` reads that and copies the file over instead of
+    // opening a path on someone else's desk.
+    onThisMachine: () => false,
     // The browser's platform, not the daemon's: this only ever labels the
     // machine the keys are pressed on.
     platform: navigator.platform || 'web',

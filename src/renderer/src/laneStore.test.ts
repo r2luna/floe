@@ -3,7 +3,9 @@ import assert from 'node:assert/strict'
 import {
   load,
   persistable,
+  projectRailOf,
   remember,
+  rememberRail,
   rememberSession,
   rememberWorktree,
   save,
@@ -220,6 +222,26 @@ test('a project switch leaves only the window panels', () => {
   )
 })
 
+// The colony board reads one repo root — its tasks, its stages, its nanny. It
+// sits left of the session, so position alone would carry it into the next
+// project and show that project a board that is not its own.
+test('a project switch takes the colony board with it', () => {
+  const lane = laneWith('s1', panel('colony', 20))
+  assert.deepEqual(
+    withoutProject(lane).panels.map((p) => p.kind),
+    ['projects', 'worktrees']
+  )
+})
+
+test('the board a project had open is what comes back to it', () => {
+  assert.deepEqual(projectRailOf(laneWith('s1', panel('colony', 20))), ['colony'])
+  // Closed is an answer, not an absence: a project you left with no board must
+  // not inherit one from the project you were in before it.
+  assert.deepEqual(projectRailOf(laneWith('s1')), [])
+  const rail = rememberRail(rememberRail({}, '/a', ['colony']), '/b', [])
+  assert.deepEqual(rail, { '/a': ['colony'], '/b': [] })
+})
+
 test('the focus never points past what the switch left standing', () => {
   const lane = { ...laneWith('s1', panel('commands', 43)), focus: 3 }
   assert.equal(withoutProject(lane).focus, 1)
@@ -227,7 +249,7 @@ test('the focus never points past what the switch left standing', () => {
 
 test('the saved focus never points past what was saved', () => {
   const lane = { panels: [panel('worktrees', 10), panel('setup', 41)], focus: 1 }
-  save({ lane, bySession: {}, byProject: {}, byWorktree: {} })
+  save({ lane, bySession: {}, byProject: {}, railByProject: {}, byWorktree: {} })
   const back = load()
   assert.deepEqual(back?.lane.panels.map((p) => p.kind), ['worktrees'])
   assert.equal(back?.lane.focus, 0, 'the checklist it pointed at is gone')

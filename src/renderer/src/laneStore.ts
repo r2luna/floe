@@ -44,6 +44,21 @@ const SESSION_ORDER = 30
  */
 const PROJECT_PANELS = new Set(['merge', 'remove', 'setup'])
 
+/**
+ * Rail panels that show ONE project's work rather than the window's.
+ *
+ * The colony board is the case: its tasks, its stages and its nanny are all
+ * keyed by repo root, so a board carried into another project would either sit
+ * empty or — worse — read as that project's while showing nothing of it. It
+ * sits left of the session (order 20) and so survives `withoutProject` on
+ * position alone, which is exactly what has to stop.
+ *
+ * Unlike PROJECT_PANELS these are remembered rather than dropped: which of them
+ * a project had open is filed under its root, so leaving hides the board and
+ * coming back puts it up again.
+ */
+const PROJECT_RAIL = new Set(['colony'])
+
 /** Whether a panel is one the session opened, and so travels with it. */
 function sessionOwns(panel: Panel): boolean {
   return (panel.order ?? 0) > SESSION_ORDER && !PROJECT_PANELS.has(panel.kind)
@@ -72,6 +87,12 @@ export interface LaneMemory {
   worktree?: string
   /** The worktree each project was last left on, keyed by project path. */
   byProject: Record<string, string>
+  /**
+   * The project-bound rail panels each project was left showing (PROJECT_RAIL),
+   * keyed by project path. An empty array is a real answer — you closed the
+   * board — and is why this is not derived from "has any task".
+   */
+  railByProject: Record<string, string[]>
   /**
    * The session each worktree was last left showing, keyed by worktree path.
    * `null` is a real answer — it means the launcher, i.e. you closed the chat
@@ -148,8 +169,24 @@ export function withScoped(lane: Lane, scoped: Panel[]): Lane {
  * is a step towards a branch in the new project.
  */
 export function withoutProject(lane: Lane): Lane {
-  const panels = lane.panels.filter((p) => (p.order ?? 0) < SESSION_ORDER)
+  const panels = lane.panels.filter(
+    (p) => (p.order ?? 0) < SESSION_ORDER && !PROJECT_RAIL.has(p.kind)
+  )
   return { panels, focus: Math.min(lane.focus, Math.max(0, panels.length - 1)) }
+}
+
+/** The project-bound rail panels a lane has open, in lane order — see PROJECT_RAIL. */
+export function projectRailOf(lane: Lane): string[] {
+  return lane.panels.filter((p) => PROJECT_RAIL.has(p.kind)).map((p) => p.kind)
+}
+
+/** Record which project-bound rail panels a project was left showing. */
+export function rememberRail(
+  railByProject: Record<string, string[]>,
+  project: string,
+  kinds: string[]
+): Record<string, string[]> {
+  return rememberIn(railByProject, project, kinds, MAX_PLACES)
 }
 
 /**
@@ -246,6 +283,7 @@ export function load(): LaneMemory | null {
       ...parsed,
       bySession: parsed.bySession ?? {},
       byProject: parsed.byProject ?? {},
+      railByProject: parsed.railByProject ?? {},
       byWorktree: parsed.byWorktree ?? {}
     }
   } catch {

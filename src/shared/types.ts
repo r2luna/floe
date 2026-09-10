@@ -473,6 +473,19 @@ export interface MediaChunk {
   base64: string
 }
 
+// A slice of a file on its way to the machine the user is at — what `o` does
+// when the file is on another machine (see main/files.ts `readFileChunk`).
+export interface FileChunk {
+  /** The file's own name, so the copy keeps it. */
+  name: string
+  /** The whole file's size, so the caller knows when it is done. */
+  size: number
+  start: number
+  /** Inclusive, and `start - 1` when the slice came back empty. */
+  end: number
+  base64: string
+}
+
 // --- Review (changed files + diff comments) --------------------------------
 
 // One entry in the changed-files review list — a file that differs from the

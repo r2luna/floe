@@ -780,7 +780,10 @@ button {
   color: var(--text-strong);
 }
 
-.row[data-active] .dot {
+/* Except when it is also unread: marking the chat you are LOOKING AT as "read
+   it later" is the whole gesture, and this rule outspecifies .dot-unread — so
+   the one row where the mark has to appear was the one row that stayed green. */
+.row[data-active] .dot:not(.dot-unread) {
   background: var(--live);
   border-color: var(--live);
 }
