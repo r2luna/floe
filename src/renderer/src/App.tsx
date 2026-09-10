@@ -3302,6 +3302,11 @@ function commandItems(binds: Keybind[]): PaletteItem[] {
   return listCommands(REGISTRY).map((c) => ({
     id: c.id,
     title: `${c.group.toLowerCase()}: ${c.title.replace(/…$/, '').toLowerCase()}`,
+    // A command is named in prose, not in path segments: `mcp: enable/disable
+    // mcp server` split at its slash reads as a file `disable mcp server` in a
+    // directory `enable/`. Flat also gives the title the row's slack, so a long
+    // name ellipsises at the key chip instead of running off the column.
+    flat: true,
     keys: bound.has(c.id) ? formatChord(bound.get(c.id)!) : c.keys
   }))
 }

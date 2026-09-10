@@ -4993,10 +4993,14 @@ button {
   overflow: hidden;
 }
 
-/* With a preview pane there are two columns to fit, so the box widens to the
-   chat panel's measure. Without one it stays at the list's width. */
+/* With a preview pane there are two columns to fit, so the box takes the room a
+   two-column thing needs. Without one it stays at the list's width.
+
+   Wide enough that the LIST is a full-measure list rather than the offcut left
+   over after the pane: at 760 the longest command in the registry ran off its
+   column mid-word, which is the one thing a palette you are reading cannot do. */
 .palette[data-wide] {
-  width: min(760px, calc(100vw - 32px));
+  width: min(1120px, calc(100vw - 32px));
 }
 
 /* The head is a panel head that happens to hold a caret: same height, same
@@ -5108,15 +5112,21 @@ button {
   padding: 5px;
 }
 
+/* The list takes the slack, the pane below is what is fixed — a row of prose is
+   as long as it is, while the pane holds four short facts and a file head and
+   has a width past which it only grows emptier. */
 .palette[data-wide] .palette-list {
-  flex: 0 0 300px;
+  flex: 1 1 auto;
   border-right: 1px solid var(--line-soft);
 }
 
 /* The row under the cursor, explained. Scrolls with its own content so a long
    file head cannot push the box past the list beside it. */
 .palette-side {
-  flex: 1;
+  /* Fixed, so the list beside it grows with the box: 420 is what the pane had
+     when the box was 760, and a file head is code — it does not reflow, so
+     there is nothing for extra width to do here. */
+  flex: 0 0 420px;
   min-width: 0;
   max-height: 52vh;
   overflow: hidden;

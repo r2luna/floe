@@ -1,0 +1,146 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Command palette — wider split</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. Every palette below uses the app's own classes and
+   tokens; each proposal is a small override block, nothing new invented. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:22px 26px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:86ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:96ch; }
+.opt{ margin:0 0 40px; }
+.k{ color:var(--text-strong); }
+button.theme{ position:fixed; top:12px; right:16px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+
+/* A fake window, so each proposal is judged against the space it actually has
+   rather than floating on an infinite page. 1440 is the laptop measure. */
+.win{ position:relative; width:1440px; max-width:100%; height:300px; overflow:hidden;
+  border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); }
+.win.short{ height:250px; }
+.win .palette-scrim{ position:absolute; padding-top:24px; }
+
+/* The fix, applied to every block below the baseline. */
+.fix .palette[data-wide]{ width: min(1120px, calc(100vw - 32px)); }
+.fix .palette[data-wide] .palette-list{ flex: 1 1 auto; }
+.fix .palette-side{ flex: 0 0 420px; }
+.fix .palette-title{ flex: 0 1 auto; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>The split is too narrow for the commands</h1>
+<p class="lede">
+Same 1440px window everywhere. Only two things change: the box widens from 760
+to 1120, and the list stops being pinned to 300px — the pane takes a fixed 420
+(what it has today) and the list keeps the rest.
+</p>
+
+<div id="out"></div>
+
+<script>
+// Real rows, from registry.ts — `group: title`, lowercased, the way
+// commandItems() builds them.
+const CMDS = [
+  ['worktrees: remove: force past the dirty tree, or retry the failed step', '⏎'],
+  ['worktrees: merge: stash the uncommitted changes and retry', 's'],
+  ['commands: move command between project and this worktree', '⌘M'],
+  ['worktrees: merge: approve, or retry the failed step', '⏎'],
+  ['sessions: delete other sessions on this worktree', ''],
+  ['files: read markdown as prose, or as a patch', '⌘K P'],
+  ['sessions: delete sessions idle for over an hour', ''],
+  ['worktrees: remove worktree and delete its branch', '⌘K X'],
+  ['panels: focus panel below (in a stack)', '⌃J'],
+];
+
+const CMD_PANE = `
+  <h4 class="palette-pane-title">Remove: force past the dirty tree, or retry the failed step</h4>
+  <div class="palette-facts">
+    <div class="palette-fact"><b>group</b><span>Worktrees</span></div>
+    <div class="palette-fact"><b>key</b><span>⏎</span></div>
+    <div class="palette-fact"><b>runs</b><span data-tone="warn">the removal is not waiting on you</span></div>
+  </div>
+  <div class="palette-pane-note">⌘⏎ records a new binding for it.</div>`;
+
+function box(head, sigil, rows, pane, foot){
+  return `
+  <div class="palette-scrim">
+    <div class="palette" data-wide>
+      <div class="palette-head">
+        <span class="palette-sigil">${sigil}</span>
+        <input class="palette-input" placeholder="${head}" readonly />
+        <span class="palette-count">139</span>
+      </div>
+      <div class="palette-split">
+        <div class="palette-list">${rows}</div>
+        <div class="palette-side">${pane}</div>
+      </div>
+      <div class="palette-foot">${foot}</div>
+    </div>
+  </div>`;
+}
+
+const cmdRows = CMDS.map(([t,k],i)=>`
+  <button class="palette-row" ${i===0?'data-at=""':''}>
+    <span class="palette-title">${t}</span>
+    ${k?`<span class="palette-keys">${k}</span>`:''}
+  </button>`).join('');
+
+const cmdPalette = () => box('Execute a command…','⌘',cmdRows,CMD_PANE,'⏎ run · ⌘⏎ rebind · ↑↓ move · esc close');
+
+// The finder — the other wide palette, and the one whose pane actually uses its
+// width: a file head is code, and code does not reflow.
+const FILES = [
+  ['src/renderer/src/','palettePreview.tsx'],
+  ['src/renderer/src/','Palette.tsx'],
+  ['src/main/worktrees/','provision.ts'],
+  ['src/shared/','types.ts'],
+  ['docs/','plugins.md'],
+  ['src/renderer/src/','registry.test.ts'],
+  ['src/main/sessions/','harness.ts'],
+];
+const fileRows = FILES.map(([d,n],i)=>`
+  <button class="palette-row" ${i===0?'data-at=""':''}>
+    <span class="palette-dir"><bdi>${d}</bdi></span>
+    <span class="palette-title">${n}</span>
+  </button>`).join('');
+const FILE_PANE = `
+  <h4 class="palette-pane-title">palettePreview.tsx</h4>
+  <pre class="palette-code">import { useEffect, useState, type ReactNode } from 'react'
+import type { Project, Worktree } from '../../shared/types'
+
+/**
+ * The palette's right-hand pane, and the add dialog's: the
+ * row under the cursor explained, as a column of facts.
+ */
+export function Facts({ children }: { children: ReactNode }) {
+  return &lt;div className="palette-facts"&gt;{children}&lt;/div&gt;
+}</pre>`;
+const finderPalette = () => box('Find a chat or a file…','⌕',fileRows,FILE_PANE,'⏎ open · ⇥ filter · ↑↓ move · esc close');
+
+const OPTS = [
+  { id:'p1', cls:'', name:'Today — commands', short:true, make:cmdPalette,
+    note:`760px box, list pinned to <span class="k">flex: 0 0 300px</span>. And the title is <span class="k">flex: none</span>, so it does not even ellipsise — it runs past the column and is clipped mid-word.` },
+  { id:'p2', cls:'fix', name:'Proposed — commands', make:cmdPalette,
+    note:`1120px box, pane fixed at 420, list takes the ~700 that is left. The longest command in the registry fits whole; the ellipsis stays as the floor for a narrow window.` },
+  { id:'p3', cls:'fix', name:'Proposed — the finder, same rule', make:finderPalette,
+    note:`The other wide palette, checked against the same numbers: the pane keeps the 420 it has today, so the file head loses no width, and the paths gain the whole difference.` },
+];
+
+document.getElementById('out').innerHTML = OPTS.map(o=>`
+  <div class="opt">
+    <h2>${o.name}</h2>
+    <p class="note">${o.note}</p>
+    <div class="win ${o.cls} ${o.short?'short':''}" id="${o.id}">${o.make()}</div>
+  </div>`).join('');
+</script>
+</body>
+</html>
