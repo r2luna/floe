@@ -29,7 +29,8 @@ const EXT_LANG: Record<string, string> = {
   sql: 'sql', graphql: 'graphql', gql: 'graphql',
   dockerfile: 'docker', makefile: 'makefile', lua: 'lua', dart: 'dart',
   ex: 'elixir', exs: 'elixir', erl: 'erlang', clj: 'clojure', hs: 'haskell',
-  proto: 'proto', prisma: 'prisma', astro: 'astro'
+  proto: 'proto', prisma: 'prisma', astro: 'astro',
+  tpl: 'blade', blade: 'blade'
 }
 
 // One loader per reachable language id. Explicit (not a template-string
@@ -77,7 +78,8 @@ const LANG_LOADERS: Record<string, () => Promise<{ default: unknown }>> = {
   haskell: () => import('shiki/dist/langs/haskell.mjs'),
   proto: () => import('shiki/dist/langs/proto.mjs'),
   prisma: () => import('shiki/dist/langs/prisma.mjs'),
-  astro: () => import('shiki/dist/langs/astro.mjs')
+  astro: () => import('shiki/dist/langs/astro.mjs'),
+  blade: () => import('shiki/dist/langs/blade.mjs')
 }
 
 // Fence-label aliases (```js, ```py …) → the ids registered above. The full
