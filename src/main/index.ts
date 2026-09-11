@@ -205,7 +205,20 @@ import {
 import { saveDownload } from './downloads'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
-import { boardFor, nannyFor, nannyOpener, pushBoard, reconcileColony, releaseTask, tick } from './colony/runner'
+import {
+  boardFor,
+  mergeTask,
+  nannyFor,
+  nannyOpener,
+  pushBoard,
+  reconcileColony,
+  holdTask,
+  releaseTask,
+  tick,
+  undoTaskMerge
+} from './colony/runner'
+import { listEvents } from './colony/events'
+import { setProjectAutomerge } from './config/colony'
 import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
@@ -1124,6 +1137,29 @@ export function registerColonyIpc(): void {
   handle('colony:remove', (event, id: string, project: string) => {
     removeTask(id)
     pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+  })
+  // The board's own record of what it did unasked. Separate from `colony:board`
+  // because it is a different question with a different lifetime: the board is
+  // now, the log is what happened — and a merge that landed an hour ago is still
+  // the thing you want to see when you come back to the machine.
+  handle('colony:events', (_event, project: string) => listEvents(project))
+  handle('colony:undoMerge', async (event, eventId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return undoTaskMerge(win, eventId)
+  })
+  // The only config value Floe writes for you. See setProjectAutomerge: a kill
+  // switch you have to find in a TOML file is not a kill switch.
+  handle('colony:setAutomerge', (event, project: string, on: boolean) => {
+    const file = setProjectAutomerge(project, on)
+    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return file
+  })
+  handle('colony:hold', (event, id: string) =>
+    holdTask(BrowserWindow.fromWebContents(event.sender) ?? undefined, id)
+  )
+  handle('colony:mergeTask', async (event, id: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    return mergeTask(win, id)
   })
   handle('colony:nanny', (_event, project: string) => ({
     ...nannyFor(project),

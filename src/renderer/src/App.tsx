@@ -123,7 +123,11 @@ const panelOf = (
   // though it carries a session too: asking codex a second thing is the same
   // side conversation, so it must focus the panel that is already open rather
   // than stack a second one beside it.
-  id: session && kind !== 'query' ? `chat:${session.id}` : `${kind}:${sub ?? ''}`,
+  // The NANNY is identified by her kind for the same reason a query is: there is
+  // one of her per project and she is replaced by slot, so borrowing the chat's
+  // `chat:<session>` id would collapse her into the card chat the moment
+  // somebody opened her session from the session list.
+  id: session && kind !== 'query' && kind !== 'nanny' ? `chat:${session.id}` : `${kind}:${sub ?? ''}`,
   kind,
   // A query is titled by who answers in it — the panel head reads `codex`, in
   // that harness's own nick colour, not the word "query" four times over.
@@ -1671,6 +1675,17 @@ export default function App() {
     rowsOf,
     project: projects.current?.path,
     openChat: (session, firstPrompt) => setLane((l) => open(l, mkPanel('chat', undefined, session, firstPrompt))),
+    openNanny: (session, firstPrompt) =>
+      setLane((l) =>
+        open(l, {
+          ...mkPanel('nanny', undefined, session, firstPrompt),
+          // Docked by default, and only by default: `open` hands a replacement
+          // the OUTGOING panel's layout, so once you have undocked her or
+          // dragged her height, that is what comes back — this is the first
+          // impression, not a rule.
+          dock: 'below'
+        })
+      ),
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
@@ -2541,7 +2556,20 @@ export default function App() {
                 }}
                 className="panel"
                 data-kind={panel.kind}
-                style={panel.dock ? { flexBasis: panel.height ?? '40%' } : undefined}
+                style={
+                  panel.dock
+                    ? {
+                        // A height you dragged wins; otherwise the kind's own
+                        // share, and 40% for a kind with no opinion.
+                        flexBasis:
+                          panel.height ??
+                          ('dockHeight' in KINDS[panel.kind as PanelKind]
+                            ? (KINDS[panel.kind as PanelKind] as { dockHeight?: string }).dockHeight
+                            : undefined) ??
+                          '40%'
+                      }
+                    : undefined
+                }
                 tabIndex={-1}
                 data-focused={i === lane.focus || undefined}
                 data-bare={bare || undefined}

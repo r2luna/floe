@@ -75,6 +75,33 @@ export function ColonyBoard({
         </p>
       ))}
 
+      {/* WHAT THIS BOARD DOES WITHOUT ASKING. A line of prose rather than an icon
+          in the header: "automerge" as a toggle glyph tells you nothing, and the
+          thing worth knowing is that cards are landing on your base branch by
+          themselves. The switch is here because this is where you find that out. */}
+      <div className="fpolicy">
+        <span className="fpolicy-text">
+          {board.automerge
+            ? 'a card that reaches done merges itself into base'
+            : 'a card that reaches done waits for you to merge it'}
+        </span>
+        <button
+          className="fpolicy-act"
+          data-on={board.automerge || undefined}
+          // Disabled for an untracked project: there is no colony.toml to write,
+          // and a switch that silently does nothing is worse than no switch.
+          disabled={!board.configPath}
+          title={
+            board.configPath
+              ? `automerge is ${board.automerge ? 'on' : 'off'} — writes ${board.configPath}`
+              : 'this project has no colony.toml to write'
+          }
+          onClick={() => onCommand?.('colony.automerge')}
+        >
+          automerge: {board.automerge ? 'on' : 'off'}
+        </button>
+      </div>
+
       {/* The one thing on this board that costs you something: tasks that
           stopped on a question. Accent is reserved for exactly this (D25). */}
       {asking.length > 0 && (
@@ -205,6 +232,14 @@ function Card({
       // skills list plays with `data-skill`, so a key and a click cannot drift.
       data-task={task.id}
       data-col={col}
+      // Landed on base. The card is finished in a way `settled` does not say on
+      // its own: `done` means every lane passed it, merged means it is out of
+      // the repo's future tense.
+      data-merged={task.mergedAt ? '' : undefined}
+      // Queued behind a dependency, so it has NO WORKTREE yet. Drawn dashed
+      // because that is literally the difference from every other card, and it
+      // is the whole point of the state — two dependent trees never co-exist.
+      data-queued={task.queued && !task.worktreePath ? '' : undefined}
       onFocus={() => onOpen(task, false)}
       onClick={() => onOpen(task, true)}
       onContextMenu={() => onCommand?.('colony.archive')}

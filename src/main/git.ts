@@ -454,6 +454,72 @@ export async function deleteBranch(root: string, branch: string, force: boolean)
 export interface MergeResult {
   ok: boolean
   message?: string
+  /**
+   * Where base was before and after, on a merge that landed.
+   *
+   * Only the caller that merged without being asked needs these, but they are
+   * read here because here is the only place that knows the base branch and can
+   * see it before it moves. See `undoMerge`.
+   */
+  base?: string
+  baseBefore?: string
+  baseAfter?: string
+}
+
+/** The tip of a ref, or null when it does not resolve. */
+async function shaOf(root: string, ref: string): Promise<string | null> {
+  try {
+    const sha = (await git(root, ['rev-parse', '--verify', `${ref}^{commit}`])).trim()
+    return sha || null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Put a base branch back where it was before a merge landed on it.
+ *
+ * REFUSES when base has moved since. That is the whole design: an undo that
+ * resets past whatever landed after is not an undo, it is a second accident —
+ * and the board merges on its own, so the window between the merge and somebody
+ * pressing undo is exactly the window another lane can finish in.
+ *
+ * The branch is moved, not reverted: the merge's own commits stay on the task
+ * branch, so this un-lands the work rather than deleting it. A dirty main
+ * worktree refuses too — resetting a checked-out branch under uncommitted
+ * changes throws them away.
+ */
+export async function undoMerge(
+  root: string,
+  base: string,
+  expected: string,
+  to: string
+): Promise<MergeResult> {
+  const now = await shaOf(root, base)
+  if (!now) return { ok: false, message: `"${base}" no longer resolves — nothing to put back` }
+  if (now !== expected) {
+    return {
+      ok: false,
+      message: `"${base}" has moved on since that merge — undo would throw away what landed after it`
+    }
+  }
+  if (!(await shaOf(root, to))) {
+    return { ok: false, message: `the commit "${base}" pointed at before the merge is gone` }
+  }
+  if (await isDirty(root)) {
+    return { ok: false, message: 'The main worktree has uncommitted changes — commit or stash first' }
+  }
+
+  const current = (await git(root, ['branch', '--show-current']).catch(() => '')).trim()
+  try {
+    // Checked out: `reset --hard` is the only thing that moves it. Not checked
+    // out: `branch -f` moves it without touching whatever IS checked out.
+    if (current === base) await git(root, ['reset', '--hard', to])
+    else await git(root, ['branch', '-f', base, to])
+  } catch (e) {
+    return { ok: false, message: firstLine(e) }
+  }
+  return { ok: true, message: `"${base}" is back at ${to.slice(0, 8)}`, base, baseBefore: to, baseAfter: now }
 }
 
 // gw merge: bring the base branch into the worktree, then fast-forward base to
@@ -475,6 +541,11 @@ export async function mergeWorktree(root: string, target: string): Promise<Merge
   if (base === branch) return { ok: false, message: `Base and branch are both "${branch}"` }
   if (await isDirty(root)) return { ok: false, message: 'The main worktree has uncommitted changes — commit or stash first' }
 
+  // Read BEFORE the fast-forward moves it. After the merge this commit is only
+  // reachable through the reflog, and an undo that had to mine the reflog for
+  // its own starting point would be one more thing to get wrong.
+  const baseBefore = await shaOf(root, base)
+
   // Merge base into the worktree branch.
   try {
     await git(target, ['merge', '--no-edit', base])
@@ -493,7 +564,13 @@ export async function mergeWorktree(root: string, target: string): Promise<Merge
     return { ok: false, message: `Merged "${base}" into "${branch}", but couldn't fast-forward "${base}". ${detail}` }
   }
 
-  return { ok: true, message: `Merged "${branch}" → "${base}"` }
+  return {
+    ok: true,
+    message: `Merged "${branch}" → "${base}"`,
+    base,
+    ...(baseBefore ? { baseBefore } : {}),
+    ...((await shaOf(root, base)) ? { baseAfter: (await shaOf(root, base)) as string } : {})
+  }
 }
 
 // --- Granular merge steps (drive the guided merge panel) -------------------

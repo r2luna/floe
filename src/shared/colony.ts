@@ -7,6 +7,9 @@
 import type { ColonyTask, TaskStatus } from '../main/colony/store'
 
 export type { ColonyTask, TaskStatus, TaskKind, TaskVisit } from '../main/colony/store'
+// The board's own record of what it did unasked. Same reason as the shapes
+// above: main writes it, the nanny panel draws it, so it crosses the IPC seam.
+export type { BoardEvent, BoardEventKind } from '../main/colony/events'
 
 /**
  * The hand-off line a lane ends its last message with — the single line the
@@ -85,6 +88,16 @@ export interface BoardColumn {
 export interface Board {
   project: string
   columns: BoardColumn[]
+  /**
+   * Whether a card reaching `done` merges itself.
+   *
+   * On the board and not only in the file, because it is the one setting that
+   * decides whether the board changes your base branch unasked — and a policy
+   * you cannot see is one you cannot have agreed to.
+   */
+  automerge: boolean
+  /** Where this project's `colony.toml` is, or would be. Null when untracked. */
+  configPath: string | null
   /** Config problems, so a board that cannot run says why instead of doing nothing. */
   errors: { file: string; line: number; reason: string }[]
 }

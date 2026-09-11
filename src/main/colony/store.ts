@@ -70,6 +70,27 @@ export interface ColonyTask {
   /** How many lanes have passed it. The card prints `✓N`. */
   passes: number
   /**
+   * Task ids this one has to wait for. Declared when the card is created, not
+   * derived: the manager knows two changes touch the same code BEFORE either has
+   * a worktree, and by the time a file overlap is visible both trees exist and
+   * the sequencing decision is already lost.
+   *
+   * It gates RELEASE, not the lanes — an unreleased card has no worktree, which
+   * is the whole point. Two dependent trees never exist at the same time.
+   */
+  dependsOn?: string[]
+  /**
+   * Somebody asked to release this and a dependency was not merged yet, so it
+   * stayed in the backlog. The intent has to be stored: nothing else remembers
+   * that this card is next, and the sweep after a merge is what acts on it.
+   */
+  queued?: boolean
+  /**
+   * When its branch landed on base. A `done` task is finished; a merged one is
+   * gone from the board's problem list, and it is what unblocks its dependents.
+   */
+  mergedAt?: number
+  /**
    * A lane ended without a hand-off line the board could parse. LANE-CONTRACT
    * promises that is treated as `pass` with a warning on the card, so the card
    * has to be able to carry one.
@@ -183,6 +204,8 @@ export interface NewTask {
   name: string
   kind?: TaskKind
   brief: string
+  /** Ids of tasks that must be merged before this one is released. */
+  dependsOn?: string[]
 }
 
 /** Add a task to the backlog. It gets no worktree until it is released. */
@@ -195,6 +218,9 @@ export function addTask(task: NewTask): ColonyTask {
     name: freeName(task.project, task.name),
     kind: task.kind ?? 'feat',
     brief: task.brief,
+    // Only when there is one: an empty array on every card would read like a
+    // declared "depends on nothing", which is not a thing anybody stated.
+    ...(task.dependsOn?.length ? { dependsOn: [...task.dependsOn] } : {}),
     stage: INBOX,
     status: 'holding',
     passes: 0,
