@@ -203,6 +203,20 @@ export interface CommandContext {
   /** Show the new-worktree flow. */
   newWorktree: () => void
   /**
+   * How many worktrees the open project has. What `worktree.focusAt` is judged
+   * against: ⌘4 on a project with three branches is a refusal with a reason,
+   * not a key that does nothing.
+   */
+  worktreeCount: number
+  /**
+   * Go to the worktree at a position in the list — ⌘1–9.
+   *
+   * The same landing the sidebar does: the chat the branch was left on comes
+   * back, or its launcher when nobody has opened it yet. Lives in App because
+   * only it holds the list and knows how to enter one.
+   */
+  enterWorktreeAt: (index: number) => void
+  /**
    * Point the window at a backend (machine). With an id, switch directly —
    * the MCP path; without, offer the picker. Lives in App because switching
    * remounts the tree, and the registry must not learn how.

@@ -601,7 +601,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.focusAt',
         title: 'Focus panel by position',
         group: 'Panels',
-        keys: '⌘1–9',
+        keys: '⌃1–9',
         run: (c, arg) => c.setLane((l) => focusAt(l, Number(arg ?? 0)))
       },
       {
@@ -1996,6 +1996,19 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Worktrees',
         keys: '⌘N',
         run: (c) => c.newWorktree()
+      },
+      {
+        // By POSITION in the sidebar, not by name: the number you press is the
+        // row you can see. Landing is the sidebar's own — the chat the branch
+        // was left on, or its launcher — so ⌘2 and clicking row two agree.
+        id: 'worktree.focusAt',
+        title: 'Go to worktree by position',
+        group: 'Worktrees',
+        keys: '⌘1–9',
+        enabled: (c, arg) => Number(arg ?? 0) < c.worktreeCount,
+        unavailable: (c, arg) =>
+          `no worktree ${Number(arg ?? 0) + 1} — this project has ${c.worktreeCount}`,
+        run: (c, arg) => c.enterWorktreeAt(Number(arg ?? 0))
       },
       // --- guided merge ---------------------------------------------------
       // Everything the checklist offers is a command: its chips dispatch these

@@ -43,9 +43,19 @@ test('an unmapped key cancels the chord instead of falling through', () => {
   assert.equal(r({ key: 'q' }, { chord: true }), null)
 })
 
-test('⌘W closes and ⌘1-9 jump to a panel', () => {
+test('⌘W closes and ⌃1-9 jump to a panel', () => {
   assert.deepEqual(r({ key: 'w', meta: true }), { id: 'panel.close' })
-  assert.deepEqual(r({ key: '3', meta: true }), { id: 'panel.focusAt', arg: '2' })
+  assert.deepEqual(r({ key: '3', ctrl: true }), { id: 'panel.focusAt', arg: '2' })
+})
+
+test('⌘1-9 cross worktrees, and still do while typing', () => {
+  // The switch you make all day, from wherever the caret is — which is usually
+  // the composer, so a modifier-less rule would be no use here.
+  assert.deepEqual(r({ key: '1', meta: true }), { id: 'worktree.focusAt', arg: '0' })
+  assert.deepEqual(r({ key: '9', meta: true }, { typing: true }), {
+    id: 'worktree.focusAt',
+    arg: '8'
+  })
 })
 
 test('j/k and the arrows both move the row cursor', () => {

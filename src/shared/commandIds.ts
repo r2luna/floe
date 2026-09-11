@@ -130,6 +130,7 @@ export const COMMAND_IDS: string[] = [
   'subagents.toggle',
   'chat.all',
   'worktree.new',
+  'worktree.focusAt',
   'worktree.merge',
   'merge.confirm',
   'merge.review',

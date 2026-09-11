@@ -1879,6 +1879,13 @@ export default function App() {
       // the lane already calls current.
       setLane((l) => open(l, panelOf('worktrees')))
     },
+    worktreeCount: worktrees.rows.length,
+    // ⌘1–9. The row order is the sidebar's, so the number matches what is on
+    // screen, and enterWorktree is the same landing a click gets.
+    enterWorktreeAt: (index: number) => {
+      const row = worktrees.rows[index]
+      if (row) enterWorktree(row.worktree.path)
+    },
     // Lazy wrapper: switchBackend is declared further down, after the picker
     // helpers it uses; the property only needs it at call time.
     useBackend: (id?: string) => switchBackend(id)
