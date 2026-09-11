@@ -968,3 +968,85 @@ test('generateWorktreeDesc: an empty spec returns null', async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+// --- harness skills ---------------------------------------------------------
+
+test('a skill reloads as the chip that ran it, not as its instructions', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-skill'
+  const body =
+    'Base directory for this skill: /tmp/wt-skill/.claude/skills/ds-specify\n\n' +
+    '## User Input\n\n```text\n388\n```\n\n## Outline\n\nFour hundred lines of instructions.'
+  const dir = seedSession(worktree, 'sess', [
+    {
+      type: 'user',
+      timestamp: '2026-09-09T22:04:00.000Z',
+      message: {
+        content:
+          '<command-message>ds-specify</command-message> <command-name>/ds-specify</command-name> <command-args>388</command-args>'
+      }
+    },
+    {
+      type: 'user',
+      isMeta: true,
+      timestamp: '2026-09-09T22:04:00.500Z',
+      message: { content: [{ type: 'text', text: body }] }
+    },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-09T22:04:10.000Z',
+      message: { content: [{ type: 'text', text: "I'll load the config first." }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    // The chip you ran, then the answer. The injected SKILL.md is not a message
+    // anyone sent, and printing it buries the chat it belongs to.
+    assert.deepEqual(
+      items.map((i) => [i.role, i.name ?? i.text]),
+      [
+        ['tool', '/ds-specify'],
+        ['assistant', "I'll load the config first."]
+      ]
+    )
+    assert.equal(items[0].summary, '388')
+    assert.ok(!items.some((i) => (i.text ?? '').includes('Base directory for this skill')))
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a skill the model called shows which skill it was', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-skill-tool'
+  const dir = seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-09-09T22:04:00.000Z', message: { content: 'commit everything' } },
+    {
+      type: 'assistant',
+      timestamp: '2026-09-09T22:04:02.000Z',
+      message: { content: [{ type: 'tool_use', id: 't1', name: 'Skill', input: { skill: 'commit', args: 'commit everything' } }] }
+    },
+    {
+      type: 'user',
+      isMeta: true,
+      timestamp: '2026-09-09T22:04:03.000Z',
+      message: { content: [{ type: 'text', text: 'Base directory for this skill: /tmp/wt-skill-tool/.claude/skills/commit\n\nrun git commit.' }] }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.name ?? i.text]),
+      [
+        ['user', 'commit everything'],
+        ['tool', 'Skill']
+      ]
+    )
+    // Without a summary the row reads "Skill" and says nothing about which one.
+    assert.equal(items[1].summary, 'commit')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

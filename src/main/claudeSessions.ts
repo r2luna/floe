@@ -572,7 +572,7 @@ export function resultText(content: unknown): string | undefined {
 
 function summarizeTool(input: unknown): string | undefined {
   const obj = (input ?? {}) as Record<string, unknown>
-  for (const key of ['file_path', 'command', 'pattern', 'path', 'url', 'description']) {
+  for (const key of ['file_path', 'command', 'pattern', 'path', 'url', 'description', 'skill']) {
     const v = obj[key]
     if (typeof v === 'string') return v
   }
@@ -585,6 +585,15 @@ function summarizeTool(input: unknown): string | undefined {
 // under your name. The live stream already discards it (see agent.ts).
 export function isTaskNotification(text: string): boolean {
   return !text.replace(/<task-notification>[\s\S]*?<\/task-notification>/g, '').trim()
+}
+
+// A harness skill, injected as a meta user message: the whole SKILL.md, headed
+// by the directory it was read from. Nobody typed it — the invocation is already
+// in the chat, as the `/name` chip the user ran or as the Skill tool row the
+// model called — so reloading the body prints four hundred lines of instructions
+// under the user's nick, for a message they never wrote.
+export function isSkillBody(text: string): boolean {
+  return /^Base directory for this skill: \S/.test(text)
 }
 
 // What a notification says: which agent finished (the id of the Task call that
@@ -660,6 +669,7 @@ function expandUserText(text: string): TranscriptItem[] {
   const stripped = text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
   if (!stripped) return []
   if (isTaskNotification(stripped)) return []
+  if (isSkillBody(stripped)) return []
 
   const peer = parsePeerMessage(stripped)
   if (peer) return peer.body ? [{ role: 'user', from: peer.from, text: peer.body }] : []
