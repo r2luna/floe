@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
@@ -37,6 +37,7 @@ const {
   mergeResolveCheck,
   mergeWorktree,
   removePreflight,
+  undoMerge,
   reviewCommits
 } = await import('./git.ts')
 
@@ -328,10 +329,53 @@ test('mergeWorktree merges the branch and fast-forwards base', async () => {
     fx.write('b.txt', 'b2\n')
     fx.commit('base moved')
 
+    const before = fx.git('rev-parse', 'main')
     const res = await mergeWorktree(fx.dir, feat)
-    assert.deepEqual(res, { ok: true, message: 'Merged "feat" → "main"' })
+    assert.equal(res.ok, true)
+    assert.equal(res.message, 'Merged "feat" → "main"')
     assert.equal(fx.git('rev-parse', 'main'), fx.git('-C', feat, 'rev-parse', 'feat'), 'base was fast-forwarded')
     assert.equal(readFileSync(join(fx.dir, 'c.txt'), 'utf8'), 'c\n', 'the work landed on main')
+    // Where base was and where it ended up — what makes an unasked-for merge
+    // reversible. Read before the fast-forward, because after it the old commit
+    // is only reachable through the reflog.
+    assert.equal(res.base, 'main')
+    assert.equal(res.baseBefore, before)
+    assert.equal(res.baseAfter, fx.git('rev-parse', 'main'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('undoMerge puts base back, and refuses once base has moved on', async () => {
+  const fx = seededRepo('floe-git-undo-')
+  try {
+    const feat = addWorktree(fx, 'feat')
+    writeFileSync(join(feat, 'c.txt'), 'c\n')
+    fx.git('-C', feat, 'add', '-A')
+    fx.git('-C', feat, 'commit', '-q', '-m', 'work')
+
+    const res = await mergeWorktree(fx.dir, feat)
+    assert.equal(res.ok, true)
+    const { base, baseBefore, baseAfter } = res as Required<typeof res>
+
+    // Something else landed after the merge. Undo now would throw it away, so
+    // it refuses — that refusal is the only thing that makes auto-merge safe.
+    fx.write('d.txt', 'd\n')
+    fx.commit('somebody else')
+    const moved = await undoMerge(fx.dir, base, baseAfter, baseBefore)
+    assert.equal(moved.ok, false)
+    assert.match(moved.message ?? '', /moved on/)
+    assert.equal(readFileSync(join(fx.dir, 'c.txt'), 'utf8'), 'c\n', 'the refusal changed nothing')
+
+    // Back to the state right after the merge: now it is the last thing that
+    // happened, so it can be taken back.
+    fx.git('reset', '--hard', baseAfter)
+    const undone = await undoMerge(fx.dir, base, baseAfter, baseBefore)
+    assert.equal(undone.ok, true)
+    assert.equal(fx.git('rev-parse', base), baseBefore, 'base is back where it was')
+    assert.equal(existsSync(join(fx.dir, 'c.txt')), false, 'the work is off main')
+    // And it is still ON the branch — this un-lands the work, it does not delete it.
+    assert.equal(fx.git('-C', feat, 'rev-parse', 'feat'), baseAfter)
   } finally {
     fx.cleanup()
   }

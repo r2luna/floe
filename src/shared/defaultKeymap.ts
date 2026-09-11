@@ -67,9 +67,12 @@ agent ran is often the one you want to run yourself.`,
 inside one. The cursor drives the panel to its right, so moving is reading;
 \`⏎\` forces the card's chat open and takes you into it.
 
-\`ESC\` swaps that same panel to the nanny — the board's own session, one per
-project. \`n\` goes there too, with the composer ready, because there is no "new
-task" dialog: she already knows the base branch and which stage is full.
+\`ESC\` opens the nanny — the board's own session, one per project — DOCKED UNDER
+the board rather than in the card's slot, so she stays on screen while you read
+a card. She carries the board log above her chat: every merge, release and
+refusal the board made on its own, each with the way back out of it. \`n\` goes
+there too, with the composer ready, because there is no "new task" dialog: she
+already knows the base branch and which stage is full.
 
 \`s\` releases a task from the backlog, which is where its worktree gets cut, and
 \`x\` takes a card off the board without touching its branch.`,

@@ -21,8 +21,8 @@
 // Reading never throws (D14). A bad value falls back and lands in `errors`,
 // which is the whole reason an agent is allowed to edit these files.
 
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { configDir } from '../dataDir'
 import { ErrorSink, type ConfigError } from './errors'
 import { TableReader, subTable } from './read'
@@ -53,6 +53,14 @@ export interface ColonyStage {
 export interface ColonyConfig {
   /** The default cap for a stage that does not set its own. */
   cap: number
+  /**
+   * Merge a task's branch into base the moment it reaches `done`, when the merge
+   * is clean. A kill switch and nothing more: everything the merge could go
+   * wrong on — a dirty tree, a conflict, a base that moved — already refuses in
+   * `mergeWorktree` and comes back to you as a warning on the card. This is for
+   * the board where you want to read the diff yourself before it lands.
+   */
+  automerge: boolean
   stages: ColonyStage[]
 }
 
@@ -66,6 +74,7 @@ export const DONE = 'done'
  */
 export const DEFAULT_COLONY: ColonyConfig = {
   cap: 5,
+  automerge: true,
   stages: [
     { name: 'specifier', skill: 'colony-specify', model: 'opus' },
     { name: 'coder', skill: 'colony-implement', model: 'opus' },
@@ -81,6 +90,7 @@ export const colonyPath = (dir: string): string => join(dir, 'colony.toml')
 /** What one layer contributes. `stages` undefined means "declared none" — see D10. */
 interface Layer {
   cap?: number
+  automerge?: boolean
   stages?: ColonyStage[]
 }
 
@@ -148,6 +158,7 @@ export function parseGlobalColony(raw: string, file: string): { layer: Layer; er
   return {
     layer: {
       cap: colony.has('cap') ? colony.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
+      automerge: colony.has('automerge') ? colony.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
       stages: readStages(sink, raw, colony.raw_('stage'), 'colony.stage')
     },
     errors: sink.errors
@@ -167,6 +178,7 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
   return {
     layer: {
       cap: t.has('cap') ? t.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
+      automerge: t.has('automerge') ? t.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
       stages: readStages(sink, raw, root.stage, 'stage')
     },
     errors: sink.errors
@@ -176,14 +188,16 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
 /** Fold the layers, newest winning. Exported for the test, and for one rule in one place. */
 export function mergeColony(layers: Layer[]): ColonyConfig {
   let cap = DEFAULT_COLONY.cap
+  let automerge = DEFAULT_COLONY.automerge
   let stages = DEFAULT_COLONY.stages
   for (const layer of layers) {
     if (layer.cap !== undefined) cap = layer.cap
+    if (layer.automerge !== undefined) automerge = layer.automerge
     // Length matters, not presence: a file with `[[stage]]` entries that were all
     // rejected has declared nothing usable, and inheriting beats an empty board.
     if (layer.stages && layer.stages.length) stages = layer.stages
   }
-  return { cap, stages }
+  return { cap, automerge, stages }
 }
 
 export interface ColonyResult extends ColonyConfig {
@@ -226,6 +240,53 @@ export function colonyConfig(projectPath: string): ColonyResult {
   }
 
   return { ...mergeColony(layers), path, errors }
+}
+
+/**
+ * Turn `automerge` on or off in a project's own `colony.toml`.
+ *
+ * Written from the UI, unlike every other value in these files, for one reason:
+ * it is the switch that decides whether the board changes your base branch
+ * without asking. A kill switch you have to find in a TOML file is not a kill
+ * switch, and this is the one setting whose whole purpose is being reachable at
+ * the moment you decide you want it.
+ *
+ * The key goes at the TOP, before any `[[stage]]` header. TOML scopes a bare key
+ * to whichever table precedes it, so the same line written at the bottom of a
+ * file with stages in it would silently become `stage.automerge` — a value
+ * nothing reads, on a board that carries on merging.
+ *
+ * Returns the file it wrote. Throws for a project Floe does not track, because
+ * there is nowhere to put it.
+ */
+export function setProjectAutomerge(projectPath: string, on: boolean): string {
+  const dir = projectScan().byPath.get(projectPath)
+  if (!dir) throw new Error('This project is not tracked by Floe, so it has no colony.toml to write')
+  const file = colonyPath(dir)
+  const raw = existsSync(file) ? readFileSync(file, 'utf8') : ''
+  const line = `automerge = ${on}`
+
+  const lines = raw.split(/\r?\n/)
+  // Only above the first table header: an `automerge` inside `[[stage]]` is a
+  // different key, and rewriting it would move a stage's setting to the root.
+  const firstTable = lines.findIndex((l) => /^\s*\[/.test(l))
+  const limit = firstTable === -1 ? lines.length : firstTable
+  const at = lines.findIndex((l, i) => i < limit && /^\s*automerge\s*=/.test(l))
+
+  let next: string
+  if (at !== -1) {
+    const copy = [...lines]
+    copy[at] = line
+    next = copy.join('\n')
+  } else if (raw.trim() === '') {
+    next = `${line}\n`
+  } else {
+    next = `${line}\n\n${raw.replace(/^\n+/, '')}`
+  }
+
+  mkdirSync(dirname(file), { recursive: true })
+  writeFileSync(file, next.endsWith('\n') ? next : `${next}\n`)
+  return file
 }
 
 /** How many tasks a stage works at once — its own cap, or the board's. */

@@ -16,10 +16,11 @@ import { capOf, colonyConfig, columnsFor, DONE, INBOX, type ColonyStage } from '
 import { addCreatedSession, closeSession, getAllCreatedSessions } from '../sessionStore'
 import { sessionRuntime, onceTurnDone, hasActiveTurn } from '../agent'
 import { startTurn } from '../turn'
-import { createWorktree } from '../git'
+import { changedFiles, createWorktree, mergeWorktree, undoMerge, type MergeResult } from '../git'
 import { provisionWorktree } from '../provision'
 import { listSkills } from '../config/skills'
 import { parseHandoff, type Board, type BoardColumn } from '../../shared/colony'
+import { getEvent, patchEvent, recordEvent } from './events'
 import {
   allTasks,
   getNanny,
@@ -86,6 +87,8 @@ export function boardFor(project: string): Board {
   return {
     project,
     columns: [column(INBOX), ...stages.map((s) => column(s.name, s)), column(DONE)],
+    automerge: config.automerge,
+    configPath: config.path,
     errors: config.errors.map((e) => ({ file: e.file, line: e.line, reason: e.reason }))
   }
 }
@@ -130,6 +133,23 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
     return requeued
   }
 
+  // A DEPENDENCY GATES THE WORKTREE, NOT THE LANES. Holding the card in the
+  // backlog is the only thing that keeps two dependent trees from existing at
+  // once: cut them both and the second is already built on a base missing the
+  // first, and no amount of scheduling fixes that after the fact. Cheap, too —
+  // a card that never left the backlog has paid for nothing.
+  const unmet = unmetDeps(task)
+  if (unmet.length) {
+    const queued = patchTask(id, {
+      // Remember that somebody asked. Nothing else knows this card is next, and
+      // the sweep after a merge is what acts on it.
+      queued: true,
+      line: `waiting on ${unmet.map((t) => t.name).join(', ')}`
+    })
+    pushBoard(win, task.project)
+    return queued ?? task
+  }
+
   let worktreePath = task.worktreePath
   let branch = task.branch
   if (!worktreePath) {
@@ -158,12 +178,229 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
   const moved = patchTask(id, {
     branch,
     worktreePath,
+    queued: undefined,
     stage: nextStage(task.project, INBOX) ?? DONE,
     status: 'holding',
     line: undefined
   })
   tick(win, task.project)
   return moved ?? task
+}
+
+// ---------------------------------------------------------------------------
+// Dependencies and merging
+// ---------------------------------------------------------------------------
+
+/**
+ * The dependencies of `task` that have not landed on base yet.
+ *
+ * A dependency id nobody recognises is DROPPED rather than treated as unmet: a
+ * card taken off the board would otherwise park everything behind it forever,
+ * with nothing left on the board to explain why.
+ */
+export function unmetDeps(task: ColonyTask): ColonyTask[] {
+  if (!task.dependsOn?.length) return []
+  const unmet: ColonyTask[] = []
+  for (const id of task.dependsOn) {
+    const dep = getTask(id)
+    if (!dep || dep.mergedAt) continue
+    unmet.push(dep)
+  }
+  return unmet
+}
+
+/**
+ * Merge a finished task's branch into its base.
+ *
+ * Only from `done`, and only once. `mergeWorktree` is the safe one-shot — it
+ * refuses on a dirty tree and aborts on a conflict, leaving the worktree exactly
+ * as it was — so every way this can fail is a message on the card rather than a
+ * half-merged branch. That is what makes it safe to call without asking.
+ */
+export async function mergeTask(win: BrowserWindow | undefined, id: string): Promise<MergeResult> {
+  const task = getTask(id)
+  if (!task) return { ok: false, message: `Unknown task: ${id}` }
+  if (task.mergedAt) return { ok: true, message: `"${task.name}" is already merged` }
+  if (task.stage !== DONE) return { ok: false, message: `"${task.name}" is still in ${task.stage}` }
+  if (!task.worktreePath) return { ok: false, message: `"${task.name}" has no worktree to merge` }
+
+  const result = await mergeWorktree(task.project, task.worktreePath)
+  if (!result.ok) {
+    // On the card, not thrown: the board is where somebody finds out, and a
+    // refused merge is a thing to read, not an exception to handle.
+    patchTask(id, { warn: result.message, line: 'not merged' })
+    recordEvent({
+      project: task.project,
+      kind: 'refused',
+      task: id,
+      taskName: task.name,
+      branch: task.branch,
+      worktreePath: task.worktreePath,
+      text: `reached done but did not merge: ${result.message ?? 'no reason given'}`
+    })
+    pushBoard(win, task.project)
+    return result
+  }
+
+  patchTask(id, { mergedAt: Date.now(), warn: undefined, line: 'merged' })
+  // The base branch moved, outside any worktree, without anybody asking. It is
+  // the one thing here that has to be both written down and reversible — see
+  // events.ts, and `undoTaskMerge` below.
+  recordEvent({
+    project: task.project,
+    kind: 'merged',
+    task: id,
+    taskName: task.name,
+    branch: task.branch,
+    worktreePath: task.worktreePath,
+    base: result.base,
+    baseBefore: result.baseBefore,
+    baseAfter: result.baseAfter,
+    text: `${task.branch ?? task.name} → ${result.base ?? 'base'}`
+  })
+  // A merge is the ONLY thing that satisfies a dependency, so it is the only
+  // place the queue behind one can move.
+  await sweepReleases(win, task.project)
+  pushBoard(win, task.project)
+  return result
+}
+
+/**
+ * Put base back where it was before one of the board's own merges.
+ *
+ * The card goes back to `done`, unmerged — which is the truthful state, not a
+ * rewind: the branch and its worktree were never touched, so what actually
+ * happened is that the work stopped being on base. Anything the merge released
+ * KEEPS its worktree: those trees exist, lanes have run in them, and deleting
+ * somebody's work to tidy up a bookkeeping edge is the one thing an undo must
+ * not do. The log says they were released, and it stays true.
+ */
+export async function undoTaskMerge(win: BrowserWindow | undefined, eventId: string): Promise<MergeResult> {
+  const event = getEvent(eventId)
+  if (!event) return { ok: false, message: 'That board event is gone' }
+  if (event.kind !== 'merged') return { ok: false, message: 'That event was not a merge' }
+  if (event.undoneAt) return { ok: false, message: `"${event.taskName}" has already been put back` }
+  if (!event.base || !event.baseBefore || !event.baseAfter) {
+    return { ok: false, message: 'That merge was recorded without the commits an undo needs' }
+  }
+
+  const result = await undoMerge(event.project, event.base, event.baseAfter, event.baseBefore)
+  if (!result.ok) return result
+
+  patchEvent(eventId, { undoneAt: Date.now() })
+  // Back to unmerged, not back to a stage: the lanes all passed it, and undoing
+  // where the work SITS is a different decision from undoing where it landed.
+  patchTask(event.task, { mergedAt: undefined, line: 'merge undone', warn: undefined })
+  pushBoard(win, event.project)
+  nudgeNanny(win, event.project, `the merge of "${event.taskName}" was undone — ${event.base} is back where it was.`)
+  return result
+}
+
+/**
+ * Release the cards that were waiting on something that has now merged.
+ *
+ * Oldest intent first, the same rule the stage queues use: a card that has been
+ * waiting longest goes first, or a busy board starves whatever asked while it
+ * was blocked.
+ */
+export async function sweepReleases(win: BrowserWindow | undefined, project: string): Promise<ColonyTask[]> {
+  if (!win) return []
+  const ready = listTasks(project)
+    .filter((t) => t.queued && t.stage === INBOX && unmetDeps(t).length === 0)
+    .sort((a, b) => a.updatedAt - b.updatedAt)
+  const released: ColonyTask[] = []
+  // Serially, not in parallel: each one cuts a worktree in the same repo, and
+  // `git worktree add` twice at once in one repo is a lock fight.
+  for (const task of ready) {
+    try {
+      const out = await releaseTask(win, task.id)
+      released.push(out)
+      // Only the SWEEP writes a `released` event. A card the user released by
+      // hand is not news — they were there. This one let itself out.
+      recordEvent({
+        project: project,
+        kind: 'released',
+        task: out.id,
+        taskName: out.name,
+        branch: out.branch,
+        worktreePath: out.worktreePath,
+        text: `was queued behind a dependency — it merged, so the worktree was cut`
+      })
+    } catch (err) {
+      patchTask(task.id, { warn: `could not release: ${(err as Error).message}` })
+    }
+  }
+  return released
+}
+
+/**
+ * Put a card back in the backlog, worktree and all.
+ *
+ * The way out of an automatic release: the board let it out because its
+ * dependency merged, and you would rather it waited. Its tree stays — cutting it
+ * was the expensive part and lanes may already have run in it — so this is a
+ * park, not an undo. `releaseTask` starts it again from the same door.
+ */
+export function holdTask(win: BrowserWindow | undefined, id: string): ColonyTask | undefined {
+  const task = getTask(id)
+  if (!task) return undefined
+  // Nothing to park: it is already in the backlog, or it has landed and the
+  // board is done with it.
+  if (task.stage === INBOX || task.mergedAt) return task
+  const held = patchTask(id, { stage: INBOX, status: 'holding', line: 'held — release it when you want it' })
+  pushBoard(win, task.project)
+  return held
+}
+
+/** Two live tasks writing the same files, and which files. */
+export interface TaskOverlap {
+  files: string[]
+  tasks: { id: string; name: string; stage: string; branch?: string }[]
+}
+
+/**
+ * Live tasks whose worktrees touch the same files.
+ *
+ * The net UNDER `dependsOn`, not a replacement for it: by the time this can see
+ * anything, both trees are already cut, so it reports a collision instead of
+ * preventing one. Still worth reporting — the alternative is finding out at the
+ * second merge, after a lane spent its whole turn building on the wrong base.
+ *
+ * Not folded into `boardFor`: this runs git in every worktree, and the board is
+ * read on every card move and every question anyone asks about it.
+ */
+export async function overlappingTasks(project: string): Promise<TaskOverlap[]> {
+  const live = listTasks(project).filter((t) => t.worktreePath && !t.mergedAt && t.stage !== INBOX)
+  const byFile = new Map<string, ColonyTask[]>()
+  await Promise.all(
+    live.map(async (task) => {
+      const files = await changedFiles(task.worktreePath as string).catch(() => [])
+      for (const file of files) {
+        const at = byFile.get(file.relPath)
+        if (at) at.push(task)
+        else byFile.set(file.relPath, [task])
+      }
+    })
+  )
+
+  // Grouped by the SET of tasks, not by the file: "these two share nine files"
+  // is one thing to decide about, and nine separate findings is not.
+  const groups = new Map<string, { tasks: ColonyTask[]; files: string[] }>()
+  for (const [relPath, tasks] of byFile) {
+    if (tasks.length < 2) continue
+    const sorted = [...tasks].sort((a, b) => a.id.localeCompare(b.id))
+    const key = sorted.map((t) => t.id).join('+')
+    const at = groups.get(key)
+    if (at) at.files.push(relPath)
+    else groups.set(key, { tasks: sorted, files: [relPath] })
+  }
+
+  return [...groups.values()]
+    .sort((a, b) => b.files.length - a.files.length)
+    .map(({ tasks, files }) => ({
+      files: files.sort(),
+      tasks: tasks.map((t) => ({ id: t.id, name: t.name, stage: t.stage, branch: t.branch }))
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +576,19 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
       status: 'holding',
       line: handoff.why || 'stopped'
     })
+    // A stop is a decision the board cannot make. That is exactly what the
+    // manager is for — tell her rather than leaving the card in the backlog for
+    // somebody to notice.
+    recordEvent({
+      project: task.project,
+      kind: 'stopped',
+      task: id,
+      taskName: task.name,
+      branch: task.branch,
+      worktreePath: task.worktreePath,
+      text: `stopped in ${stage}: ${handoff.why || 'no reason given'}`
+    })
+    nudgeNanny(win, task.project, `"${task.name}" stopped in ${stage}: ${handoff.why || 'no reason given'}`)
   } else if (handoff?.verdict === 'return') {
     // A return is a second visit, not a fresh arrival (D23): the pass count is
     // what the card prints, and a task bouncing between two lanes is the signal
@@ -351,6 +601,20 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
       status: back ? 'holding' : 'blocked',
       line: back ? `returned from ${stage}: ${handoff.why}` : `returned to an unknown lane "${handoff.lane}"`
     })
+    // A return to a real lane moves itself. A return to a lane nobody has is
+    // parked, and stays parked until a human renames a stage or requeues it.
+    if (!back) {
+      recordEvent({
+        project: task.project,
+        kind: 'lost',
+        task: id,
+        taskName: task.name,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        text: `${stage} handed it back to "${handoff.lane}", which is not a stage on this board`
+      })
+      nudgeNanny(win, task.project, `"${task.name}" returned to a lane nobody has: "${handoff.lane}"`)
+    }
   } else {
     const next = nextStage(task.project, stage) ?? DONE
     recordVisit(id, { at, stage, sessionId, verdict: handoff ? 'pass' : 'none' }, {
@@ -360,10 +624,57 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
       warn: handoff ? undefined : `${stage} ended without a COLONY: line`,
       line: next === DONE ? 'done' : `passed ${stage}`
     })
+    // Reaching `done` is the moment the merge question becomes answerable, and
+    // the moment whatever is queued behind this task can move. Floating on
+    // purpose: `finishLane` is a turn-done listener and merging is git, so it
+    // cannot be waited for here without holding the harness's callback open.
+    if (next === DONE) {
+      recordEvent({
+        project: task.project,
+        kind: 'passed',
+        task: id,
+        taskName: task.name,
+        branch: task.branch,
+        worktreePath: task.worktreePath,
+        text: `passed ${stage} — the last stage, so it reached done`
+      })
+      void settleDone(win, id)
+    }
   }
 
   tick(win, task.project)
   pushBoard(win, task.project)
+}
+
+/**
+ * What happens once a card lands in `done`: merge it if the board says to, and
+ * tell the manager either way.
+ *
+ * The merge is mechanical and the reporting is not, which is why it splits here.
+ * `mergeWorktree` already refuses everything it should refuse, so "merge it" is
+ * a decision no judgement is needed for — but a refused merge, and the question
+ * of what to start next, are exactly what a person wants a sentence about.
+ */
+async function settleDone(win: BrowserWindow, id: string): Promise<void> {
+  const task = getTask(id)
+  if (!task || task.stage !== DONE || task.mergedAt) return
+
+  if (!colonyConfig(task.project).automerge) {
+    // Still sweep: `automerge = false` is about who runs the merge, not about
+    // whether a card that merged earlier releases what was waiting on it.
+    await sweepReleases(win, task.project)
+    nudgeNanny(win, task.project, `"${task.name}" reached done and is waiting to be merged (automerge is off).`)
+    return
+  }
+
+  const result = await mergeTask(win, id)
+  nudgeNanny(
+    win,
+    task.project,
+    result.ok
+      ? `"${task.name}" reached done and merged cleanly into base.`
+      : `"${task.name}" reached done but did not merge: ${result.message ?? 'no reason given'}`
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -416,9 +727,79 @@ export function nannyOpener(project: string): string {
     '/colony-nanny',
     '',
     `You are the nanny for the project at ${project}.`,
-    'Read the board and tell me what is holding, in the two lines your skill describes.',
-    'Then wait.'
+    'Read the board. Tell me what is holding, what is done and not merged yet,',
+    'and what is queued behind something. Two lines. Then wait.'
   ].join('\n')
+}
+
+/**
+ * Notes waiting to reach a project's nanny, and whether a flush is already due.
+ *
+ * Buffered rather than sent one per event, for two reasons. A nanny mid-turn
+ * cannot take a second prompt — `startTurn` on a busy session is a second agent
+ * in the same conversation. And five lanes finishing inside a second is ONE
+ * thing to tell her, not five turns that each re-read the same board.
+ */
+const nannyNotes = new Map<string, string[]>()
+const nannyDue = new Set<string>()
+
+/**
+ * Tell the project's manager that something on the board moved.
+ *
+ * Only an EXISTING nanny, never a new one. Minting her here would open a chat
+ * nobody asked for and start it talking to a panel that is not on screen — the
+ * same reason the `colony:nanny` handler leaves the opener to the renderer.
+ */
+export function nudgeNanny(win: BrowserWindow | undefined, project: string, note: string): void {
+  if (!win || win.isDestroyed()) return
+  const sessionId = getNanny(project)
+  if (!sessionId || !getAllCreatedSessions().some((s) => s.id === sessionId)) return
+
+  nannyNotes.set(project, [...(nannyNotes.get(project) ?? []), note])
+  if (nannyDue.has(project)) return
+  nannyDue.add(project)
+  // A beat, so a burst of lanes finishing together collapses into one turn
+  // rather than racing each other to be the one that reports.
+  setTimeout(() => flushNanny(win, project, sessionId), 250)
+}
+
+function flushNanny(win: BrowserWindow, project: string, sessionId: string): void {
+  if (win.isDestroyed()) {
+    nannyDue.delete(project)
+    nannyNotes.delete(project)
+    return
+  }
+  const key = connKeyFor(sessionId)
+  // She is talking to the user. Wait — interrupting that turn would answer a
+  // question nobody asked and lose the one they did. The notes keep piling up
+  // in the meantime, which is the right outcome: they are still true.
+  if (hasActiveTurn(key)) {
+    onceTurnDone(key, () => flushNanny(win, project, sessionId))
+    return
+  }
+  nannyDue.delete(project)
+  const notes = nannyNotes.get(project) ?? []
+  nannyNotes.delete(project)
+  if (!notes.length) return
+
+  const prompt = [
+    'BOARD EVENT — nobody asked you a question. These cards moved on their own:',
+    '',
+    ...notes.map((note) => `- ${note}`),
+    '',
+    'Run your merge and ordering duties on the current board, then report in at',
+    'most three lines: what landed, what is blocked, and what you started next.',
+    'If nothing needs the user, say so in one line and stop.'
+  ].join('\n')
+
+  try {
+    // Her own permissions, not a lane's `skip`: she merges into the user's base
+    // branch and the user is right there in the panel watching her do it.
+    startTurn(win, sessionId, project, prompt, { permissionMode: 'default' })
+  } catch {
+    // Nothing to recover. A manager who could not be told is a manager the user
+    // asks instead, and the board itself is on screen and already correct.
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -455,4 +836,11 @@ export function reconcileColony(win: BrowserWindow): void {
     tick(win, project)
     pushBoard(win, project)
   }
+
+  // Then the cards queued behind a dependency: it can have been merged from the
+  // terminal while the app was closed, and nothing else would ever look again.
+  // After the ticks and floating, because releasing cuts worktrees — boot is not
+  // waiting on git, and `releaseTask` ticks and repaints for itself.
+  const queued = new Set(allTasks().filter((t) => t.queued).map((t) => t.project))
+  for (const project of queued) void sweepReleases(win, project)
 }

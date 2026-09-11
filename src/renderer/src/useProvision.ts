@@ -20,6 +20,16 @@ export interface ProvisionFlow {
   /** The last line of output, so a long install says what it is doing. */
   tail?: string
   /**
+   * Which step the tail came from.
+   *
+   * The interview runs beside the recipe, so two rows can be live at once —
+   * without this the migrate step's output is drawn under the premise question
+   * as well, and the same line appears twice on the checklist. Undefined when
+   * the tail belongs to the run rather than a step (no stack, or a run that
+   * failed before any step started).
+   */
+  tailId?: string
+  /**
    * The premise question waiting on the user, if one is.
    *
    * Held on the flow rather than beside it because it belongs to this
@@ -91,14 +101,21 @@ export function useProvision(deps: {
         steps: all[target.worktreePath]?.steps ?? [],
         running: true,
         ok: undefined,
-        tail: undefined
+        tail: undefined,
+        tailId: undefined
       }
     }))
     show()
     void window.floe.provision
       .run(target.root, target.worktreePath, target.branch, from ? { from } : undefined)
       .catch((e: Error) => {
-        patch(target.worktreePath, (f) => ({ ...f, running: false, ok: false, tail: e.message }))
+        patch(target.worktreePath, (f) => ({
+          ...f,
+          running: false,
+          ok: false,
+          tail: e.message,
+          tailId: undefined
+        }))
       })
   }
 
@@ -154,7 +171,8 @@ export function useProvision(deps: {
               steps: e.steps,
               running: e.steps.length > 0,
               ok: e.steps.length ? undefined : true,
-              tail: e.steps.length ? undefined : 'No known stack here — nothing to set up'
+              tail: e.steps.length ? undefined : 'No known stack here — nothing to set up',
+              tailId: undefined
             }
           }
         }
@@ -177,7 +195,7 @@ export function useProvision(deps: {
         // non-empty one is what the step is doing right now.
         if (e.kind === 'log') {
           const line = e.text.split('\n').filter((l) => l.trim()).pop()
-          return line ? { ...all, [e.worktreePath]: { ...cur, tail: line } } : all
+          return line ? { ...all, [e.worktreePath]: { ...cur, tail: line, tailId: e.id } } : all
         }
         if (e.kind === 'done') {
           // The tail is a running step's live output, so it goes when the run
@@ -189,7 +207,8 @@ export function useProvision(deps: {
               ...cur,
               running: false,
               ok: e.ok,
-              tail: cur.steps.length ? undefined : cur.tail
+              tail: cur.steps.length ? undefined : cur.tail,
+              tailId: undefined
             }
           }
         }

@@ -1,0 +1,349 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — the nanny docked under the board</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+
+  /* --- lane shell -------------------------------------------------------- */
+  .lane { display: flex; gap: 8px; height: 100vh; padding: 8px 8px 34px; box-sizing: border-box; }
+  .lane-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+  .lane-col[data-w="200"] { flex: 0 0 200px; }
+  .lane-col[data-w="520"] { flex: 0 0 520px; }
+  .lane-col[data-grow] { flex: 1 1 auto; min-width: 0; }
+  .panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+           background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px;
+                border-bottom: 1px solid var(--line-soft); flex: none; }
+  .panel-name { color: var(--text-strong); flex: none; }
+  .panel-sub { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+  .glyph { color: var(--dim); flex: none; }
+  :focus { outline: none; }
+  :focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+  ::selection { background: var(--wash-4); color: var(--text-strong); }
+
+  .act { border: 1px solid var(--edge); background: var(--wash-1); color: var(--text); border-radius: 1px;
+         font: inherit; font-size: 11px; padding: 2px 9px; cursor: pointer; }
+  .act:hover { background: var(--wash-3); }
+  .act[data-on] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+  /* --- the board --------------------------------------------------------- */
+  .board { display: flex; gap: 6px; align-items: stretch; height: 100%; min-height: 0; user-select: none; }
+  .board *::-webkit-scrollbar { width: 0; height: 0; }
+  .board * { scrollbar-width: none; }
+  .fcol { display: flex; flex-direction: column; min-width: 0; flex: 1 1 150px;
+          border: 1px dashed var(--line); border-radius: var(--radius); background: var(--wash-1); }
+  .fcol[data-empty] { background: none; }
+  .fcol[data-collapsed] { flex: 0 0 30px; }
+  .fcol[data-collapsed] .fcol-body { display: none; }
+  .fcol[data-collapsed] .fcol-head { flex-direction: column; height: 100%; padding: 8px 0; gap: 8px; border: 0; }
+  .fcol[data-collapsed] .fcol-name { writing-mode: vertical-rl; }
+  .fcol[data-collapsed] .fcol-cap { display: none; }
+  .fcol-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding: 5px 8px; flex: none;
+               border-bottom: 1px solid var(--line-soft); }
+  .fcol-name { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+  .fcol[data-live] .fcol-name { color: var(--text-strong); }
+  .fcol-cap { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .fcol-cap[data-full] { color: var(--accent); }
+  .fcol-body { flex: 1; min-height: 0; overflow: auto; padding: 6px; display: flex; flex-direction: column; gap: 6px; }
+
+  .fcard { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel);
+           padding: 7px 8px; display: flex; flex-direction: column; gap: 4px; }
+  .fcard[data-cursor] { border-color: #55688f; background: var(--panel-focused); }
+  .fcard-top { display: flex; align-items: center; gap: 6px; }
+  .fkind { border: 1px solid var(--line); border-radius: 1px; color: var(--dimmer); font-size: 10px; padding: 0 5px; }
+  .fcard-name { color: var(--text-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .fcard-line { color: var(--dim); font-size: 10px; }
+  .hmark { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; flex: none;
+           border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 50%;
+           color: var(--accent); font-size: 9px; }
+  /* Landed on base — the end of the card's life. Dimmed name, not a green
+     badge: the accent is already spoken for by "this needs you". */
+  .fcard[data-merged] .fcard-name { color: var(--dimmer); }
+  .fcard[data-merged] .fcard-line { color: var(--nick-gemini); }
+  /* Queued behind a dependency. Dashed because it has no worktree yet — that is
+     literally the difference, and it is the whole point of the state. */
+  .fcard[data-queued] { border-style: dashed; }
+
+  /* --- the nanny dock ----------------------------------------------------
+     Under the board, spanning it, a third of the screen. It is about the WHOLE
+     board, so it belongs to the board's column and not to the slot that shows
+     one card — which is why it is never swapped away for a card chat. */
+  .dock { flex: 0 0 33%; display: flex; flex-direction: column; min-height: 120px; }
+  .dock-grip { height: 5px; margin-bottom: -5px; cursor: ns-resize; flex: none; position: relative; z-index: 2; }
+  .dock-grip:hover::after { content: ''; position: absolute; inset: 2px 0; background: var(--edge); }
+
+  /* --- the stream --------------------------------------------------------
+     Two kinds of line share it, and the difference has to read at a glance,
+     because that IS the point: what the BOARD did on its own, and what the
+     nanny said about it. */
+  .msg { margin-bottom: 9px; }
+  .msg-head { display: flex; gap: 8px; align-items: baseline; }
+  .msg-nick { color: var(--nick-you); }
+  .msg-nick[data-who="nanny"] { color: var(--nick-gemini); }
+  .msg-nick[data-who="claude"] { color: var(--nick-claude); }
+  .msg-time { color: var(--time-dim); font-size: 10px; }
+  .msg-body { color: var(--text); }
+  .msg-body .dim { color: var(--dim); }
+  .msg-body b { color: var(--text-strong); font-weight: 400; }
+
+  /* THE EVENT LINE. The board acting on its own — a merge, a release, a
+     refusal — written the moment it happens. It is not a chat message and must
+     not look like one: no nick, a rule down its left edge, the verb first.
+     Nothing the board does is allowed to be invisible, so this is the record. */
+  .ev { display: flex; gap: 8px; align-items: baseline; margin: 0 0 9px; padding: 3px 0 3px 9px;
+        border-left: 2px solid var(--edge); }
+  .ev-time { color: var(--time-dim); font-size: 10px; flex: none; }
+  .ev-body { flex: 1; min-width: 0; color: var(--dim); font-size: 11px; }
+  .ev-body b { color: var(--text-strong); font-weight: 400; }
+  .ev-verb { color: var(--dimmer); }
+  .ev[data-tone="land"] { border-left-color: var(--nick-gemini); }
+  .ev[data-tone="land"] .ev-verb { color: var(--nick-gemini); }
+  .ev[data-tone="stop"] { border-left-color: var(--accent); }
+  .ev[data-tone="stop"] .ev-verb { color: var(--accent); }
+  /* What makes it not-under-the-covers rather than merely logged: every
+     automatic action carries the way back out of it, on the line that did it. */
+  .ev-acts { display: flex; gap: 8px; margin-top: 3px; }
+  .ev-act { color: var(--dimmer); font-size: 10px; border-bottom: 1px dotted var(--edge); cursor: pointer; }
+  .ev-act:hover { color: var(--text); }
+
+  .composer { flex: none; border-top: 1px solid var(--line-soft); padding: 7px 10px; color: var(--faint); }
+  .keys { flex: none; display: flex; gap: 14px; padding: 4px 11px; border-top: 1px solid var(--line-soft); color: var(--faint); font-size: 10px; }
+  .keys b { color: var(--dimmer); font-weight: 400; }
+
+  .toolbar { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 6px; align-items: center;
+             padding: 5px 10px; background: var(--bg); border-top: 1px solid var(--line-soft); z-index: 5; }
+  .toolbar .note { color: var(--faint); font-size: 10px; margin-left: auto; }
+</style>
+</head>
+<body>
+<div class="lane">
+
+  <!-- projects, for context only -->
+  <div class="lane-col" data-w="200">
+    <div class="panel">
+      <div class="panel-head"><span class="glyph">▤</span><span class="panel-name">projects</span></div>
+      <div class="panel-body" style="padding:6px 4px">
+        <div class="row row-session" style="padding-left:8px"><span class="dot"></span><span class="row-name">floe</span></div>
+        <div class="row row-session" data-active style="padding-left:8px"><span class="dot dot-unread"></span><span class="row-name">rookery</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- The board, and the nanny under it. One column, split 2/3 · 1/3. -->
+  <div class="lane-col" data-grow>
+    <div class="panel" data-focused>
+      <div class="panel-head">
+        <span class="glyph">◫</span>
+        <span class="panel-name">colony</span>
+        <span class="panel-sub">rookery · base master · 9 tasks · 4 in flight · 2 landed today</span>
+        <button class="act" id="automerge" data-on>automerge: on</button>
+      </div>
+      <div class="panel-body"><div class="board" id="board"></div></div>
+      <div class="keys">
+        <span><b>h l</b> column</span><span><b>j k</b> card</span><span><b>⏎</b> open chat →</span>
+        <span><b>n</b> new task</span><span><b>ESC</b> focus nanny ↓</span>
+      </div>
+    </div>
+
+    <div class="dock" id="dock">
+      <div class="dock-grip" id="grip"></div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="glyph">◐</span><span class="panel-name">nanny</span>
+          <span class="panel-sub">rookery · the whole board</span>
+          <button class="act" style="font-size:10px;padding:1px 7px">history</button>
+        </div>
+        <div class="panel-body" id="dock-stream" style="padding:8px 11px"></div>
+        <div class="composer">Ask the nanny… (⏎ send · ⇧⏎ newline)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- The card chat keeps the right column, full height. It is about ONE card;
+       the nanny is about the board. They were never the same question, which is
+       why sharing one slot meant losing the board every time you opened a card. -->
+  <div class="lane-col" data-w="520" id="col-chat">
+    <div class="panel">
+      <div class="panel-head"><span class="glyph">▸</span><span class="panel-name">chat</span><span class="panel-sub">adaptive-polling · coder</span></div>
+      <div class="panel-body" id="chat-stream"></div>
+      <div class="composer">Follow-up… (⏎ send · ⇧⏎ newline)</div>
+    </div>
+  </div>
+</div>
+
+<div class="toolbar">
+  <button class="act" id="theme">theme</button>
+  <button class="act" id="third" data-on>dock: 1/3</button>
+  <button class="act" id="chat-open" data-on>card chat: open</button>
+  <span class="note">the dock is as wide as the board — close the card chat and the board takes the whole lane, dock with it</span>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// The board behind the mock
+// ---------------------------------------------------------------------------
+const STAGES = [
+  { name: 'inbox' },
+  { name: 'specifier', cap: 5 },
+  { name: 'coder', cap: 5 },
+  { name: 'cleaner', cap: 1 },
+  { name: 'hardener', cap: 5 },
+  { name: 'qa', cap: 5 },
+  { name: 'done' }
+]
+
+const CARDS = [
+  // The dependency, drawn where it is decided: in the backlog, with no tree.
+  { col:'inbox', st:'queued', kind:'feat', name:'session-ref-ui', line:'waiting on entity-identity', dep:true },
+  { col:'inbox', st:'holding', kind:'chore', name:'static-spatial-index' },
+
+  { col:'specifier', st:'blocked', kind:'fix', name:'tactical-persistence', line:'asks whether the old format still has to be read', ask:true },
+  { col:'coder', st:'working', kind:'feat', name:'adaptive-polling', line:'writing the store', cursor:true },
+  { col:'cleaner', st:'working', kind:'feat', name:'thrust-clamp', line:'second CRAP pass' },
+  { col:'qa', st:'working', kind:'fix', name:'targeting-policy', line:'running the suite' },
+
+  { col:'done', st:'settled', kind:'feat', name:'entity-identity', line:'merged', merged:true },
+  { col:'done', st:'settled', kind:'chore', name:'orbit-cache', line:'not merged — uncommitted changes', ask:true }
+]
+
+const board = document.getElementById('board')
+for (const stage of STAGES) {
+  const mine = CARDS.filter((c) => c.col === stage.name)
+  const busy = mine.filter((c) => c.st === 'working' || c.st === 'blocked').length
+  const col = document.createElement('div')
+  col.className = 'fcol'
+  if (!mine.length) { col.dataset.empty = ''; col.dataset.collapsed = '' }
+  if (mine.some((c) => c.st === 'working')) col.dataset.live = ''
+  col.innerHTML =
+    '<div class="fcol-head"><span class="fcol-name">' + stage.name + '</span>' +
+    (stage.cap ? '<span class="fcol-cap"' + (busy >= stage.cap ? ' data-full' : '') + '>' + busy + '/' + stage.cap + '</span>' : '') +
+    '</div><div class="fcol-body"></div>'
+  const body = col.querySelector('.fcol-body')
+  for (const card of mine) {
+    const el = document.createElement('div')
+    el.className = 'fcard'
+    if (card.cursor) el.dataset.cursor = ''
+    if (card.merged) el.dataset.merged = ''
+    if (card.dep) el.dataset.queued = ''
+    el.innerHTML =
+      '<div class="fcard-top">' +
+      '<span class="fkind">' + card.kind + '</span>' +
+      '<span class="fcard-name">' + card.name + '</span>' +
+      (card.ask ? '<span class="hmark" style="margin-left:auto">?</span>' : '') +
+      '</div>' +
+      (card.line ? '<div class="fcard-line">' + card.line + '</div>' : '')
+    body.appendChild(el)
+  }
+  board.appendChild(col)
+}
+
+// ---------------------------------------------------------------------------
+// The stream. This is the answer to "it cannot happen under the covers".
+//
+// `ev` is the BOARD acting on its own. It is written the moment it happens, it
+// names what it did in the first word, and it carries the way back out of it.
+// `msg` is somebody talking.
+// ---------------------------------------------------------------------------
+const STREAM = [
+  { t:'ev', time:'14:31', verb:'passed', body:'<b>entity-identity</b> passed qa — last stage, so it reached <span class="dim">done</span>.' },
+  { t:'ev', time:'14:31', tone:'land', verb:'merged', body:'<b>feat/entity-identity</b> → <b>master</b>, 14 files, fast-forward clean.',
+    acts:['undo this merge', 'show the diff', 'open the worktree'] },
+  { t:'ev', time:'14:31', verb:'released', body:'<b>session-ref-ui</b> was queued behind it — dependency met, worktree cut off the new master.',
+    acts:['hold it again'] },
+  { t:'msg', time:'14:31', who:'nanny', body:
+    'entity-identity landed on master — 14 files, no conflict.<br>' +
+    'session-ref-ui was waiting on it, so it is out of the backlog and in specifier now.<br>' +
+    '<span class="dim">Nothing needs you.</span>' },
+
+  { t:'ev', time:'14:38', tone:'stop', verb:'refused', body:'<b>orbit-cache</b> reached done but did not merge: its worktree has uncommitted changes.',
+    acts:['show what is uncommitted', 'open the worktree', 'retry the merge'] },
+  { t:'msg', time:'14:38', who:'nanny', body:
+    '<b>orbit-cache</b> is finished but will not land: the qa lane left three files edited and never committed them.<br>' +
+    'Commit them in its worktree, or tell me to and I will ask the lane to. Nothing else is blocked by it.' },
+
+  { t:'msg', time:'14:40', who:'you', body:'e o targeting-policy?' },
+  { t:'msg', time:'14:40', who:'nanny', body:
+    'Still in qa, 6m, running the suite. It touches <span class="dim">src/main/turn.ts</span>, and so does adaptive-polling in coder — ' +
+    'they will collide at the second merge. targeting-policy is further along, so it should land first.' }
+]
+
+const stream = document.getElementById('dock-stream')
+for (const item of STREAM) {
+  const el = document.createElement('div')
+  if (item.t === 'ev') {
+    el.className = 'ev'
+    if (item.tone) el.dataset.tone = item.tone
+    el.innerHTML =
+      '<span class="ev-time">' + item.time + '</span>' +
+      '<span class="ev-body"><span class="ev-verb">' + item.verb + '</span> · ' + item.body +
+      (item.acts ? '<span class="ev-acts">' + item.acts.map((a) => '<span class="ev-act">' + a + '</span>').join('') + '</span>' : '') +
+      '</span>'
+  } else {
+    el.className = 'msg'
+    el.innerHTML =
+      '<div class="msg-head"><span class="msg-nick"' + (item.who === 'nanny' ? ' data-who="nanny"' : '') + '>' +
+      (item.who === 'nanny' ? 'nanny' : 'r2luna') + '</span><span class="msg-time">' + item.time + '</span></div>' +
+      '<div class="msg-body">' + item.body + '</div>'
+  }
+  stream.appendChild(el)
+}
+stream.scrollTop = stream.scrollHeight
+
+document.getElementById('chat-stream').innerHTML =
+  '<div class="msg"><div class="msg-head"><span class="msg-nick" data-who="claude">claude<span class="irc-host">@opus-5</span></span>' +
+  '<span class="msg-time">14:29</span></div><div class="msg-body">Reading the existing store, then the polling loop. ' +
+  'The acceptance criteria in <span class="dim">specs/feat-adaptive-polling/spec.md</span> want backoff on a backgrounded tab, ' +
+  'so the timer has to move off <span class="dim">setInterval</span>.</div></div>' +
+  '<div class="msg"><div class="msg-head"><span class="msg-nick">r2luna</span><span class="msg-time">14:33</span></div>' +
+  '<div class="msg-body">use the visibility API</div></div>'
+
+// ---------------------------------------------------------------------------
+// The grip. A dock you cannot shrink is a dock in the way.
+// ---------------------------------------------------------------------------
+const dock = document.getElementById('dock')
+document.getElementById('grip').onpointerdown = (down) => {
+  const start = down.clientY
+  const from = dock.getBoundingClientRect().height
+  const move = (e) => {
+    const next = Math.max(120, Math.min(window.innerHeight * 0.7, from - (e.clientY - start)))
+    dock.style.flexBasis = next + 'px'
+    document.getElementById('third').textContent = 'dock: ' + Math.round((next / window.innerHeight) * 100) + '%'
+  }
+  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', up)
+}
+document.getElementById('third').onclick = (e) => {
+  dock.style.flexBasis = '33%'
+  e.target.textContent = 'dock: 1/3'
+}
+
+// The dock is not a fraction of the window — it is the width of the column it
+// is docked in, and the board column takes whatever the lane has left over.
+// Closing the card chat is what makes it full width; nothing is reserved.
+document.getElementById('chat-open').onclick = (e) => {
+  const col = document.getElementById('col-chat')
+  const open = e.target.dataset.on !== undefined
+  col.hidden = open
+  if (open) { delete e.target.dataset.on; e.target.textContent = 'card chat: closed' }
+  else { e.target.dataset.on = ''; e.target.textContent = 'card chat: open' }
+}
+
+document.getElementById('theme').onclick = () => {
+  const root = document.documentElement
+  root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'
+}
+document.getElementById('automerge').onclick = (e) => {
+  const on = e.target.dataset.on !== undefined
+  if (on) { delete e.target.dataset.on; e.target.textContent = 'automerge: off' }
+  else { e.target.dataset.on = ''; e.target.textContent = 'automerge: on' }
+}
+</script>
+</body>
+</html>
