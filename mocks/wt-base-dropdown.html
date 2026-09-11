@@ -1,0 +1,47 @@
+<!doctype html>
+<html data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="../src/renderer/src/index.css" />
+    <style>
+      body { margin: 0; padding: 24px; background: var(--bg); }
+      .col { width: 330px; }
+    </style>
+  </head>
+  <body>
+    <div class="col">
+      <form class="wt-new">
+        <label class="chips-label">New worktree</label>
+        <input class="dialog-input" placeholder="Name it, or pick a branch…" />
+        <div class="wt-base">
+          <button type="button" class="wt-base-button" aria-expanded="true">
+            <span class="wt-base-value">split-colony-sessions</span>
+            <span class="wt-base-note">here</span>
+            <span class="wt-base-caret">▾</span>
+          </button>
+          <div class="wt-base-menu" role="listbox">
+            <button type="button" class="wt-base-row" data-at data-on>
+              <span class="wt-base-label">split-colony-sessions</span>
+              <span class="wt-base-note">here</span>
+            </button>
+            <button type="button" class="wt-base-row">
+              <span class="wt-base-label">master</span>
+              <span class="wt-base-note">main</span>
+            </button>
+            <button type="button" class="wt-base-row">
+              <span class="wt-base-label">plugin-ui</span>
+            </button>
+            <button type="button" class="wt-base-row">
+              <span class="wt-base-label">block-worktree</span>
+            </button>
+          </div>
+        </div>
+        <div class="dialog-actions" style="margin-top: 160px">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>

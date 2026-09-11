@@ -1,0 +1,115 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — new worktree: when git says no</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .mock-page { display: flex; gap: 18px; align-items: flex-start; padding: 18px; }
+  .mock-col { flex: 0 0 360px; }
+  .mock-col h1 { font-size: 11px; margin: 0 0 8px; color: var(--dim); font-weight: 400; letter-spacing: .06em; text-transform: uppercase; }
+  .mock-note { margin: 0 0 14px; color: var(--dimmest); font-size: 11px; }
+  .panel { background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 11px 4px; margin-bottom: 16px; }
+  :focus { outline: none; }
+  :focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
+
+  /* The .wt-new-error / .wt-new-why / .wt-new-raw / .wt-new-fix rules are
+     real now — they come from index.css above, not from here. */
+</style>
+</head>
+<body>
+<div class="mock-page">
+
+  <div class="mock-col">
+    <h1>Dark</h1>
+    <p class="mock-note">Estados de falha do formulário inline (⌘N), no painel de worktrees.</p>
+
+    <!-- 1. namespace blocked (o caso de hoje) -->
+    <div class="panel">
+      <form class="wt-new">
+        <label class="chips-label">New worktree</label>
+        <input class="dialog-input" value="feat/dos-388-plan" />
+        <div class="wt-new-error">
+          <p class="wt-new-why">The branch feat already exists, so nothing can be created under feat/ — git keeps branches as files, and feat cannot be a file and a folder at once. Rename or delete feat first.</p>
+          <button type="button" class="wt-new-fix">Create feat-dos-388-plan instead ⌥⏎</button>
+          <p class="wt-new-raw">fatal: cannot lock ref 'refs/heads/feat/dos-388-plan': 'refs/heads/feat' exists; cannot create 'refs/heads/feat/dos-388-plan'</p>
+        </div>
+        <div class="wt-base">
+          <button type="button" class="wt-base-button">
+            <span class="wt-base-value">master</span><span class="wt-base-note">main</span><span class="wt-base-caret">▾</span>
+          </button>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel</button>
+          <button type="button" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 2. branch already checked out somewhere -->
+    <div class="panel">
+      <form class="wt-new">
+        <label class="chips-label">New worktree</label>
+        <input class="dialog-input" value="plugin-ui" />
+        <div class="wt-new-error">
+          <p class="wt-new-why">The branch plugin-ui is already checked out at /Users/r2luna/…/.worktrees/plugin-ui.</p>
+          <p class="wt-new-raw">fatal: 'plugin-ui' is already used by worktree at '/Users/r2luna/…/.worktrees/plugin-ui'</p>
+        </div>
+        <div class="wt-base">
+          <button type="button" class="wt-base-button">
+            <span class="wt-base-value">Keep the branch as it is</span><span class="wt-base-caret">▾</span>
+          </button>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel</button>
+          <button type="button" class="btn btn-primary">Check out</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 3. anything else: git's words, unedited -->
+    <div class="panel">
+      <form class="wt-new">
+        <label class="chips-label">New worktree</label>
+        <input class="dialog-input" value="dos-390" />
+        <div class="wt-new-error">
+          <p class="wt-new-why">There is no ref named release-2.4 here to branch from.</p>
+          <p class="wt-new-raw">fatal: invalid reference: release-2.4</p>
+        </div>
+        <div class="wt-base">
+          <button type="button" class="wt-base-button">
+            <span class="wt-base-value">release-2.4</span><span class="wt-base-caret">▾</span>
+          </button>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel</button>
+          <button type="button" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="mock-col" id="light-col">
+    <h1>Light</h1>
+    <p class="mock-note">Mesmo markup, tema claro.</p>
+    <div id="light-slot"></div>
+  </div>
+
+</div>
+<script>
+  // The light column is the dark one, re-rendered inside data-theme='light' —
+  // one source of markup, so the two can never drift apart.
+  const src = document.querySelector('.mock-col').innerHTML
+  const host = document.createElement('div')
+  host.setAttribute('data-theme', 'light')
+  host.style.cssText = 'background: var(--bg); padding: 6px; border-radius: var(--radius)'
+  host.innerHTML = src.replace(/<h1>Dark<\/h1>/, '').replace(/<p class="mock-note">[\s\S]*?<\/p>/, '')
+  document.getElementById('light-slot').appendChild(host)
+</script>
+</body>
+</html>

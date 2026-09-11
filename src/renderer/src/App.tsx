@@ -55,6 +55,7 @@ import { AddProject } from './AddProject'
 import { reason } from './ipcError'
 import { attach, backendLabel, backendOf, currentBackend, dropLanding, handOff, LOCAL, peekLanding } from './backends'
 import type { NewWorktreeProps } from './NewWorktree'
+import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
 import { useWorktrees, type WorktreeRow } from './useWorktrees'
@@ -592,6 +593,10 @@ export default function App() {
   const markAnchor = useRef<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
+  // Why the last create was refused, and whether one is in flight — both belong
+  // to the form, which stays open across a failure so it can show them.
+  const [newWtError, setNewWtError] = useState<WorktreeFailure | null>(null)
+  const [newWtBusy, setNewWtBusy] = useState(false)
   const [branches, setBranches] = useState<string[]>([])
   // The patch currently rendered in the diff panel, so `c` can quote from
   // exactly what is on screen.
@@ -1922,6 +1927,8 @@ export default function App() {
           setBranches(all.filter((b) => !taken.has(b)))
         })
         .catch(() => setBranches([]))
+      setNewWtError(null)
+      setNewWtBusy(false)
       setNewWt(true)
       // The form lives at the top of the worktrees panel, so the panel has to
       // be up — and focused, so the input's own focus lands inside the panel
@@ -2248,17 +2255,30 @@ export default function App() {
           branches,
           mainBase: worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch,
           defaultBase: current?.worktree.branch,
+          // The only other bases offered: branches Floe already has a worktree
+          // for. Everything else is a branch you were not working in.
+          worktreeBases: worktrees.rows.map((r) => r.worktree.branch),
+          error: newWtError,
+          busy: newWtBusy,
+          onClearError: () => setNewWtError(null),
           onCancel: () => {
             setNewWt(false)
+            setNewWtError(null)
             // After the re-render that removes the form — reading the rows now
             // would hand focus to a button about to disappear.
             requestAnimationFrame(backToLane)
           },
           onCreate: ({ branch, base, resetBranch }) => {
-            setNewWt(false)
+            // The form stays up until git agrees. Closing it first is what used
+            // to send a refusal to the console and leave the panel looking as
+            // if nothing had been asked for.
+            setNewWtError(null)
+            setNewWtBusy(true)
             void window.floe.worktrees
               .create(projects.current!.path, branch, { base, resetBranch })
               .then((list) => {
+                setNewWtBusy(false)
+                setNewWt(false)
                 worktrees.reload()
                 // Land in what you just made — creating a worktree and then
                 // having to go find it is a step the app can take for you. The
@@ -2278,7 +2298,10 @@ export default function App() {
                     branch: made.branch
                   })
               })
-              .catch((e: Error) => console.warn('[worktree.new]', e.message))
+              .catch((e: Error) => {
+                setNewWtBusy(false)
+                setNewWtError(diagnoseWorktreeFailure(branch, e.message))
+              })
           }
         }
       : undefined

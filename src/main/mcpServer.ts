@@ -108,6 +108,7 @@ import { copyPlan, PLANS_DIR, readImplementPhases } from './plans'
 import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort } from './mcpHarness'
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
+import { diagnoseWorktreeFailure } from '../shared/worktreeError'
 import {
   createSkill,
   deleteSkill,
@@ -527,7 +528,10 @@ async function createWorktreeTool(
     if (win && created) void provisionWorktree(win, project, created.path, created.branch)
     return textResult({ created, worktrees })
   } catch (e) {
-    return textResult({ error: (e as Error).message })
+    // The same diagnosis the form shows, so an agent reads the reason and the
+    // way out instead of git's ref-locking vocabulary.
+    const failure = diagnoseWorktreeFailure(branch, (e as Error).message)
+    return textResult({ error: failure.why, git: failure.raw || undefined, suggestion: failure.suggestion })
   }
 }
 
