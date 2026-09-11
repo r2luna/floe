@@ -10,8 +10,36 @@
 
 import { useEffect, useState } from 'react'
 import { setDefaultChoice, setHarnessDefaults, setUserNick } from './models'
+import type { TransparencyId } from '../../shared/types'
 
 type Theme = 'system' | 'dark' | 'light'
+
+// `[appearance] transparency` and its amount, kept for the same reason `chosen`
+// is: an OS flip has to re-decide whether THIS theme is glassed without
+// re-reading the file.
+let glass: TransparencyId = 'off'
+let glassAmount = 18
+
+/**
+ * Turn the per-theme choice into the one bit the stylesheet reads.
+ *
+ * The window is already non-opaque whenever transparency names any theme (main
+ * clears its fill; see transparencyOn), so this attribute is what decides
+ * whether the surfaces let that blur through or cover it — which is how a
+ * `dark`-only glass stays solid in light without touching the window.
+ *
+ * macOS only: the blur is an NSVisualEffectView. Elsewhere — and in the browser
+ * build, where `platform` is the browser's — translucent surfaces would sit over
+ * nothing at all, so the app stays opaque.
+ */
+function applyGlass(dark: boolean): void {
+  const supported = window.floe.platform === 'darwin'
+  const on = supported && (glass === 'all' || glass === (dark ? 'dark' : 'light'))
+  document.documentElement.dataset.vibrancy = on ? 'on' : 'off'
+  // The alpha every glassed surface is tinted at. Stated as "how much comes
+  // through" in the file, because that is the thing being judged.
+  document.documentElement.style.setProperty('--glass', String(1 - glassAmount / 100))
+}
 
 // The theme in force, kept so an OS switch can be applied without re-reading the
 // config — and ignored when the config names a theme outright.
@@ -28,6 +56,7 @@ async function applyTheme(theme: Theme): Promise<void> {
   chosen = theme
   const dark = theme === 'system' ? await window.floe.theme.isDark() : theme === 'dark'
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+  applyGlass(dark)
 }
 
 /**
@@ -59,6 +88,9 @@ export async function applyConfig(): Promise<void> {
     // the same transcript, and the rules keyed off this attribute are what move
     // the nick, the air and the surfaces. See CHAT_LAYOUTS in shared/types.
     document.documentElement.dataset.chatLayout = config.appearance.chatLayout
+    // Before applyTheme: it resolves dark/light and applies the glass with it.
+    glass = config.appearance.transparency
+    glassAmount = config.appearance.transparencyAmount
     await applyTheme(config.appearance.theme)
     setDefaultChoice(config.agent)
     setHarnessDefaults(config.harness)

@@ -109,7 +109,12 @@ const index = await import('./index.ts')
 const { registeredChannels } = await import('./plugins/handleMap.ts')
 const { addCreatedSession, touchCreatedSession } = await import('./sessionStore.ts')
 const { addProjectByPath } = await import('./projects.ts')
-const { setVibrancy } = await import('./sessionStore.ts')
+const { setFloeValue } = await import('./config/floe.ts')
+
+// The glass is `[appearance] transparency` now, so a test that needs it on or
+// off writes the (temp) config file the same way Settings does.
+const setTransparency = (on: boolean): void =>
+  setFloeValue('appearance', 'transparency', on ? 'all' : 'off')
 
 type FakeNotification = {
   opts: { title: string; body: string }
@@ -311,6 +316,11 @@ const CHANNELS = [
   'colony:add',
   'colony:release',
   'colony:remove',
+  'colony:events',
+  'colony:undoMerge',
+  'colony:setAutomerge',
+  'colony:hold',
+  'colony:mergeTask',
   'colony:nanny',
   'terminal:write',
   'terminal:resize',
@@ -367,8 +377,6 @@ const CHANNELS = [
   'config:paths',
   'config:reveal',
   'theme:get',
-  'window:getVibrancy',
-  'window:setVibrancy',
   'app:getLoginItem',
   'app:setLoginItem',
   'user:name',
@@ -641,7 +649,7 @@ test('popupContextMenu shows a menu only when something applies', () => {
 })
 
 test('captureWindow writes the dev screenshot', async () => {
-  setVibrancy(false) // vibrancy on suppresses the capture; see the note on it
+  setTransparency(false) // glass on suppresses the capture; see the note on it
   const shot = join(userData, 'floe-shot.png')
   rmSync(shot, { force: true })
 
@@ -653,7 +661,7 @@ test('captureWindow writes the dev screenshot', async () => {
 })
 
 test('captureWindow swallows a failed capture', async () => {
-  setVibrancy(false)
+  setTransparency(false)
   const win = {
     webContents: {
       capturePage: () => Promise.reject(new Error('window gone'))
@@ -665,7 +673,7 @@ test('captureWindow swallows a failed capture', async () => {
 
 test('captureWindow leaves the macOS blur alone', async (t) => {
   if (process.platform !== 'darwin') return t.skip('macOS only')
-  setVibrancy(true)
+  setTransparency(true)
   const shot = join(userData, 'floe-shot.png')
   rmSync(shot, { force: true })
   let captured = false
@@ -681,7 +689,7 @@ test('captureWindow leaves the macOS blur alone', async (t) => {
     }
   } as unknown as BrowserWindow)
   assert.equal(captured, false)
-  setVibrancy(false)
+  setTransparency(false)
 })
 
 test('waitForBundle waits for an index.html that reads back intact', async () => {

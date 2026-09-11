@@ -60,8 +60,6 @@ export const PINNED_CHANNELS = new Set([
   'window:capture',
   'window:focus',
   'window:hide',
-  'window:getVibrancy',
-  'window:setVibrancy',
   'app:getLoginItem',
   'app:setLoginItem',
   'open:external',

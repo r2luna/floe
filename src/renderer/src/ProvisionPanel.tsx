@@ -27,7 +27,7 @@ export function ProvisionPanel({
   if (!flow)
     return <p className="empty">No setup running. ⌘K W runs it again for this worktree.</p>
 
-  const { steps, running, ok, branch, tail, ask } = flow
+  const { steps, running, ok, branch, tail, tailId, ask } = flow
   const failed = steps.find((s) => s.status === 'failed')
   const settled = steps.filter((s) => s.status !== 'pending' && s.status !== 'running').length
 
@@ -57,7 +57,7 @@ export function ProvisionPanel({
           <Step
             key={s.id}
             step={s}
-            tail={tail}
+            tail={tailId === s.id ? tail : undefined}
             ask={ask?.stepId === s.id ? ask : null}
             onCommand={onCommand}
             onAnswer={onAnswer}

@@ -111,6 +111,36 @@ test('chat-layout takes only the known layouts, and defaults to classic', () => 
   assert.equal(absent.config.appearance.chatLayout, 'classic', 'an old file keeps the log it had')
 })
 
+test('transparency names the themes that get glass, and defaults to off', () => {
+  const dark = parseFloeConfig('[appearance]\ntransparency = "dark"\n', 'floe.toml')
+  assert.equal(dark.config.appearance.transparency, 'dark')
+  assert.equal(dark.errors.length, 0)
+
+  const both = parseFloeConfig('[appearance]\ntransparency = "all"\n', 'floe.toml')
+  assert.equal(both.config.appearance.transparency, 'all')
+
+  // `true` was never a value here — the choice is per theme, and a boolean that
+  // silently meant "all" would glass a light theme nobody asked to glass.
+  const bool = parseFloeConfig('[appearance]\ntransparency = true\n', 'floe.toml')
+  assert.equal(bool.config.appearance.transparency, 'off')
+  assert.equal(bool.errors.length, 1)
+
+  const absent = parseFloeConfig('', 'floe.toml')
+  assert.equal(absent.config.appearance.transparency, 'off', 'an existing app stays solid')
+})
+
+test('transparency-amount is clamped to what stays readable', () => {
+  const set = parseFloeConfig('[appearance]\ntransparency-amount = 35\n', 'floe.toml')
+  assert.equal(set.config.appearance.transparencyAmount, 35)
+  assert.equal(set.errors.length, 0)
+
+  // The slider stops at 60 and so does the file: past that the wallpaper reads
+  // through the text, which is not a preference, it is an unusable window.
+  const wild = parseFloeConfig('[appearance]\ntransparency-amount = 95\n', 'floe.toml')
+  assert.equal(wild.config.appearance.transparencyAmount, 18)
+  assert.equal(wild.errors.length, 1)
+})
+
 test('notification sound takes only the known sounds, off included', () => {
   const picked = parseFloeConfig('[notifications]\nsound = "tada"\n', 'floe.toml')
   assert.equal(picked.config.notifications.sound, 'tada')

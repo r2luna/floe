@@ -32,7 +32,7 @@ import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { downloadAndOpen } from './download.ts'
-import { CHAT_LAYOUTS, type FileOp } from '../../shared/types.ts'
+import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
  * The layout after this one, wrapping — what `chat.layout` steps through.
@@ -1348,8 +1348,11 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
-        // The board's own session, in the same slot the card chats use (D7) —
-        // never a second chat beside the first.
+        // The board's own session, DOCKED UNDER THE BOARD — not in the slot the
+        // card chats use, which is what D7 used to say. She is about the whole
+        // board and a card's chat is about one card; one replacing the other
+        // meant losing the board on the very keystroke you pressed to look at
+        // something on it. Already open, ESC just focuses her.
         id: 'colony.nanny',
         title: 'Ask the nanny',
         group: 'Colony',
@@ -1362,8 +1365,30 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.colony
             .nanny(project)
             .then((n) =>
-              c.openChat({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
+              c.openNanny({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
             )
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // The switch for the one thing the board does to code outside a
+        // worktree. A command and not just a button, so the palette and a key
+        // reach the same thing the strip does.
+        id: 'colony.automerge',
+        title: 'Automerge finished tasks — on or off',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'automerge belongs to a project board — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          // Read the board rather than tracking the value here: it is three
+          // config layers deep, and a toggle that flipped a remembered value
+          // would fight whatever the file says.
+          void window.floe.colony
+            .board(project)
+            .then((b) => window.floe.colony.setAutomerge(project, !b.automerge))
+            .then(() => c.say('automerge switched — the board says which way'))
             .catch((err: unknown) => c.say(reason(err)))
         }
       },
@@ -1384,7 +1409,7 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.colony
             .nanny(project)
             .then((n) => {
-              c.openChat({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
+              c.openNanny({ id: n.sessionId, worktreePath: n.worktreePath }, n.fresh ? n.opener : undefined)
               // After the panel has mounted: the composer does not exist on the
               // frame the chat is opened in.
               setTimeout(() => findComposer(c)?.focus(), 60)
@@ -1557,6 +1582,30 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.config
             .set('appearance', 'chat-layout', next)
             .then(() => c.say(`Chat layout: ${next}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Settings has the row, but glass is judged against the desktop behind
+        // the window — so it has to be reachable without a panel covering it.
+        // Steps through off → dark → light → all: the choice is per theme, and
+        // walking it is how you see what each one does to the app you are in.
+        id: 'appearance.transparency',
+        title: 'Next transparency',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then(async (config) => {
+              const at = TRANSPARENCY.indexOf(config.appearance.transparency)
+              // -1 (a value from a newer version) steps to the second entry the
+              // same way index 0 does — the same rule as the chat layout.
+              const next = TRANSPARENCY[(at + 1) % TRANSPARENCY.length] as string
+              // The write comes back as a `config:changed`, which is what moves
+              // the attribute and the window's fill — see appearance.ts.
+              await window.floe.config.set('appearance', 'transparency', next)
+              c.say(`Transparency: ${next}`)
+            })
             .catch((err: unknown) => c.say(reason(err)))
         }
       },

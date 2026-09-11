@@ -20,7 +20,7 @@ import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
 import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
-import type { Board, ColonyTask, TaskKind } from '../shared/colony'
+import type { Board, BoardEvent, ColonyTask, TaskKind } from '../shared/colony'
 import type { Route } from '../shared/mentions'
 import type { TomlValue } from '../main/config/toml'
 import type {
@@ -155,12 +155,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // so an attached window raises itself on the user's desk even when the command
     // Resolves false when there's no window to raise.
     focus: (): Promise<boolean> => ipcRenderer.invoke('window:focus'),
-    // Translucent (vibrancy) window appearance — macOS only. `get` is the snapshot
-    // for the initial [data-vibrancy] CSS state; `set` flips it live and persists.
-    vibrancy: {
-      get: (): Promise<boolean> => ipcRenderer.invoke('window:getVibrancy'),
-      set: (on: boolean): Promise<void> => ipcRenderer.invoke('window:setVibrancy', on)
-    },
     // The machines this window can run on. Workspace calls follow `use`'s
     // pointer; PINNED channels always stay on this machine (remoteProtocol.ts).
     backends: {
@@ -934,6 +928,22 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         project: string
       ): Promise<{ sessionId: string; worktreePath: string; fresh: boolean; opener: string }> =>
         ipcRenderer.invoke('colony:nanny', project),
+      // What the board did without being asked. A different question from
+      // `board` — that one is now, this one is what happened.
+      events: (project: string): Promise<BoardEvent[]> => ipcRenderer.invoke('colony:events', project),
+      // Put base back where it was before one of those merges. Refuses when
+      // base has moved on since, which is the only thing that makes it safe.
+      undoMerge: (eventId: string): Promise<{ ok: boolean; message?: string }> =>
+        ipcRenderer.invoke('colony:undoMerge', eventId),
+      mergeTask: (id: string): Promise<{ ok: boolean; message?: string }> =>
+        ipcRenderer.invoke('colony:mergeTask', id),
+      // The one config value Floe writes for you — the switch that decides
+      // whether the board changes your base branch unasked.
+      setAutomerge: (project: string, on: boolean): Promise<string> =>
+        ipcRenderer.invoke('colony:setAutomerge', project, on),
+      // Park a card back in the backlog, worktree intact — the way out of an
+      // automatic release.
+      hold: (id: string): Promise<ColonyTask | undefined> => ipcRenderer.invoke('colony:hold', id),
       onEvent: (cb: (event: { project: string }) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, event: { project: string }): void => cb(event)
         ipcRenderer.on('colony:event', listener)

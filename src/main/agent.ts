@@ -1835,7 +1835,7 @@ export function parseQuestions(input: unknown): AgentQuestion[] {
 
 function summarizeTool(block: Record<string, unknown>): string | undefined {
   const input = (block.input ?? {}) as Record<string, unknown>
-  for (const field of ['file_path', 'command', 'pattern', 'path', 'url', 'description']) {
+  for (const field of ['file_path', 'command', 'pattern', 'path', 'url', 'description', 'skill']) {
     const value = input[field]
     if (typeof value === 'string') return value
   }

@@ -89,6 +89,22 @@ export const CHAT_LAYOUTS = [
 export type ChatLayoutId = (typeof CHAT_LAYOUTS)[number]
 
 /**
+ * Which themes get the translucent window — `[appearance] transparency`.
+ *
+ * Four values rather than a boolean because the glass is a different proposition
+ * in each theme: dark tints a blur and stays legible, light washes it out. So
+ * the choice is per theme — `dark` or `light` glasses that one and leaves the
+ * other solid, `all` glasses both, `off` is the opaque app.
+ *
+ * Like CHAT_LAYOUTS this is a stylesheet switch: appearance.ts resolves it
+ * against the theme in force and puts `data-vibrancy` on <html>. The window
+ * itself is made non-opaque in main for anything but `off` — see windowOptions.
+ */
+export const TRANSPARENCY = ['off', 'dark', 'light', 'all'] as const
+
+export type TransparencyId = (typeof TRANSPARENCY)[number]
+
+/**
  * The sounds a finished turn can play, in the order Settings cycles them.
  * Shared because `[notifications] sound` is validated against this list in main
  * and synthesized from it in the renderer (`renderer/src/sounds.ts`) — the

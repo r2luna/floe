@@ -19,8 +19,16 @@ import type {
 import { COMMAND_IDS } from '../shared/commandIds'
 import { parseArtifactSpec } from '../shared/artifact'
 import { listProjects } from './projects'
-import { boardFor, pushBoard, releaseTask } from './colony/runner'
-import { addTask, getTask, removeTask, TASK_KINDS, type TaskKind } from './colony/store'
+import {
+  boardFor,
+  mergeTask,
+  overlappingTasks,
+  pushBoard,
+  releaseTask,
+  unmetDeps
+} from './colony/runner'
+import { addTask, getTask, listTasks, removeTask, TASK_KINDS, type TaskKind } from './colony/store'
+import { DONE } from './config/colony'
 import {
   changedFiles,
   createWorktree,
@@ -468,6 +476,7 @@ function registerTools(server: McpServer, token: string): void {
   registerDrawingTools(server, token)
   registerDecisionTools(server)
   registerColonyTools(server)
+  registerColonyLandingTools(server)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
   registerProjectTools(server)
@@ -1644,6 +1653,10 @@ function registerDecisionTools(server: McpServer): void {
   )
 }
 
+// The board and the cards on it: read it, put work on it, take work off it.
+// Split from the landing tools below because they are two jobs — what is ON the
+// board, and what comes OFF it — and one function registering seven tools is a
+// function nobody can see the shape of.
 function registerColonyTools(server: McpServer): void {
   // --- Colony (the agent board — one column per profile, one worktree per card)
 
@@ -1670,12 +1683,26 @@ function registerColonyTools(server: McpServer): void {
         .describe("Short kebab-case name — the branch's last segment. What the change IS, not what it fixes."),
       brief: z.string().describe('What the first lane reads. The request in the user\'s own words, plus the file, symbol or reproduction you can see.'),
       kind: z.enum(TASK_KINDS as [string, ...string[]]).optional().describe('feat, fix or chore. Defaults to feat.'),
+      dependsOn: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Task ids (from colony_board) that must be MERGED before this one gets a worktree. Use it whenever this change builds on another one that is still in flight — it is the only thing that stops two dependent branches existing at the same time. With start=true and an unmet dependency the task stays in the backlog and is released automatically the moment the last one merges.'
+        ),
       start: z.boolean().optional().describe('Release it now — this is what cuts the worktree. Default false.')
     },
-    async ({ project, name, brief, kind, start }) => {
+    async ({ project, name, brief, kind, dependsOn, start }) => {
       try {
         const root = projectRoot(project)
-        const task = addTask({ project: root, name, brief, kind: kind as TaskKind | undefined })
+        // Checked here and not in the store: a typo'd id would silently become a
+        // dependency on nothing, which reads on the board as "released, so it
+        // must have been fine" — the one failure this whole field exists to stop.
+        const known = new Set(listTasks(root).map((t) => t.id))
+        const unknown = (dependsOn ?? []).filter((id) => !known.has(id))
+        if (unknown.length) {
+          return textResult({ error: `No task on this board has these ids: ${unknown.join(', ')}` })
+        }
+        const task = addTask({ project: root, name, brief, kind: kind as TaskKind | undefined, dependsOn })
         const win = getWindow()
         if (start && win) {
           const released = await releaseTask(win, task.id)
@@ -1723,6 +1750,73 @@ function registerColonyTools(server: McpServer): void {
       }
     }
   )
+}
+
+// Landing finished work, and the order it has to land in. The half of the board
+// that is about leaving it: what can merge, what is queued behind what, and
+// which two live worktrees are about to collide.
+function registerColonyLandingTools(server: McpServer): void {
+  server.tool(
+    'colony_merge_task',
+    "Merge a finished task's branch into its base. Only works from `done`, and only once. It is the SAFE merge — it refuses on a dirty worktree, a dirty main worktree or a conflict, and leaves the branch exactly as it was, so the answer is either a clean landing or a reason. Merging is also what unblocks anything queued behind this task: whatever was waiting on it is released automatically here.",
+    { task: z.string().describe('The task id, from colony_board.') },
+    async ({ task }) => {
+      try {
+        const result = await mergeTask(getWindow(), task)
+        return textResult(result)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_conflicts',
+    "Live tasks whose worktrees are changing the SAME files, grouped by the tasks that share them. Read this before starting parallel work and before deciding a merge order: two cards in this list will conflict at the second merge, and the fix is to merge one first or to have declared dependsOn in the first place. Runs git in every worktree, so ask for it when the order matters — not on every board read.",
+    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    async ({ project }) => {
+      try {
+        const root = projectRoot(project)
+        const overlaps = await overlappingTasks(root)
+        return textResult({
+          overlaps,
+          note: overlaps.length
+            ? 'These tasks touch the same files. Merge them one at a time and re-check after each.'
+            : 'No two live worktrees are touching the same file.'
+        })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_pending',
+    "What the board is waiting on: every task that is done but not merged, and every task queued behind a dependency that has not landed. This is the manager's own worklist — read it when you are asked what to do next, or after anything merges.",
+    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    async ({ project }) => {
+      try {
+        const root = projectRoot(project)
+        const tasks = listTasks(root)
+        return textResult({
+          mergeable: tasks
+            .filter((t) => t.stage === DONE && !t.mergedAt)
+            .map((t) => ({ id: t.id, name: t.name, branch: t.branch, worktreePath: t.worktreePath, warn: t.warn })),
+          waiting: tasks
+            .filter((t) => t.queued && unmetDeps(t).length > 0)
+            .map((t) => ({
+              id: t.id,
+              name: t.name,
+              on: unmetDeps(t).map((d) => ({ id: d.id, name: d.name, stage: d.stage }))
+            })),
+          merged: tasks.filter((t) => t.mergedAt).map((t) => ({ id: t.id, name: t.name, mergedAt: t.mergedAt }))
+        })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
 }
 
 function registerSkillTools(server: McpServer): void {

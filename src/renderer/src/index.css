@@ -46,8 +46,13 @@
     "Cascadia Code", monospace;
 
   --bg: #0d0e11;
-  --panel: #141519;
-  --panel-focused: #17181d;
+  /* The three stacked surfaces are spelled as channels so the glass block can
+     re-tint them at an alpha without a second copy of the hex — see
+     [data-vibrancy='on'] below. */
+  --panel-rgb: 20 21 25;
+  --panel: rgb(var(--panel-rgb));
+  --panel-focused-rgb: 23 24 29;
+  --panel-focused: rgb(var(--panel-focused-rgb));
   --line: #23252b;
   --line-soft: #1c1e23;
 
@@ -80,7 +85,8 @@
   --dimmer: #7f8797;
   --dimmest: #8f96a4;
   --edge: #343a45;
-  --well: #1b1d23;
+  --well-rgb: 27 29 35;
+  --well: rgb(var(--well-rgb));
 
   /* Hover and selection washes, as one scale. On dark they lighten; the light
      theme swaps the whole ladder to black at the same alphas, which is the
@@ -96,6 +102,11 @@
      sets a radius of its own. Three exceptions: the round dot (50%), and — both
      square, so rows stack flush — the diff row and every list row's highlight
      (see "rows"). */
+  /* How solid a surface is when the window is glassed — 1 is opaque. Written by
+     appearance.ts from `[appearance] transparency-amount`; the value here is
+     that default, so the sheet stands on its own before the config is read. */
+  --glass: 0.82;
+
   --radius: 5px;
   /* Hairline bars — meters, pipeline segments, the cursor tick. They are 3–5px
      tall, so the box radius would round them into pills. Derived, not typed,
@@ -143,8 +154,10 @@
      gutter into a grey slab down the edge. Flat white, and the rail's icons
      float on the background with the panels reading off their borders. */
   --bg: #ffffff;
-  --panel: #f8f9fb;
-  --panel-focused: #ffffff;
+  --panel-rgb: 248 249 251;
+  --panel: rgb(var(--panel-rgb));
+  --panel-focused-rgb: 255 255 255;
+  --panel-focused: rgb(var(--panel-focused-rgb));
   --line: #d7dae1;
   --line-soft: #e4e7ec;
 
@@ -155,7 +168,8 @@
   --dimmer: #868d99;
   --dimmest: #7d8490;
   --edge: #c3c8d1;
-  --well: #eef0f4;
+  --well-rgb: 238 240 244;
+  --well: rgb(var(--well-rgb));
 
   --live: #2f7d52;
   --working: #3a64a8;
@@ -189,6 +203,36 @@
   --nick-4: #007eb0;
   --nick-5: #346cc2;
   --nick-6: #a64b94;
+}
+
+/* --- glass ---------------------------------------------------------------- */
+
+/* The translucent window — `[appearance] transparency`, macOS only.
+   The blur itself is native (an NSVisualEffectView behind the web layer, see
+   applyVibrancy in main/index.ts), so nothing here filters anything: the job of
+   this block is only to stop the web layer from painting over it.
+
+   Two moves, and no third. The body stops painting, so the window's gutters show
+   the blur; and the three stacked surfaces are re-tinted at --glass, so a panel
+   is the same colour it always was, thinner. Everything else — washes, borders,
+   the chat's own fills — is already alpha and layers over the result unchanged.
+
+   After the light block on purpose: same specificity, so source order is what
+   lets a glassed light theme re-tint its own (white) surfaces.
+
+   appearance.ts decides whether this is on for the theme in force, which is what
+   makes `transparency = "dark"` solid in light without the window changing. */
+:root[data-vibrancy='on'] body {
+  background: transparent;
+}
+
+:root[data-vibrancy='on'] {
+  --panel: rgb(var(--panel-rgb) / var(--glass));
+  --panel-focused: rgb(var(--panel-focused-rgb) / var(--glass));
+  /* A well sits BELOW the panel it is in, and on glass that reads as more of the
+     desktop rather than a darker grey — so it is thinner than the panel by the
+     same step the opaque theme separates them by. */
+  --well: rgb(var(--well-rgb) / calc(var(--glass) - 0.12));
 }
 
 *,
@@ -8421,4 +8465,228 @@ kbd {
 :root[data-chat-layout='labels'] .irc-body {
   max-width: 80ch;
   line-height: 1.8;
+}
+
+/* --- the nanny: the board's log, and the board's session under it ---------
+   One panel, two regions. The log is fixed and scrolls on its own; the chat
+   below it takes the rest and behaves like any other chat, because it is one. */
+.nanny {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.nanny-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The log never takes more than half the panel: it is the record, and the
+   conversation about the record is the part you type into. */
+.clog {
+  flex: 0 1 auto;
+  max-height: 50%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.clog-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: none;
+  padding: 5px 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.clog-title {
+  color: var(--dimmer);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.clog-sub {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.clog-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 7px 11px;
+}
+
+/* A row is not a chat message and must not read as one: no nick, a rule down
+   its left edge, and the verb first. That difference is the whole point — the
+   nanny's transcript is what she made of it, this is that it happened. */
+.clog-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 7px;
+  padding: 2px 0 2px 9px;
+  border-left: 2px solid var(--edge);
+}
+
+.clog-time {
+  flex: none;
+  color: var(--time-dim);
+  font-size: 10px;
+}
+
+.clog-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.clog-text b {
+  color: var(--text-strong);
+  font-weight: 400;
+}
+
+.clog-verb {
+  color: var(--dimmer);
+}
+
+/* The only green in the panel: something is on base now that was not before. */
+.clog-row[data-tone='land'] {
+  border-left-color: var(--nick-gemini);
+}
+
+.clog-row[data-tone='land'] .clog-verb {
+  color: var(--nick-gemini);
+}
+
+/* The accent means "this needs you" everywhere else in the app, and a refused
+   merge, a stopped lane and a card handed to a stage nobody has all are. */
+.clog-row[data-tone='stop'] {
+  border-left-color: var(--accent);
+}
+
+.clog-row[data-tone='stop'] .clog-verb {
+  color: var(--accent);
+}
+
+.clog-acts {
+  display: flex;
+  gap: 10px;
+  margin-top: 3px;
+}
+
+/* The way back out of something the board did on its own. A text affordance
+   rather than a chip: it sits inside a sentence, and a button drawn as a box
+   would read as the row's purpose instead of its escape hatch. */
+.clog-act {
+  border: 0;
+  border-bottom: 1px dotted var(--edge);
+  background: none;
+  color: var(--dimmer);
+  font: inherit;
+  font-size: 10px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.clog-act:hover:not(:disabled) {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.clog-act:disabled {
+  cursor: default;
+  color: var(--faint);
+}
+
+.clog-done {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+/* A refusal belongs on the row that was refused — "base has moved on since that
+   merge" is only an answer while you can still see which merge it is about. */
+.clog-failed {
+  display: block;
+  margin-top: 3px;
+  color: var(--accent);
+  font-size: 10px;
+}
+
+/* Landed on base: the card is out of the repo's future tense. The NAME steps
+   down rather than the whole card — the line under it says "merged", and that is
+   the part worth reading on a card you are done with. */
+.fcard[data-merged] .fcard-name {
+  color: var(--dimmer);
+}
+
+.fcard[data-merged] .fcard-line {
+  color: var(--nick-gemini);
+}
+
+/* Queued behind a dependency: no worktree yet, which is exactly what the dashed
+   border says — every other card on the board owns a tree. */
+.fcard[data-queued] {
+  border-style: dashed;
+}
+
+/* --- what the board does without asking -----------------------------------
+   A line of prose, not an icon in the header: "automerge" as a glyph tells you
+   nothing, and the thing worth knowing is that cards are landing on your base
+   branch by themselves. The switch sits where you find that out. */
+.fpolicy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  margin: -8px -8px 8px;
+  padding: 4px 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.fpolicy-text {
+  color: var(--faint);
+  font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An outline chip, never filled — the same shape every other action in the app
+   wears. It takes the accent when ON, because ON is the state that acts by
+   itself and that is the one worth catching your eye. */
+.fpolicy-act {
+  margin-left: auto;
+  flex: none;
+  border: 1px solid var(--edge);
+  border-radius: 1px;
+  background: var(--wash-1);
+  color: var(--dimmer);
+  font: inherit;
+  font-size: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+}
+
+.fpolicy-act:hover:not(:disabled) {
+  background: var(--wash-3);
+  color: var(--text);
+}
+
+.fpolicy-act[data-on] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.fpolicy-act:disabled {
+  cursor: default;
+  color: var(--faint);
 }

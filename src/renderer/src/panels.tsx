@@ -58,6 +58,7 @@ import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
 import { ActiveSessionsList } from './ActiveSessions'
+import { ColonyLog } from './ColonyLog'
 import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { FileIcon } from './FileIcon'
@@ -145,6 +146,7 @@ import {
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
+  TRANSPARENCY,
   type NotifySoundId,
   type PenguinColorId,
   type PenguinHeadId
@@ -298,6 +300,28 @@ export const KINDS = {
     // header button is right for here is the board's own definition, because the
     // board IS its config file.
     action: { icon: IconSettings, title: 'Edit the stages…', command: 'colony.stages' }
+  },
+  // The board's own session, and the ONE panel that is about the whole board
+  // rather than about one card. It docks under the colony (order 21 puts it
+  // immediately right of it, which is the column `dock: 'below'` joins), so
+  // opening a card's chat narrows it instead of taking it away.
+  //
+  // It used to share the session slot with the card chats (D7). That was wrong
+  // for one reason: they answer different questions. Losing the board every
+  // time you opened a card is exactly what "I need the manager open to see what
+  // is happening" is complaining about.
+  nanny: {
+    icon: IconMessage,
+    title: 'nanny',
+    width: 600,
+    grow: true,
+    min: 400,
+    order: 21,
+    needsProject: true,
+    // Its own slot, so a project switch replaces the nanny rather than leaving
+    // the last project's board session sitting under the new project's board.
+    slot: 'nanny',
+    dockHeight: '33%'
   },
   changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
   // The guided merge's checklist. Beside `changes`, and deliberately narrow for
@@ -478,6 +502,16 @@ export const KINDS = {
     action?: { icon: ComponentType<IconProps>; title: string; command: string }
     /** Panels sharing a slot replace each other. See Panel.slot in lane.ts. */
     slot?: string
+    /**
+     * The share of its column this kind takes when DOCKED, before anyone drags
+     * it. A percentage rather than pixels so it survives a window resize — a
+     * height in px would be a third of the screen it was opened on.
+     *
+     * Unset falls back to the lane's own 40%. The nanny states 1/3 because she
+     * is docked under a BOARD: the columns have to stay readable above her, and
+     * 40% of a short window starts eating the cards.
+     */
+    dockHeight?: string
     // How narrow this panel may get before the lane scrolls instead. Omitted
     // means "never shrink" — right for lists, wrong for anything holding prose.
     min?: number
@@ -784,6 +818,22 @@ export function PanelBody({
         onOpen={onOpen}
       />
     )
+  // The same chat component the card chats use — she IS a session, and a second
+  // transcript renderer would drift from the first one the week after it landed.
+  // What makes her the nanny is the board log above her, not a different chat.
+  if (kind === 'nanny')
+    return session ? (
+      <NannyPanel
+        session={session}
+        project={projects.current?.path}
+        menuItems={menuItems}
+        firstPrompt={firstPrompt}
+        firstChoice={firstChoice}
+        onUsage={onUsage}
+        onOpen={onOpen}
+        onEnterWorktree={onEnterWorktree}
+      />
+    ) : null
   if (kind === 'colony')
     return <ColonyBoard project={projects.current?.path} onOpen={onOpen} onCommand={onCommand} />
   if (kind === 'active')
@@ -1271,6 +1321,54 @@ export function useComposerMenu(
  * said full-width beneath, and a run of entries from one speaker printing a
  * single header.
  */
+/**
+ * The nanny: the board's log, and the board's session under it.
+ *
+ * Both, in one panel, because they answer one question from two directions —
+ * what happened, and what somebody makes of it. Splitting them into two panels
+ * would put the record one keystroke away from the conversation about it, which
+ * is exactly the distance at which people stop reading records.
+ *
+ * The log is fixed at the top and scrolls on its own; the chat below it behaves
+ * like any other chat, because it IS one.
+ */
+function NannyPanel({
+  session,
+  project,
+  menuItems,
+  firstPrompt,
+  firstChoice,
+  onUsage,
+  onOpen,
+  onEnterWorktree
+}: {
+  session: { id: string; worktreePath: string }
+  project?: string
+  menuItems?: (trigger: Trigger) => PaletteItem[]
+  firstPrompt?: string
+  firstChoice?: ModelChoice
+  onUsage?: (usage: Usage) => void
+  onOpen?: OpenFn
+  /** How a log row goes to the branch it is about. */
+  onEnterWorktree?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
+}) {
+  return (
+    <div className="nanny">
+      <ColonyLog project={project} onEnterWorktree={onEnterWorktree} onOpen={onOpen} />
+      <div className="nanny-chat">
+        <ChatPanel
+          session={session}
+          menuItems={menuItems}
+          firstPrompt={firstPrompt}
+          firstChoice={firstChoice}
+          onUsage={onUsage}
+          onOpen={onOpen}
+        />
+      </div>
+    </div>
+  )
+}
+
 function ChatPanel({
   session,
   menuItems,
@@ -5906,6 +6004,28 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           // file would reject cannot happen.
           options: [...CHAT_LAYOUTS],
           hint: 'how a turn is arranged — classic is the log the app shipped with'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'transparency',
+          label: 'Transparency',
+          value: config.appearance.transparency,
+          options: [...TRANSPARENCY],
+          hint: 'which themes get the blurred desktop behind them — macOS only'
+        },
+        {
+          kind: 'slider',
+          table: 'appearance',
+          key: 'transparency-amount',
+          label: 'Transparency amount',
+          value: config.appearance.transparencyAmount,
+          // The bounds the reader validates against; past 40 the wallpaper
+          // starts reading through the text, which is why it stops at 60.
+          min: 0,
+          max: 60,
+          suffix: '%',
+          hint: 'how much of the desktop comes through — nothing unless transparency is on'
         }
       ]
     },

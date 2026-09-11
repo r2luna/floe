@@ -107,6 +107,16 @@ export interface CommandContext {
    */
   openChat: (session: { id: string; worktreePath: string }, firstPrompt?: string) => void
   /**
+   * Put the nanny in the lane, docked under the board.
+   *
+   * A seam of its own for the same reason `openChat` is one — it needs a
+   * session, which the registry has no other way to pass — plus the thing that
+   * makes it not `openChat`: it lands in the NANNY slot, not the session slot.
+   * She is about the whole board and a card's chat is about one card, so one
+   * replacing the other meant losing the board every time you opened a card.
+   */
+  openNanny: (session: { id: string; worktreePath: string }, firstPrompt?: string) => void
+  /**
    * The worktree's registered processes.
    *
    * Passed whole rather than as eight callbacks: start, stop and restart are
