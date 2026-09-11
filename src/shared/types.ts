@@ -246,9 +246,26 @@ export interface JumpSession {
   worktreePath: string
   branch: string
   sessionId: string
+  // The CLI's own name for the session, when it has one. A session answers to
+  // two ids for its whole life and the chat panel is keyed by `claudeId ?? id`
+  // (see enterWorktree), so a caller that wants to OPEN the row needs both.
+  claudeId?: string
   title: string
   lastActivityAt: number // session mtime (epoch ms) — drives "12m" and the sort
   running: boolean
+}
+
+// One row of the `active` panel: every machine's most recent sessions in one
+// list, so "who is waiting on me" is a question you ask once instead of once
+// per project. A JumpSession plus the one thing its index leaves out — whether
+// the session is blocked on YOU — which costs a per-session transcript read and
+// is therefore paid only for the handful of rows that survive the sort.
+// `backend` is filled in by the renderer, which is the only side that knows
+// which machine answered.
+export interface ActiveSession extends JumpSession {
+  needsYou: boolean
+  /** The machine this row came from — `local`, or a paired backend's id. */
+  backend?: string
 }
 
 // Pushed to the renderer when a project's worktree set changes outside the normal

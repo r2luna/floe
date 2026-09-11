@@ -9,7 +9,7 @@
 //
 // Channel strings live here and nowhere else in the renderer — `backends.invokeOn`
 // is the only untyped seam, so it stays behind these wrappers.
-import type { Project } from '../../shared/types'
+import type { ActiveSession, Project } from '../../shared/types'
 
 export const LOCAL = 'local'
 
@@ -44,6 +44,15 @@ export interface Landing {
   path: string
   /** The project was new there: start its setup once we arrive. */
   created?: boolean
+  /**
+   * The conversation to open once the project is entered.
+   *
+   * A project is where the projects panel's landing stops, because that is what
+   * its rows name. The `active` panel's rows name a SESSION on another machine,
+   * and stopping at its project would drop you on whatever branch that project
+   * was last left on — next to the row you clicked, but not on it.
+   */
+  session?: { worktreePath: string; sessionKey: string }
 }
 
 // Module scope is what survives the remount — component state is exactly what
@@ -194,6 +203,10 @@ export function mergeProjects(
 // A project belongs to one machine, so every mutation on it names that machine
 // rather than riding the pointer: the panel lists rows you are not attached to,
 // and acting on one must not reach the wrong disk.
+
+/** One machine's most recent sessions — the `active` panel's slice of it. */
+export const recentSessionsOn = (backend: string, limit: number): Promise<ActiveSession[]> =>
+  window.floe.backends.invokeOn(backend, 'sessions:recent', limit) as Promise<ActiveSession[]>
 
 export const setGroupOn = (backend: string, path: string, group: string): Promise<Project[]> =>
   window.floe.backends.invokeOn(backend, 'projects:setGroup', path, group) as Promise<Project[]>

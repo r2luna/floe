@@ -895,6 +895,94 @@ button {
   color: var(--dim);
 }
 
+/* --- active sessions ------------------------------------------------------
+   The one list that spans machines. Its row is two lines rather than the flat
+   `.row` every other panel uses, because it answers three questions the sidebar
+   never has to — which machine, which project, which branch — and on one line
+   those three ellipsis away the title, which is the part you actually read. */
+
+.sx {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 0;
+  text-align: left;
+}
+
+.sx-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Indented under the title by exactly the mark's width plus its gap, so the
+   two lines read as one row with a hanging glyph rather than as two rows. */
+.sx-bot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 14px;
+  color: var(--dimmest);
+}
+
+.sx-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-age {
+  flex: none;
+  color: var(--dim);
+}
+
+.sx-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sx-sep {
+  color: var(--line);
+}
+
+/* The chat the lane already has open. Same tint the sidebar marks it with —
+   the two lists must not disagree about which conversation you are in. */
+.sx[data-active] .sx-name {
+  color: var(--text-strong);
+}
+
+/* The machine. Smaller than `.badge` because it sits on the dim second line and
+   has to stay quieter than the branch beside it. Local never gets one. */
+.sx-host {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 10px;
+}
+
+/* The band heads. NEEDS YOU takes the accent — the same warm mark the `?` on
+   its rows uses, and `--accent` flips with the theme, so no light override. */
+.group-label[data-ask] {
+  color: var(--accent);
+}
+
+.group-label .group-n {
+  color: var(--dimmest);
+  letter-spacing: 0;
+}
+
 /* --- launcher ------------------------------------------------------------ */
 
 .launcher {

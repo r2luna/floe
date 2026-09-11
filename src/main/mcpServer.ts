@@ -40,6 +40,7 @@ import { listPlans, readPlan } from './plans'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, summarize } from './draw/index'
 import { eraseElements, expandSkeletons, moveElements } from './draw/skeleton'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion, type TranscriptItem } from './claudeSessions'
+import { recentSessions } from './sessionIndex'
 // Circular with codex (it emits through agent, which imports this file) — safe:
 // every side only calls the others' functions at runtime, never at module top.
 import { askPeer, MAX_EXCHANGES, type PeerSpec } from './peer'
@@ -917,6 +918,22 @@ function registerSessionTools(server: McpServer, token: string): void {
     'List the sessions Floe knows about, optionally filtered to one worktree. `running` means a turn is in flight right now; `needsYou` (only computed when `worktree` is given) means the session is blocked on you — an unanswered question or a tool-permission prompt.',
     { worktree: z.string().optional().describe('Limit to sessions in this worktree path.') },
     async (a) => listSessionsTool(a.worktree)
+  )
+
+  // The `active` panel's read, for an agent. Cross-project, but NOT cross
+  // machine: a tool answers on the machine it runs on, and the union of paired
+  // backends is the window's own — see the panel (useActiveSessions).
+  server.tool(
+    'recent_sessions',
+    'The most recently touched sessions on this machine, across every project, newest first. `needsYou` means the session is blocked on the user (an unanswered question or a tool-permission prompt); `running` means a turn is in flight. This is what the `active` panel shows.',
+    { limit: z.number().optional().describe('How many rows to return. Default 10.') },
+    async (a) => {
+      try {
+        return textResult(await recentSessions(a.limit))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
   )
 
   server.tool(

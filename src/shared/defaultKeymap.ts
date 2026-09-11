@@ -115,8 +115,19 @@ worktree lists, bare \`h\` and \`l\` jump between the two directly — those key
 stay free everywhere else.
 
 \`⌘K B\` is the colony board — b for board, because \`⌘K C\` is already the
-commands panel and the two are the pair you would most easily confuse.`,
+commands panel and the two are the pair you would most easily confuse.
+
+\`⌘A\` is the active panel: every machine's most recent sessions, so a question
+waiting for you in a project you are not in is one key away. It gets a bare
+chord rather than a \`⌘K\` one because it is a place you go BETWEEN things, like
+the two lists it sits between — not something you set up once.
+
+Bare \`h\` and \`l\` walk those three, left to right: projects, active,
+worktrees. Each binding names the NEIGHBOUR rather than a list of panels the
+key applies in, so a key never points at the panel it is pressed in — which is
+\`panel.goto\` for "close this one".`,
     binds: [
+      { key: 'super+a', command: 'panel.goto', arg: 'active' },
       { key: 'super+e', command: 'panel.goto', arg: 'worktrees' },
       { key: 'super+shift+e', command: 'panel.goto', arg: 'projects' },
       { key: 'super+y', command: 'panel.goto', arg: 'terminal' },
@@ -126,8 +137,10 @@ commands panel and the two are the pair you would most easily confuse.`,
       { key: 'super+k p', command: 'panel.goto', arg: 'plans' },
       { key: 'super+k d', command: 'panel.goto', arg: 'draw' },
       { key: 'super+k c', command: 'panel.goto', arg: 'commands' },
-      { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel in ["projects", "worktrees"]' },
-      { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel in ["projects", "worktrees"]' }
+      { key: 'l', command: 'panel.goto', arg: 'active', when: 'panel == "projects"' },
+      { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel == "active"' },
+      { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel == "active"' },
+      { key: 'h', command: 'panel.goto', arg: 'active', when: 'panel == "worktrees"' }
     ]
   },
   {

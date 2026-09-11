@@ -78,9 +78,16 @@ test('i enters the composer and Escape is the way back out', () => {
   assert.equal(r({ key: 'Escape' }), null)
 })
 
-test('bare h/l only bind inside the two panels they connect', () => {
-  assert.deepEqual(r({ key: 'h' }, { kind: 'projects' }), { id: 'panel.goto', arg: 'projects' })
-  assert.deepEqual(r({ key: 'l' }, { kind: 'worktrees' }), { id: 'panel.goto', arg: 'worktrees' })
+test('bare h/l walk the three lists as neighbours, and stop at the ends', () => {
+  assert.deepEqual(r({ key: 'l' }, { kind: 'projects' }), { id: 'panel.goto', arg: 'active' })
+  assert.deepEqual(r({ key: 'h' }, { kind: 'active' }), { id: 'panel.goto', arg: 'projects' })
+  assert.deepEqual(r({ key: 'l' }, { kind: 'active' }), { id: 'panel.goto', arg: 'worktrees' })
+  assert.deepEqual(r({ key: 'h' }, { kind: 'worktrees' }), { id: 'panel.goto', arg: 'active' })
+  // The ends of the chain have no neighbour that way, and a binding pointing at
+  // its own panel is `panel.goto` for "close this one" — which is not what a
+  // direction key should mean.
+  assert.equal(r({ key: 'h' }, { kind: 'projects' }), null)
+  assert.equal(r({ key: 'l' }, { kind: 'worktrees' }), null)
   // Elsewhere the letters stay free.
   assert.equal(r({ key: 'h' }, { kind: 'chat' }), null)
   assert.equal(r({ key: 'l' }, { kind: 'diff' }), null)

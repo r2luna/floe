@@ -85,6 +85,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'changed_files',
       'file_diff',
       'list_sessions',
+      'recent_sessions',
       'create_session',
       'send_message',
       'ask_peer',

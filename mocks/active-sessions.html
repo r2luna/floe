@@ -1,0 +1,238 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions (every project, every machine)</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+
+  /* --- lane shell: just enough to judge the panel where it would sit ------ */
+  .lane { display: flex; gap: 8px; height: 100vh; padding: 8px; box-sizing: border-box; }
+  .lane-col { display: flex; min-width: 0; }
+  .lane-col[data-w="360"] { flex: 0 0 360px; }
+  .lane-col[data-grow] { flex: 1 1 600px; min-width: 400px; }
+  .panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+           background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px;
+                border-bottom: 1px solid var(--line-soft); flex: none; }
+  .panel-name { color: var(--text-strong); flex: none; }
+  .panel-sub { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 8px 0; }
+  .glyph { color: var(--dim); flex: none; }
+  :focus { outline: none; }
+  :focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: -1px; }
+  .filler { display: grid; place-items: center; color: var(--dimmest); }
+
+  /* --- the row ------------------------------------------------------------
+     Two lines, because a row here answers three questions the sidebar never
+     has to: which machine, which project, which branch. On one line those
+     three ellipsis the title away — which is the one thing you actually read. */
+  .sx { display: flex; flex-direction: column; align-items: stretch; gap: 1px; width: 100%;
+        padding: 5px 8px; border-radius: 0; text-align: left; }
+  .sx-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sx-bot { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 14px; color: var(--dimmest); }
+  .sx-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-age { flex: none; color: var(--dim); }
+  .sx-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-sep { color: var(--line); }
+  /* The session the lane already has open. Same tint the sidebar uses. */
+  .sx[data-active] .sx-name { color: var(--text-strong); }
+
+  /* The machine. Local gets no badge — naming this machine on every row
+     answers nothing (same rule the projects list already follows). */
+  .sx-host { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: var(--radius);
+             color: var(--dim); font-size: 10px; }
+
+  /* --- the marks, straight off the sidebar's SessionMark ------------------ */
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; }
+  .mark-ask { flex: none; display: grid; place-items: center; width: 6px; height: 6px;
+              color: var(--accent); font-size: 11px; font-weight: 700; line-height: 1; }
+  .spin { flex: none; display: grid; place-items: center; width: 6px; height: 6px;
+          color: var(--working); font-size: 12px; line-height: 1; transform: translateY(-0.5px); }
+
+  /* --- section heads ------------------------------------------------------
+     Status first, recency inside it. The whole point of the panel is "who is
+     waiting on me", and that question is not answered by a list sorted by
+     clock alone. */
+  .group-label { padding: 4px 8px; color: var(--dim); font-size: 11px; letter-spacing: 0.08em; }
+  .group-label[data-ask] { color: var(--accent); }
+  .group-label .n { color: var(--dimmest); letter-spacing: 0; }
+
+  .remote-notes { margin-top: 8px; padding: 6px 8px 0; border-top: 1px solid var(--line-soft); }
+  .remote-note { display: flex; align-items: center; gap: 8px; color: var(--dimmest); }
+  .remote-why { flex: none; }
+
+  .side { display: flex; gap: 8px; padding: 8px; }
+  .cap { color: var(--dim); font-size: 11px; padding: 0 0 6px 2px; }
+</style>
+</head>
+<body>
+
+<div class="lane">
+  <div class="lane-col" data-w="360">
+    <section class="panel" data-focused>
+      <header class="panel-head">
+        <span class="glyph">◎</span>
+        <span class="panel-name">active</span>
+        <span class="panel-sub">10 sessions · 3 machines</span>
+      </header>
+      <div class="panel-body">
+
+        <div class="group-label" data-ask>NEEDS YOU <span class="n">2</span></div>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="mark-ask">?</span>
+            <span class="sx-name">rewrite the migration guard</span>
+            <span class="sx-age">2m</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">elevaris <span class="sx-sep">/</span> fix-migrations</span>
+            <span class="sx-host">link</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="mark-ask">?</span>
+            <span class="sx-name">split colony steps into one session each</span>
+            <span class="sx-age">9m</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">floe <span class="sx-sep">/</span> panel-active-sessions</span>
+          </span>
+        </button>
+
+        <div class="group-label">WORKING <span class="n">3</span></div>
+
+        <button class="sx" data-active>
+          <span class="sx-top">
+            <span class="spin">⠹</span>
+            <span class="sx-name">port the rail groups to the new registry</span>
+            <span class="sx-age">now</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">floe <span class="sx-sep">/</span> master</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="spin">⠼</span>
+            <span class="sx-name">bench the ingest path</span>
+            <span class="sx-age">now</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">pinguim <span class="sx-sep">/</span> perf-ingest</span>
+            <span class="sx-host">link</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="spin">⠶</span>
+            <span class="sx-name">draft the release notes</span>
+            <span class="sx-age">1m</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">rookery <span class="sx-sep">/</span> notes-0-24</span>
+            <span class="sx-host">cypher</span>
+          </span>
+        </button>
+
+        <div class="group-label">IDLE <span class="n">5</span></div>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="dot"></span>
+            <span class="sx-name">why does the gate drop the socket</span>
+            <span class="sx-age">22m</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">floe <span class="sx-sep">/</span> web-gate</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="dot dot-unread"></span>
+            <span class="sx-name">the deploy script keeps re-uploading out/web</span>
+            <span class="sx-age">41m</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">floe <span class="sx-sep">/</span> deploy</span>
+            <span class="sx-host">link</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="dot"></span>
+            <span class="sx-name">tighten the crap threshold on commandRunner</span>
+            <span class="sx-age">1h</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">floe <span class="sx-sep">/</span> crap-runner</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="dot"></span>
+            <span class="sx-name">invoice pdf renders blank on safari</span>
+            <span class="sx-age">3h</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">elevaris <span class="sx-sep">/</span> pdf-safari</span>
+            <span class="sx-host">link</span>
+          </span>
+        </button>
+
+        <button class="sx">
+          <span class="sx-top">
+            <span class="dot"></span>
+            <span class="sx-name">cron for the nightly snapshot</span>
+            <span class="sx-age">5h</span>
+          </span>
+          <span class="sx-bot">
+            <span class="sx-where">pinguim <span class="sx-sep">/</span> master</span>
+            <span class="sx-host">cypher</span>
+          </span>
+        </button>
+
+        <!-- A machine that did not answer is NAMED, not counted: with one
+             remote down the question is which one. Same treatment the
+             projects list already gives it. -->
+        <div class="remote-notes">
+          <div class="remote-note">
+            <span class="remote-off">○</span>
+            <span class="sx-where">tucano</span>
+            <span class="remote-why">offline</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+
+  <div class="lane-col" data-grow>
+    <section class="panel">
+      <header class="panel-head">
+        <span class="glyph">▤</span>
+        <span class="panel-name">chat</span>
+        <span class="panel-sub">⏎ on a row lands here — on this machine or another</span>
+      </header>
+      <div class="panel-body filler">the session the cursor is on</div>
+    </section>
+  </div>
+</div>
+
+<!-- Light needs no override here: every colour in this panel is a theme
+     variable, and the one tinted thing (NEEDS YOU and its `?`) is --accent,
+     which flips with the appearance. Open this file with data-theme='light' on
+     <html> to check it. -->
+</body>
+</html>

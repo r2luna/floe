@@ -25,7 +25,11 @@ import type { QueryMark } from '../shared/types'
 
 const projectsDir = (): string => join(homedir(), '.claude', 'projects')
 const encode = (p: string): string => p.replace(/[^a-zA-Z0-9]/g, '-')
-const ACTIVE_WINDOW_MS = 2 * 60 * 1000
+// How long after its last write a session still counts as live. Exported
+// because the same window decides whether an unanswered question at a
+// transcript's tail is a real block or an orphan left by a killed CLI — see
+// computeProjectActivity, and recentSessions in index.ts.
+export const ACTIVE_WINDOW_MS = 2 * 60 * 1000
 
 export interface ClaudeSessionMeta {
   // Floe's stable session id: the created-session id for sessions opened in

@@ -65,10 +65,9 @@ import {
   mergeResolveCheck,
   mergeCommit,
   mergeFastForward,
-  worktreeDiffStat,
   type CreateWorktreeOptions
 } from './git'
-import { answerQuestion, respondPermission, stopAgent, isClaudeIdConnected, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { answerQuestion, respondPermission, stopAgent, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { dispatchTurn } from './turn'
@@ -85,10 +84,14 @@ import {
 } from './queries'
 import type { Route } from '../shared/mentions'
 import { ensureAgentHookInstalled } from './hooks'
+import { allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions } from './sessionIndex'
+// Re-exported because they used to live here: the IPC handlers below call them,
+// and so does index.test.ts, which is the test that covers the walk.
+export { allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions }
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
-import { listClaudeSessions, listResumableSessions, computeProjectActivity, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, sessionHasUnansweredQuestion } from './claudeSessions'
+import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc } from './claudeSessions'
 import {
   setSessionTitle,
   getCreatedSession,
@@ -217,7 +220,7 @@ import {
   unlinkWorktreeSite,
   ensureContainerUp
 } from './provision'
-import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, JumpSession, McpCommandResult, NeedsYouSession, PermissionMode, ProjectActivity, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
+import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, McpCommandResult, PermissionMode, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
 // wouldn't be found. Prepend the usual locations.
@@ -273,98 +276,6 @@ export async function refreshWorktreeDescs(win: BrowserWindow, repoPath: string,
   }
 }
 
-
-// The worktrees of a project that can run sessions. Home isn't a git repo and a
-// read-only project never runs one, so both come back empty — as does a project
-// whose repo has moved or been removed, which just leaves it off the rail.
-async function sessionWorktrees(project: { path: string; readOnly?: boolean; home?: boolean }): Promise<Worktree[]> {
-  if (project.readOnly || project.home) return []
-  try {
-    return await listWorktrees(project.path)
-  } catch {
-    return []
-  }
-}
-
-// Projects rail: a cross-project activity snapshot for every project worked
-// today (sessions touched since midnight), each with a single status glyph.
-export async function projectsActivity(): Promise<ProjectActivity[]> {
-  const out: ProjectActivity[] = []
-  for (const project of listProjects()) {
-    const worktrees = await sessionWorktrees(project)
-    const activity = computeProjectActivity(worktrees.map((w) => w.path), isClaudeIdConnected)
-    if (activity) out.push({ path: project.path, ...activity })
-  }
-  return out
-}
-
-// The sessions in one worktree that are blocked on an unanswered question.
-export function waitingSessions(worktreePath: string): ReturnType<typeof listClaudeSessions> {
-  return listClaudeSessions(worktreePath).filter(
-    (s) =>
-      s.claudeId &&
-      (s.active || isClaudeIdConnected(s.claudeId)) &&
-      sessionHasUnansweredQuestion(worktreePath, s.claudeId)
-  )
-}
-
-// Every session, across ALL projects, currently blocked on an unanswered
-// question — feeds the ⌘/ switcher's "NEEDS YOU" list and the Home strip. Same
-// on-disk scan as projectsActivity, but per-session and with the worktree's diff
-// stat attached. Only worktrees that actually have a waiting session pay for the
-// (cheap) `git diff --shortstat`.
-export async function needsYouSessions(): Promise<NeedsYouSession[]> {
-  const out: NeedsYouSession[] = []
-  for (const project of listProjects()) {
-    for (const wt of await sessionWorktrees(project)) {
-      const waiting = waitingSessions(wt.path)
-      if (!waiting.length) continue
-      const stat = await worktreeDiffStat(wt.path)
-      for (const s of waiting) {
-        out.push({
-          projectPath: project.path,
-          projectName: project.name,
-          worktreePath: wt.path,
-          branch: wt.branch,
-          sessionId: s.id,
-          title: s.title,
-          lastActivityAt: s.mtime,
-          additions: stat.additions,
-          deletions: stat.deletions
-        })
-      }
-    }
-  }
-  return out
-}
-
-// Every session on disk, across ALL projects — the ⌘J palette's index. Same walk
-// as needsYouSessions, without the question filter or the diff stat, so the
-// palette can pull it on open instead of paying for a poll.
-export async function allSessions(): Promise<JumpSession[]> {
-  const out: JumpSession[] = []
-  for (const project of listProjects()) {
-    for (const wt of await sessionWorktrees(project)) {
-      for (const s of listClaudeSessions(wt.path)) {
-        out.push({
-          projectPath: project.path,
-          projectName: project.name,
-          worktreePath: wt.path,
-          branch: wt.branch,
-          sessionId: s.id,
-          title: s.title,
-          lastActivityAt: s.mtime,
-          // A turn in flight — NOT "the child is alive", which a session that
-          // answered an hour ago still is: the CLI child is kept for the next
-          // --resume, so that read left every session it had ever run marked as
-          // working until the process was reaped.
-          running: anyActiveTurn([s.id, s.claudeId])
-        })
-      }
-    }
-  }
-  return out
-}
 
 // A worktree path resolved to the project it belongs to, for the config files
 // scoped per project (skills, MCP servers). No path — or one under no known
@@ -675,6 +586,7 @@ export function registerProjectsIpc(): void {
   handle('projects:activity', () => projectsActivity())
   handle('sessions:needsYou', () => needsYouSessions())
   handle('sessions:all', () => allSessions())
+  handle('sessions:recent', (_event, limit?: number) => recentSessions(limit))
 
   // Rail visibility + the per-project hide list (both persisted in prefs).
   handle('rail:get', () => getRailVisible())

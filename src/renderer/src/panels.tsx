@@ -1,4 +1,5 @@
 import {
+  IconActivity,
   IconCaretRightFilled,
   IconCheck,
   IconChecklist,
@@ -56,13 +57,15 @@ import { useQueries } from './useQueries'
 import { AllPicker } from './AllPicker'
 import { Composer } from './Composer'
 import { ColonyBoard } from './ColonyBoard'
+import { ActiveSessionsList } from './ActiveSessions'
 import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
-import { hitRanges, splitByHits } from './findHits.ts'
+import { splitByHits } from './findHits.ts'
+import { markAll } from './findMark'
 import { usePlans } from './usePlans'
 import { useDrawings } from './useDrawings'
 import { useSkills } from './useSkills'
@@ -147,7 +150,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import type { Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import type { ActiveSession, Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
@@ -183,6 +186,20 @@ export const KINDS = {
     // own thing would be a fourth way to add a project, drifting from the other
     // three.
     action: { icon: IconPlus, title: 'Add project…', command: 'project.add' }
+  },
+  // Every machine's most recent sessions in one list. Deliberately NOT
+  // `needsProject`: its whole subject is the work that is NOT in front of you,
+  // and scoping it to the open project would leave it listing the one place you
+  // can already see. It sits left of the session slot for the file tree's
+  // reason — a row opens a chat, so the list has to be left of the chat.
+  active: {
+    icon: IconActivity,
+    title: 'active',
+    width: 340,
+    min: 260,
+    // No header action: the list re-reads itself every few seconds, so a
+    // reload button would be a control for something that already happened.
+    order: 5
   },
   worktrees: {
     icon: IconGitBranch,
@@ -514,8 +531,11 @@ const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdl
  * commands that spawn processes like it.
  */
 export const RAIL_GROUPS: PanelKind[][] = [
-  // Where the work lives.
-  ['projects', 'worktrees', 'colony'],
+  // Where the work lives, and what it is doing right now. The order is the
+  // order they sit in the lane, because bare `h`/`l` walk the first three as
+  // neighbours — a rail that disagreed with the lane would teach the wrong
+  // direction.
+  ['projects', 'active', 'worktrees', 'colony'],
   // What the work did to the tree — read it, review it, land it.
   ['changes', 'merge', 'files', 'plans', 'draw'],
   // What the agents are made of: the skills they can run and the servers they
@@ -604,6 +624,7 @@ export function PanelBody({
   root,
   session,
   openSession,
+  onJumpSession,
   find,
   firstPrompt,
   firstChoice,
@@ -684,6 +705,14 @@ export function PanelBody({
    */
   openSession?: string | null
   /**
+   * Go to a session the `active` panel lists — any project, any machine.
+   *
+   * Not `onEnterWorktree`: that one lands on whatever chat the branch was left
+   * showing, which is the right answer for a branch and the wrong one for a row
+   * that names a conversation. See jumpToSession in App.
+   */
+  onJumpSession?: (session: ActiveSession) => void
+  /**
    * Run a command by id — what a panel's own mouse affordances dispatch.
    *
    * A right-click menu must not contain behaviour: it focuses the row it was
@@ -757,6 +786,14 @@ export function PanelBody({
     )
   if (kind === 'colony')
     return <ColonyBoard project={projects.current?.path} onOpen={onOpen} onCommand={onCommand} />
+  if (kind === 'active')
+    return (
+      <ActiveSessionsList
+        openSession={openSession ?? undefined}
+        onJump={(s) => onJumpSession?.(s)}
+        find={find}
+      />
+    )
   // The query's key IS its identity (`sess~codex`), and it arrives as the
   // panel's `session` for exactly the reason a chat's does: it is what
   // `useTranscript` streams.
@@ -5277,38 +5314,6 @@ function markCode(tokens: HlToken[] | null | undefined, line: string, query?: st
     </span>
   ))
 }
-
-/**
- * Tint every occurrence of the find bar's query in a piece of text.
- *
- * The one marker for every panel. It used to be two — rows marked the FIRST
- * match in the palette's blue while code marked ALL of them in amber — which
- * meant the same search looked like two different features depending on which
- * panel you ran it in. Blue stays with the palette, where it means a fuzzy
- * match on something you are picking; the find bar is always amber, always
- * every occurrence.
- */
-function markAll(text: string, query?: string): ReactNode {
-  const q = query?.trim().toLowerCase()
-  if (!q) return text
-  // Same range finder the code marker uses, so a row and a line of code cannot
-  // disagree about what counts as a match.
-  const hits = hitRanges(text, q)
-  if (!hits.length) return text
-  const out: ReactNode[] = []
-  let at = 0
-  hits.forEach(([from, to], i) => {
-    if (from > at) out.push(text.slice(at, from))
-    out.push(
-      <span key={i} className="find-hit">
-        {text.slice(from, to)}
-      </span>
-    )
-    at = to
-  })
-  return [...out, text.slice(at)]
-}
-
 
 /** Coarse on purpose: you want "recent or not", not a stopwatch. */
 function ago(at: number): string {

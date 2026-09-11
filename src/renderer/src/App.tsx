@@ -53,7 +53,7 @@ import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { AddProject } from './AddProject'
 import { reason } from './ipcError'
-import { attach, backendLabel, backendOf, dropLanding, handOff, LOCAL, peekLanding } from './backends'
+import { attach, backendLabel, backendOf, currentBackend, dropLanding, handOff, LOCAL, peekLanding } from './backends'
 import type { NewWorktreeProps } from './NewWorktree'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -71,6 +71,7 @@ import { nickColor } from './nickColor'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import {
   DEFAULT_GROUP,
+  type ActiveSession,
   type ContextUsage,
   type McpCommand,
   type Project,
@@ -987,8 +988,48 @@ export default function App() {
     return 'launcher'
   }
 
-  /** Go to a project, then on to the branch it was left on — see enterWorktree. */
-  const enterProject = (path: string): void => {
+  /**
+   * Go to one session named by the `active` panel — any project, any machine.
+   *
+   * Three cases, narrowing: another machine hands the target to the instance the
+   * attach mounts (there is nothing to open on this one); another project files
+   * the target under the memory refs and enters, because its worktree list is a
+   * fetch away; the open project opens the chat panel straight away.
+   *
+   * Deliberately not enterWorktree: that lands on whatever chat the branch was
+   * last left showing, which is right for a branch row and wrong for a row that
+   * names a conversation.
+   */
+  const jumpToSession = (s: ActiveSession): void => {
+    const key = s.claudeId ?? s.sessionId
+    const backend = s.backend ?? LOCAL
+    if (backend !== currentBackend()) {
+      handOff({ path: s.projectPath, session: { worktreePath: s.worktreePath, sessionKey: key } }, self)
+      // Refused: the machine went away since the list was built. Stay put rather
+      // than land nowhere.
+      if (!attach(backend)) {
+        dropLanding()
+        say(`${backendLabel(backend)} is not reachable.`)
+      }
+      return
+    }
+    byProject.current[s.projectPath] = s.worktreePath
+    byWorktree.current[s.worktreePath] = key
+    if (projects.current?.path !== s.projectPath) return enterProject(s.projectPath, false)
+    worktrees.select(s.worktreePath)
+    setLane((l) => open(l, mkPanel('chat', s.title, { id: key, worktreePath: s.worktreePath })))
+  }
+
+  /**
+   * Go to a project, then on to the branch it was left on — see enterWorktree.
+   *
+   * `list` is whether the worktree list comes with you. It does by default,
+   * because picking a project IS a step towards picking a branch — but not when
+   * the caller already knows which conversation it is headed for (the `active`
+   * panel's rows do), where the list would be a panel you asked for on the way
+   * to somewhere else, opened over and over.
+   */
+  const enterProject = (path: string, list = true): void => {
     // Another project means another repo, so what is on screen stops applying:
     // the panels the old project opened close and the new one's chat brings its
     // own back (withoutProject). Re-entering the project you are already in is
@@ -998,22 +1039,21 @@ export default function App() {
     // Its worktrees are a fetch away, so the rest of the restore happens when
     // they arrive.
     pending.current = { project: path, boot: false }
-    // Switching project is only ever a step towards a worktree, so the list
-    // comes with you rather than leaving you on whatever was on screen.
     const name = projects.all.find((p) => p.path === path)?.name
-    const list = panelOf('worktrees', name)
+    const panel = list ? panelOf('worktrees', name) : null
     setLane((l) => {
-      const base = open(leaving ? withoutProject(l) : l, list)
+      const base = panel ? open(leaving ? withoutProject(l) : l, panel) : leaving ? withoutProject(l) : l
       if (!leaving) return base
       // The board went out with the old project; the new one gets its own back,
       // open or closed as it was left. Focus stays on the worktree list — the
       // switch is a step towards a branch, and a restored panel is not where you
-      // were headed.
+      // were headed. With no list, focus is left where it is: the panel that
+      // sent you here is still on screen, and the chat takes it when it opens.
       const back = (railByProject.current[path] ?? []).reduce(
         (acc, kind) => open(acc, panelOf(kind as PanelKind)),
         base
       )
-      return focusAt(back, back.panels.findIndex((p) => p.id === list.id))
+      return panel ? focusAt(back, back.panels.findIndex((p) => p.id === panel.id)) : back
     })
   }
 
@@ -1218,10 +1258,19 @@ export default function App() {
     // panel's name, and an empty list would open a nameless one.
     if (!handoff || projects.loading) return
     dropLanding()
+    // A landing that names a session (the `active` panel's rows do) files it
+    // under the same memory refs a local jump uses, so the restore that runs
+    // when this project's worktrees arrive lands on the conversation rather
+    // than on the branch's last one.
+    if (handoff.session) {
+      byProject.current[handoff.path] = handoff.session.worktreePath
+      byWorktree.current[handoff.session.worktreePath] = handoff.session.sessionKey
+    }
     // The same entry a project on this machine gets — select it, bring its
     // worktrees, let the branch and chat follow. Crossing a machine to get here
-    // is the only difference, and it is not one the landing should show.
-    enterProject(handoff.path)
+    // is the only difference, and it is not one the landing should show. A
+    // landing that names a session skips the list for jumpToSession's reason.
+    enterProject(handoff.path, !handoff.session)
     // The saved-project restore must not pull the selection back once the list
     // arrives: landing on what we came here for IS this mount's restore, and
     // both machines can hold a project at the same path.
@@ -2743,6 +2792,9 @@ export default function App() {
                     // it restores everything that place was left showing.
                     onEnterProject={enterProject}
                     onEnterWorktree={enterWorktree}
+                    // A row of the `active` panel names a conversation, not a
+                    // place — see jumpToSession.
+                    onJumpSession={jumpToSession}
                     newWorktree={newWorktreeProps}
                     cwd={cwd}
                     root={panel.root}

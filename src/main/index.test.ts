@@ -107,7 +107,7 @@ register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.u
 
 const index = await import('./index.ts')
 const { registeredChannels } = await import('./plugins/handleMap.ts')
-const { addCreatedSession } = await import('./sessionStore.ts')
+const { addCreatedSession, touchCreatedSession } = await import('./sessionStore.ts')
 const { addProjectByPath } = await import('./projects.ts')
 const { setVibrancy } = await import('./sessionStore.ts')
 
@@ -191,6 +191,7 @@ const CHANNELS = [
   'projects:activity',
   'sessions:needsYou',
   'sessions:all',
+  'sessions:recent',
   'rail:get',
   'rail:set',
   'projects:getHidden',
@@ -432,6 +433,46 @@ test('the project scans walk a real project and report what is on disk', async (
     // holding a question — nothing needs you.
     assert.deepEqual(index.waitingSessions(repo.dir), [])
     assert.deepEqual(await index.needsYouSessions(), [])
+
+    // The `active` panel's slice: the same walk, newest first, with the one
+    // thing the jump index leaves out. Never spawned means never blocked.
+    const active = await index.recentSessions()
+    assert.equal(active.length, 1)
+    assert.equal(active[0]?.sessionId, 'sess-1')
+    assert.equal(active[0]?.needsYou, false)
+  } finally {
+    repo.cleanup()
+  }
+})
+
+test('recentSessions returns the newest sessions first and stops at the limit', async () => {
+  const repo = makeGitRepo('floe-index-recent-')
+  try {
+    repo.write('README.md', '# recent\n')
+    repo.commit('init')
+    await addProjectByPath(repo.dir)
+
+    // Recency for a session that never spawned is its `usedAt` — there is no
+    // transcript on disk to take an mtime from. Touched in a deliberate order,
+    // a millisecond apart, because Date.now() cannot separate three calls made
+    // in the same tick.
+    for (const id of ['old', 'mid', 'new']) {
+      addCreatedSession({ id, worktreePath: repo.dir, title: id })
+      touchCreatedSession(id)
+      await new Promise((r) => setTimeout(r, 2))
+    }
+
+    assert.deepEqual(
+      (await index.recentSessions()).map((s) => s.sessionId),
+      ['new', 'mid', 'old']
+    )
+    // The limit is applied AFTER the sort, or the newest rows are the ones it
+    // would drop.
+    assert.deepEqual(
+      (await index.recentSessions(2)).map((s) => s.sessionId),
+      ['new', 'mid']
+    )
+    assert.deepEqual(await index.recentSessions(0), [])
   } finally {
     repo.cleanup()
   }
