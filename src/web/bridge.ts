@@ -61,8 +61,6 @@ export function browserHandlers(
       window.focus()
       return true
     },
-    'window:getVibrancy': async () => false,
-    'window:setVibrancy': async () => undefined,
 
     // Open at login belongs to an installed app; there is none.
     'app:getLoginItem': async () => false,

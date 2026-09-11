@@ -142,6 +142,7 @@ import {
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
+  TRANSPARENCY,
   type NotifySoundId,
   type PenguinColorId,
   type PenguinHeadId
@@ -5901,6 +5902,28 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           // file would reject cannot happen.
           options: [...CHAT_LAYOUTS],
           hint: 'how a turn is arranged — classic is the log the app shipped with'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'transparency',
+          label: 'Transparency',
+          value: config.appearance.transparency,
+          options: [...TRANSPARENCY],
+          hint: 'which themes get the blurred desktop behind them — macOS only'
+        },
+        {
+          kind: 'slider',
+          table: 'appearance',
+          key: 'transparency-amount',
+          label: 'Transparency amount',
+          value: config.appearance.transparencyAmount,
+          // The bounds the reader validates against; past 40 the wallpaper
+          // starts reading through the text, which is why it stops at 60.
+          min: 0,
+          max: 60,
+          suffix: '%',
+          hint: 'how much of the desktop comes through — nothing unless transparency is on'
         }
       ]
     },

@@ -73,6 +73,7 @@ export const COMMAND_IDS: string[] = [
   'auth.account',
   'settings.open',
   'chat.layout',
+  'appearance.transparency',
   'commands.open',
   'skills.open',
   'skill.new',

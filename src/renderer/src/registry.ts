@@ -32,7 +32,7 @@ import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { downloadAndOpen } from './download.ts'
-import { CHAT_LAYOUTS, type FileOp } from '../../shared/types.ts'
+import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
  * The layout after this one, wrapping — what `chat.layout` steps through.
@@ -1557,6 +1557,30 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.config
             .set('appearance', 'chat-layout', next)
             .then(() => c.say(`Chat layout: ${next}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Settings has the row, but glass is judged against the desktop behind
+        // the window — so it has to be reachable without a panel covering it.
+        // Steps through off → dark → light → all: the choice is per theme, and
+        // walking it is how you see what each one does to the app you are in.
+        id: 'appearance.transparency',
+        title: 'Next transparency',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then(async (config) => {
+              const at = TRANSPARENCY.indexOf(config.appearance.transparency)
+              // -1 (a value from a newer version) steps to the second entry the
+              // same way index 0 does — the same rule as the chat layout.
+              const next = TRANSPARENCY[(at + 1) % TRANSPARENCY.length] as string
+              // The write comes back as a `config:changed`, which is what moves
+              // the attribute and the window's fill — see appearance.ts.
+              await window.floe.config.set('appearance', 'transparency', next)
+              c.say(`Transparency: ${next}`)
+            })
             .catch((err: unknown) => c.say(reason(err)))
         }
       },

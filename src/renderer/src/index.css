@@ -46,8 +46,13 @@
     "Cascadia Code", monospace;
 
   --bg: #0d0e11;
-  --panel: #141519;
-  --panel-focused: #17181d;
+  /* The three stacked surfaces are spelled as channels so the glass block can
+     re-tint them at an alpha without a second copy of the hex — see
+     [data-vibrancy='on'] below. */
+  --panel-rgb: 20 21 25;
+  --panel: rgb(var(--panel-rgb));
+  --panel-focused-rgb: 23 24 29;
+  --panel-focused: rgb(var(--panel-focused-rgb));
   --line: #23252b;
   --line-soft: #1c1e23;
 
@@ -80,7 +85,8 @@
   --dimmer: #7f8797;
   --dimmest: #8f96a4;
   --edge: #343a45;
-  --well: #1b1d23;
+  --well-rgb: 27 29 35;
+  --well: rgb(var(--well-rgb));
 
   /* Hover and selection washes, as one scale. On dark they lighten; the light
      theme swaps the whole ladder to black at the same alphas, which is the
@@ -96,6 +102,11 @@
      sets a radius of its own. Three exceptions: the round dot (50%), and — both
      square, so rows stack flush — the diff row and every list row's highlight
      (see "rows"). */
+  /* How solid a surface is when the window is glassed — 1 is opaque. Written by
+     appearance.ts from `[appearance] transparency-amount`; the value here is
+     that default, so the sheet stands on its own before the config is read. */
+  --glass: 0.82;
+
   --radius: 5px;
   /* Hairline bars — meters, pipeline segments, the cursor tick. They are 3–5px
      tall, so the box radius would round them into pills. Derived, not typed,
@@ -143,8 +154,10 @@
      gutter into a grey slab down the edge. Flat white, and the rail's icons
      float on the background with the panels reading off their borders. */
   --bg: #ffffff;
-  --panel: #f8f9fb;
-  --panel-focused: #ffffff;
+  --panel-rgb: 248 249 251;
+  --panel: rgb(var(--panel-rgb));
+  --panel-focused-rgb: 255 255 255;
+  --panel-focused: rgb(var(--panel-focused-rgb));
   --line: #d7dae1;
   --line-soft: #e4e7ec;
 
@@ -155,7 +168,8 @@
   --dimmer: #868d99;
   --dimmest: #7d8490;
   --edge: #c3c8d1;
-  --well: #eef0f4;
+  --well-rgb: 238 240 244;
+  --well: rgb(var(--well-rgb));
 
   --live: #2f7d52;
   --working: #3a64a8;
@@ -189,6 +203,36 @@
   --nick-4: #007eb0;
   --nick-5: #346cc2;
   --nick-6: #a64b94;
+}
+
+/* --- glass ---------------------------------------------------------------- */
+
+/* The translucent window — `[appearance] transparency`, macOS only.
+   The blur itself is native (an NSVisualEffectView behind the web layer, see
+   applyVibrancy in main/index.ts), so nothing here filters anything: the job of
+   this block is only to stop the web layer from painting over it.
+
+   Two moves, and no third. The body stops painting, so the window's gutters show
+   the blur; and the three stacked surfaces are re-tinted at --glass, so a panel
+   is the same colour it always was, thinner. Everything else — washes, borders,
+   the chat's own fills — is already alpha and layers over the result unchanged.
+
+   After the light block on purpose: same specificity, so source order is what
+   lets a glassed light theme re-tint its own (white) surfaces.
+
+   appearance.ts decides whether this is on for the theme in force, which is what
+   makes `transparency = "dark"` solid in light without the window changing. */
+:root[data-vibrancy='on'] body {
+  background: transparent;
+}
+
+:root[data-vibrancy='on'] {
+  --panel: rgb(var(--panel-rgb) / var(--glass));
+  --panel-focused: rgb(var(--panel-focused-rgb) / var(--glass));
+  /* A well sits BELOW the panel it is in, and on glass that reads as more of the
+     desktop rather than a darker grey — so it is thinner than the panel by the
+     same step the opaque theme separates them by. */
+  --well: rgb(var(--well-rgb) / calc(var(--glass) - 0.12));
 }
 
 *,

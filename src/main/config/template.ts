@@ -56,15 +56,27 @@ export const FLOE_TOML = `# ====================================================
 # | above the words. Every one of them is a block of CSS — the transcript
 # | renders the same either way.
 # |
+# | \`transparency\` makes the window translucent, with the desktop blurred
+# | behind every surface — macOS only. It is chosen per theme, because the two
+# | are not the same proposition: \`dark\` tints the blur and stays legible,
+# | \`light\` washes out over a bright wallpaper. \`off\` is the opaque app,
+# | \`dark\` or \`light\` glasses that theme alone, and \`all\` glasses both.
+# |
+# | \`transparency-amount\` is how much comes through, 0–60 percent. 0 leaves
+# | the surfaces solid over the window's own blur; past 40 the wallpaper starts
+# | reading through the text. 18 is the value the interface is drawn at.
+# |
 # ------------------------------------------------------------------------------
 
 [appearance]
-font-family   = "CommitMonoPinguim"
-font-size     = 13
-theme         = "system"
-penguin       = "classic"
-penguin-color = "accent"
-chat-layout   = "classic"
+font-family         = "CommitMonoPinguim"
+font-size           = 13
+theme               = "system"
+penguin             = "classic"
+penguin-color       = "accent"
+chat-layout         = "classic"
+transparency        = "off"
+transparency-amount = 18
 
 
 # ------------------------------------------------------------------------------

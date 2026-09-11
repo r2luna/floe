@@ -108,8 +108,6 @@ import {
   getViewState,
   setProjectWorktree,
   setWorktreeView,
-  getVibrancy,
-  setVibrancy,
   getRailVisible,
   setRailVisible,
   getHiddenProjects,
@@ -380,14 +378,12 @@ export function projectScope(worktreePath?: string): string | undefined {
 // fires after, on the same value — setZoomFactor is idempotent.
 export function setConfigValue(table: string, key: string, value: TomlValue): ReturnType<typeof floeConfig> {
   setFloeValue(table, key, value)
-  for (const win of BrowserWindow.getAllWindows()) applyZoom(win)
+  const on = transparencyOn()
+  for (const win of BrowserWindow.getAllWindows()) {
+    applyZoom(win)
+    applyVibrancy(win, on)
+  }
   return floeConfig()
-}
-
-/** Persist the translucency preference and flip the live window to match. */
-export function toggleVibrancy(win: BrowserWindow | null, on: boolean): void {
-  setVibrancy(on)
-  if (win && !win.isDestroyed()) applyVibrancy(win, on)
 }
 
 // Who to greet on the launcher. `git config user.name` first — it's the name the
@@ -1346,12 +1342,6 @@ export function registerSettingsIpc(): void {
   // mount for the initial xterm palette.
   handle('theme:get', () => nativeTheme.shouldUseDarkColors)
 
-  // Translucent (vibrancy) window appearance. The renderer reads `get` at mount
-  // to set the matching [data-vibrancy] CSS state, and calls `set` from the
-  // "Toggle transparency" command to flip it live and persist the choice.
-  handle('window:getVibrancy', () => getVibrancy())
-  handle('window:setVibrancy', (event, on: boolean) => toggleVibrancy(winOf(event), on))
-
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
   handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
@@ -1381,7 +1371,7 @@ export function watchThemeChanges(): void {
 
 /** Tell every live window the OS appearance changed, and re-assert its fill. */
 export function broadcastTheme(): void {
-  const vibrancy = getVibrancy()
+  const vibrancy = transparencyOn()
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue
     win.webContents.send('theme:changed', nativeTheme.shouldUseDarkColors)
@@ -1430,11 +1420,15 @@ export function reconcileBoards(): void {
   }
 }
 
-/** Zoom is re-applied on every non-keymap reload; the keymap save is cheap. */
+/** Zoom and glass are re-applied on every non-keymap reload; the keymap save is cheap. */
 export function broadcastConfigChange(keymap: boolean): void {
+  const on = transparencyOn()
   for (const win of BrowserWindow.getAllWindows()) {
     if (win.isDestroyed()) continue
-    if (!keymap) applyZoom(win)
+    if (!keymap) {
+      applyZoom(win)
+      applyVibrancy(win, on)
+    }
     win.webContents.send(keymap ? 'keybindings:changed' : 'config:changed')
   }
 }
@@ -1448,7 +1442,7 @@ export function broadcastConfigChange(keymap: boolean): void {
 // symptom. The dev screenshot isn't worth losing the effect.
 export async function captureWindow(win: BrowserWindow): Promise<void> {
   if (app.isPackaged) return
-  if (process.platform === 'darwin' && getVibrancy()) return
+  if (process.platform === 'darwin' && transparencyOn()) return
   try {
     const image = await win.webContents.capturePage()
     writeFileSync(join(app.getPath('userData'), 'floe-shot.png'), image.toPNG())
@@ -1461,23 +1455,30 @@ export async function captureWindow(win: BrowserWindow): Promise<void> {
 // index.css for each theme.
 const solidBg = (): string => (nativeTheme.shouldUseDarkColors ? '#131315' : '#fcfdfe')
 
-// Toggle the translucent macOS vibrancy. The native blur view is created up
-// front (see createWindow) so the NSWindow is non-opaque; here we just reveal or
-// hide it. Two backings have to be cleared for the blur to actually show: the
-// window's own fill AND the webContents backing — a transparent window over an
-// opaque web layer still reads as solid (the web layer composites onto its own
-// backing, not onto the vibrancy view behind it). So we clear the fill to
-// '#00000000' whenever the preference is on and let the renderer's
-// [data-vibrancy] surfaces clear (or keep) the web backing per appearance.
-//
-// Crucially this does NOT gate on the OS being dark. Glass is still a dark-only
-// *look*, but that's enforced entirely in CSS (the tints are scoped to
-// [data-theme='dark']; light keeps fully-opaque surfaces that cover the blur).
-// Re-opaquing the window in light would relock it: a window constructed (or
-// later set) opaque won't reliably flip back to non-opaque on macOS, so the next
-// light→dark switch would leave the blur half-dead until an app restart. Keeping
-// the window perpetually non-opaque while the preference is on means the dark
-// glass can appear and disappear purely by the CSS body toggling transparent.
+/**
+ * Whether the window should be non-opaque at all — `[appearance] transparency`
+ * naming any theme (`dark`, `light` or `all`).
+ *
+ * Deliberately not "is the theme in force glassed": a window constructed (or
+ * later set) opaque won't reliably flip back to non-opaque on macOS, so a fill
+ * that followed the theme would leave the blur half-dead after the first
+ * switch. The window stays non-opaque for anything but `off`, and WHICH themes
+ * actually show glass is decided in CSS — see the `[data-vibrancy]` block in
+ * index.css, and applyVibrancy below.
+ */
+export function transparencyOn(): boolean {
+  return floeConfig().appearance.transparency !== 'off'
+}
+
+// Reveal or hide the translucent macOS vibrancy. The native blur view is created
+// up front (see createWindow) so the NSWindow is non-opaque; here we just clear
+// or restore its fill. Two backings have to be cleared for the blur to actually
+// show: the window's own fill AND the webContents backing — a transparent window
+// over an opaque web layer still reads as solid (the web layer composites onto
+// its own backing, not onto the vibrancy view behind it). So we clear the fill
+// to '#00000000' whenever transparency names any theme, and the renderer's
+// [data-vibrancy] surfaces clear (or keep) the web backing for the theme in
+// force. A theme the user left opaque simply covers the blur.
 // No-op off macOS, where vibrancy isn't supported.
 function applyVibrancy(win: BrowserWindow, on: boolean): void {
   if (process.platform !== 'darwin') return
@@ -1622,7 +1623,7 @@ function createWindow(): void {
   // theme. Constructing opaque in light would relock the window so a later
   // light→dark switch couldn't reveal the blur without a restart. Light still
   // reads solid because its CSS surfaces are opaque and cover the blur.
-  const vibrancyOn = darwin && getVibrancy()
+  const vibrancyOn = darwin && transparencyOn()
   const cascade = BrowserWindow.getAllWindows().length * 28
   const mainWindow = new BrowserWindow(windowOptions(darwin, vibrancyOn, cascade))
 

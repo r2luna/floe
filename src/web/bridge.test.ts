@@ -158,7 +158,6 @@ test('a pinned window channel is answered by the tab, never sent to the daemon',
   await settle()
 
   assert.equal(await ipc.invoke('window:focus'), true)
-  assert.equal(await ipc.invoke('window:getVibrancy'), false)
   prefersDark = true
   assert.equal(await ipc.invoke('theme:get'), true)
 

@@ -95,7 +95,6 @@ export interface ViewState {
 // App-wide (not per-session) preferences. Kept small and flat; defaults live in
 // the getters so a missing key just reads as "off".
 export interface AppPrefs {
-  vibrancy?: boolean // translucent window with a soft macOS background blur
   // The projects rail (leftmost) is shown by default; this records an explicit
   // hide so the choice survives restarts. Absent/true → visible.
   railVisible?: boolean
@@ -518,18 +517,6 @@ export function setWorktreeView(worktreePath: string, view: WorktreeView): void 
   if (!worktreePath || !view?.key) return
   const store = read()
   store.view.viewByWorktree[worktreePath] = view
-  write(store)
-}
-
-// Whether the translucent (vibrancy) window appearance is enabled. Off by
-// default so the app stays solid until the user opts in.
-export function getVibrancy(): boolean {
-  return read().prefs.vibrancy === true
-}
-
-export function setVibrancy(on: boolean): void {
-  const store = read()
-  store.prefs.vibrancy = on
   write(store)
 }
 

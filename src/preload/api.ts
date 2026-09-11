@@ -155,12 +155,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // so an attached window raises itself on the user's desk even when the command
     // Resolves false when there's no window to raise.
     focus: (): Promise<boolean> => ipcRenderer.invoke('window:focus'),
-    // Translucent (vibrancy) window appearance — macOS only. `get` is the snapshot
-    // for the initial [data-vibrancy] CSS state; `set` flips it live and persists.
-    vibrancy: {
-      get: (): Promise<boolean> => ipcRenderer.invoke('window:getVibrancy'),
-      set: (on: boolean): Promise<void> => ipcRenderer.invoke('window:setVibrancy', on)
-    },
     // The machines this window can run on. Workspace calls follow `use`'s
     // pointer; PINNED channels always stay on this machine (remoteProtocol.ts).
     backends: {

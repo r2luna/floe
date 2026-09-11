@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Floe — transparency (whole app)</title>
+<style>
+  :root {
+    --mono: "CommitMonoPinguim", ui-monospace, SFMono-Regular, Menlo, monospace;
+    /* real dark tokens from src/renderer/src/index.css */
+    --bg-rgb: 13 14 17;
+    --panel-rgb: 20 21 25;
+    --panel-focused-rgb: 23 24 29;
+    --well-rgb: 27 29 35;
+    --line: #23252b;
+    --line-soft: #1c1e23;
+    --text: #c9ccd2;
+    --text-strong: #e8eaee;
+    --dim: #6d7280;
+    --faint: #575d6a;
+    --dimmer: #7f8797;
+    --edge: #343a45;
+    --live: #6ea86e;
+    --accent: #d3956d;
+    --nick-claude: #ec9e79;
+    --radius: 5px;
+    --head-h: 34px;
+    /* surface alpha, driven by the slider */
+    --a: 0.72;
+    --a-panel: 0.62;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; overflow: hidden;
+    font: 12.5px/1.55 var(--mono);
+    color: var(--text);
+    background: #000 url("images/wallpaper-dark.jpg") center/cover no-repeat;
+    display: grid; place-items: center;
+  }
+  /* desktop junk behind the window, so translucency has something to prove */
+  .desk { position: fixed; inset: 0; pointer-events: none; }
+  .desk .note {
+    position: absolute; padding: 10px 14px; border-radius: 10px;
+    background: #ffffff1a; border: 1px solid #ffffff26; color: #ffffffcc;
+    font-size: 12px; backdrop-filter: blur(6px);
+  }
+  .desk .n1 { left: 4%; top: 16%; }
+  .desk .n2 { right: 5%; top: 62%; }
+  .desk .n3 { left: 12%; bottom: 8%; }
+
+  /* ---- the window ---- */
+  .win {
+    width: 1400px; height: 900px; flex: none;
+    border-radius: 12px; overflow: hidden;
+    border: 1px solid #ffffff1f;
+    display: grid; grid-template-rows: 43px 1fr;
+    transform-origin: center;
+  }
+  /* opaque: today */
+  .win[data-mode="opaque"] { background: rgb(var(--bg-rgb)); }
+  .win[data-mode="opaque"] .panel,
+  .win[data-mode="opaque"] .side { background: rgb(var(--panel-rgb)); }
+  .win[data-mode="opaque"] .top { background: rgb(var(--bg-rgb)); }
+  .win[data-mode="opaque"] .well { background: rgb(var(--well-rgb)); }
+
+  /* chrome-only glass: window + rails translucent, reading panes stay solid */
+  .win[data-mode="chrome"] { background: rgb(var(--bg-rgb) / var(--a)); backdrop-filter: blur(34px) saturate(1.7); }
+  .win[data-mode="chrome"] .top,
+  .win[data-mode="chrome"] .side { background: transparent; }
+  .win[data-mode="chrome"] .panel { background: rgb(var(--panel-rgb)); }
+  .win[data-mode="chrome"] .well { background: rgb(var(--well-rgb)); }
+
+  /* full glass: every surface tints over one blur */
+  .win[data-mode="full"] { background: rgb(var(--bg-rgb) / var(--a)); backdrop-filter: blur(34px) saturate(1.7); }
+  .win[data-mode="full"] .top,
+  .win[data-mode="full"] .side { background: transparent; }
+  .win[data-mode="full"] .panel { background: rgb(var(--panel-rgb) / var(--a-panel)); }
+  .win[data-mode="full"] .well { background: rgb(var(--well-rgb) / 0.55); }
+
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
+  }
+  .crumb { display: flex; gap: 8px; align-items: center; color: var(--dim); }
+  .crumb b { color: var(--text-strong); font-weight: 700; }
+  .stats { display: flex; gap: 14px; color: var(--dim); font-size: 12px; }
+
+  .body { display: grid; grid-template-columns: 240px 1fr 379px; min-height: 0; }
+  .side { border-right: 1px solid var(--line-soft); padding: 0; min-height: 0; }
+  .side .head {
+    height: var(--head-h); display: flex; align-items: center; gap: 8px;
+    padding: 0 12px; border-bottom: 1px solid var(--line-soft); color: var(--text-strong);
+  }
+  .group { padding: 14px 12px 4px; display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 11px; letter-spacing: .06em; }
+  .group .rule { flex: 1; height: 1px; background: var(--line-soft); }
+  .row { display: flex; align-items: center; gap: 8px; padding: 5px 12px; color: var(--text); }
+  .row .dot { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--edge); }
+  .row.sel { background: #ffffff12; color: var(--text-strong); font-weight: 700; }
+  .row.live .dot { background: var(--live); border-color: var(--live); }
+
+  .center { display: grid; grid-template-rows: var(--head-h) 1fr auto; min-height: 0; border-right: 1px solid var(--line-soft); }
+  .center .head { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); color: var(--text); }
+  .center .head .bar { width: 2px; height: 14px; background: var(--live); }
+  .chat { overflow: hidden; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .meta { color: var(--faint); font-size: 12px; }
+  .msg { line-height: 1.65; }
+  .msg b { color: var(--text-strong); }
+  .code { background: #ffffff0d; border-radius: var(--radius); padding: 1px 6px; color: var(--nick-claude); }
+  .mine { align-self: flex-end; background: #ffffff12; border-radius: var(--radius); padding: 8px 12px; max-width: 62%; }
+  .composer { border-top: 1px solid var(--line-soft); padding: 10px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .chips { display: flex; gap: 8px; align-items: center; color: var(--dim); font-size: 12px; }
+  .chip { border: 1px solid var(--edge); border-radius: var(--radius); padding: 3px 9px; }
+  .chip.acc { border-color: var(--accent); color: var(--accent); }
+  .spacer { flex: 1; }
+  .well { border: 1px solid var(--edge); border-radius: var(--radius); padding: 11px 12px; color: var(--dim); }
+
+  .files { display: grid; grid-template-rows: var(--head-h) 1fr 26px; min-height: 0; }
+  .tabs { display: flex; align-items: center; justify-content: space-around; border-bottom: 1px solid var(--line-soft); color: var(--dim); }
+  .tabs .t { padding: 0 10px; }
+  .tabs .t.on { color: var(--text-strong); }
+  .tree { padding: 8px 0; overflow: hidden; }
+  .tree .f { display: flex; gap: 8px; padding: 3px 14px; color: var(--text); }
+  .tree .f .k { color: var(--faint); font-size: 10px; width: 26px; }
+  .tree .f.sel { background: #ffffff12; }
+  .hint { border-top: 1px solid var(--line-soft); display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; color: var(--faint); font-size: 11px; }
+
+  /* ---- controls ---- */
+  .ctl {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; z-index: 10;
+    background: #000000a6; backdrop-filter: blur(20px); border: 1px solid #ffffff26;
+    border-radius: 999px; padding: 7px 12px; font-size: 12px; color: #fff;
+  }
+  .ctl button {
+    font: inherit; color: #fff; background: #ffffff14; border: 1px solid #ffffff1f;
+    border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  }
+  .ctl button.on { background: #fff; color: #000; border-color: #fff; }
+  .ctl input { width: 130px; }
+  .ctl .lbl { color: #ffffff99; }
+</style>
+</head>
+<body>
+  <div class="desk">
+    <div class="note n1">desktop behind the window</div>
+    <div class="note n2">wallpaper: your own</div>
+    <div class="note n3">this is what shows through</div>
+  </div>
+
+  <div class="win" id="win" data-mode="full">
+    <div class="top">
+      <div class="crumb">r2luna <span>›</span> <b>floe</b> <span>›</span> ⑂ transparencyjk <span>›</span> Session 2</div>
+      <div class="stats"><span>✦ 5% 5h · 7% wk</span><span>◍ 1003 MB</span></div>
+    </div>
+
+    <div class="body">
+      <div class="side">
+        <div class="head">⑂ <b>transparencyjk</b></div>
+        <div class="group">SESSIONS <span class="rule"></span> 0/2</div>
+        <div class="row live"><span class="dot"></span> Session 1</div>
+        <div class="row sel live"><span class="dot"></span> Session 2</div>
+        <div class="group">TERMINALS <span class="rule"></span> 0/1</div>
+        <div class="row"><span class="dot"></span> zsh</div>
+        <div class="group">COMMANDS <span class="rule"></span> 0/1</div>
+        <div class="row"><span class="dot"></span> pnpm dev</div>
+      </div>
+
+      <div class="center">
+        <div class="head"><span class="bar"></span> é possível ter transparência no app todo ?</div>
+        <div class="chat">
+          <div class="meta">· 2 actions Read, Grep</div>
+          <div class="msg">Sim, no macOS. A metade de janela já existe: <span class="code">vibrancy: 'fullscreen-ui'</span> é criada sempre, e o fill alterna em <span class="code">applyVibrancy</span>.</div>
+          <div class="meta">· 1 action Bash</div>
+          <div class="msg">Falta o lado do renderer — nada lê <span class="code">floe.window.vibrancy</span>, e não existe CSS de <span class="code">[data-vibrancy]</span>.</div>
+          <div class="msg"><b>Resumo</b></div>
+          <div class="msg">Os terminais já estão prontos: <span class="code">allowTransparency: true</span> e fundo <span class="code">#00000000</span>. O trabalho real são as 35 regras de superfície.</div>
+          <div class="mine">me mostra</div>
+          <div class="meta">· 1 action Write</div>
+        </div>
+        <div class="composer">
+          <div class="chips">
+            <span class="chip">▢ floe</span><span class="chip">⑂ transparencyjk</span>
+            <span class="spacer"></span>
+            <span>0k/1M (0%)</span><span class="chip">high</span><span class="chip acc">opus 5</span>
+          </div>
+          <div class="well">Describe what you'd like the agent to do… Type / for commands, @ for files.</div>
+        </div>
+      </div>
+
+      <div class="files">
+        <div class="tabs"><span class="t on">▤</span><span class="t">✎</span><span class="t">✦</span><span class="t">▤</span><span class="t">⑂</span></div>
+        <div class="tree">
+          <div class="f"><span class="k">›</span> .claude</div>
+          <div class="f"><span class="k">›</span> docs</div>
+          <div class="f"><span class="k">›</span> mocks</div>
+          <div class="f"><span class="k">›</span> src</div>
+          <div class="f"><span class="k">MD</span> AGENTS.md</div>
+          <div class="f"><span class="k">MD</span> CLAUDE.md</div>
+          <div class="f"><span class="k">TS</span> electron.vite.config.ts</div>
+          <div class="f sel"><span class="k">CSS</span> index.css</div>
+          <div class="f"><span class="k">JSON</span> package.json</div>
+          <div class="f"><span class="k">TS</span> xtermTheme.ts</div>
+        </div>
+        <div class="hint">a new · r rename · d delete · = apply</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <button data-m="opaque">Opaque (today)</button>
+    <button data-m="chrome">Glass: chrome only</button>
+    <button data-m="full" class="on">Glass: everything</button>
+    <span class="lbl">alpha</span>
+    <input id="alpha" type="range" min="0.30" max="0.95" step="0.01" value="0.72" />
+    <span class="lbl" id="aval">0.72</span>
+  </div>
+
+<script>
+  const win = document.getElementById('win')
+  const btns = [...document.querySelectorAll('.ctl button')]
+  btns.forEach(b => b.onclick = () => {
+    win.dataset.mode = b.dataset.m
+    btns.forEach(x => x.classList.toggle('on', x === b))
+  })
+  const alpha = document.getElementById('alpha'), aval = document.getElementById('aval')
+  alpha.oninput = () => {
+    const a = +alpha.value
+    win.style.setProperty('--a', a)
+    win.style.setProperty('--a-panel', Math.max(0, a - 0.10))
+    aval.textContent = a.toFixed(2)
+  }
+  // fit the 1400x900 window to the viewport
+  const fit = () => {
+    const s = Math.min((innerWidth - 80) / 1400, (innerHeight - 110) / 900, 1)
+    win.style.transform = `scale(${s})`
+  }
+  addEventListener('resize', fit); fit()
+</script>
+</body>
+</html>

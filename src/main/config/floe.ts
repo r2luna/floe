@@ -22,7 +22,8 @@ import {
   DEFAULT_GROUP,
   NOTIFY_SOUNDS,
   PENGUIN_COLORS,
-  PENGUIN_HEADS
+  PENGUIN_HEADS,
+  TRANSPARENCY
 } from '../../shared/types'
 import { HARNESSES } from '../../shared/modes'
 import { EFFORTS } from '../../shared/types'
@@ -62,6 +63,14 @@ export interface FloeConfig {
     penguinColor: (typeof PENGUIN_COLORS)[number]
     /** How the transcript arranges a turn. Pure CSS — see CHAT_LAYOUTS. */
     chatLayout: (typeof CHAT_LAYOUTS)[number]
+    /** Which themes get the translucent window — see TRANSPARENCY. macOS only. */
+    transparency: (typeof TRANSPARENCY)[number]
+    /**
+     * How much of the desktop comes through, in percent. 0 is an opaque surface
+     * (the glass is then only the window's own fill); 60 is as clear as the text
+     * on it stays readable over a busy wallpaper.
+     */
+    transparencyAmount: number
   }
   agent: {
     model: (typeof MODELS)[number]
@@ -121,7 +130,11 @@ export const DEFAULTS: FloeConfig = {
     penguinColor: 'accent',
     // The log the app shipped with. A layout is a matter of taste, so nobody
     // gets moved off the one they already know by installing an update.
-    chatLayout: 'classic'
+    chatLayout: 'classic',
+    // Opaque until asked: the glass is a choice about the desktop behind the
+    // window, and nobody's app should turn see-through on an update.
+    transparency: 'off',
+    transparencyAmount: 18
   },
   agent: {
     model: 'opus',
@@ -264,7 +277,13 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
           d.appearance.penguinColor,
         chatLayout:
           appearance?.oneOf('chat-layout', CHAT_LAYOUTS, d.appearance.chatLayout) ??
-          d.appearance.chatLayout
+          d.appearance.chatLayout,
+        transparency:
+          appearance?.oneOf('transparency', TRANSPARENCY, d.appearance.transparency) ??
+          d.appearance.transparency,
+        transparencyAmount:
+          appearance?.num('transparency-amount', d.appearance.transparencyAmount, { min: 0, max: 60 }) ??
+          d.appearance.transparencyAmount
       },
       agent: {
         model: agent?.oneOf('model', MODELS, d.agent.model) ?? d.agent.model,
