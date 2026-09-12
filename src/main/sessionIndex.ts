@@ -14,6 +14,7 @@ import {
   sessionHasUnansweredQuestion
 } from './claudeSessions'
 import { anyActiveTurn, isClaudeIdConnected, waitingKeys } from './agent'
+import { colonySessionIds } from './colony/store'
 import type {
   ActiveSession,
   JumpSession,
@@ -147,10 +148,17 @@ function sessionNeedsYou(s: JumpSession, waiting: ReadonlySet<string>): boolean 
  * The panel unions several machines' answers and re-slices, which is correct
  * without any coordination: a machine's own top ten is always a superset of
  * whatever it contributes to the global top ten.
+ *
+ * The colony's own sessions are dropped BEFORE the cut, not after: they are the
+ * busiest sessions on the machine, so leaving them in spends the ten rows on
+ * lanes the board already shows and pushes the user's own work off the list.
+ * Filtering in the renderer would leave the same hole, just emptier.
  */
 export async function recentSessions(limit = 10): Promise<ActiveSession[]> {
   const waiting = new Set(waitingKeys())
+  const colony = colonySessionIds()
   return (await allSessions())
+    .filter((s) => !colony.has(s.sessionId))
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
     .slice(0, Math.max(0, limit))
     .map((s) => ({ ...s, needsYou: sessionNeedsYou(s, waiting) }))

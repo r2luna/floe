@@ -8,7 +8,13 @@
 // coordination, because a machine's own top ten is always a superset of whatever
 // it contributes to the global top ten.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { backendIds, backendLabel, currentBackend, recentSessionsOn } from './backends.ts'
+import {
+  backendIds,
+  backendLabel,
+  backendState,
+  currentBackend,
+  recentSessionsOn
+} from './backends.ts'
 import type { ActiveSession } from '../../shared/types'
 
 /** How long one machine gets to answer. The projects union's number, its reason. */
@@ -31,6 +37,17 @@ export interface OfflineBackend {
   id: string
   label: string
 }
+
+/**
+ * Does a failed read mean the machine is down?
+ *
+ * Only the socket decides. A machine whose socket is open DID answer — it
+ * answered with an error, which is what a channel it does not have looks like
+ * when the desktop is newer than the daemon. Reporting that as "offline" tells
+ * the user the network is gone when the machine is right there, and the panel
+ * has no other way to say "incomplete", so the false report wins the row.
+ */
+export const unreachable = (state: 'connecting' | 'open' | 'closed'): boolean => state !== 'open'
 
 export interface ActiveSessions {
   rows: ActiveSession[]
@@ -89,12 +106,16 @@ export function useActiveSessions(limit = 10): ActiveSessions {
           setRows((prev) => mergeSlice(prev, slice, id))
           setPending((p) => p.filter((x) => x !== id))
         })
-        .catch(() => {
+        .catch((err) => {
           clearTimeout(late)
           if (gen.current !== mine) return
-          setOffline((o) =>
-            o.some((b) => b.id === id) ? o : [...o, { id, label: backendLabel(id) }]
-          )
+          // An error from a machine that is still connected is a bug or a
+          // version skew, not an outage: it goes to the console, not the panel.
+          if (unreachable(backendState(id)))
+            setOffline((o) =>
+              o.some((b) => b.id === id) ? o : [...o, { id, label: backendLabel(id) }]
+            )
+          else console.debug('[active]', id, err)
           // Nothing to merge, but its old rows must go: keeping them would show
           // a machine's sessions as current long after it stopped answering.
           setRows((prev) => prev.filter((s) => s.backend !== id))

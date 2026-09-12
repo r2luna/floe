@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mergeSlice, topSessions } from './useActiveSessions.ts'
+import { mergeSlice, topSessions, unreachable } from './useActiveSessions.ts'
 import type { ActiveSession } from '../../shared/types'
 
 const row = (id: string, at: number, backend?: string): ActiveSession => ({
@@ -44,4 +44,12 @@ test('a machine answering with nothing empties its own rows only', () => {
     mergeSlice(prev, [], 'link').map((s) => s.sessionId),
     ['a1']
   )
+})
+
+test('only the socket says a machine is offline — an error from a connected one does not', () => {
+  // The skew case: `link` is attached and answering, but the desktop asked for a
+  // channel its daemon does not have. That is a bug report, not an outage.
+  assert.equal(unreachable('open'), false)
+  assert.equal(unreachable('closed'), true)
+  assert.equal(unreachable('connecting'), true)
 })

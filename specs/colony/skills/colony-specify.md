@@ -19,6 +19,22 @@ Linear, GitHub), fetch it and treat it as the primary source: title, description
 acceptance criteria, comments, attachments. If it cannot be fetched, proceed
 from the text you have and note the gap. If it is free text, use it directly.
 
+The brief is often the output of an interview — the `colony-add-task` skill
+grills the user before the card exists. When it carries these sections they are
+already settled, and you start from them instead of from scratch:
+
+- `## Decisions` — copy every line into the spec's `## Clarifications` before you
+  write anything else, as `- Q: <question> -> A: <decision> (user)`. They are a
+  human's answers: they outrank anything you would infer.
+- `## Out of scope` and `## Done when` — the seeds of the spec's own Out of Scope
+  and Success Criteria.
+- `## Anchors` — the files to read first.
+- `## Still open` — an interview the user broke off. Each line carries a
+  recommended default: take it, record it under Assumptions, and keep going. It
+  is not a question you inherit.
+
+Never re-ask something the brief settled, and never reopen a non-goal it records.
+
 ## 2. spec.md — what and why, never how
 
 Sections, in this order: Summary; User Stories (prioritized P1/P2/P3, each
@@ -68,6 +84,11 @@ That is a licence, not an instruction. Most specs should still be written withou
 asking anything — resolve what you can from the request, the codebase, existing
 patterns and the conventions doc, and record the rest as assumptions.
 
+A brief with a `## Decisions` section has already been through the interview, and
+the bar is higher again: the only thing left worth a human is something you found
+in the code that the interview could not have known and that changes the shape of
+the work. One question at most, and only when guessing wrong is expensive.
+
 When something genuinely needs a human — scope that could go two ways, a
 product decision the code cannot answer, a costly or hard-to-reverse call — ask.
 Rules:
@@ -88,5 +109,5 @@ you inherit the decision instead of re-deriving it.
 
 ## Report
 
-The three paths, the count of assumptions you recorded, and the first task the
-coder will pick up.
+The three paths, how many decisions you inherited from the brief, how many
+assumptions you recorded yourself, and the first task the coder will pick up.

@@ -179,6 +179,30 @@ export function taskForSession(sessionId: string): ColonyTask | undefined {
 }
 
 /**
+ * Every session the colony owns, across all boards.
+ *
+ * For the lists that rank sessions by how recently they were touched: a board
+ * running four cards writes far more often than the user types, so a panel that
+ * counts colony sessions shows the colony working and nothing else — which is
+ * what the board itself is for.
+ *
+ * A card is not one session for its whole life. Every step mints its own (see
+ * the runner's `startLane`) and the finished ones stay on `visits`, so reading
+ * `sessionId` alone would only catch the step running right now. The nannies are
+ * here too: the board's own session is the colony's, not the user's.
+ */
+export function colonySessionIds(): Set<string> {
+  const store = read()
+  const ids = new Set<string>()
+  for (const task of store.tasks) {
+    if (task.sessionId) ids.add(task.sessionId)
+    for (const visit of task.visits ?? []) if (visit.sessionId) ids.add(visit.sessionId)
+  }
+  for (const id of Object.values(store.nannies)) ids.add(id)
+  return ids
+}
+
+/**
  * A name no other task on this board has.
  *
  * The name is the branch's last segment, so a collision would be two tasks

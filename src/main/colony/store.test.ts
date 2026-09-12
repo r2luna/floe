@@ -11,8 +11,18 @@ const dir = mkdtempSync(join(tmpdir(), 'colony-'))
 const { setSharedDataDir } = await import('../dataDir.ts')
 setSharedDataDir(dir)
 
-const { addTask, freeName, getTask, listTasks, patchTask, recordVisit, removeTask, taskForSession } =
-  await import('./store.ts')
+const {
+  addTask,
+  colonySessionIds,
+  freeName,
+  getTask,
+  listTasks,
+  patchTask,
+  recordVisit,
+  removeTask,
+  setNanny,
+  taskForSession
+} = await import('./store.ts')
 
 test('a task starts in the backlog with no worktree — a card nobody released costs nothing', () => {
   const t = addTask({ project: '/p', name: 'Backgrounded Polling', brief: 'drops events' })
@@ -54,4 +64,20 @@ test('removing a task takes it off the board and nothing else', () => {
   const t = addTask({ project: '/p', name: 'gone', brief: '' })
   removeTask(t.id)
   assert.equal(getTask(t.id), undefined)
+})
+
+test('the colony owns every step a card ran, not just the one running now', () => {
+  const t = addTask({ project: '/owned', name: 'stepped', brief: '' })
+  patchTask(t.id, { sessionId: 'step-2' })
+  // Step one already finished and moved to the card's history — its session is
+  // still the colony's, and the list that hides lanes has to hide it too.
+  recordVisit(t.id, { at: 1, stage: 'coder', sessionId: 'step-1', verdict: 'pass' }, {})
+  setNanny('/owned', 'nanny-1')
+
+  const ids = colonySessionIds()
+  assert.ok(ids.has('step-2'))
+  assert.ok(ids.has('step-1'))
+  assert.ok(ids.has('nanny-1'))
+  // A session nobody put on a board is the user's own.
+  assert.equal(ids.has('mine'), false)
 })

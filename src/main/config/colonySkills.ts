@@ -1,4 +1,5 @@
-// The six lane skills the colony ships with, and the nanny's.
+// The six lane skills the colony ships with, the nanny's, and the interview that
+// writes a task brief worth running.
 //
 // Layer 1 of the board config points at these (spec D18): the default board has
 // to work on a fresh install, and a board naming skills the user has not written
@@ -106,6 +107,22 @@ Linear, GitHub), fetch it and treat it as the primary source: title, description
 acceptance criteria, comments, attachments. If it cannot be fetched, proceed
 from the text you have and note the gap. If it is free text, use it directly.
 
+The brief is often the output of an interview — the \`colony-add-task\` skill
+grills the user before the card exists. When it carries these sections they are
+already settled, and you start from them instead of from scratch:
+
+- \`## Decisions\` — copy every line into the spec's \`## Clarifications\` before you
+  write anything else, as \`- Q: <question> -> A: <decision> (user)\`. They are a
+  human's answers: they outrank anything you would infer.
+- \`## Out of scope\` and \`## Done when\` — the seeds of the spec's own Out of Scope
+  and Success Criteria.
+- \`## Anchors\` — the files to read first.
+- \`## Still open\` — an interview the user broke off. Each line carries a
+  recommended default: take it, record it under Assumptions, and keep going. It
+  is not a question you inherit.
+
+Never re-ask something the brief settled, and never reopen a non-goal it records.
+
 ## 2. spec.md — what and why, never how
 
 Sections, in this order: Summary; User Stories (prioritized P1/P2/P3, each
@@ -155,6 +172,11 @@ That is a licence, not an instruction. Most specs should still be written withou
 asking anything — resolve what you can from the request, the codebase, existing
 patterns and the conventions doc, and record the rest as assumptions.
 
+A brief with a \`## Decisions\` section has already been through the interview, and
+the bar is higher again: the only thing left worth a human is something you found
+in the code that the interview could not have known and that changes the shape of
+the work. One question at most, and only when guessing wrong is expensive.
+
 When something genuinely needs a human — scope that could go two ways, a
 product decision the code cannot answer, a costly or hard-to-reverse call — ask.
 Rules:
@@ -175,8 +197,8 @@ you inherit the decision instead of re-deriving it.
 
 ## Report
 
-The three paths, the count of assumptions you recorded, and the first task the
-coder will pick up.`
+The three paths, how many decisions you inherited from the brief, how many
+assumptions you recorded yourself, and the first task the coder will pick up.`
 )
 
 const COLONY_IMPLEMENT = lane(
@@ -635,6 +657,15 @@ You are the only way a task is created, because you already have the board's
 context: the base branch, which stage is full, what is queued ahead of it. When
 the user describes work:
 
+For anything bigger than a one-line fix, run the \`colony-add-task\` skill instead
+of writing the brief from the first description. It interviews the user in rounds
+until nothing is left assumed, and hands back a brief with the decisions in it —
+which is the difference between a specifier that runs start to finish and a card
+sitting in \`needs you\`. It ends by calling \`colony_add_task\` itself, so when you
+use it the steps below are already done.
+
+For a fix small enough that there is nothing to decide, write it yourself:
+
 1. Give it a short kebab-case **name** — the branch's last segment, two or three
    words, what the change IS and not what it fixes (\`backgrounded-polling\`, not
    \`fix-the-polling-bug\`).
@@ -679,6 +710,154 @@ most.
   through. A merge that refuses is telling you something true.
 `
 
+/**
+ * Not a lane either: the interview happens before a card exists, so there is no
+ * task dir, no branch and nothing to hand off — it inherits no contract.
+ *
+ * The round format is adapted from Matt Pocock's `grilling` skill:
+ * https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md
+ */
+const COLONY_ADD_TASK = `---
+name: colony-add-task
+description: Interview the user about a change until every decision is settled, then put it on the colony board with a brief that leaves the specifier nothing to ask.
+---
+
+# Adding a task to the board
+
+You turn "I want X" into a task the specifier can work from without stopping to
+ask anybody anything. The interview is the point: every decision settled here is
+a decision no lane has to park a card on later.
+
+You write no code and you do not design the solution. The brief carries WHAT is
+wanted and WHICH WAY each open question was answered. How it gets built is the
+specifier's lane.
+
+Everything you write is in English, whatever language the user asks in — the
+brief is read by lanes that write English artifacts and English commits.
+
+## 1. Find the facts yourself
+
+Facts are your job, never the user's. Before the first round:
+
+- Call \`colony_board\` for the project. You need to know whether this change is
+  already on it, and which live task this one would collide with.
+- Read the code the request points at: the file, the symbol, the failing test,
+  the conventions doc.
+
+A question the repo can answer is a question you do not ask. When a fact is slow
+to find, dispatch a sub-agent for it and ask the rest of the round while it runs
+— only the questions downstream of that fact wait.
+
+## 2. Grill in rounds
+
+Map the change as a **design tree**: every decision branches into the decisions
+that hang off it. The **frontier** is every decision whose prerequisites are
+already settled — the questions you can ask NOW without guessing at answers you
+have not heard yet.
+
+Ask the whole frontier in one round. Number each question, give your recommended
+answer, then stop and wait for the user.
+
+\`\`\`
+❓ **Q1** - **<question title>**: <question body, may be several paragraphs, may offer choices>
+
+➡️ <your recommended answer>
+
+---
+
+❓ **Q2** - **<question title>**: <question body>
+
+➡️ <your recommended answer>
+\`\`\`
+
+Every round of answers reshapes the tree: settled decisions push the frontier
+outward and unblock the questions that depended on them. Recompute the frontier
+and ask the next round. A question whose answer depends on another question still
+open in this round belongs to a LATER round.
+
+The decisions are the user's. Put each to them and wait — never answer your own
+question and carry on.
+
+## 3. What is worth a round
+
+Grill the things a lane cannot decide for itself, in this order:
+
+1. **Scope** — where this change stops, and what is deliberately not in it.
+2. **Observable behaviour** — what the user sees, in which states, including the
+   empty, error and slow ones.
+3. **Data** — what is stored, and what happens to what is stored already.
+4. **Edge cases** — the inputs and races that would otherwise be discovered in
+   the coder lane.
+5. **Done when** — the outcome that makes this task finishable, checkable
+   without reading the diff.
+
+Not worth a round: naming, style, file placement, anything with an obvious
+default, anything the repo already answers. Those are yours to decide.
+
+The interview is done when the frontier is empty: every branch visited, nothing
+left silently assumed. Say so, and do not create the task until the user confirms
+you have a shared understanding.
+
+## 4. Write the brief
+
+Hand the interview back as the brief, because the brief is the only thing the
+specifier reads. Sections in this order, skipping any that is empty:
+
+\`\`\`markdown
+## Request
+<the change in the user's own words, two to five lines>
+
+## Decisions
+- Q: <question> -> A: <what was decided>
+
+## Scope
+- <one line per thing in it>
+
+## Out of scope
+- <one line per thing deliberately left out>
+
+## Done when
+- <observable outcome, checkable without reading the diff>
+
+## Anchors
+- \`path/to/file.ts:symbol\` — what it is and why it matters here
+
+## Still open
+- <question> — recommended: <the default the specifier should take>
+\`\`\`
+
+\`## Decisions\` is the part that pays for the interview: one line per answer, in
+the user's terms, no reasoning. The specifier copies them into the spec's
+\`## Clarifications\`, so anything you leave out here gets asked again.
+
+\`## Still open\` is only for an interview the user broke off. Every line needs a
+recommendation, or it is a question with nobody left to answer it.
+
+## 5. Put it on the board
+
+1. **name** — short kebab-case, the branch's last segment, what the change IS
+   and not what it fixes (\`backgrounded-polling\`, not \`fix-the-polling-bug\`).
+2. **kind** — \`feat\` for new behaviour, \`fix\` for broken behaviour, \`chore\` for
+   the rest.
+3. **dependsOn** — if a live task on the board is changing the same code, pass
+   its id. That decision has to be made now; it cannot be made once both
+   worktrees exist.
+4. Call \`colony_add_task\` with \`start: true\` unless the user said to park it. An
+   unmet dependency still starts: the card waits in the backlog and releases
+   itself when the dependency merges.
+
+Two changes means two tasks. Split them, brief them separately, and say why you
+split them.
+
+Then report in two lines: what you created, and whether it started or is holding
+behind something.
+
+---
+
+The round format is adapted from Matt Pocock's \`grilling\` skill:
+<https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md>
+`
+
 export const COLONY_SKILLS: BuiltinSkill[] = [
   { name: 'colony-specify', text: COLONY_SPECIFY },
   { name: 'colony-implement', text: COLONY_IMPLEMENT },
@@ -686,5 +865,6 @@ export const COLONY_SKILLS: BuiltinSkill[] = [
   { name: 'colony-architecture', text: COLONY_ARCHITECTURE },
   { name: 'colony-review', text: COLONY_REVIEW },
   { name: 'colony-verify', text: COLONY_VERIFY },
-  { name: 'colony-nanny', text: COLONY_NANNY }
+  { name: 'colony-nanny', text: COLONY_NANNY },
+  { name: 'colony-add-task', text: COLONY_ADD_TASK }
 ]
