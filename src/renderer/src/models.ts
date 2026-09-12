@@ -72,7 +72,15 @@ export function setDefaultChoice(agent: {
   // Snapped, not trusted: floe.toml can name a mode the configured runtime
   // cannot do, and a new session must not start on a flag that fails the turn.
   const mode = nearestMode(modeFromLabel(agent.mode) ?? DEFAULT_MODE, provider)
-  configured = provider ? { model: agent.model, effort, provider, mode } : { model: agent.model, effort, mode }
+  // `[agent] model` is a Claude alias — it is validated against MODELS on the
+  // way out of floe.toml — so it is not this harness's to run when `provider`
+  // names another one. Same rule as routeChoice: the harness's own block
+  // answers for the model, and nothing there means its own default. Without
+  // this, `provider = "codex"` beside `model = "opus"` starts every session on
+  // a pair that cannot exist, and the panel writes it down as the session's
+  // own choice the first time it opens.
+  const model = provider ? (harnessDefault(provider).model ?? '') : agent.model
+  configured = provider ? { model, effort, provider, mode } : { model, effort, mode }
 }
 
 /** What a new session starts on: the config, or the built-in fallback. */
@@ -134,6 +142,37 @@ export function routeChoice(
     // The mode you are on keeps travelling, snapped to what this harness can
     // honestly do — the same rule as switching harness in the picker.
     mode: nearestMode(from.mode ?? DEFAULT_MODE, claude ? undefined : route.harness)
+  }
+}
+
+/**
+ * What a session's RECORDED choice means when the panel reads it back.
+ *
+ * Only the harness is certain — the rest of the record can be missing, and
+ * what fills a gap depends on who answers there. The model above all: it
+ * belongs to the harness that offered it, so a session answering as codex
+ * falls back to `[harness.codex]` and then to an empty model, which every
+ * runtime reads as "whatever you are set to". Never to `[agent] model`, which
+ * is Claude's own alias — that is how a record holding a provider without a
+ * model came back as `codex@opus` and sent the next message to codex on a
+ * model it has never heard of.
+ *
+ * The same order as routeChoice, for the same reason: one rule for what a
+ * harness answers with, whether a handle named it or the session is set to it.
+ */
+export function storedChoice(stored: {
+  provider?: string
+  model?: string
+  effort?: Effort
+  mode?: PermissionMode
+}): ModelChoice {
+  const claude = !stored.provider
+  const set = harnessDefault(stored.provider ?? 'claude')
+  return {
+    model: stored.model ?? set.model ?? (claude ? defaultChoice().model : ''),
+    effort: stored.effort ?? defaultChoice().effort,
+    provider: stored.provider,
+    mode: stored.mode
   }
 }
 

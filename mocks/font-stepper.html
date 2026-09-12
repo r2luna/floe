@@ -1,0 +1,30 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>body{padding:20px;background:var(--bg)}.settings{width:420px;border:1px solid var(--line)}</style>
+</head>
+<body>
+<div class="settings">
+  <button class="row settings-row"><span class="row-name">Font family</span><span class="settings-value">CommitMonoPinguim</span></button>
+  <div class="row settings-row settings-editing settings-stepping" tabindex="-1" autofocus>
+    <span class="row-name">Font size</span>
+    <span class="settings-stepper">
+      <button class="settings-step">−</button>
+      <span class="settings-value settings-step-value">15</span>
+      <button class="settings-step">+</button>
+    </span>
+  </div>
+  <button class="row settings-row"><span class="row-name">Theme</span><span class="settings-value">dark</span></button>
+  <div class="row settings-row settings-editing settings-stepping" tabindex="-1">
+    <span class="row-name">Font size (at min)</span>
+    <span class="settings-stepper">
+      <button class="settings-step" disabled>−</button>
+      <span class="settings-value settings-step-value">6</span>
+      <button class="settings-step">+</button>
+    </span>
+  </div>
+</div>
+</body>
+</html>

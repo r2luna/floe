@@ -92,8 +92,11 @@ export async function applyConfig(): Promise<void> {
     glass = config.appearance.transparency
     glassAmount = config.appearance.transparencyAmount
     await applyTheme(config.appearance.theme)
-    setDefaultChoice(config.agent)
+    // Harness blocks first: a default that names another harness reads its
+    // model out of them, and installed the other way round it would read an
+    // empty table and fall back to that harness's own default instead.
     setHarnessDefaults(config.harness)
+    setDefaultChoice(config.agent)
     setVim(config.composer.vim)
     // Resolved in main — config first, then git/system — so the chat's nick and
     // the launcher's greeting can never disagree about who you are. NOT awaited:

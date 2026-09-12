@@ -28,6 +28,7 @@
 // (the exact path, the exact error) that continuity actually turns on.
 
 import type { TranscriptItem } from '../main/claudeSessions'
+import { wrapPremise } from './premise.ts'
 
 /** Opens a packet. Versioned: a v2 shape must not be stripped as if it were v1. */
 export const PACKET_OPEN = '<!-- floe:handoff:v1 -->'
@@ -106,6 +107,11 @@ function cut(text: string, max: number = ITEM_CHARS): string {
 function render(item: TranscriptItem, max?: number): string | null {
   if (item.role === 'tool') {
     const name = item.name ?? 'tool'
+    // The worktree's brief is not a tool that ran: it is the standing context
+    // the whole session is inside, folded out of the first message it rode on
+    // (claudeSessions.ts). Sent as the block it was, so the harness picking the
+    // conversation up reads it exactly as the one that started it did.
+    if (name === 'premise' && item.summary) return wrapPremise(item.summary).trim()
     // A tool line is a note that something ran, never the payload — it keeps
     // the short allowance whoever is reading it.
     return `[ran ${name}${item.summary ? `: ${cut(item.summary)}` : ''}]`

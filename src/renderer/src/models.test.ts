@@ -2,14 +2,17 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   addressOf,
+  defaultChoice,
   describeChoice,
   hostOf,
   lastChoice,
   loadChoice,
   routeChoice,
+  setDefaultChoice,
   setHarnessDefaults,
   setUserNick,
   speakerKey,
+  storedChoice,
   userNick,
   windowOf
 } from './models.ts'
@@ -238,4 +241,60 @@ test('no model is invented for a harness that named none', () => {
   // one that cannot ("no model loaded") is more use than a guess that hangs.
   assert.equal(routeChoice({ harness: 'codex' }, { model: 'opus', effort: 'high' }).model, '')
   assert.equal(routeChoice({ harness: 'ollama' }, { model: 'opus', effort: 'high' }).model, '')
+})
+
+/* --- what the config and a stored record start a session on --------------- */
+
+test('a configured harness does not inherit Claude’s model', () => {
+  setHarnessDefaults({ codex: { model: 'gpt-5.6-sol', effort: 'high' } })
+  // `[agent] model` is validated against MODELS, so it is always a Claude
+  // alias. Beside `provider = "codex"` it named a pair that cannot exist, and
+  // every session opened while it was set was written down as `codex@opus`.
+  setDefaultChoice({ model: 'opus', effort: 'medium', provider: 'codex', mode: 'full' })
+  assert.equal(defaultChoice().model, 'gpt-5.6-sol')
+  assert.equal(defaultChoice().provider, 'codex')
+})
+
+test('a configured harness with no block of its own names no model', () => {
+  setHarnessDefaults({})
+  setDefaultChoice({ model: 'opus', effort: 'medium', provider: 'codex', mode: 'full' })
+  assert.equal(defaultChoice().model, '')
+})
+
+test('Claude still takes the model the config names', () => {
+  setHarnessDefaults({})
+  setDefaultChoice({ model: 'sonnet', effort: 'low', provider: 'claude', mode: 'full' })
+  assert.deepEqual(defaultChoice(), { model: 'sonnet', effort: 'low', mode: 'skip' })
+})
+
+test('a record with a harness and no model falls back to that harness, not to Claude', () => {
+  setHarnessDefaults({ codex: { model: 'gpt-5.6-sol' } })
+  setDefaultChoice({ model: 'opus', effort: 'high', provider: 'claude', mode: 'full' })
+  assert.deepEqual(storedChoice({ provider: 'codex', effort: 'high', mode: 'plan' }), {
+    model: 'gpt-5.6-sol',
+    effort: 'high',
+    provider: 'codex',
+    mode: 'plan'
+  })
+  setHarnessDefaults({})
+  assert.equal(storedChoice({ provider: 'codex' }).model, '')
+})
+
+test('a Claude record with no model borrows the configured one', () => {
+  setHarnessDefaults({})
+  setDefaultChoice({ model: 'sonnet', effort: 'max', provider: 'claude', mode: 'full' })
+  assert.deepEqual(storedChoice({ mode: 'skip' }), {
+    model: 'sonnet',
+    effort: 'max',
+    provider: undefined,
+    mode: 'skip'
+  })
+})
+
+test('what the record names is what it answers as', () => {
+  setHarnessDefaults({ codex: { model: 'gpt-5.6-sol' } })
+  assert.equal(storedChoice({ provider: 'codex', model: 'o3' }).model, 'o3')
+  // Empty is a choice too — "whatever that runtime is set to" — not a gap for
+  // the harness default to fill.
+  assert.equal(storedChoice({ provider: 'codex', model: '' }).model, '')
 })

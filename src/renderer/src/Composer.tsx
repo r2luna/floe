@@ -110,8 +110,18 @@ export function Composer({
   /** Send, with the model and effort picked in this composer, plus whatever was
       dropped or pasted into it. The chips live here, so they leave from here. */
   onSend: (choice: ModelChoice, attached?: Attached) => void
-  /** Fires when the model or effort changes, and once with what was restored. */
-  onChoice?: (choice: ModelChoice) => void
+  /**
+   * What the composer is set to, and whether a PERSON set it.
+   *
+   * The two are not the same answer. Restoring a saved choice and pinning the
+   * session's own are the composer telling the panel what it is showing, so
+   * the gauge counts against the right window; only `picked` is the user
+   * saying who answers here. Written down without that distinction, the
+   * globally saved model lands on every session the moment its panel mounts —
+   * which is how a chat whose record still said `codex` ended up recorded as
+   * `codex@opus`, a pair neither harness can run.
+   */
+  onChoice?: (choice: ModelChoice, picked?: boolean) => void
   /**
    * The model this session already answers as, once its transcript is read.
    * Takes over from the saved choice — which is global, and so belongs to
@@ -261,8 +271,10 @@ export function Composer({
     setChoice(merged)
     saveChoice(merged)
     // The panel above needs it too: the context gauge counts against the chosen
-    // model's window, which is a different number for every runtime.
-    onChoice?.(merged)
+    // model's window, which is a different number for every runtime. Flagged as
+    // picked, because this is the one path a person actually chose on — the
+    // session records it, the mount and the pin do not.
+    onChoice?.(merged, true)
     input.current?.focus()
   }
 

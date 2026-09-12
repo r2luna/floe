@@ -95,13 +95,13 @@ import type { Changes } from './useChanges'
 import type { PaletteItem } from './fuzzy'
 import type { Trigger } from './trigger'
 import {
-  defaultChoice,
   EFFORTS,
   lastChoice,
   loadChoice,
   MODELS,
   routeChoice,
   speakerKey,
+  storedChoice,
   userNick,
   windowOf,
   type ModelChoice
@@ -1500,12 +1500,7 @@ function ChatPanel({
           if (guessed) void window.floe.claude.setChoice(id, guessed).catch(() => {})
           return
         }
-        setSessionChoice({
-          model: stored.model ?? defaultChoice().model,
-          effort: stored.effort ?? defaultChoice().effort,
-          provider: stored.provider,
-          mode: stored.mode
-        })
+        setSessionChoice(storedChoice(stored))
       })
     return () => {
       alive = false
@@ -1855,12 +1850,18 @@ function ChatPanel({
           setText('')
           setLinking(false)
         }}
-        onChoice={(next) => {
+        onChoice={(next, picked) => {
           setChoice(next)
           // The picker is the session's answer to "who answers here", so it is
           // written down the moment it changes. A message addressed to
           // `@codex` never comes through here — that is one turn, not a switch.
-          if (session?.id) void window.floe.claude.setChoice(session.id, next).catch(() => {})
+          //
+          // Only when a person changed it. The composer also announces what it
+          // restored and what this session pinned, and recording those wrote
+          // the GLOBALLY saved model onto whichever chat was opened next —
+          // leaving the harness the record already held beside a model that
+          // was never picked for it.
+          if (picked && session?.id) void window.floe.claude.setChoice(session.id, next).catch(() => {})
         }}
         pinned={sessionChoice}
         pinPending={!sessionChoice && loading}
@@ -2515,6 +2516,15 @@ export const Log = memo(function Log({
       continue
     }
 
+    // Nor is the worktree's brief part of a run of calls: it is the frame the
+    // whole session sits in, riding the first message because that is the only
+    // place a harness reads standing context. One line, opening to the brief —
+    // it was written once and is the same in every chat on this branch.
+    if (item.role === 'tool' && item.name === 'premise') {
+      out.push(<PremiseFold item={item} key={base + i} />)
+      continue
+    }
+
     if (item.role === 'tool') {
       const run: TranscriptItem[] = []
       const at = i
@@ -2826,6 +2836,61 @@ function QueryFold({ item }: { item: TranscriptItem }): ReactNode {
                 {said_.role === 'user' ? 'you' : (said_.provider ?? 'claude')}
               </span>{' '}
               <span className="query-fold-body-text">{said_.text ?? said_.summary}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The worktree's premise, folded to one line.
+ *
+ * Closed by default and closed for good reason: the brief is the same two
+ * hundred words at the top of every chat on this branch, and printed in full it
+ * pushed the message you actually typed off the screen. The line still says it
+ * is there — the model was given it, and a session that opens with hidden
+ * standing context is worse than one that opens with two hundred visible words.
+ */
+function PremiseFold({ item }: { item: TranscriptItem }): ReactNode {
+  const [open, setOpen] = useState(false)
+  const brief = item.summary ?? ''
+  // The first line of prose under the first heading: the goal, which is the one
+  // thing the brief is really about and the only part that fits on the line.
+  const goal = brief
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith('#'))
+  const lines = useMemo(() => (open ? renderMarkdown(brief) : []), [open, brief])
+  return (
+    <div className="tool-run">
+      <div
+        className="run-fold premise-fold"
+        data-nav
+        tabIndex={-1}
+        role="button"
+        aria-expanded={open}
+        data-open={open || undefined}
+        title="The standing brief for this worktree, given to every session here"
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          setOpen((o) => !o)
+        }}
+      >
+        <IconChecklist size={11} className="bash-mark" />
+        <span className="run-fold-line">
+          <span className="run-fold-count">worktree premise</span>
+          {goal && <span className="run-fold-verbs"> · {goal}</span>}
+        </span>
+      </div>
+      {open && (
+        <div className="run-fold-body premise-body">
+          {lines.map((line, i) => (
+            <div className="premise-line" data-md={line.kind} data-level={line.level} key={i}>
+              <MarkdownText line={line} />
             </div>
           ))}
         </div>
@@ -5830,6 +5895,19 @@ type SettingRow =
       suffix?: string
       hint?: string
     }
+  | {
+      kind: 'stepper'
+      table: string
+      key: string
+      label: string
+      value: number
+      /** The same bounds the config reader validates against — never a range that writes a value the file would reject. */
+      min: number
+      max: number
+      step?: number
+      suffix?: string
+      hint?: string
+    }
   | { kind: 'penguin'; table: string; key: string; label: string; value: PenguinHeadId; hint?: string }
   | {
       kind: 'penguinColor'
@@ -5957,16 +6035,16 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           placeholder: 'system monospace'
         },
         {
-          kind: 'slider',
+          kind: 'stepper',
           table: 'appearance',
           key: 'font-size',
           label: 'Font size',
           value: config.appearance.fontSize,
-          // 6–48 is what the config reader accepts; a slider that stops short of
+          // 6–48 is what the config reader accepts; a stepper that stops short of
           // it would make a hand-edited file unreachable from this row.
           min: 6,
           max: 48,
-          hint: 'scales the whole surface — the app resizes as you drag'
+          hint: 'scales the whole surface — one point per step'
         },
         {
           kind: 'choice',
@@ -6359,6 +6437,10 @@ function SettingRowView({
     return <SettingSlider row={row} onSet={onSet} onLeave={leave} />
   }
 
+  if (editing && row.kind === 'stepper') {
+    return <SettingStepper row={row} onSet={onSet} onLeave={leave} />
+  }
+
   if (editing && (row.kind === 'text' || row.kind === 'number')) {
     return (
       <div className="row settings-row settings-editing">
@@ -6388,7 +6470,8 @@ function SettingRowView({
       const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
       return onSet(row.table, row.key, next)
     }
-    if (row.kind === 'penguin' || row.kind === 'penguinColor' || row.kind === 'slider') return onEdit()
+    if (row.kind === 'penguin' || row.kind === 'penguinColor' || row.kind === 'slider' || row.kind === 'stepper')
+      return onEdit()
     setDraft(row.kind === 'number' ? String(row.value) : row.value)
     onEdit()
   }
@@ -6399,7 +6482,8 @@ function SettingRowView({
       <span className={`settings-value${row.kind === 'bool' && !row.value ? ' settings-off' : ''}`}>
         {row.kind === 'bool' && (row.value ? 'on' : 'off')}
         {row.kind === 'choice' && (row.value || row.placeholder || '—')}
-        {(row.kind === 'number' || row.kind === 'slider') && `${row.value}${row.suffix ?? ''}`}
+        {(row.kind === 'number' || row.kind === 'slider' || row.kind === 'stepper') &&
+          `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
         {row.kind === 'penguin' && (
           <>
@@ -6492,6 +6576,108 @@ function SettingSlider({
       <span className="settings-value">
         {value}
         {row.suffix ?? ''}
+      </span>
+    </div>
+  )
+}
+
+/**
+ * A number you step — the font size.
+ *
+ * Two buttons rather than a handle: the whole useful range is 6–48, so every
+ * move here is "one point bigger" or "one point smaller", and a track that
+ * narrow turned each of them into a drag that overshot. Writes stay live and
+ * coalesced, because font size is a window zoom and the only honest preview of
+ * a size is the app already drawn at it.
+ *
+ * The row keeps focus while the buttons are pressed, so the keyboard is the
+ * same before and after a click: arrows (or a bare - and +) step, Home/End take
+ * the ends, Enter keeps what is showing, Escape puts back what was there.
+ */
+function SettingStepper({
+  row,
+  onSet,
+  onLeave
+}: {
+  row: Extract<SettingRow, { kind: 'stepper' }>
+  onSet: (table: string, key: string, value: number) => void
+  onLeave: () => void
+}) {
+  const [value, setValue] = useState(row.value)
+  // What the row was on when it opened — the only thing Escape can put back,
+  // since a live write has already been to disk by then.
+  const start = useRef(row.value)
+  const box = useRef<HTMLDivElement>(null)
+  const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const step = row.step ?? 1
+
+  useEffect(() => {
+    box.current?.focus()
+    return () => {
+      if (pending.current) clearTimeout(pending.current)
+    }
+  }, [])
+
+  const write = (next: number): void => {
+    const clamped = Math.min(row.max, Math.max(row.min, next))
+    if (clamped === value) return
+    setValue(clamped)
+    if (pending.current) clearTimeout(pending.current)
+    pending.current = setTimeout(() => onSet(row.table, row.key, clamped), 80)
+  }
+
+  const finish = (next: number): void => {
+    if (pending.current) clearTimeout(pending.current)
+    pending.current = null
+    if (next !== row.value) onSet(row.table, row.key, next)
+    onLeave()
+  }
+
+  return (
+    <div
+      ref={box}
+      className="row settings-row settings-editing settings-stepping"
+      tabIndex={-1}
+      title={row.hint}
+      onKeyDown={(e) => {
+        // The lane binds j/k and Escape; in here the arrows are this row's own
+        // and must not also move the cursor behind it.
+        e.stopPropagation()
+        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === '-') return write(value - step)
+        if (e.key === 'ArrowUp' || e.key === 'ArrowRight' || e.key === '+' || e.key === '=')
+          return write(value + step)
+        if (e.key === 'Home') return write(row.min)
+        if (e.key === 'End') return write(row.max)
+        if (e.key === 'Enter') return finish(value)
+        if (e.key === 'Escape') return finish(start.current)
+      }}
+    >
+      <span className="row-name">{row.label}</span>
+      <span className="settings-stepper">
+        <button
+          className="settings-step"
+          aria-label="smaller"
+          disabled={value <= row.min}
+          // The click must not take focus off the row, or the next arrow key
+          // would land on a button instead of the stepper.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => write(value - step)}
+        >
+          −
+        </button>
+        <span className="settings-value settings-step-value">
+          {value}
+          {row.suffix ?? ''}
+        </span>
+        <button
+          className="settings-step"
+          aria-label="bigger"
+          disabled={value >= row.max}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => write(value + step)}
+        >
+          +
+        </button>
       </span>
     </div>
   )

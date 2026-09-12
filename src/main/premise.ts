@@ -22,6 +22,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { wrapPremise } from '../shared/premise'
 import { floeConfig } from './config/floe'
 import { log } from './log'
 
@@ -116,23 +117,17 @@ export function ensurePremiseFile(worktreePath: string): string {
 /**
  * The premise as it reaches a model, or '' when there isn't one.
  *
- * Fenced in a named block for the same reason the handoff packet is: read back
- * out of the transcript it has to be recognisable as ours rather than as
- * something the user typed. Addressed to the model in the second person because
- * it is an instruction about the session it opens, not a document to summarise.
+ * Fenced in a named block (shared/premise.ts) for the same reason the handoff
+ * packet is: read back out of the transcript it has to be recognisable as ours
+ * rather than as something the user typed — the chat collapses it to one line,
+ * and a packet built from that transcript sends it once instead of quoting it
+ * back as a message. Addressed to the model in the second person because it is
+ * an instruction about the session it opens, not a document to summarise.
  */
 export function premiseSeed(worktreePath: string): string {
   const premise = readPremise(worktreePath)
   if (!premise) return ''
-  return (
-    '<worktree-premise>\n' +
-    'This is the standing brief for the worktree you are working in. It was ' +
-    'written when the worktree was created and holds for the whole session — ' +
-    'treat it as context you already have, not as the request. Do not ' +
-    'acknowledge it; answer what is actually asked.\n\n' +
-    premise.trim() +
-    '\n</worktree-premise>\n\n'
-  )
+  return wrapPremise(premise)
 }
 
 // --- the model call ---------------------------------------------------------

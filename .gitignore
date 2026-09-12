@@ -12,3 +12,8 @@ src/renderer/public/excalidraw/
 
 # Scratch drawings. The versioned ones live in specs/<branch>/ — see docs/draw.md.
 .floe/draw/
+
+# The worktree's standing brief (src/main/premise.ts). It describes ONE branch,
+# so it must not travel: committed once, it rode a merge into master and every
+# new chat on master opened with another branch's goal.
+.floe/premise.md

@@ -4,6 +4,7 @@ import { register } from 'node:module'
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { wrapPremise } from '../shared/premise.ts'
 
 // claudeSessions.ts uses extensionless relative imports (./plans, ./sessionStore,
 // …) — resolved by electron-vite at build time, not by raw Node ESM. Register the
@@ -1045,6 +1046,40 @@ test('a skill the model called shows which skill it was', () => {
     )
     // Without a summary the row reads "Skill" and says nothing about which one.
     assert.equal(items[1].summary, 'commit')
+  } finally {
+    process.env.HOME = home
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the worktree premise folds out of the first message into its own row', () => {
+  const home = process.env.HOME
+  const worktree = '/tmp/wt-premise'
+  const seed = wrapPremise('## Goal\nSplit colony execution.\n\n## Done when\nEach step has its own session.')
+  const dir = seedSession(worktree, 'sess', [
+    {
+      type: 'user',
+      timestamp: '2026-09-11T00:29:00.000Z',
+      message: { content: seed + 'is ai-memory working?' }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    assert.deepEqual(
+      items.map((i) => [i.role, i.name ?? i.text]),
+      [
+        ['tool', 'premise'],
+        // The brief is gone from the message, so the chat shows what was typed.
+        ['user', 'is ai-memory working?']
+      ]
+    )
+    // The row carries the brief itself — the fold opens to it, and the handoff
+    // packet sends it on to whichever harness answers next.
+    assert.equal(items[0].by, 'user')
+    assert.match(items[0].summary as string, /^## Goal\nSplit colony execution\./)
+    assert.ok(!(items[0].summary as string).includes('standing brief'))
+    // Stamped like every other row: an unstamped one heads the chat with no time.
+    assert.ok((items[0].at ?? 0) > 0)
   } finally {
     process.env.HOME = home
     rmSync(dir, { recursive: true, force: true })

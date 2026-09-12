@@ -8,6 +8,7 @@ import { findSpecSummarySource } from './plans'
 import { contextTokens } from '../shared/types'
 import { collapseSkills, hasSkill } from '../shared/skills'
 import { collapseSessionRefs, hasSessionRef } from '../shared/sessionRefs'
+import { hasPremise, premiseIn, stripPremise } from '../shared/premise'
 import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
 import { parseArtifactSpec, type ArtifactSpec } from '../shared/artifact'
@@ -666,10 +667,27 @@ export function collapseFloe(text: string): string {
   return out
 }
 
+/**
+ * A user message as the chat should read it.
+ *
+ * The worktree's premise rides the first prompt of every session (premise.ts),
+ * so the first thing you see in a new chat was two hundred words you did not
+ * type. It still has to reach the model, and it still has to be in the
+ * transcript — a packet built from a transcript without it would hand the next
+ * harness a session with no brief — so it is taken out of your words and put
+ * back as its own row: one line in the chat, the whole brief when opened.
+ */
+function expandUserText(text: string): TranscriptItem[] {
+  if (!hasPremise(text)) return expandUserBody(text)
+  const brief = premiseIn(text)
+  const rest = expandUserBody(stripPremise(text))
+  return brief ? [{ role: 'tool', name: 'premise', summary: brief, by: 'user' }, ...rest] : rest
+}
+
 // Prettify Claude Code's local slash-command markers that show up in user
 // messages: drop the internal caveat, render the command as a chip, and the
 // command output as a code block.
-function expandUserText(text: string): TranscriptItem[] {
+function expandUserBody(text: string): TranscriptItem[] {
   const stripped = text.replace(/<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g, '').trim()
   if (!stripped) return []
   if (isTaskNotification(stripped)) return []

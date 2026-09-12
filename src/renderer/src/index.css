@@ -3199,6 +3199,30 @@ button {
   border-left: 1px solid var(--line);
 }
 
+/* The premise's mark is an icon rather than a caret: it names what the row is,
+   so unlike a caret it must not turn when the row opens. */
+.premise-fold[data-open] .bash-mark {
+  transform: none;
+}
+
+/* The brief itself: markdown rows with no line numbers, since it is a document
+   you read rather than a file you navigate. */
+.premise-line {
+  white-space: pre-wrap;
+}
+
+/* The brief's blank lines are empty rows with no height, so the air above a
+   section comes from the heading itself — otherwise Scope runs straight on from
+   the end of Goal. */
+.premise-line[data-md='heading'] {
+  font-weight: 700;
+  margin-top: 6px;
+}
+
+.premise-line:first-child[data-md='heading'] {
+  margin-top: 0;
+}
+
 /* Like a shell row, the fold carries the cursor as its marker brightening,
    not as a wash — it sits inside prose, not in a list. */
 .run-fold[data-cursor] {
@@ -6708,6 +6732,50 @@ kbd {
 
 .settings-slider:focus-visible::-webkit-slider-thumb {
   background: var(--accent);
+}
+
+/* The font-size stepper: two buttons around the value, on the same 22px line
+   as the boxes the other rows open, so nothing shifts when the row opens. */
+.settings-stepper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.settings-step:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* An end of the range is a dead button, not a missing one: dimmed in place, so
+   the row keeps its shape at 6 and at 48. */
+.settings-step:disabled {
+  color: var(--dim);
+  cursor: default;
+}
+
+/* Focus sits on the row, so the tell that the stepper is live is the value it
+   is holding — tinted, never ringed. */
+.settings-stepping {
+  outline: none;
+}
+
+.settings-stepping:focus .settings-step-value {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* The pinguim's tones. Each one is a pair — the dark value is what the app is
