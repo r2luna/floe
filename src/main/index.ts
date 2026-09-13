@@ -91,7 +91,7 @@ export { allSessions, needsYouSessions, projectsActivity, recentSessions, waitin
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
-import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc } from './claudeSessions'
+import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
 import {
   setSessionTitle,
   getCreatedSession,
@@ -204,7 +204,7 @@ import {
   searchableFiles
 } from './files'
 import { saveDownload } from './downloads'
-import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia, readMediaChunk } from './media'
+import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
   boardFor,
@@ -929,8 +929,11 @@ export function registerFileIpc(): void {
   )
   // The lightbox's `c`: the same clipboard write the right-click menu does, but
   // driven from the keyboard, where the pointer's coordinates don't exist.
-  handle('media:copyImage', (_event, dataUrl: string) => {
-    const image = nativeImage.createFromDataURL(dataUrl)
+  handle('media:copyImage', (_event, url: string) => {
+    // A transcript image is served from the cache (see cachedImage), so its
+    // address names a file; one attached a moment ago is still a data URL.
+    const path = pathFromMediaUrl(url)
+    const image = path ? nativeImage.createFromPath(path) : nativeImage.createFromDataURL(url)
     if (image.isEmpty()) return false
     clipboard.writeImage(image)
     return true
@@ -1641,6 +1644,8 @@ void app.whenReady().then(async () => {
   // sandbox.ts stays electron-free so its tests can load it directly, so the
   // setting is pushed in rather than read there.
   setSandboxEnabled(floeConfig().sandbox.enabled)
+  // Transcript screenshots are decoded here once and served by URL from then on.
+  setImageCacheDir(join(app.getPath('userData'), 'image-cache'))
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
   buildAppMenu(openNewInstance)

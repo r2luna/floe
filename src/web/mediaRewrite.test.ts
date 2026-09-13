@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { rewriteProbe, toHttpMediaUrl } from './mediaRewrite.ts'
+import { rewriteProbe, rewriteTranscript, toHttpMediaUrl } from './mediaRewrite.ts'
 
 test('the scheme becomes the daemon route, encoding untouched', () => {
   // What mediaUrl() writes for `/tmp/my demo #2.mp4`.
@@ -35,4 +35,20 @@ test('"no such video" passes through — this rewrites, it does not validate', (
   assert.equal(rewriteProbe(null, 'local'), null)
   assert.equal(rewriteProbe(undefined, 'local'), undefined)
   assert.deepEqual(rewriteProbe({ mediaType: 'video/mp4' }, 'local'), { mediaType: 'video/mp4' })
+})
+
+test('a transcript comes back with its served images fetchable and nothing else touched', () => {
+  const rows = [
+    { role: 'user', text: 'look' },
+    { role: 'image', mediaType: 'image/png', src: 'floe-media://file/tmp/cache/ab.png' },
+    { role: 'image', mediaType: 'image/png', data: 'AA==' }
+  ]
+  assert.deepEqual(rewriteTranscript(rows, 'mac-1'), [
+    rows[0],
+    { role: 'image', mediaType: 'image/png', src: '/media/mac-1/tmp/cache/ab.png' },
+    rows[2]
+  ])
+  // Not a list: not a transcript. Passed through, not guessed at.
+  assert.equal(rewriteTranscript(null, 'local'), null)
+  assert.deepEqual(rewriteTranscript({ items: [] }, 'local'), { items: [] })
 })
