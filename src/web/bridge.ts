@@ -89,6 +89,9 @@ export function browserHandlers(
 
     // Light/dark follows the browser, not the daemon's (shimmed) nativeTheme.
     'theme:get': async () => matchMedia('(prefers-color-scheme: dark)').matches,
+    // A browser cannot read the desk it runs on, and the daemon's Omarchy is
+    // another machine's desktop — so `theme = "omarchy"` is `system` here.
+    'omarchy:get': async () => null,
 
     // The desktop auto-updater installs a .app. A tab updates by reloading, and
     // the daemon it talks to is updated by a deploy — so there is nothing to

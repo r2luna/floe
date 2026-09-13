@@ -166,6 +166,7 @@ import {
 } from './config/mcpServers'
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
+import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
 import { handle } from './plugins/handleMap'
 import { loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
 import { launchEditor } from './editors'
@@ -1355,6 +1356,9 @@ export function registerSettingsIpc(): void {
   // mount for the initial xterm palette.
   handle('theme:get', () => nativeTheme.shouldUseDarkColors)
 
+  // The Omarchy desktop's palette, for `theme = "omarchy"` — null off Omarchy.
+  handle('omarchy:get', () => readOmarchyPalette())
+
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
   handle('app:getLoginItem', () => app.getLoginItemSettings().openAtLogin)
@@ -1380,6 +1384,13 @@ export function registerSettingsIpc(): void {
 // schedule at sunrise/sunset). `nativeTheme` catches them, so we broadcast.
 export function watchThemeChanges(): void {
   nativeTheme.on('updated', () => broadcastTheme())
+  // Omarchy switches arrive the same way: the payload-free event tells each
+  // window to re-read `omarchy:get`, which is pinned to the window's own machine.
+  watchOmarchyTheme(() => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('omarchy:changed')
+    }
+  })
 }
 
 /** Tell every live window the OS appearance changed, and re-assert its fill. */

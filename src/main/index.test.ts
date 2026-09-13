@@ -390,6 +390,7 @@ const CHANNELS = [
   'config:paths',
   'config:reveal',
   'theme:get',
+  'omarchy:get',
   'app:getLoginItem',
   'app:setLoginItem',
   'user:name',

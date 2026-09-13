@@ -22,6 +22,7 @@ import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
 import type { Board, BoardEvent, ColonyTask, TaskKind } from '../shared/colony'
 import type { Route } from '../shared/mentions'
+import type { OmarchyPalette } from '../shared/omarchyPalette'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -271,6 +272,17 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, isDark: boolean): void => cb(isDark)
         ipcRenderer.on('theme:changed', listener)
         return () => ipcRenderer.removeListener('theme:changed', listener)
+      }
+    },
+    // The Omarchy desktop's current theme, for `theme = "omarchy"`. `palette` is
+    // null where Omarchy is not installed; `onChange` fires on every Omarchy
+    // theme switch, and the listener re-reads `palette` for the new colours.
+    omarchy: {
+      palette: (): Promise<OmarchyPalette | null> => ipcRenderer.invoke('omarchy:get'),
+      onChange: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('omarchy:changed', listener)
+        return () => ipcRenderer.removeListener('omarchy:changed', listener)
       }
     },
     // User keybinding overrides. `load` returns the parsed config (overrides +

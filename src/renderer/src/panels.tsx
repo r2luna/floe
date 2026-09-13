@@ -154,6 +154,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
+import { omarchyAvailable } from './appearance'
 import type { ActiveSession, Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
@@ -6103,8 +6104,14 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           key: 'theme',
           label: 'Theme',
           value: config.appearance.theme,
-          options: ['dark', 'light', 'system'],
-          hint: 'system follows the OS; dark and light stay put'
+          // `omarchy` only where there is an Omarchy theme to follow — or when the
+          // file already names it, so the row can show the value in force.
+          ...(omarchyAvailable() || config.appearance.theme === 'omarchy'
+            ? {
+                options: ['dark', 'light', 'system', 'omarchy'],
+                hint: 'system follows the OS; omarchy follows the desktop theme; dark and light stay put'
+              }
+            : { options: ['dark', 'light', 'system'], hint: 'system follows the OS; dark and light stay put' })
         },
         {
           kind: 'penguin',
