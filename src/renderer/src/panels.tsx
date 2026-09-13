@@ -5316,6 +5316,9 @@ function WorktreesList({
           <button
             className="row row-branch"
             title={worktree.path}
+            // Which row the lane's cursor is on, so a merge that removes a
+            // worktree above it does not slide the cursor onto another row.
+            data-key={worktree.path}
             data-active={worktree.path === worktrees.currentPath || undefined}
             aria-expanded={!collapsed.has(worktree.path)}
             onClick={() => {
@@ -5377,6 +5380,7 @@ function WorktreesList({
               // cursor is on — `x` and `d` read these rather than counting rows,
               // which a folded branch would throw off.
               data-session={s.id}
+              data-key={s.id}
               // The other name. The unread mark can be keyed by either (the
               // events carry whichever the conn spawned with), so `u` has to be
               // able to take it off under both — see unreadTarget.
