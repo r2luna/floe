@@ -30,6 +30,15 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     openChat: () => {},
     openNanny: () => {},
     whyCannotOpen: () => 'not available',
+    browser: {
+      address: () => {},
+      back: () => {},
+      forward: () => {},
+      reload: () => {},
+      stop: () => {},
+      focus: () => {},
+      devtools: () => {}
+    },
     patchFor: () => '',
     openPalette: () => {},
     openCommands: () => {},
