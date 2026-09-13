@@ -326,7 +326,8 @@ export const KINDS = {
   changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
   // The guided merge's checklist. Beside `changes`, and deliberately narrow for
   // the same reason: the review checkpoint sends you to the diff, and both have
-  // to be readable at once.
+  // to be readable at once. Off the rail: a merge is always of the branch a chat
+  // is working on, so it starts from that chat's header or ⌘K M.
   merge: { icon: IconGitMerge, title: 'merge', width: 340, min: 260, order: 41, needsProject: true },
   // The guided removal's checklist. Same shape and width as the merge — it is
   // the same kind of thing — but deliberately NOT on the rail: an icon you can
@@ -552,7 +553,7 @@ export function panelForFile(relPath: string): PanelKind {
 
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'remove', 'setup', 'provision', 'query', 'lane']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'merge', 'remove', 'setup', 'provision', 'query', 'lane']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -571,7 +572,7 @@ export const RAIL_GROUPS: PanelKind[][] = [
   // direction.
   ['projects', 'active', 'worktrees', 'colony'],
   // What the work did to the tree — read it, review it, land it.
-  ['changes', 'merge', 'files', 'plans', 'draw'],
+  ['changes', 'files', 'plans', 'draw'],
   // What the agents are made of: the skills they can run and the servers they
   // get. Both are global, both are edited the same way, so they sit together.
   ['skills', 'mcp'],

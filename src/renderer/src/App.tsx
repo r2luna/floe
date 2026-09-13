@@ -1,5 +1,6 @@
 import {
   IconGitCompare,
+  IconGitMerge,
   IconMenu2,
   IconLayoutColumns,
   IconLayoutRows,
@@ -2811,6 +2812,24 @@ export default function App() {
                       </button>
                     )}
                     {usage[panel.id]?.used > 0 && <ContextMeter usage={usage[panel.id]} />}
+                    {/* The merge lives on the chat, not the rail: it merges the
+                        branch this chat works on. Only on the chat that defines
+                        `here`, because that is the branch the command merges,
+                        and never on the main worktree, which has no base. Runs
+                        the same command as its chord, so no mouse-only path. */}
+                    {kind === 'chat' &&
+                      panel.session?.worktreePath === here &&
+                      worktrees.rows.some((r) => r.worktree.path === here && !r.worktree.isMain) && (
+                        <button
+                          className="panel-act"
+                          title={`Merge into base${
+                            chordLabels['worktree.merge'] ? ` (${chordLabels['worktree.merge']})` : ''
+                          }`}
+                          onClick={() => runCommand(REGISTRY, ctxRef.current, 'worktree.merge')}
+                        >
+                          <IconGitMerge size={14} stroke={1.8} />
+                        </button>
+                      )}
                     {'action' in spec && spec.action && (
                       <button
                         className="panel-act"
