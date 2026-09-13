@@ -150,6 +150,16 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'harness_usage',
       'plan_phases',
       'copy_plan',
+      'open_browser',
+      'browser_navigate',
+      'browser_snapshot',
+      'browser_click',
+      'browser_type',
+      'browser_press',
+      'browser_evaluate',
+      'browser_screenshot',
+      'browser_history',
+      'browser_devtools',
       'list_commands',
       'run_command'
     ]) {
@@ -182,6 +192,17 @@ test('run_command without a window answers with an error, not a hang', async () 
     const content = result.content as Array<{ type: string; text: string }>
     const parsed = JSON.parse(content[0].text) as { error?: string }
     assert.ok(parsed.error, 'with no window the tool must return an error explaining that')
+  } finally {
+    await client.close()
+  }
+})
+
+test('open_browser without a window answers with an error, not a UI timeout', async () => {
+  const client = await connect()
+  try {
+    const result = await client.callTool({ name: 'open_browser', arguments: { url: 'localhost:3000' } })
+    const content = result.content as Array<{ type: string; text: string }>
+    assert.match(content[0].text, /No Floe window is open/)
   } finally {
     await client.close()
   }

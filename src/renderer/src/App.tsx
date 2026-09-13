@@ -25,7 +25,7 @@ import {
   toggleDock
 } from './lane'
 import { dragAnchor, selRange } from './diff'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
@@ -648,6 +648,23 @@ export default function App() {
     if (!narrow) setRailMenu(false)
   }, [narrow])
 
+  // A native WebContentsView sits above renderer HTML. Hide it while one of
+  // Floe's overlays is open, or it would cover the palette instead of yielding
+  // to it like every DOM-backed panel does.
+  useEffect(() => {
+    if (window.floe.version === 'web' || !lane.panels.some((panel) => panel.kind === 'browser')) return
+    const overlay =
+      paletteOpen ||
+      commandsOpen ||
+      finderFiles !== null ||
+      adding ||
+      newWt ||
+      finding !== null ||
+      picker !== null ||
+      (narrow && railMenu)
+    void window.floe.browser.visible(!overlay)
+  }, [lane.panels, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
   const menuRef = useRef<HTMLButtonElement>(null)
@@ -748,7 +765,9 @@ export default function App() {
   // status, the file list, a patch. Without the thing they read there is nothing
   // to show, so they can't be opened at all: better than opening one onto an
   // empty list or an error.
-  const canOpen = (kind: string): boolean => !needsProject(kind) || !!projects.current
+  const canOpen = (kind: string): boolean =>
+    (!needsProject(kind) || !!projects.current) &&
+    (!needsDesktop(kind) || window.floe.version !== 'web')
 
   /**
    * The same sentence the rail puts in its tooltip, for the keyboard.
@@ -758,9 +777,11 @@ export default function App() {
    * deserve the identical answer.
    */
   const whyCannotOpen = (kind: string): string =>
-    needsProject(kind) && !projects.current
-      ? `${kind} — open a project first`
-      : `${kind} is not available right now`
+    needsDesktop(kind) && window.floe.version === 'web'
+      ? `${kind} — available in the desktop app`
+      : needsProject(kind) && !projects.current
+        ? `${kind} — open a project first`
+        : `${kind} is not available right now`
 
   /**
    * Every session in the project, in the order the list draws them.
@@ -1756,6 +1777,15 @@ export default function App() {
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
+    browser: {
+      address: () => document.querySelector<HTMLInputElement>('.browser-address input')?.focus(),
+      back: () => void window.floe.browser.back(),
+      forward: () => void window.floe.browser.forward(),
+      reload: () => void window.floe.browser.reload(),
+      stop: () => void window.floe.browser.stop(),
+      focus: () => void window.floe.browser.focus(),
+      devtools: () => void window.floe.browser.devtools()
+    },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
@@ -3433,4 +3463,3 @@ function commandItems(binds: Keybind[]): PaletteItem[] {
     keys: bound.has(c.id) ? formatChord(bound.get(c.id)!) : c.keys
   }))
 }
-

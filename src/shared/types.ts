@@ -458,6 +458,38 @@ export type FileOp =
   | { kind: 'rename'; from: string; to: string }
   | { kind: 'copy'; from: string; to: string }
 
+/** Live state of the native browser preview hosted beside the renderer. */
+export interface BrowserState {
+  url: string
+  title: string
+  loading: boolean
+  canGoBack: boolean
+  canGoForward: boolean
+  error?: string
+}
+
+/** The workspace machine whose network the local browser preview represents. */
+export interface BrowserTarget {
+  id: string
+  /** Hostname of a remote backend. Omitted for the machine holding the window. */
+  host?: string
+}
+
+/** The readable and interactive page surface returned to an agent. */
+export interface BrowserSnapshot {
+  url: string
+  title: string
+  text: string
+  elements: Array<{
+    ref: string
+    tag: string
+    role?: string
+    name: string
+    href?: string
+    type?: string
+  }>
+}
+
 // The content of a single file, read for the read-only reader. Text files come
 // back as UTF-8 `text`; images as a `dataUrl` (base64) ready for an <img src>;
 // anything too large or not displayable is `binary` (the reader shows a notice).

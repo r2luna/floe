@@ -70,6 +70,20 @@ test('a queued message keeps the harness it was addressed to', () => {
   assert.equal(batch?.choice?.provider, 'codex')
 })
 
+test('a message that named nobody still remembers what the picker said', () => {
+  // The panel that drains it may be a fresh mount (you switched chats and came
+  // back), whose own ref says the default. In a codex query that default is
+  // Claude — so the item carries the pick, and a linked line still joins it.
+  const codex = { model: '', effort: 'medium' as const, provider: 'codex' }
+  const batch = takeBatch([
+    { id: '1', text: 'first', picked: codex, linked: false },
+    { id: '2', text: 'and this', picked: codex, linked: true }
+  ])
+  assert.equal(batch?.text, 'first\n\nand this')
+  assert.equal(batch?.choice, undefined, 'it named nobody')
+  assert.equal(batch?.picked?.provider, 'codex')
+})
+
 test('a linked run is one message, so it goes to one harness', () => {
   const batch = takeBatch([
     { id: '1', text: 'revisa isso', shown: '@codex revisa isso', choice: { model: '', effort: 'high', provider: 'codex' }, linked: false },

@@ -8,9 +8,11 @@
 // Built on shiki/core with the JS regex engine, not the full bundle: the full
 // bundle emits every grammar shiki ships (~11 MB across 300 chunks) while the
 // extension map below can only ever reach the ~43 registered here. Grammars
-// load lazily, one dynamic import per language on first use.
-import { createHighlighterCore, type HighlighterCore } from 'shiki/core'
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
+// load lazily, one dynamic import per language on first use — and so does the
+// engine itself: panels.tsx imports this module for the diff and file viewers,
+// and a static `shiki/core` here put ~130 KB of textmate machinery into the
+// startup chunk of an app that highlights nothing until a code block shows.
+import type { HighlighterCore } from 'shiki/core'
 import type { CSSProperties } from 'react'
 
 // File extension → Shiki language id. Only the languages likely to show up in a
@@ -109,13 +111,16 @@ let highlighterPromise: Promise<HighlighterCore> | undefined
 const loadedLangs = new Map<string, Promise<void>>()
 
 function getHighlighter(): Promise<HighlighterCore> {
-  highlighterPromise ??= createHighlighterCore({
-    themes: [import('shiki/dist/themes/github-light.mjs'), import('shiki/dist/themes/github-dark.mjs')],
-    langs: [],
-    // `forgiving` drops the rare regex construct the JS engine can't compile
-    // instead of failing the whole grammar.
-    engine: createJavaScriptRegexEngine({ forgiving: true })
-  })
+  highlighterPromise ??= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(
+    ([core, js]) =>
+      core.createHighlighterCore({
+        themes: [import('shiki/dist/themes/github-light.mjs'), import('shiki/dist/themes/github-dark.mjs')],
+        langs: [],
+        // `forgiving` drops the rare regex construct the JS engine can't compile
+        // instead of failing the whole grammar.
+        engine: js.createJavaScriptRegexEngine({ forgiving: true })
+      })
+  )
   return highlighterPromise
 }
 

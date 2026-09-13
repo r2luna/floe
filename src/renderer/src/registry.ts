@@ -665,6 +665,69 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        id: 'browser.open',
+        title: 'Open browser',
+        group: 'Browser',
+        keys: '⌘K O',
+        enabled: (c) => c.canOpen('browser'),
+        unavailable: (c) => c.whyCannotOpen('browser'),
+        run: (c) => c.setLane((l) => open(l, c.makePanel('browser')))
+      },
+      {
+        id: 'browser.address',
+        title: 'Focus browser address',
+        group: 'Browser',
+        keys: '⌘L',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.address()
+      },
+      {
+        id: 'browser.back',
+        title: 'Browser back',
+        group: 'Browser',
+        keys: '⌘[',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.back()
+      },
+      {
+        id: 'browser.forward',
+        title: 'Browser forward',
+        group: 'Browser',
+        keys: '⌘]',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.forward()
+      },
+      {
+        id: 'browser.reload',
+        title: 'Reload browser',
+        group: 'Browser',
+        keys: '⌘R',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.reload()
+      },
+      {
+        id: 'browser.stop',
+        title: 'Stop browser loading',
+        group: 'Browser',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.stop()
+      },
+      {
+        id: 'browser.focus',
+        title: 'Focus browser page',
+        group: 'Browser',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.focus()
+      },
+      {
+        id: 'browser.devtools',
+        title: 'Open browser developer tools',
+        group: 'Browser',
+        keys: '⌘⌥I',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.devtools()
+      },
+      {
         id: 'cursor.down',
         title: 'Move cursor down',
         group: 'Cursor',
@@ -2450,4 +2513,3 @@ export const REGISTRY: Map<string, Command> = new Map(
     ] satisfies Command[]
   ).map((c) => [c.id, c])
 )
-
