@@ -63,6 +63,18 @@ export const PINNED_CHANNELS = new Set([
   'app:getLoginItem',
   'app:setLoginItem',
   'open:external',
+  'browser:mount',
+  'browser:bounds',
+  'browser:visible',
+  'browser:unmount',
+  'browser:state',
+  'browser:navigate',
+  'browser:back',
+  'browser:forward',
+  'browser:reload',
+  'browser:stop',
+  'browser:focus',
+  'browser:devtools',
   // A file pulled off another machine has to land on the desk the WINDOW is at
   // — opening the copy on the backend would be the bug this exists to fix.
   'files:openDownload',

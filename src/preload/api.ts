@@ -45,6 +45,7 @@ import type {
   McpServerEntry,
   MediaFile,
   AuthStatus,
+  BrowserState,
   ClaudeAuthEvent,
   ClaudeStats,
   HarnessUsage,
@@ -150,6 +151,32 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     homeDir: host.homeDir,
     capture: (): Promise<void> => ipcRenderer.invoke('window:capture'),
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open:external', url),
+    browser: {
+      mount: (bounds: { x: number; y: number; width: number; height: number }): Promise<BrowserState | null> =>
+        ipcRenderer.invoke('browser:mount', bounds),
+      bounds: (bounds: { x: number; y: number; width: number; height: number }): Promise<void> =>
+        ipcRenderer.invoke('browser:bounds', bounds),
+      visible: (visible: boolean): Promise<void> => ipcRenderer.invoke('browser:visible', visible),
+      unmount: (): Promise<void> => ipcRenderer.invoke('browser:unmount'),
+      state: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:state'),
+      navigate: (url: string): Promise<BrowserState | null> => ipcRenderer.invoke('browser:navigate', url),
+      back: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:back'),
+      forward: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:forward'),
+      reload: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:reload'),
+      stop: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:stop'),
+      focus: (): Promise<void> => ipcRenderer.invoke('browser:focus'),
+      devtools: (): Promise<void> => ipcRenderer.invoke('browser:devtools'),
+      onState: (cb: (state: BrowserState) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, state: BrowserState): void => cb(state)
+        ipcRenderer.on('browser:state', listener)
+        return () => ipcRenderer.removeListener('browser:state', listener)
+      },
+      onShortcut: (cb: (command: string) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, command: string): void => cb(command)
+        ipcRenderer.on('browser:shortcut', listener)
+        return () => ipcRenderer.removeListener('browser:shortcut', listener)
+      }
+    },
     hide: (): Promise<void> => ipcRenderer.invoke('window:hide'),
     // Bring THIS window forward. Pinned to the local machine (see PINNED_INVOKE),
     // so an attached window raises itself on the user's desk even when the command

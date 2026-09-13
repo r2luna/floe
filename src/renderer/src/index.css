@@ -664,6 +664,125 @@ button {
   padding: 0;
 }
 
+/* --- browser ------------------------------------------------------------- */
+
+/* The page itself is a native WebContentsView placed over .browser-viewport.
+   The DOM keeps the toolbar, focus order and geometry; the main process owns
+   the isolated browsing context and clips it to this rectangle. */
+.panel[data-kind='browser'] > .panel-body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.browser-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 6px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.browser-toolbar button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 1px;
+}
+
+.browser-toolbar button:hover,
+.browser-toolbar button:focus-visible {
+  color: var(--text-strong);
+  border-color: var(--muted-2);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .browser-toolbar button {
+    transition: color 90ms ease-out, border-color 90ms ease-out, scale 90ms ease-out;
+  }
+
+  .browser-toolbar button:active {
+    scale: 0.96;
+  }
+}
+
+.browser-toolbar button:disabled {
+  opacity: 0.38;
+}
+
+.browser-address {
+  flex: 1;
+  min-width: 0;
+}
+
+.browser-address input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding-inline: 9px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 1px;
+  font: inherit;
+}
+
+.browser-toolbar button:focus-visible,
+.browser-address input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.browser-viewport {
+  flex: 1;
+  min-height: 0;
+  background: #131315;
+}
+
+.browser-error {
+  flex: none;
+  padding: 6px 10px;
+  color: #c49495;
+  background: #221b1c;
+  border-bottom: 1px solid #352829;
+}
+
+:root[data-theme='light'] .browser-error {
+  color: #b1454a;
+  background: #f9eef0;
+  border-color: #e3bdbf;
+}
+
+:root[data-theme='light'] .browser-viewport {
+  background: #fcfdfe;
+}
+
+.browser-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .empty {
   margin: 0;
   padding: 6px;

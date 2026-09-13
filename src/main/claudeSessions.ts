@@ -1,7 +1,9 @@
-import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mediaUrl } from './media'
 import { getSessionMeta, getCreatedSessions, type CreatedSession, type SessionMeta } from './sessionStore'
 import { findSpecSummarySource } from './plans'
 
@@ -66,7 +68,20 @@ export interface TranscriptItem {
   name?: string
   summary?: string
   mediaType?: string // for role 'image'
-  data?: string // base64, for role 'image'
+  /**
+   * Base64, for a role 'image' that was never on disk: one attached to a
+   * message the moment it was sent. Everything read back off a transcript
+   * carries `src` instead — see cachedImage.
+   */
+  data?: string
+  /**
+   * A `floe-media://` address for role 'image', pointing at the decoded bytes
+   * in the image cache. A transcript with thirty screenshots was sixteen
+   * megabytes of base64 crossing IPC, held in the renderer, and pasted into
+   * `data:` URLs on every render; a URL is a hundred bytes and the browser
+   * decodes the file itself.
+   */
+  src?: string
   spec?: ArtifactSpec // for role 'artifact' — the decision panel, rebuilt on reload
   at?: number // epoch ms — the claude JSONL line's `timestamp`, for the "time ago" stamp
   /**
@@ -886,11 +901,51 @@ function pushStringContent(
   else if (content.trim()) ctx.items.push({ role, text: content })
 }
 
-// The base64 payload of an `image` block, in the shape the transcript renders.
+// Where transcript images are decoded to. Injected by main at boot (userData),
+// so this module stays electron-free; the tmpdir default only serves tests.
+let imageCacheDir = join(tmpdir(), 'floe-image-cache')
+export function setImageCacheDir(dir: string): void {
+  imageCacheDir = dir
+}
+
+const IMAGE_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp'
+}
+
+/**
+ * The image's bytes on disk, addressed by their hash — the same screenshot in
+ * two transcripts (or the same transcript opened twice) is written once. The
+ * write is sync because the loader is: a first open of a session with thirty
+ * screenshots costs one pass of writes, and every later open costs a stat each.
+ */
+export function cachedImage(mediaType: string, base64: string): string | undefined {
+  const ext = IMAGE_EXT[mediaType]
+  if (!ext) return undefined
+  try {
+    const bytes = Buffer.from(base64, 'base64')
+    const file = join(imageCacheDir, `${createHash('sha1').update(bytes).digest('hex')}.${ext}`)
+    if (!existsSync(file)) {
+      mkdirSync(imageCacheDir, { recursive: true })
+      writeFileSync(file, bytes)
+    }
+    return mediaUrl(file)
+  } catch {
+    return undefined
+  }
+}
+
+// The `image` block of a transcript line, in the shape the transcript renders:
+// served from the cache when its type is one the browser draws, carried as
+// base64 only when it is not.
 function base64Image(source: unknown): TranscriptItem | undefined {
   const src = source as { type?: string; media_type?: string; data?: string } | undefined
   if (src?.type !== 'base64' || typeof src.data !== 'string' || !src.data) return undefined
-  return { role: 'image', mediaType: src.media_type ?? 'image/png', data: src.data }
+  const mediaType = src.media_type ?? 'image/png'
+  const cached = cachedImage(mediaType, src.data)
+  return cached ? { role: 'image', mediaType, src: cached } : { role: 'image', mediaType, data: src.data }
 }
 
 function pushTextBlock(ctx: TranscriptCtx, block: Record<string, unknown>, role: 'user' | 'assistant'): void {

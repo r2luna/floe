@@ -24,6 +24,7 @@ import { DEFAULT_MODE } from '../../shared/modes.ts'
 import type { Queued } from './queue'
 import { claimBatch, queueOf, releaseBoundary, subscribeQueue, updateQueue } from './queueStore'
 import { liveReducer } from './transcriptState'
+import { subscribeTurns } from './activeTurns.ts'
 
 export type { Queued }
 
@@ -568,13 +569,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
    *
    * Only while running: an idle panel has nothing to correct and must not poll.
    */
+  //
+  // The poll is the shared one (activeTurns.ts), so ten open chats ask once.
   useEffect(() => {
     if (!running || !key) return
-    let stopped = false
-    const check = async (): Promise<void> => {
-      const keys = await window.floe.agent.active().catch(() => null)
-      if (stopped || !keys) return
-      if (keys.some((k) => names.current.has(k))) return
+    return subscribeTurns(({ active }) => {
+      if (!active) return
+      if (active.some((k) => names.current.has(k))) return
       // An answer assembled BEFORE this turn started says nothing about it —
       // and a turn that has just streamed is alive whatever the poll says. So
       // only a quiet session is closed here.
@@ -585,12 +586,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         tokens: tokensRef.current
       })
       setRunning(false)
-    }
-    const timer = setInterval(() => void check(), 4_000)
-    return () => {
-      stopped = true
-      clearInterval(timer)
-    }
+    })
   }, [running, key])
 
   /** Actually start a turn. Everything that sends goes through here. */

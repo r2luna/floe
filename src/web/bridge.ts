@@ -25,7 +25,7 @@ import { buildFloeApi, type BackendInfo, type FloeHost, type IpcLike } from '../
 import { createSocketIpc, type SocketIpc } from '../preload/socketIpc.ts'
 import { PINNED_CHANNELS } from '../shared/remoteProtocol.ts'
 import { secureBackendUrl } from './backendUrl.ts'
-import { rewriteProbe } from './mediaRewrite.ts'
+import { rewriteProbe, rewriteTranscript } from './mediaRewrite.ts'
 
 /** Written into the page by the server plugin's HTTP face, before this module loads. */
 export interface FloeBoot {
@@ -242,11 +242,13 @@ export function webIpc(
         channel,
         ...args
       )
-      // The one answer whose CONTENT is host-specific: a `floe-media://` address
-      // means nothing to a tab. Rewritten here — with the machine that answered,
-      // since that is the only one holding the file — so the renderer never
-      // learns that a web build exists. See mediaRewrite.ts.
-      return channel === 'media:probe' ? answer.then((r) => rewriteProbe(r, on)) : answer
+      // The two answers whose CONTENT is host-specific: a `floe-media://`
+      // address means nothing to a tab. Rewritten here — with the machine that
+      // answered, since that is the only one holding the file — so the renderer
+      // never learns that a web build exists. See mediaRewrite.ts.
+      if (channel === 'media:probe') return answer.then((r) => rewriteProbe(r, on))
+      if (channel === 'claude:transcript') return answer.then((r) => rewriteTranscript(r, on))
+      return answer
     },
     on: (channel, listener) => {
       if (!local.has(channel)) local.set(channel, new Set())

@@ -41,3 +41,18 @@ export function rewriteProbe(result: unknown, backendId: string): unknown {
   if (typeof file.url !== 'string') return result
   return { ...file, url: toHttpMediaUrl(file.url, backendId) }
 }
+
+/**
+ * `claude:transcript`'s answer with every served image made fetchable — the
+ * same rewrite as the probe's, applied to each `image` row's `src`. Anything
+ * that is not a list, or a row without one, passes through untouched.
+ */
+export function rewriteTranscript(result: unknown, backendId: string): unknown {
+  if (!Array.isArray(result)) return result
+  return result.map((item: unknown) => {
+    if (!item || typeof item !== 'object') return item
+    const row = item as { src?: unknown }
+    if (typeof row.src !== 'string') return item
+    return { ...row, src: toHttpMediaUrl(row.src, backendId) }
+  })
+}

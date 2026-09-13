@@ -91,7 +91,7 @@ export { allSessions, needsYouSessions, projectsActivity, recentSessions, waitin
 import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
-import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc } from './claudeSessions'
+import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
 import {
   setSessionTitle,
   getCreatedSession,
@@ -182,6 +182,20 @@ import {
   notifyTerminalsTheme
 } from './terminal'
 import {
+  browserBack,
+  browserForward,
+  browserReload,
+  browserState,
+  browserStop,
+  focusBrowser,
+  mountBrowser,
+  navigateBrowser,
+  openBrowserDevTools,
+  setBrowserBounds,
+  setBrowserVisible,
+  unmountBrowser
+} from './browser'
+import {
   startCommand,
   stopCommand,
   restartCommand,
@@ -204,7 +218,7 @@ import {
   searchableFiles
 } from './files'
 import { saveDownload } from './downloads'
-import { SCHEME as MEDIA_SCHEME, mediaResponse, probeMedia, readMediaChunk } from './media'
+import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
   boardFor,
@@ -546,6 +560,7 @@ export function registerIpc(): void {
   registerStatusIpc()
   registerCommandIpc()
   registerEditorIpc()
+  registerBrowserIpc()
   registerFileIpc()
   registerNotesIpc()
   registerColonyIpc()
@@ -897,6 +912,53 @@ export function registerEditorIpc(): void {
   )
 }
 
+// The native browser preview. It stays on this window even when the workspace
+// pointer targets another machine: the pixels and DevTools live on this desk.
+function withBrowserWindow<T>(event: IpcMainInvokeEvent, run: (win: BrowserWindow) => T): T | null {
+  const win = winOf(event)
+  return win ? run(win) : null
+}
+
+const browserMountIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): ReturnType<typeof mountBrowser> | null =>
+  withBrowserWindow(event, (win) => mountBrowser(win, bounds))
+const browserBoundsIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): void | null =>
+  withBrowserWindow(event, (win) => setBrowserBounds(win, bounds))
+const browserVisibleIpc = (event: IpcMainInvokeEvent, visible: boolean): void | null =>
+  withBrowserWindow(event, (win) => setBrowserVisible(win, visible))
+const browserUnmountIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, unmountBrowser)
+const browserStateIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserState> | null =>
+  withBrowserWindow(event, browserState)
+const browserNavigateIpc = (event: IpcMainInvokeEvent, url: string): ReturnType<typeof navigateBrowser> | null =>
+  withBrowserWindow(event, (win) => navigateBrowser(win, url))
+const browserBackIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserBack> | null =>
+  withBrowserWindow(event, browserBack)
+const browserForwardIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserForward> | null =>
+  withBrowserWindow(event, browserForward)
+const browserReloadIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserReload> | null =>
+  withBrowserWindow(event, browserReload)
+const browserStopIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserStop> | null =>
+  withBrowserWindow(event, browserStop)
+const browserFocusIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, focusBrowser)
+const browserDevToolsIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, openBrowserDevTools)
+
+export function registerBrowserIpc(): void {
+  handle('browser:mount', browserMountIpc)
+  handle('browser:bounds', browserBoundsIpc)
+  handle('browser:visible', browserVisibleIpc)
+  handle('browser:unmount', browserUnmountIpc)
+  handle('browser:state', browserStateIpc)
+  handle('browser:navigate', browserNavigateIpc)
+  handle('browser:back', browserBackIpc)
+  handle('browser:forward', browserForwardIpc)
+  handle('browser:reload', browserReloadIpc)
+  handle('browser:stop', browserStopIpc)
+  handle('browser:focus', browserFocusIpc)
+  handle('browser:devtools', browserDevToolsIpc)
+}
+
 // The file tree, media probes and the review diff.
 export function registerFileIpc(): void {
   handle('files:list', (_event, worktreePath: string, relPath?: string) =>
@@ -929,8 +991,11 @@ export function registerFileIpc(): void {
   )
   // The lightbox's `c`: the same clipboard write the right-click menu does, but
   // driven from the keyboard, where the pointer's coordinates don't exist.
-  handle('media:copyImage', (_event, dataUrl: string) => {
-    const image = nativeImage.createFromDataURL(dataUrl)
+  handle('media:copyImage', (_event, url: string) => {
+    // A transcript image is served from the cache (see cachedImage), so its
+    // address names a file; one attached a moment ago is still a data URL.
+    const path = pathFromMediaUrl(url)
+    const image = path ? nativeImage.createFromPath(path) : nativeImage.createFromDataURL(url)
     if (image.isEmpty()) return false
     clipboard.writeImage(image)
     return true
@@ -1641,6 +1706,8 @@ void app.whenReady().then(async () => {
   // sandbox.ts stays electron-free so its tests can load it directly, so the
   // setting is pushed in rather than read there.
   setSandboxEnabled(floeConfig().sandbox.enabled)
+  // Transcript screenshots are decoded here once and served by URL from then on.
+  setImageCacheDir(join(app.getPath('userData'), 'image-cache'))
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
   buildAppMenu(openNewInstance)

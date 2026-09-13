@@ -13,7 +13,9 @@ export interface PsRow {
   rssBytes: number
 }
 
-const TTL = 1500 // shorter than the 2s poll interval, so every tick still sees fresh data
+// Shorter than the 2s poll interval, so every tick still sees fresh data.
+// Overridable alongside FLOE_MEM_INTERVAL_MS, for the same test.
+const TTL = Number(process.env.FLOE_PS_TTL_MS) || 1500
 
 let cache: { at: number; promise: Promise<PsRow[]> } | undefined
 

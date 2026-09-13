@@ -1,7 +1,7 @@
-import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
+import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import { resolveKey } from './keys'
@@ -143,11 +143,7 @@ export function TerminalPanel({
     // shell — where the keyboard reaches the app but not the shell. Marks the
     // one element worth focusing; see `focusSink` in App.tsx.
     term.textarea?.setAttribute('data-focus-sink', '')
-    try {
-      term.loadAddon(new CanvasAddon())
-    } catch {
-      /* no WebGL/canvas — the DOM renderer still works */
-    }
+    loadRenderer(term)
     fit.fit()
     term.focus()
 
