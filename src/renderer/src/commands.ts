@@ -65,6 +65,14 @@ export interface CommandContext {
   }) => void
   /** Say something to the user, briefly. Failures that have no row to dim. */
   say: (text: string) => void
+  /**
+   * Ask a yes/no question before something destructive. Resolves true on yes.
+   *
+   * The palette again, not `window.confirm`: a native dialog breaks the app's
+   * own keys and hands focus back to nowhere. `verb` is what Enter does, in the
+   * user's words ("Delete session"); `detail` is the consequence, on the row.
+   */
+  confirm: (opts: { question: string; verb: string; detail?: string }) => Promise<boolean>
   /** Name a new project group. */
   createGroup: () => void
   /** Re-read every machine's project list — the way back from a remote that was down. */
@@ -157,8 +165,11 @@ export interface CommandContext {
     active: boolean
     /** It stopped on a failed step, so ⏎ means retry. */
     failed: boolean
-    /** It is at the dirty-tree checkpoint, so ⏎ means force the removal. */
-    awaitingForce: boolean
+    /**
+     * It is stopped at a checkpoint — the dirty tree, or the unmerged branch —
+     * so ⏎ means "yes, go on". Which one is the panel's to say.
+     */
+    awaiting: boolean
     /** Remove the worktree the app is in, or show the flow already running. */
     start: () => void
     force: () => void
@@ -203,11 +214,16 @@ export interface CommandContext {
   /** Show the new-worktree flow. */
   newWorktree: () => void
   /**
-   * How many worktrees the open project has. What `worktree.focusAt` is judged
-   * against: ⌘4 on a project with three branches is a refusal with a reason,
-   * not a key that does nothing.
+   * The open project's branches, in the sidebar's order. What `worktree.focusAt`
+   * is judged against — ⌘4 on a project with three branches is a refusal with a
+   * reason, not a key that does nothing — and what its palette rows are named.
    */
-  worktreeCount: number
+  worktreeNames: string[]
+  /**
+   * The panel kinds `panel.goto` can be asked for, in rail order. The registry
+   * must not know what panels exist; this is how it lists one row per kind.
+   */
+  gotoTargets: string[]
   /**
    * Go to the worktree at a position in the list — ⌘1–9.
    *
@@ -271,8 +287,15 @@ export interface Command {
   id: string
   title: string
   group: string
-  /** What the keymap presses for it, shown in the palette. Not the binding. */
-  keys?: string
+  /**
+   * The arguments this command takes, for a list that has to show them.
+   *
+   * `panel.goto` is one command and nine destinations. Without this the palette
+   * had one row, "Go to panel", that opened the projects list — and MCP callers
+   * had to guess what `arg` could be. Each entry becomes its own row, judged by
+   * `enabled(ctx, arg)` like any other. Absent for the commands that take none.
+   */
+  args?: (ctx: CommandContext) => { arg: string; title: string }[]
   /**
    * False when the command can't act right now — the palette dims it and MCP
    * refuses. Takes the argument too, because one command can be available for
@@ -344,16 +367,52 @@ export function installPluginCommands(
   }
 }
 
-/** The palette's list: ids, titles and groups, without the run functions. */
+export interface CommandRow {
+  id: string
+  /** Set on a row that stands for one argument of a parametrized command. */
+  arg?: string
+  title: string
+  group: string
+  /** What presses it, read from the LIVE keymap — never written by hand. */
+  keys?: string
+  enabled: boolean
+}
+
+/**
+ * The palette's list: ids, titles and groups, without the run functions.
+ *
+ * A command with `args` is one row PER argument, so "Go to files" and "Go to
+ * plans" are two things to pick, not one command with a hidden blank. `keysOf`
+ * answers from the keymap: the registry has no opinion about what presses what,
+ * because a hand-written hint is a second copy of the keymap and drifts.
+ */
 export function listCommands(
   registry: Map<string, Command>,
-  ctx?: CommandContext
-): { id: string; title: string; group: string; keys?: string; enabled: boolean }[] {
-  return [...registry.values()].map((c) => ({
-    id: c.id,
-    title: c.title,
-    group: c.group,
-    keys: c.keys,
-    enabled: !ctx || !c.enabled || c.enabled(ctx)
-  }))
+  ctx?: CommandContext,
+  keysOf?: (id: string, arg?: string) => string | undefined
+): CommandRow[] {
+  const rows: CommandRow[] = []
+  for (const c of registry.values()) {
+    if (ctx && c.args) {
+      for (const { arg, title } of c.args(ctx)) {
+        rows.push({
+          id: c.id,
+          arg,
+          title,
+          group: c.group,
+          keys: keysOf?.(c.id, arg),
+          enabled: !c.enabled || c.enabled(ctx, arg)
+        })
+      }
+      continue
+    }
+    rows.push({
+      id: c.id,
+      title: c.title,
+      group: c.group,
+      keys: keysOf?.(c.id),
+      enabled: !ctx || !c.enabled || c.enabled(ctx)
+    })
+  }
+  return rows
 }

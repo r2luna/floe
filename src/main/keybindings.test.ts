@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
@@ -11,7 +11,7 @@ import { settle, waitFor } from './watch.test-helper.ts'
 process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'floe-cfg-'))
 installHook()
 
-const { generateKeybindings, keybindingsPath, parseKeybindings, watchKeybindings } = await import('./keybindings.ts')
+const { generateKeybindings, keybindingsPath, parseKeybindings, rebindCommand, watchKeybindings } = await import('./keybindings.ts')
 const { configDir } = await import('./dataDir.ts')
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -132,4 +132,34 @@ test('watchKeybindings ignores a sibling file in the same config dir', async () 
   } finally {
     stop()
   }
+})
+
+test('a rebind edits the entry for THAT argument, and appends one where there is none', () => {
+  const read = (): ReturnType<typeof parseKeybindings>['binds'] =>
+    parseKeybindings(readFileSync(keybindingsPath(), 'utf8')).binds
+  const bind = (command: string, arg?: string) =>
+    read().find((b) => b.command === command && (arg === undefined ? b.arg === undefined : b.arg === arg))
+
+  // `panel.goto files` is its own binding: rebinding it must not move `plans`,
+  // which is what matching on the command alone used to do — the first
+  // `panel.goto` in the file took every rebind aimed at any of the nine.
+  rebindCommand('panel.goto', 'super+shift+f', 'files')
+  assert.equal(bind('panel.goto', 'files')?.key, 'super+shift+f')
+  assert.equal(bind('panel.goto', 'plans')?.key, 'super+k p', 'the neighbour is untouched')
+  assert.equal(bind('panel.goto', 'active')?.key, 'super+a', 'and so is the first entry in the file')
+
+  // One of the unbound suggestions: no entry yet, so one is appended…
+  rebindCommand('panel.grow', 'super+shift+.')
+  assert.equal(bind('panel.grow')?.key, 'super+shift+.')
+  // …and an argument the defaults never bound is appended WITH its arg, so the
+  // new line means the same row the palette showed.
+  rebindCommand('worktree.focusAt', 'super+shift+0', '9')
+  assert.equal(bind('worktree.focusAt', '9')?.key, 'super+shift+0')
+  assert.equal(bind('worktree.focusAt', '0')?.key, 'super+1', 'the existing ones keep their keys')
+
+  // A file that does not parse is refused, not half-edited.
+  writeFileSync(keybindingsPath(), '[[keybind]\nkey = "x"\n')
+  assert.throws(() => rebindCommand('panel.grow', 'super+shift+,'), /cannot rebind while/)
+  // Put the defaults back for whatever runs after this.
+  writeFileSync(keybindingsPath(), generateKeybindings())
 })

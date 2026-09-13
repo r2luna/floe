@@ -7,7 +7,7 @@ import {
   IconTrash,
   IconX
 } from '@tabler/icons-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { loadChoice, type ModelChoice } from './models'
 import type { Lane, Panel } from './lane'
 import {
@@ -31,7 +31,9 @@ import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { useNarrow, useTouch } from './useNarrow'
 import { RailMenu } from './RailMenu'
-import { installPluginCommands, runCommand, type CommandContext } from './commands'
+import { installPluginCommands, runCommand, type CommandContext, type CommandRow } from './commands'
+import { keyHint } from './keyHints'
+import { useNeedsYouNotifier } from './useNotify'
 import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
@@ -520,6 +522,8 @@ export default function App() {
     value?: string
     dynamic?: (query: string) => PaletteItem | null
     onPick: (id: string) => void
+    /** Escape, or a click outside. A yes/no question resolves "no" here. */
+    onClose?: () => void
   } | null>(null)
   const [commandsOpen, setCommandsOpen] = useState(false)
   // ⌘P's files, or null while it is closed — which is also what says the
@@ -823,28 +827,33 @@ export default function App() {
     // Returns whether it went ahead, so a caller with its own state to tidy —
     // the ticks — can tell "deleted" from "you said no" and leave a cancelled
     // selection exactly as it was.
-    const forget = (targets: Target[], question: string): boolean => {
-      if (!window.confirm(question)) return false
+    const forget = async (targets: Target[], question: string): Promise<boolean> => {
+      const n = targets.length
+      const yes = await askConfirm({
+        question,
+        verb: n === 1 ? 'Delete session' : `Delete ${n} sessions`,
+        detail: `Floe forgets ${n === 1 ? 'it' : 'them'} — the Claude ${n === 1 ? 'transcript stays' : 'transcripts stay'} on disk`
+      })
+      if (!yes) return false
       const gone = new Set(
         targets.flatMap(({ s }) => [s.id, s.claudeId].filter(Boolean) as string[])
       )
-      void Promise.all(
+      await Promise.all(
         targets.map(({ s, path }) =>
           window.floe.claude.closeSession({ id: s.id, worktreePath: path, claudeId: s.claudeId })
         )
-      ).then(() => {
-        // Close every panel showing one of them — indices shift as we go, so
-        // resolve the next victim against the lane we just produced.
-        setLane((l) => {
-          let next = l
-          for (;;) {
-            const i = next.panels.findIndex((p) => p.session && gone.has(p.session.id))
-            if (i === -1) return next
-            next = closePanel(next, i, () => panelOf('branch'))
-          }
-        })
-        worktrees.reload()
+      )
+      // Close every panel showing one of them — indices shift as we go, so
+      // resolve the next victim against the lane we just produced.
+      setLane((l) => {
+        let next = l
+        for (;;) {
+          const i = next.panels.findIndex((p) => p.session && gone.has(p.session.id))
+          if (i === -1) return next
+          next = closePanel(next, i, () => panelOf('branch'))
+        }
       })
+      worktrees.reload()
       return true
     }
 
@@ -862,15 +871,9 @@ export default function App() {
         targets.length === 1
           ? `"${targets[0].s.title}"`
           : `${targets.length} selected sessions`
-      const went = forget(
-        targets,
-        `Delete ${what}? Floe forgets ${targets.length === 1 ? 'it' : 'them'} — the Claude ${
-          targets.length === 1 ? 'transcript stays' : 'transcripts stay'
-        } on disk.`
-      )
       // Only once it actually deleted. Answering "no" and finding the selection
       // gone would make the cancel cost as much as the delete.
-      if (went) clearMarks()
+      void forget(targets, `Delete ${what}?`).then((went) => went && clearMarks())
       return
     }
 
@@ -887,10 +890,7 @@ export default function App() {
           .map((s) => ({ s, path: r.worktree.path }))
       )
       if (!targets.length) return say('no session has been idle for an hour')
-      forget(
-        targets,
-        `Delete ${targets.length} session${targets.length > 1 ? 's' : ''} idle for over an hour? Floe forgets them — the Claude transcripts stay on disk.`
-      )
+      void forget(targets, `Delete ${targets.length} session${targets.length > 1 ? 's' : ''} idle for over an hour?`)
       return
     }
 
@@ -911,13 +911,16 @@ export default function App() {
       // would leave that half behind. The sidebar already knows it.
       const claudeId = worktrees.rows.flatMap((r) => r.sessions).find((s) => s.id === id)?.claudeId
       const name = panel.sub ?? 'this session'
-      if (
-        !window.confirm(`Delete "${name}"? Floe forgets it — the Claude transcript stays on disk.`)
-      )
-        return
-      void window.floe.claude.closeSession({ id, worktreePath, claudeId }).then(() => {
-        setLane((l) => closePanel(l, at, () => panelOf('branch')))
-        worktrees.reload()
+      void askConfirm({
+        question: `Delete "${name}"?`,
+        verb: 'Delete session',
+        detail: 'Floe forgets it — the Claude transcript stays on disk'
+      }).then((yes) => {
+        if (!yes) return
+        void window.floe.claude.closeSession({ id, worktreePath, claudeId }).then(() => {
+          setLane((l) => closePanel(l, at, () => panelOf('branch')))
+          worktrees.reload()
+        })
       })
       return
     }
@@ -928,9 +931,9 @@ export default function App() {
       scope === 'others'
         ? `the other ${picked.length} session${picked.length > 1 ? 's' : ''}`
         : `all ${picked.length} session${picked.length > 1 ? 's' : ''}`
-    forget(
+    void forget(
       picked.map((s) => ({ s, path })),
-      `Delete ${what} on this worktree? Floe forgets them — the Claude transcripts stay on disk.`
+      `Delete ${what} on this worktree?`
     )
   }
 
@@ -1286,6 +1289,50 @@ export default function App() {
     landedProject.current = true
     if (handoff.created) setup.start(handoff.path)
   }, [projects.loading])
+
+  // Every name the open session answers to — Floe's id and the claudeId — so
+  // a question in the chat you are reading is never announced as elsewhere.
+  const openNames = useMemo(() => {
+    if (!sessionKey) return []
+    for (const r of worktrees.rows) {
+      const s = r.sessions.find((s) => s.id === sessionKey || s.claudeId === sessionKey)
+      if (s) return s.claudeId ? [s.id, s.claudeId] : [s.id]
+    }
+    return [sessionKey]
+  }, [sessionKey, worktrees.rows])
+
+  // A session blocked on you, somewhere you are not looking: the OS says so.
+  // The sound already covers "a turn ended"; this is the one event that goes
+  // nowhere until you act, which is why it gets the notification.
+  useNeedsYouNotifier({
+    openKeys: openNames,
+    describe: (key) => {
+      for (const r of worktrees.rows) {
+        const s = r.sessions.find((s) => s.id === key || s.claudeId === key)
+        if (s) return { title: s.title, where: whereOf(r.worktree.path) }
+      }
+      return undefined
+    }
+  })
+
+  // Clicking the notification opens the session it named — in this project
+  // straight away, in another through the same landing the active panel uses.
+  const openByKeyRef = useRef<(key: string) => void>(() => {})
+  useEffect(() => window.floe.onNotificationClick((key) => openByKeyRef.current(key)), [])
+  openByKeyRef.current = (key: string): void => {
+    for (const r of worktrees.rows) {
+      const s = r.sessions.find((s) => s.id === key || s.claudeId === key)
+      if (!s) continue
+      worktrees.select(r.worktree.path)
+      setLane((l) => open(l, mkPanel('chat', s.title, { id: s.claudeId ?? s.id, worktreePath: r.worktree.path })))
+      return
+    }
+    void window.floe.projects.allSessions().then((all) => {
+      const s = all.find((x) => x.sessionId === key || x.claudeId === key)
+      if (s) jumpToSession({ ...s, needsYou: true })
+      else say('that session is gone')
+    })
+  }
 
   // ⌃W: back to the chat you came from.
   const alternateSession = () => {
@@ -1767,6 +1814,7 @@ export default function App() {
     // command that calls them only runs long after the render that built it.
     askText: (opts) => askText(opts),
     say,
+    confirm: (opts) => askConfirm(opts),
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
     reloadProjects: () => projects.reload(),
     deleteProject: () => {
@@ -1775,9 +1823,13 @@ export default function App() {
       // What is being removed is Floe's record of the project, not the code:
       // say so, because "delete" over a folder full of work reads much worse
       // than what this does.
-      if (window.confirm(`Remove "${project.name}" from Floe? The folder stays on disk.`)) {
-        void projects.remove(project.path)
-      }
+      void askConfirm({
+        question: `Remove "${project.name}" from Floe?`,
+        verb: 'Remove project',
+        detail: 'the folder stays on disk'
+      }).then((yes) => {
+        if (yes) void projects.remove(project.path)
+      })
     },
     startMoveProject: () => {
       const project = projectAtCursor()
@@ -1822,7 +1874,11 @@ export default function App() {
           const moved = count
             ? ` Its ${count === 1 ? 'project moves' : `${count} projects move`} to ${DEFAULT_GROUP}.`
             : ''
-          if (window.confirm(`Delete the group "${g}"?${moved}`)) void projects.deleteGroup(g)
+          void askConfirm({ question: `Delete the group "${g}"?`, verb: 'Delete group', detail: moved.trim() || undefined }).then(
+            (yes) => {
+              if (yes) void projects.deleteGroup(g)
+            }
+          )
         }
       }),
     // `here`, not the sidebar selection. A project opened with no row clicked
@@ -1864,7 +1920,7 @@ export default function App() {
     remove: {
       active: !!remove.flow,
       failed: !!remove.flow?.steps.some((s) => s.status === 'error'),
-      awaitingForce: remove.flow?.awaiting === 'force',
+      awaiting: !!remove.flow?.awaiting,
       start: () => {
         const wt = worktrees.rows.find((r) => r.worktree.path === here)?.worktree
         if (!wt) return say('no worktree to remove')
@@ -1935,7 +1991,9 @@ export default function App() {
       // the lane already calls current.
       setLane((l) => open(l, panelOf('worktrees')))
     },
-    worktreeCount: worktrees.rows.length,
+    worktreeNames: worktrees.rows.map((r) => r.worktree.branch),
+    // Every kind the rail offers, in its order — what "Go to …" lists.
+    gotoTargets: RAIL.flat(),
     // ⌘1–9. The row order is the sidebar's, so the number matches what is on
     // screen, and enterWorktree is the same landing a click gets.
     enterWorktreeAt: (index: number) => {
@@ -2046,7 +2104,7 @@ export default function App() {
         void window.floe.mcp.commandResult({
           requestId: command.requestId,
           ok: true,
-          commands: listCommands(REGISTRY, ctxRef.current)
+          commands: listCommands(REGISTRY, ctxRef.current, (id, arg) => keyHint(binds, id, arg)?.all)
         })
         return
       }
@@ -2167,8 +2225,11 @@ export default function App() {
         alt: e.altKey
       }
       // An overlay owns the keyboard while it is up — including the user's own
-      // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null
+      // bindings, or ⌘↵ inside the palette would fire a command behind it. The
+      // picker counts: without it Escape on a question ALSO ran composer.leave
+      // through here, and the focus the palette had just handed back moved on.
+      const blocked =
+        paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null || picker !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2208,7 +2269,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving, picker])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -2246,6 +2307,73 @@ export default function App() {
     const at = lane.panels[lane.focus]?.cursor
     ;(rows[Math.min(at ?? 0, rows.length - 1)] ?? focusSink(el) ?? el).focus({ preventScroll: true })
   }
+
+  // The element in the lane that held focus when an overlay went up, so the
+  // overlay can hand it back. Two sources, because neither alone is enough:
+  //
+  //  - `focusin` at the document, which follows focus around the lane all day —
+  //    but a window that is not the frontmost one gets no focus events at all,
+  //    only a silently moving activeElement.
+  //  - a layout effect on the overlay's first render, which reads activeElement
+  //    before the palette's own effect has moved it — but AddProject focuses
+  //    its input on mount, earlier than any parent effect, so it is too late
+  //    there.
+  //
+  // Neither cares where the overlay was opened from: palettes open from a
+  // dozen call sites — keys, the rail, MCP — and every one of them would have
+  // to remember to write the element down.
+  const lastFocus = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const onFocusIn = (e: FocusEvent): void => {
+      const el = e.target as HTMLElement | null
+      if (el && laneRef.current?.contains(el)) lastFocus.current = el
+    }
+    document.addEventListener('focusin', onFocusIn)
+    return () => document.removeEventListener('focusin', onFocusIn)
+  }, [])
+  const overlayUp = paletteOpen || commandsOpen || finderFiles !== null || adding || picker !== null
+  useLayoutEffect(() => {
+    if (!overlayUp) {
+      // Closed: what was captured has been handed back (or could not be). A
+      // stale element must not answer for the next overlay.
+      lastFocus.current = null
+      return
+    }
+    const el = document.activeElement as HTMLElement | null
+    if (el && laneRef.current?.contains(el)) lastFocus.current = el
+  }, [overlayUp])
+
+  /**
+   * What an overlay owes on the way out: the keyboard back where it was taken
+   * from — mid-sentence in the composer, on the row in a list — and only failing
+   * that the cursor row of the focused panel. Focus left on a dismissed palette
+   * is focus on `body`, where typing goes nowhere and every panel key has lost
+   * its place. Called BEFORE the action a pick runs, so a pick that moves the
+   * lane gets the last word on where focus ends up.
+   */
+  const restoreFocus = (): void => {
+    const el = lastFocus.current
+    if (el && el.isConnected && laneRef.current?.contains(el)) el.focus({ preventScroll: true })
+    else backToLane()
+  }
+
+  /**
+   * A yes/no question, as the palette: two rows, Enter takes the one under the
+   * cursor, Escape is no. The verb is what Enter does, in the user's words, so
+   * the row reads "Delete session" rather than "OK".
+   */
+  const askConfirm = (opts: { question: string; verb: string; detail?: string }): Promise<boolean> =>
+    new Promise((resolve) => {
+      setPicker({
+        placeholder: opts.question,
+        items: [
+          { id: 'yes', title: opts.verb, detail: opts.detail, flat: true },
+          { id: 'no', title: 'Cancel', flat: true }
+        ],
+        onPick: (id) => resolve(id === 'yes'),
+        onClose: () => resolve(false)
+      })
+    })
 
   // The inline new-worktree form's wiring, handed to the worktrees panel while
   // ⌘N has one open — the flow that used to be a modal.
@@ -2436,6 +2564,10 @@ export default function App() {
     if (!canOpen(kind)) return
     setLane((l) => open(l, mkPanel(kind)))
   }
+
+  // The palette's rows, only while it is up: the list reads the context (which
+  // panels are open, which branches exist) and would be stale if memoised.
+  const commands$ = commandsOpen ? commandItems(binds, ctxRef.current) : { items: [], rows: new Map<string, CommandRow>() }
 
   return (
     <div className="app">
@@ -3068,11 +3200,13 @@ export default function App() {
               ? null
               : (group) => {
                   setAdding(false)
+                  restoreFocus()
                   void projects.add(group).then(afterAdd)
                 }
           }
           onAdd={(backend, path, group) => {
             setAdding(false)
+            restoreFocus()
             // Where the window was when the dialog was answered. Read now rather
             // than when the add resolves: whether this is a move is the user's
             // choice in the dialog, not wherever the pointer drifted meanwhile.
@@ -3100,7 +3234,10 @@ export default function App() {
               // dialog is already closed, so this is the only place left to say it.
               .catch((e) => say(reason(e)))
           }}
-          onClose={() => setAdding(false)}
+          onClose={() => {
+            setAdding(false)
+            restoreFocus()
+          }}
         />
       )}
 
@@ -3114,55 +3251,67 @@ export default function App() {
           hints="⏎ pick · ↑↓ move · esc cancel"
           onClose={() => {
             setPicker(null)
-            backToLane()
+            picker.onClose?.()
+            restoreFocus()
           }}
           onPick={(id) => {
             // Cleared first: onPick may open the next step, and clearing after
             // would close the one it just put up.
             setPicker(null)
             picker.onPick(id)
-            // After the answer, back to the row you asked from — so `r`, a new
+            // After the answer, back to where you asked from — so `r`, a new
             // name, Enter leaves you where `j` still works. A step that opened
             // another palette takes the focus back on mount, after this.
-            backToLane()
+            restoreFocus()
           }}
         />
       )}
       {commandsOpen && (
         <Palette
           placeholder="Execute a command…"
-          items={commandItems(binds)}
+          items={commands$.items}
           sigil="⌘"
           hints="⏎ run · ⌘⏎ rebind · ↑↓ move · esc close"
           // The pane says what a dimmed row cannot: which condition is missing.
           preview={(item) => {
-            const cmd = REGISTRY.get(item.id)
-            if (!cmd) return null
+            const row = commands$.rows.get(item.id)
+            const cmd = row && REGISTRY.get(row.id)
+            if (!row || !cmd) return null
             return (
               <CommandPreview
-                title={cmd.title}
+                title={row.title}
                 group={cmd.group}
-                keys={item.keys}
+                // Every binding, not only the chip's: this is the pane with room.
+                keys={keyHint(binds, row.id, row.arg)?.all}
                 unavailable={
-                  cmd.enabled && !cmd.enabled(ctxRef.current)
-                    ? (cmd.unavailable?.(ctxRef.current) ?? 'not available here')
+                  cmd.enabled && !cmd.enabled(ctxRef.current, row.arg)
+                    ? (cmd.unavailable?.(ctxRef.current, row.arg) ?? 'not available here')
                     : undefined
                 }
               />
             )
           }}
-          onClose={() => setCommandsOpen(false)}
+          onClose={() => {
+            setCommandsOpen(false)
+            restoreFocus()
+          }}
           onPick={(id) => {
             setCommandsOpen(false)
-            const res = runCommand(REGISTRY, ctxRef.current, id)
-            if (!res.ok) console.debug('[command]', res.error)
+            // Before the command, so one that moves the lane has the last word.
+            restoreFocus()
+            const row = commands$.rows.get(id)
+            const res = runCommand(REGISTRY, ctxRef.current, row?.id ?? id, row?.arg)
+            if (!res.ok) say(res.error)
           }}
           onRebind={(id, chord) => {
             // Written through to the file, which is the keymap — so the change
             // is in the same place the user would have made it by hand, and
             // survives a restart without a second store to keep in sync. The
-            // watcher below reloads and repaints once the write lands.
-            void window.floe.keybindings.rebind(id, chord)
+            // watcher below reloads and repaints once the write lands. An
+            // argument row rebinds its own entry: `panel.goto files`, not the
+            // first `panel.goto` in the file.
+            const row = commands$.rows.get(id)
+            void window.floe.keybindings.rebind(row?.id ?? id, chord, row?.arg)
           }}
         />
       )}
@@ -3200,9 +3349,13 @@ export default function App() {
             // one you meant — two files named index.ts differ by nothing else.
             return here && <FilePreview root={here} path={item.title} />
           }}
-          onClose={() => setFinderFiles(null)}
+          onClose={() => {
+            setFinderFiles(null)
+            restoreFocus()
+          }}
           onPick={(id) => {
             setFinderFiles(null)
+            restoreFocus()
             const chat = finder.chats.get(id)
             // A chat carries its own worktree: picking one on another branch
             // takes you there, the same as clicking its row in the sidebar.
@@ -3235,9 +3388,13 @@ export default function App() {
               />
             )
           }}
-          onClose={() => setPaletteOpen(false)}
+          onClose={() => {
+            setPaletteOpen(false)
+            restoreFocus()
+          }}
           onPick={(id) => {
             setPaletteOpen(false)
+            restoreFocus()
             if (id === 'project.add') return ctxRef.current.addProject()
             // Same move as clicking the project row: it hands you over to the
             // worktree list and on to the branch that project was left on.
@@ -3401,23 +3558,33 @@ function paletteItems(projects: ReturnType<typeof useProjects>): PaletteItem[] {
 
 /**
  * Every command, named the way the palette reads best: `group: title`, so
- * typing either half finds it. The key chip shows the user's binding when they
- * have set one, because that is the one that will fire.
+ * typing either half finds it. A parametrized command is one row per argument
+ * ("Go to files", "Go to plans"), and the key chip is read from the live keymap
+ * — the binding that will actually fire, the user's if they rebound it.
+ *
+ * The rows come back beside the items because a palette hands back an id and
+ * nothing else: running the pick needs the command AND its argument, and an
+ * argument can be anything, so it is not folded into the id string.
  */
-function commandItems(binds: Keybind[]): PaletteItem[] {
-  // The chip shows the binding that will actually fire: the FIRST entry for the
-  // command, since resolution is first-match-wins.
-  const bound = new Map<string, string>()
-  for (const b of binds) if (!bound.has(b.command)) bound.set(b.command, b.key)
-  return listCommands(REGISTRY).map((c) => ({
-    id: c.id,
-    title: `${c.group.toLowerCase()}: ${c.title.replace(/…$/, '').toLowerCase()}`,
-    // A command is named in prose, not in path segments: `mcp: enable/disable
-    // mcp server` split at its slash reads as a file `disable mcp server` in a
-    // directory `enable/`. Flat also gives the title the row's slack, so a long
-    // name ellipsises at the key chip instead of running off the column.
-    flat: true,
-    keys: bound.has(c.id) ? formatChord(bound.get(c.id)!) : c.keys
-  }))
+function commandItems(
+  binds: Keybind[],
+  ctx: CommandContext
+): { items: PaletteItem[]; rows: Map<string, CommandRow> } {
+  const rows = new Map<string, CommandRow>()
+  const items = listCommands(REGISTRY, ctx, (id, arg) => keyHint(binds, id, arg)?.chip).map((c, i) => {
+    const id = c.arg === undefined ? c.id : `${c.id}#${i}`
+    rows.set(id, c)
+    return {
+      id,
+      title: `${c.group.toLowerCase()}: ${c.title.replace(/…$/, '').toLowerCase()}`,
+      // A command is named in prose, not in path segments: `mcp: enable/disable
+      // mcp server` split at its slash reads as a file `disable mcp server` in a
+      // directory `enable/`. Flat also gives the title the row's slack, so a long
+      // name ellipsises at the key chip instead of running off the column.
+      flat: true,
+      keys: c.keys
+    }
+  })
+  return { items, rows }
 }
 

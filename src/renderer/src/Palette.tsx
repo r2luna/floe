@@ -171,10 +171,19 @@ export function Palette({
   }, [at])
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // A key the palette acts on stops here. Closing hands focus back to the
+    // lane — the composer, a row — while this same press is still on its way
+    // to the window, where the app's keymap would read it a second time
+    // against the element that just got focus: Esc became "leave the
+    // composer", and Enter over a commands row opened its output.
+    const claim = (): void => {
+      e.preventDefault()
+      e.stopPropagation()
+    }
     // While recording, every press is the binding being captured — including
     // the ones that would otherwise close the palette.
     if (recording) {
-      e.preventDefault()
+      claim()
       if (e.key === 'Escape') return setRecording(null)
       const chord = chordFor({
         key: e.key,
@@ -198,7 +207,7 @@ export function Palette({
     // nothing else in the palette to focus, and a tab that moved focus out of
     // the input would strand every other key.
     if (scopes && e.key === 'Tab') {
-      e.preventDefault()
+      claim()
       const i = scopes.findIndex((s) => s.id === scope)
       const next = (i + (e.shiftKey ? -1 : 1) + scopes.length) % scopes.length
       setScope(scopes[next].id)
@@ -208,11 +217,11 @@ export function Palette({
     // Every key the palette handles is claimed here, so none of them reach the
     // app's global keymap while the palette is open.
     if (e.key === 'Escape') {
-      e.preventDefault()
+      claim()
       return onClose()
     }
     if (e.key === 'Enter') {
-      e.preventDefault()
+      claim()
       const picked = results[at]
       if (!picked) return
       // ⌘↵ on a row rebinds it instead of running it — the two live one
@@ -225,7 +234,7 @@ export function Palette({
     const down = e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')
     const up = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')
     if (!down && !up) return
-    e.preventDefault()
+    claim()
     if (!results.length) return
     // Wraps: at the bottom of a short list, down is a faster way to the top than
     // holding up.

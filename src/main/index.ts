@@ -1250,8 +1250,8 @@ export function registerSettingsIpc(): void {
   // is what the command palette's rebind writes through.
   handle('keybindings:load', () => loadKeybindings())
   handle('keybindings:reveal', () => revealKeybindings())
-  handle('keybindings:rebind', (_event, command: string, chord: string) =>
-    rebindCommand(command, chord)
+  handle('keybindings:rebind', (_event, command: string, chord: string, arg?: string) =>
+    rebindCommand(command, chord, arg)
   )
   // Regenerate the file from the built-in table, keeping the old one as .bak.
   // The way out when an update ships a binding an existing file has no entry for.

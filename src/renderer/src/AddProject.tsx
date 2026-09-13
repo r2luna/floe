@@ -123,8 +123,16 @@ export function AddProject({
   }
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    // Claimed, not only prevented: closing hands focus back to the lane while
+    // this press is still travelling to the window, where the app's keymap
+    // would read it again against the element that just got focus. Same rule
+    // as Palette.
+    const claim = (): void => {
       e.preventDefault()
+      e.stopPropagation()
+    }
+    if (e.key === 'Escape') {
+      claim()
       // One level at a time: out of the group name, then out of the answers,
       // then out of the dialog.
       if (naming) {
@@ -136,7 +144,7 @@ export function AddProject({
       return onClose()
     }
     if (e.key === 'Enter') {
-      e.preventDefault()
+      claim()
       // Naming: ⏎ settles the name and hands the head back to the path.
       if (naming) {
         if (!newGroup.trim()) return
@@ -149,13 +157,13 @@ export function AddProject({
     }
     // ⌘O is the picker, from anywhere in the box.
     if (e.key.toLowerCase() === 'o' && e.metaKey && local && onBrowse) {
-      e.preventDefault()
+      claim()
       return onBrowse(chosenGroup)
     }
     const down = e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')
     const up = e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')
     if (!down && !up) return
-    e.preventDefault()
+    claim()
     if (!rows.length) return
     // Stops at both ends rather than wrapping: the top of this list is the path
     // you are typing, and wrapping past it would take the caret somewhere you

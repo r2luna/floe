@@ -272,6 +272,7 @@ test('removePreflight reports branch, dirt and merged state', async () => {
       changes: [],
       hasBranch: false,
       merged: false,
+      ahead: 0,
       message: 'Refusing to remove the main worktree'
     })
     assert.deepEqual(await removePreflight(fx.dir, plain), {
@@ -280,6 +281,7 @@ test('removePreflight reports branch, dirt and merged state', async () => {
       changes: [],
       hasBranch: false,
       merged: false,
+      ahead: 0,
       message: 'Not a git worktree'
     })
 
@@ -296,6 +298,9 @@ test('removePreflight reports branch, dirt and merged state', async () => {
     assert.equal(ahead.dirty, false)
     assert.deepEqual(ahead.changes, [])
     assert.equal(ahead.merged, false, 'not in `branch --merged main` yet')
+    // The second checkpoint's number: what `-D` would throw away, and against what.
+    assert.equal(ahead.ahead, 1, 'one commit base has not got')
+    assert.equal(ahead.base, 'main')
 
     // Uncommitted work is listed verbatim, so the panel can show it.
     writeFileSync(join(feat, 'd.txt'), 'd\n')
@@ -309,6 +314,7 @@ test('removePreflight reports branch, dirt and merged state', async () => {
     const merged = await removePreflight(fx.dir, feat)
     assert.equal(merged.merged, true)
     assert.equal(merged.dirty, false)
+    assert.equal(merged.ahead, 0, 'nothing to lose once base has it')
   } finally {
     fx.cleanup()
     rmSync(plain, { recursive: true, force: true })

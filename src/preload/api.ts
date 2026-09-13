@@ -252,8 +252,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     keybindings: {
       load: (): Promise<KeybindingsConfig> => ipcRenderer.invoke('keybindings:load'),
       reveal: (): Promise<void> => ipcRenderer.invoke('keybindings:reveal'),
-      rebind: (command: string, chord: string): Promise<void> =>
-        ipcRenderer.invoke('keybindings:rebind', command, chord),
+      rebind: (command: string, chord: string, arg?: string): Promise<void> =>
+        ipcRenderer.invoke('keybindings:rebind', command, chord, arg),
       reset: (): Promise<string> => ipcRenderer.invoke('keybindings:reset'),
       onChange: (cb: () => void): (() => void) => {
         const listener = (): void => cb()

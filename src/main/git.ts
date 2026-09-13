@@ -383,17 +383,18 @@ export async function removeWorktree(root: string, target: string): Promise<Work
 // deleting the branch — all observable, like the guided merge.
 
 // Inspect the worktree without touching it: its branch, whether it's dirty
-// (with the porcelain change list for display), and whether the branch is
-// already merged into base (so we know `-d` vs `-D` when deleting it).
+// (with the porcelain change list for display), whether the branch is already
+// merged into base (so we know `-d` vs `-D` when deleting it), and how many
+// commits `-D` would throw away — the number the second checkpoint shows.
 export async function removePreflight(root: string, target: string): Promise<RemovePreflight> {
   if (target === root) {
-    return { ok: false, dirty: false, changes: [], hasBranch: false, merged: false, message: 'Refusing to remove the main worktree' }
+    return { ok: false, dirty: false, changes: [], hasBranch: false, merged: false, ahead: 0, message: 'Refusing to remove the main worktree' }
   }
   let branch = ''
   try {
     branch = (await git(target, ['branch', '--show-current'])).trim()
   } catch {
-    return { ok: false, dirty: false, changes: [], hasBranch: false, merged: false, message: 'Not a git worktree' }
+    return { ok: false, dirty: false, changes: [], hasBranch: false, merged: false, ahead: 0, message: 'Not a git worktree' }
   }
 
   let changes: string[] = []
@@ -407,8 +408,10 @@ export async function removePreflight(root: string, target: string): Promise<Rem
   }
 
   let merged = false
+  let ahead = 0
+  let base: string | undefined
   if (branch) {
-    const base = readBase(target) || (await mainBranch(root))
+    base = readBase(target) || (await mainBranch(root))
     if (base !== branch) {
       try {
         merged = (await git(root, ['branch', '--merged', base]))
@@ -418,10 +421,21 @@ export async function removePreflight(root: string, target: string): Promise<Rem
       } catch {
         /* assume not merged */
       }
+      // What deleting the branch would lose: its commits that base has not
+      // got. Counted rather than inferred from `merged` — a rebased or
+      // squash-merged branch reads as unmerged while every change is in base,
+      // and the number is what lets the user tell those apart.
+      if (!merged) {
+        try {
+          ahead = Number((await git(root, ['rev-list', '--count', `${base}..${branch}`])).trim()) || 0
+        } catch {
+          /* unknown: 0, and the checkpoint is skipped */
+        }
+      }
     }
   }
 
-  return { ok: true, branch: branch || undefined, dirty: changes.length > 0, changes, hasBranch: !!branch, merged }
+  return { ok: true, branch: branch || undefined, dirty: changes.length > 0, changes, hasBranch: !!branch, merged, ahead, base }
 }
 
 // Remove the worktree. `force` lets it go even with a dirty tree (the renderer
