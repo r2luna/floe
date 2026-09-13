@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  useSyncExternalStore
+} from 'react'
 import type { TranscriptItem } from '../../main/claudeSessions'
 import type {
   AgentEvent,
@@ -13,7 +21,8 @@ import type {
 import type { Route } from '../../shared/mentions.ts'
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
-import { takeBatch, type Queued } from './queue'
+import type { Queued } from './queue'
+import { claimBatch, queueOf, releaseBoundary, subscribeQueue, updateQueue } from './queueStore'
 import { liveReducer } from './transcriptState'
 
 export type { Queued }
@@ -85,7 +94,7 @@ export interface Transcript {
    * drains one entry per turn boundary. Claude never queues — a mid-turn send
    * is steered into the live loop instead.
    */
-  queued: Queued[]
+  queued: readonly Queued[]
   send: (
     prompt: string,
     choice?: ModelChoice,
@@ -167,10 +176,6 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The AskUserQuestion the turn is paused on. Selection state lives here too:
   // the composer answers it (digits, free text), and the panel only renders.
   const [question, setQuestion] = useState<PendingQuestion | null>(null)
-  // Typed while a one-shot runtime was busy (Claude steers instead of
-  // queueing). The UI owns this buffer — the runtime is never asked to pull
-  // from a queue, it just receives an ordinary next turn.
-  const [queued, setQueued] = useState<Queued[]>([])
   // The model/effort last chosen, read at DELIVERY rather than at enqueue: a
   // message that waited should go out with the model in effect when it fires,
   // not the one that was selected minutes ago when it was typed.
@@ -225,10 +230,12 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The running true→false edge is the barrier, so the previous value has to be
   // remembered — `running === false` is true on every idle render.
   const wasRunning = useRef(false)
-  // One delivery per boundary. A single turn can surface more than one edge (a
-  // process that died mid-queue, a re-delivered event); without this the whole
-  // queue would flush at once instead of one clean turn at a time.
-  const draining = useRef(false)
+  // A boundary this panel did not see. The turn ended while no panel for this
+  // session was mounted — you were in another chat — so there was no
+  // true→false edge here, and the queue would wait for one that already went
+  // by. The replay says whether the session is idle; if it is and something is
+  // queued, this is the edge.
+  const [owed, setOwed] = useState(false)
 
   useEffect(() => {
     if (!worktreePath || !sessionId) {
@@ -265,6 +272,13 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The session key the agent events are tagged with. One per session, so two
   // chats open at once never read each other's stream.
   const key = sessionId ?? ''
+
+  // Typed while a one-shot runtime was busy (Claude steers instead of
+  // queueing). The UI owns this buffer — the runtime is never asked to pull
+  // from a queue, it just receives an ordinary next turn. Filed under the
+  // session in queueStore.ts, not in this panel: the panel is unmounted when
+  // you open another chat, and the queue has to be there when you come back.
+  const queued = useSyncExternalStore(subscribeQueue, () => queueOf(key))
 
   /** Fold one streamed event into the panel. Also used for the replay events. */
   const apply = useCallback((event: AgentEvent) => {
@@ -467,6 +481,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       tokensRef.current = 0
       setStartedAt(undefined)
       startedRef.current = undefined
+      setOwed(false)
     }
     // Until the snapshot answers, this panel only knows the one name it was
     // opened with — so nothing is judged by name yet (see `names` below) and
@@ -513,6 +528,11 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           setStartedAt(startedRef.current)
           // The seeded turn must still produce a true→false edge for the queue.
           wasRunning.current = true
+        } else if (queueOf(key).length) {
+          // Idle, with something still queued: the turn it was waiting on
+          // ended while this session had no panel open. That boundary went by
+          // unseen, so it is owed here — the drainer treats it as the edge.
+          setOwed(true)
         }
         for (const payload of pending)
           if (names.current.has(payload.key) && payload.seq > replay.lastSeq) apply(payload.event)
@@ -521,6 +541,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         // No snapshot is only a colder start: drain what buffered and go live.
         if (alive && pending)
           for (const payload of pending) if (names.current.has(payload.key)) apply(payload.event)
+        // And nothing says a turn is in flight, so a queue left here is owed
+        // its boundary the same as above. If a turn IS running after all, the
+        // drainer's guard on `running` holds it until the real edge.
+        if (alive && queueOf(key).length) setOwed(true)
       })
       .finally(() => {
         pending = null
@@ -638,7 +662,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           setRunning(false)
           // Release the boundary lock, or a failed delivery would wedge the
           // queue: no turn to end, so no edge, so nothing ever drains again.
-          draining.current = false
+          releaseBoundary(key)
           dispatch({ type: 'push', item: { role: 'tool', name: 'error', summary: e.message } })
         })
     },
@@ -759,7 +783,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       const provider = (choice ?? choiceRef.current).provider ?? 'claude'
       const answering = runChoice.current.provider ?? 'claude'
       if (running && (provider !== 'claude' || answering !== 'claude')) {
-        setQueued((prev) => [
+        updateQueue(key, (prev) => [
           ...prev,
           {
             id: crypto.randomUUID(),
@@ -770,6 +794,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
             // continuation look like it named somewhere else, and split the
             // run it was linked to.
             choice: addressed ? choice : undefined,
+            // And what the picker said regardless, for the panel that drains
+            // this after a remount — its own ref knows nothing of this one.
+            picked: choice ?? choiceRef.current,
             images,
             files,
             linked: !!linked
@@ -779,12 +806,15 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       }
       deliver(prompt, choice ?? choiceRef.current, images, files, addressed?.shown)
     },
-    [worktreePath, sessionId, running, deliver, question, answerActive]
+    [worktreePath, sessionId, key, running, deliver, question, answerActive]
   )
 
-  const unqueue = useCallback((id: string) => {
-    setQueued((prev) => prev.filter((q) => q.id !== id))
-  }, [])
+  const unqueue = useCallback(
+    (id: string) => {
+      updateQueue(key, (prev) => prev.filter((q) => q.id !== id))
+    },
+    [key]
+  )
 
   /**
    * Drain at the turn boundary, never mid-turn. Only the one-shot runtimes
@@ -795,23 +825,35 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   useEffect(() => {
     const was = wasRunning.current
     wasRunning.current = running
-    // A turn started: the boundary that delivered it is closed.
+    // A turn started: the boundary that delivered it is closed, and one owed
+    // from before is not owed any more — the real edge is coming.
     if (running) {
-      draining.current = false
+      releaseBoundary(key)
+      if (owed) setOwed(false)
       return
     }
-    // Only the true→false edge is a boundary. `running === false` is true on
-    // every idle render, and draining on those would fire the queue instantly.
-    if (!was || draining.current || !queued.length) return
-
-    const batch = takeBatch(queued)
+    // Only the true→false edge is a boundary — or one this panel was not there
+    // to see (`owed`). `running === false` is true on every idle render, and
+    // draining on those would fire the queue instantly.
+    if (!was && !owed) return
+    if (owed) setOwed(false)
+    // One delivery per boundary, and the lock is the session's, not this
+    // panel's: a single turn can surface more than one edge (a process that
+    // died mid-queue, a re-delivered event, a second panel on the same
+    // session), and without it the whole queue would flush at once.
+    const batch = claimBatch(key)
     if (!batch) return
-    setQueued(batch.rest)
-    draining.current = true
-    // Its own choice if it named one, the session's otherwise — the message
-    // that waited was addressed when it was typed, not when it went out.
-    deliver(batch.text, batch.choice ?? choiceRef.current, batch.images, batch.files, batch.shown)
-  }, [running, queued, deliver])
+    // Its own choice if it named one, else the picker's when it was typed —
+    // the message that waited was addressed when it was typed, not when it
+    // went out. Only a queue from before either existed falls back to the ref.
+    deliver(
+      batch.text,
+      batch.choice ?? batch.picked ?? choiceRef.current,
+      batch.images,
+      batch.files,
+      batch.shown
+    )
+  }, [running, owed, key, deliver])
 
   const stop = useCallback(() => {
     void window.floe.agent.stop(key)
