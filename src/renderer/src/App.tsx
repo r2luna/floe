@@ -1709,16 +1709,42 @@ export default function App() {
     setLane((l) => setCursor(l, at, row))
   }, [sessionKey, lane.panels, worktrees.rows])
 
+  // Each panel's cursor and the `data-key` of every row at the last paint.
+  const cursorRows = useRef(new Map<string, { cursor: number; keys: (string | undefined)[] }>())
+
   // Paint the cursor. It's an attribute rather than a class passed down because
   // no panel body knows it has a cursor — the lane owns that, for every panel
   // that exists now or later. A row keeps its mark while the panel is unfocused,
   // which is what makes "where was I" answerable at a glance.
+  //
+  // The cursor is an index, so a list that changes under it — a merge tearing
+  // down a worktree above it — would leave the mark on whichever row inherited
+  // the position. Rows that carry a `data-key` keep the cursor on the same row
+  // instead; a row that is gone hands it to the next row that survived.
   useEffect(() => {
     lane.panels.forEach((panel, i) => {
       const rows = rowsOf(panelAt(i))
       const sel = selRange(panel.selection)
+      const keys = rows.map((r) => r.dataset.key)
+      let cursor = panel.cursor
+      const last = cursorRows.current.get(panel.id)
+      const was = cursor != null && last?.cursor === cursor ? last.keys[cursor] : undefined
+      if (cursor != null && was && rows.length && keys[cursor] !== was) {
+        const old = last!.keys
+        const survivors = [...old.slice(cursor), ...old.slice(0, cursor).reverse()]
+        const heir = survivors.find((k) => k && keys.includes(k))
+        cursor = heir ? keys.indexOf(heir) : Math.min(cursor, rows.length - 1)
+        const moved = cursor
+        setLane((l) => setCursor(l, i, moved))
+        // The focused row went with its worktree: focus fell to the body, and
+        // the next j would have nowhere to start from.
+        if (i === lane.focus && document.activeElement === document.body)
+          rows[cursor]?.focus({ preventScroll: true })
+      }
+      // An empty list is a panel still loading, not a list that lost its rows.
+      if (cursor != null && rows.length) cursorRows.current.set(panel.id, { cursor, keys })
       rows.forEach((row: HTMLElement, j: number) => {
-        if (panel.cursor === j) row.setAttribute('data-cursor', '')
+        if (cursor === j) row.setAttribute('data-cursor', '')
         else row.removeAttribute('data-cursor')
         if (sel && j >= sel[0] && j <= sel[1]) row.setAttribute('data-sel', '')
         else row.removeAttribute('data-sel')
@@ -2210,8 +2236,11 @@ export default function App() {
         alt: e.altKey
       }
       // An overlay owns the keyboard while it is up — including the user's own
-      // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null
+      // bindings, or ⌘↵ inside the palette would fire a command behind it. The
+      // new-worktree form is not one: it is inline in a panel, so `typing`
+      // already keeps bare letters out of its input and the form stops its own
+      // Escape and ⌥⏎ before they get here.
+      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || finding !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2251,7 +2280,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, finding, moving])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
