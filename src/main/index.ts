@@ -182,6 +182,20 @@ import {
   notifyTerminalsTheme
 } from './terminal'
 import {
+  browserBack,
+  browserForward,
+  browserReload,
+  browserState,
+  browserStop,
+  focusBrowser,
+  mountBrowser,
+  navigateBrowser,
+  openBrowserDevTools,
+  setBrowserBounds,
+  setBrowserVisible,
+  unmountBrowser
+} from './browser'
+import {
   startCommand,
   stopCommand,
   restartCommand,
@@ -546,6 +560,7 @@ export function registerIpc(): void {
   registerStatusIpc()
   registerCommandIpc()
   registerEditorIpc()
+  registerBrowserIpc()
   registerFileIpc()
   registerNotesIpc()
   registerColonyIpc()
@@ -895,6 +910,53 @@ export function registerEditorIpc(): void {
   handle('editor:launch', (_event, cwd: string, file: string, line?: number) =>
     launchEditor(cwd, file, line)
   )
+}
+
+// The native browser preview. It stays on this window even when the workspace
+// pointer targets another machine: the pixels and DevTools live on this desk.
+function withBrowserWindow<T>(event: IpcMainInvokeEvent, run: (win: BrowserWindow) => T): T | null {
+  const win = winOf(event)
+  return win ? run(win) : null
+}
+
+const browserMountIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): ReturnType<typeof mountBrowser> | null =>
+  withBrowserWindow(event, (win) => mountBrowser(win, bounds))
+const browserBoundsIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): void | null =>
+  withBrowserWindow(event, (win) => setBrowserBounds(win, bounds))
+const browserVisibleIpc = (event: IpcMainInvokeEvent, visible: boolean): void | null =>
+  withBrowserWindow(event, (win) => setBrowserVisible(win, visible))
+const browserUnmountIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, unmountBrowser)
+const browserStateIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserState> | null =>
+  withBrowserWindow(event, browserState)
+const browserNavigateIpc = (event: IpcMainInvokeEvent, url: string): ReturnType<typeof navigateBrowser> | null =>
+  withBrowserWindow(event, (win) => navigateBrowser(win, url))
+const browserBackIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserBack> | null =>
+  withBrowserWindow(event, browserBack)
+const browserForwardIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserForward> | null =>
+  withBrowserWindow(event, browserForward)
+const browserReloadIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserReload> | null =>
+  withBrowserWindow(event, browserReload)
+const browserStopIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserStop> | null =>
+  withBrowserWindow(event, browserStop)
+const browserFocusIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, focusBrowser)
+const browserDevToolsIpc = (event: IpcMainInvokeEvent): void | null =>
+  withBrowserWindow(event, openBrowserDevTools)
+
+export function registerBrowserIpc(): void {
+  handle('browser:mount', browserMountIpc)
+  handle('browser:bounds', browserBoundsIpc)
+  handle('browser:visible', browserVisibleIpc)
+  handle('browser:unmount', browserUnmountIpc)
+  handle('browser:state', browserStateIpc)
+  handle('browser:navigate', browserNavigateIpc)
+  handle('browser:back', browserBackIpc)
+  handle('browser:forward', browserForwardIpc)
+  handle('browser:reload', browserReloadIpc)
+  handle('browser:stop', browserStopIpc)
+  handle('browser:focus', browserFocusIpc)
+  handle('browser:devtools', browserDevToolsIpc)
 }
 
 // The file tree, media probes and the review diff.

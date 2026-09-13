@@ -128,8 +128,8 @@ The conditions:
   panel != "terminal" the focused panel is anything else
   panel in ["a","b"]  the focused panel is one of these kinds
 
-Panel kinds: chat, diff, files, changes, commands, cmdlog, terminal, projects,
-worktrees.
+Panel kinds: chat, diff, files, changes, commands, cmdlog, terminal, browser,
+projects, worktrees.
 
 Combine them with \`and\`, \`or\` and \`not\`. \`and\` binds tighter than \`or\`, so
 \`a and b or c\` reads as \`(a and b) or c\`. There are no parentheses — if you

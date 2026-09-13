@@ -45,6 +45,8 @@ export interface BackendEntry {
   label: string
   /** WebSocket URL of the remote Floe server, e.g. ws://100.x.y.z:41680. */
   url: string
+  /** Host used for preview traffic when it differs from the WebSocket host. */
+  browserHost?: string
   token: string
 }
 

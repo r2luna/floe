@@ -30,6 +30,7 @@ import {
   IconSparkles,
   IconTerminal2,
   IconUserCircle,
+  IconWorld,
   IconX,
   type IconProps
 } from '@tabler/icons-react'
@@ -134,6 +135,7 @@ import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
 import { ProvisionPanel } from './ProvisionPanel'
 import { SetupPanel } from './SetupPanel'
+import { BrowserPanel } from './BrowserPanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
@@ -477,6 +479,17 @@ export const KINDS = {
     grow: true,
     order: 60
   },
+  // A native WebContentsView, so local dev servers render with Chromium's full
+  // browser behavior and can open their own detached DevTools.
+  browser: {
+    icon: IconWorld,
+    title: 'browser',
+    width: 760,
+    min: 460,
+    grow: true,
+    order: 70,
+    needsDesktop: true
+  },
   // The Claude account the CLI runs as — the app's own /login. Narrow: it holds
   // one identity and two buttons, never a list.
   account: { icon: IconUserCircle, title: 'account', width: 380, order: 130 },
@@ -524,6 +537,8 @@ export const KINDS = {
      * worktree, the sidebar's, or the root — and these panels follow it.
      */
     needsProject?: true
+    /** Native Electron surface; unavailable in the hosted web client. */
+    needsDesktop?: true
   }
 >
 
@@ -535,6 +550,11 @@ export const KINDS = {
 export function needsProject(kind: string): boolean {
   const spec = KINDS[kind as PanelKind]
   return !!spec && 'needsProject' in spec
+}
+
+export function needsDesktop(kind: string): boolean {
+  const spec = KINDS[kind as PanelKind]
+  return !!spec && 'needsDesktop' in spec
 }
 
 /**
@@ -577,7 +597,7 @@ export const RAIL_GROUPS: PanelKind[][] = [
   ['skills', 'mcp'],
   // Things that run: the project's own processes, and a shell for everything
   // else.
-  ['commands', 'terminal'],
+  ['commands', 'terminal', 'browser'],
   // The app itself.
   ['account', 'settings']
 ]
@@ -963,6 +983,7 @@ export function PanelBody({
         <TerminalPanel termId={termIdOf('terminal', sub) as string} cwd={sub ?? HOME} branch="" />
       </Suspense>
     )
+  if (kind === 'browser') return <BrowserPanel onCommand={onCommand} />
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />
