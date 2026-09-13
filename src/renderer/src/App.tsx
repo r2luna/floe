@@ -2236,8 +2236,11 @@ export default function App() {
         alt: e.altKey
       }
       // An overlay owns the keyboard while it is up — including the user's own
-      // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null
+      // bindings, or ⌘↵ inside the palette would fire a command behind it. The
+      // new-worktree form is not one: it is inline in a panel, so `typing`
+      // already keeps bare letters out of its input and the form stops its own
+      // Escape and ⌥⏎ before they get here.
+      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || finding !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2277,7 +2280,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, finding, moving])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
