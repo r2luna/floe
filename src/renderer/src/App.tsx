@@ -719,17 +719,27 @@ export default function App() {
   // would race the load. A project that is gone, or a first run with none saved,
   // releases the wait instead of holding it open forever.
   const landedProject = useRef(false)
+  // A remote machine's list lands after this one's. Settling as soon as local
+  // answered sent every reload of a project on another machine back to the
+  // first local project, so the wait holds until each remote answers or is
+  // given up on.
+  const remotesLoading = projects.remotes.some((r) => r.state === 'loading')
   useEffect(() => {
     if (landedProject.current || projects.loading) return
-    landedProject.current = true
     // A landing is waiting: this instance was brought up to be somewhere, and
     // the saved project can live on the machine we just left — selecting it
     // would point the window straight back and throw the landing away.
-    if (peekLanding(self)) return
+    if (peekLanding(self)) {
+      landedProject.current = true
+      return
+    }
     const want = restored.current?.project
-    if (want && projects.all.some((p) => p.path === want)) projects.select(want)
+    const found = !!want && projects.all.some((p) => p.path === want)
+    if (want && !found && remotesLoading) return
+    landedProject.current = true
+    if (found) projects.select(want)
     else if (pending.current) pending.current = { ...pending.current, project: undefined }
-  }, [projects.loading, projects.all])
+  }, [projects.loading, projects.all, remotesLoading])
 
   // Delete the session the lane is showing. "Delete" is Floe's record of it:
   // the Claude transcript stays on disk and `claude --resume` still finds it,
@@ -1044,6 +1054,9 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
+    // Going somewhere on purpose ends the boot restore, which may still be
+    // waiting on a remote list and would pull the selection back when it lands.
+    landedProject.current = true
     projects.select(path)
     // Its worktrees are a fetch away, so the rest of the restore happens when
     // they arrive.
