@@ -26,7 +26,7 @@ import {
   toggleDock
 } from './lane'
 import { dragAnchor, selRange } from './diff'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
@@ -649,6 +649,23 @@ export default function App() {
     if (!narrow) setRailMenu(false)
   }, [narrow])
 
+  // A native WebContentsView sits above renderer HTML. Hide it while one of
+  // Floe's overlays is open, or it would cover the palette instead of yielding
+  // to it like every DOM-backed panel does.
+  useEffect(() => {
+    if (window.floe.version === 'web' || !lane.panels.some((panel) => panel.kind === 'browser')) return
+    const overlay =
+      paletteOpen ||
+      commandsOpen ||
+      finderFiles !== null ||
+      adding ||
+      newWt ||
+      finding !== null ||
+      picker !== null ||
+      (narrow && railMenu)
+    void window.floe.browser.visible(!overlay)
+  }, [lane.panels, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
   const menuRef = useRef<HTMLButtonElement>(null)
@@ -720,17 +737,27 @@ export default function App() {
   // would race the load. A project that is gone, or a first run with none saved,
   // releases the wait instead of holding it open forever.
   const landedProject = useRef(false)
+  // A remote machine's list lands after this one's. Settling as soon as local
+  // answered sent every reload of a project on another machine back to the
+  // first local project, so the wait holds until each remote answers or is
+  // given up on.
+  const remotesLoading = projects.remotes.some((r) => r.state === 'loading')
   useEffect(() => {
     if (landedProject.current || projects.loading) return
-    landedProject.current = true
     // A landing is waiting: this instance was brought up to be somewhere, and
     // the saved project can live on the machine we just left — selecting it
     // would point the window straight back and throw the landing away.
-    if (peekLanding(self)) return
+    if (peekLanding(self)) {
+      landedProject.current = true
+      return
+    }
     const want = restored.current?.project
-    if (want && projects.all.some((p) => p.path === want)) projects.select(want)
+    const found = !!want && projects.all.some((p) => p.path === want)
+    if (want && !found && remotesLoading) return
+    landedProject.current = true
+    if (found) projects.select(want)
     else if (pending.current) pending.current = { ...pending.current, project: undefined }
-  }, [projects.loading, projects.all])
+  }, [projects.loading, projects.all, remotesLoading])
 
   // Delete the session the lane is showing. "Delete" is Floe's record of it:
   // the Claude transcript stays on disk and `claude --resume` still finds it,
@@ -739,7 +766,9 @@ export default function App() {
   // status, the file list, a patch. Without the thing they read there is nothing
   // to show, so they can't be opened at all: better than opening one onto an
   // empty list or an error.
-  const canOpen = (kind: string): boolean => !needsProject(kind) || !!projects.current
+  const canOpen = (kind: string): boolean =>
+    (!needsProject(kind) || !!projects.current) &&
+    (!needsDesktop(kind) || window.floe.version !== 'web')
 
   /**
    * The same sentence the rail puts in its tooltip, for the keyboard.
@@ -749,9 +778,11 @@ export default function App() {
    * deserve the identical answer.
    */
   const whyCannotOpen = (kind: string): string =>
-    needsProject(kind) && !projects.current
-      ? `${kind} — open a project first`
-      : `${kind} is not available right now`
+    needsDesktop(kind) && window.floe.version === 'web'
+      ? `${kind} — available in the desktop app`
+      : needsProject(kind) && !projects.current
+        ? `${kind} — open a project first`
+        : `${kind} is not available right now`
 
   /**
    * Every session in the project, in the order the list draws them.
@@ -1045,6 +1076,9 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
+    // Going somewhere on purpose ends the boot restore, which may still be
+    // waiting on a remote list and would pull the selection back when it lands.
+    landedProject.current = true
     projects.select(path)
     // Its worktrees are a fetch away, so the rest of the restore happens when
     // they arrive.
@@ -1770,6 +1804,15 @@ export default function App() {
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
+    browser: {
+      address: () => document.querySelector<HTMLInputElement>('.browser-address input')?.focus(),
+      back: () => void window.floe.browser.back(),
+      forward: () => void window.floe.browser.forward(),
+      reload: () => void window.floe.browser.reload(),
+      stop: () => void window.floe.browser.stop(),
+      focus: () => void window.floe.browser.focus(),
+      devtools: () => void window.floe.browser.devtools()
+    },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
@@ -2194,8 +2237,11 @@ export default function App() {
         alt: e.altKey
       }
       // An overlay owns the keyboard while it is up — including the user's own
-      // bindings, or ⌘↵ inside the palette would fire a command behind it.
-      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null
+      // bindings, or ⌘↵ inside the palette would fire a command behind it. The
+      // new-worktree form is not one: it is inline in a panel, so `typing`
+      // already keeps bare letters out of its input and the form stops its own
+      // Escape and ⌥⏎ before they get here.
+      const blocked = paletteOpen || commandsOpen || finderFiles !== null || adding || finding !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2235,7 +2281,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, finding, moving])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -3465,4 +3511,3 @@ function commandItems(binds: Keybind[]): PaletteItem[] {
     keys: bound.has(c.id) ? formatChord(bound.get(c.id)!) : c.keys
   }))
 }
-

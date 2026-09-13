@@ -80,6 +80,10 @@ globalThis.__ptySpawns = []
 globalThis.__resizes = []
 
 process.env.FLOE_TEST_USERDATA = mkdtempSync(join(tmpdir(), 'floe-cmd-'))
+// A short memory poll, so the sampling test proves its point in well under a
+// second instead of waiting out two real 2s ticks and a 1.5s ps cache.
+process.env.FLOE_MEM_INTERVAL_MS = '200'
+process.env.FLOE_PS_TTL_MS = '100'
 register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.url)
 
 const runner = await import('./commandRunner.ts')
@@ -121,7 +125,7 @@ const of = <K extends CommandEvent['kind']>(
 // below, where the thing being waited for is the point.
 const waitFor = (what: string, ok: () => boolean, ms = 4000): Promise<void> => until(ok, ms, what)
 
-const MEM_TICK = 2100 // one poll interval, to prove the timer is gone
+const MEM_TICK = 300 // one (shortened) poll interval, to prove the timer is gone
 
 function persistedFile(dir: string): string {
   return join(dir, 'running-commands.json')

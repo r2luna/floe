@@ -70,10 +70,16 @@ test('several bad values are all reported, not just the first', () => {
   assert.deepEqual(errors.map((e) => e.line), [2, 3, 4])
 })
 
-test('theme takes only the two themes and system, and names them when it does not', () => {
-  const { config, errors } = parseFloeConfig('[appearance]\ntheme = "omarchy"\n', 'floe.toml')
+test('theme takes only the known themes, and names them when it does not', () => {
+  const { config, errors } = parseFloeConfig('[appearance]\ntheme = "solarized"\n', 'floe.toml')
   assert.equal(config.appearance.theme, 'system', 'an unknown theme falls back to following the OS')
-  assert.match(errors[0].reason, /system, dark, light/)
+  assert.match(errors[0].reason, /system, dark, light, omarchy/)
+})
+
+test('theme accepts omarchy', () => {
+  const { config, errors } = parseFloeConfig('[appearance]\ntheme = "omarchy"\n', 'floe.toml')
+  assert.equal(config.appearance.theme, 'omarchy')
+  assert.equal(errors.length, 0)
 })
 
 test('penguin picks one of the known heads, and defaults to the original', () => {

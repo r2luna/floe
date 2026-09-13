@@ -106,3 +106,16 @@ test('a chunk of something that is not a playable video is refused', async () =>
   const odd = await readMediaChunk(video, Number.NaN, 2)
   assert.equal(odd?.start, 0)
 })
+
+test('a transcript screenshot is served with its own type; a text file still is not', async () => {
+  const png = join(dir, 'shot.png')
+  writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  const res = mediaResponse(mediaUrl(png), null)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('Content-Type'), 'image/png')
+  assert.equal(Buffer.from(await res.arrayBuffer()).length, 4)
+
+  const txt = join(dir, 'notes.txt')
+  writeFileSync(txt, 'hi')
+  assert.equal(mediaResponse(mediaUrl(txt), null).status, 415)
+})

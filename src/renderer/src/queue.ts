@@ -25,6 +25,14 @@ export interface Queued {
    * what each of them asked for.
    */
   choice?: ModelChoice
+  /**
+   * What the picker said when this was typed — the fallback for a line that
+   * named nobody. Kept on the item because the panel that drains it may not be
+   * the panel that queued it: switching chats unmounts the panel, and the one
+   * that comes back starts with the default choice, which in a codex query
+   * would hand the message to Claude.
+   */
+  picked?: ModelChoice
   /** What was dropped or pasted with it — it waits in the queue too. */
   images?: ImageAttachment[]
   files?: FileAttachment[]
@@ -59,10 +67,11 @@ const sameTarget = (a?: ModelChoice, b?: ModelChoice): boolean =>
   // it was never given.
   (a?.mode ?? '') === (b?.mode ?? '')
 
-export function takeBatch(queued: Queued[]): {
+export function takeBatch(queued: readonly Queued[]): {
   text: string
   shown: string
   choice?: ModelChoice
+  picked?: ModelChoice
   images: ImageAttachment[]
   files: FileAttachment[]
   rest: Queued[]
@@ -88,6 +97,7 @@ export function takeBatch(queued: Queued[]): {
     // The first item's, since a linked run is one message: the lines after it
     // said "and this too", not "and ask someone else".
     choice: batch[0].choice,
+    picked: batch[0].picked,
     images: batch.flatMap((q) => q.images ?? []),
     files: batch.flatMap((q) => q.files ?? []),
     rest: queued.slice(take)

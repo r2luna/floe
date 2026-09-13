@@ -30,6 +30,7 @@ import {
   IconSparkles,
   IconTerminal2,
   IconUserCircle,
+  IconWorld,
   IconX,
   type IconProps
 } from '@tabler/icons-react'
@@ -134,6 +135,7 @@ import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
 import { ProvisionPanel } from './ProvisionPanel'
 import { SetupPanel } from './SetupPanel'
+import { BrowserPanel } from './BrowserPanel'
 import { Lightbox, type GalleryImage } from './Lightbox'
 import { VideoRefs } from './Video'
 import type { Merge } from './useMerge'
@@ -152,6 +154,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
+import { omarchyAvailable } from './appearance'
 import type { ActiveSession, Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
@@ -478,6 +481,17 @@ export const KINDS = {
     grow: true,
     order: 60
   },
+  // A native WebContentsView, so local dev servers render with Chromium's full
+  // browser behavior and can open their own detached DevTools.
+  browser: {
+    icon: IconWorld,
+    title: 'browser',
+    width: 760,
+    min: 460,
+    grow: true,
+    order: 70,
+    needsDesktop: true
+  },
   // The Claude account the CLI runs as — the app's own /login. Narrow: it holds
   // one identity and two buttons, never a list.
   account: { icon: IconUserCircle, title: 'account', width: 380, order: 130 },
@@ -525,6 +539,8 @@ export const KINDS = {
      * worktree, the sidebar's, or the root — and these panels follow it.
      */
     needsProject?: true
+    /** Native Electron surface; unavailable in the hosted web client. */
+    needsDesktop?: true
   }
 >
 
@@ -536,6 +552,11 @@ export const KINDS = {
 export function needsProject(kind: string): boolean {
   const spec = KINDS[kind as PanelKind]
   return !!spec && 'needsProject' in spec
+}
+
+export function needsDesktop(kind: string): boolean {
+  const spec = KINDS[kind as PanelKind]
+  return !!spec && 'needsDesktop' in spec
 }
 
 /**
@@ -578,7 +599,7 @@ export const RAIL_GROUPS: PanelKind[][] = [
   ['skills', 'mcp'],
   // Things that run: the project's own processes, and a shell for everything
   // else.
-  ['commands', 'terminal'],
+  ['commands', 'terminal', 'browser'],
   // The app itself.
   ['account', 'settings']
 ]
@@ -964,6 +985,7 @@ export function PanelBody({
         <TerminalPanel termId={termIdOf('terminal', sub) as string} cwd={sub ?? HOME} branch="" />
       </Suspense>
     )
+  if (kind === 'browser') return <BrowserPanel onCommand={onCommand} />
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />
@@ -2167,13 +2189,28 @@ function useThrottled<T>(value: T, ms: number): T {
 }
 
 /**
+ * How long the streaming tail holds its text between markdown re-parses.
+ *
+ * Every re-render parses the WHOLE growing message, so a fixed interval spends
+ * more of the core the longer the answer gets — 30% of one at 1.5k words, and
+ * climbing. Scaling the hold with the length keeps that share flat: parse time
+ * and interval both grow with the text. The cap keeps a long answer visibly
+ * moving; 600ms is under what reads as a stall.
+ */
+export function tailHoldMs(length: number): number {
+  return Math.min(600, 150 + Math.floor(length / 100))
+}
+
+/**
  * The streaming tail, with its markdown re-parse throttled. Deltas flush at
  * ~33ms and react-markdown re-parses the WHOLE growing message each time —
  * ~600 full parses over a 20 KB answer. MessageBody is memoised on text, so
- * holding the text to one change per ~150ms cuts that 5× with no visible lag.
+ * holding the text between changes cuts that many times over with no visible
+ * lag; see tailHoldMs for how long.
  */
 export function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolean }) {
-  const text = useThrottled(item.text ?? '', 150)
+  const raw = item.text ?? ''
+  const text = useThrottled(raw, tailHoldMs(raw.length))
   return <Entry item={text === (item.text ?? '') ? item : { ...item, text }} isNew={isNew} streaming />
 }
 
@@ -2456,9 +2493,10 @@ export const Log = memo(function Log({
   const galleryAt = new Map<number, number>()
   for (let i = 0; i < items.length; i++) {
     const item = items[i]
-    if (item.role !== 'image' || !item.data) continue
+    const src = imageSrc(item)
+    if (!src) continue
     galleryAt.set(i, gallery.length)
-    gallery.push({ src: `data:${item.mediaType ?? 'image/png'};base64,${item.data}`, alt: item.name })
+    gallery.push({ src, alt: item.name })
   }
 
   const out: ReactNode[] = []
@@ -2554,13 +2592,14 @@ export const Log = memo(function Log({
     // An image in the transcript is shown, not named: it is either what was
     // attached to a message or what a tool read, and the point of both is to
     // look at it.
-    if (item.role === 'image' && item.data) {
+    const src = imageSrc(item)
+    if (src) {
       out.push(
         <div className="irc-body irc-act" key={base + i}>
           {/* A button, which is what makes it a cursor row: j/k walks onto the
               image and Enter opens it full size, same as a shell row. */}
           <Zoomable
-            src={`data:${item.mediaType ?? 'image/png'};base64,${item.data}`}
+            src={src}
             alt={item.name}
             gallery={gallery}
             index={galleryAt.get(i) ?? 0}
@@ -2607,6 +2646,17 @@ export const Log = memo(function Log({
  * you ask — a screenshot at 260px is there to tell you a screenshot happened,
  * not to be read.
  */
+/**
+ * What an image row draws. Read back off a transcript it is served from the
+ * image cache by URL (see cachedImage in main); attached a moment ago it is
+ * still the base64 the composer sent, inlined as a data URL.
+ */
+function imageSrc(item: TranscriptItem): string | undefined {
+  if (item.role !== 'image') return undefined
+  if (item.src) return item.src
+  return item.data ? `data:${item.mediaType ?? 'image/png'};base64,${item.data}` : undefined
+}
+
 function Zoomable({
   src,
   alt,
@@ -2629,7 +2679,9 @@ function Zoomable({
         title="Open full size"
         onClick={() => setOpen(true)}
       >
-        <img src={src} alt={alt ?? ''} />
+        {/* Decoded off the main thread and only once it scrolls near: a session
+            with thirty screenshots must not decode all thirty to show the last. */}
+        <img src={src} alt={alt ?? ''} loading="lazy" decoding="async" />
       </button>
       {open && (
         <Lightbox
@@ -6057,8 +6109,14 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           key: 'theme',
           label: 'Theme',
           value: config.appearance.theme,
-          options: ['dark', 'light', 'system'],
-          hint: 'system follows the OS; dark and light stay put'
+          // `omarchy` only where there is an Omarchy theme to follow — or when the
+          // file already names it, so the row can show the value in force.
+          ...(omarchyAvailable() || config.appearance.theme === 'omarchy'
+            ? {
+                options: ['dark', 'light', 'system', 'omarchy'],
+                hint: 'system follows the OS; omarchy follows the desktop theme; dark and light stay put'
+              }
+            : { options: ['dark', 'light', 'system'], hint: 'system follows the OS; dark and light stay put' })
         },
         {
           kind: 'penguin',

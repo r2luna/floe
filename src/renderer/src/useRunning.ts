@@ -3,6 +3,7 @@ import type { AgentEvent, AgentEventEnvelope, NotifySoundId } from '../../shared
 import { isQueryKey } from '../../shared/queries.ts'
 import { playDoneSound } from './sounds.ts'
 import { markUnread, readOpen, subscribeUnread, unreadMarks } from './unreadStore.ts'
+import { subscribeTurns } from './activeTurns.ts'
 
 // How long an event-driven `busy` entry is trusted over the server's answer. A
 // poll in flight when a turn starts would otherwise erase the spinner it raced:
@@ -164,34 +165,21 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
   // and who is actually blocked on the user, and believe it. Also re-hydrates
   // after a reload, when the sets start empty but the turns did not stop and the
   // open question did not answer itself.
-  useEffect(() => {
-    let stopped = false
-    const sync = async (): Promise<void> => {
-      const [keys, asking] = await Promise.all([
-        window.floe.agent.active().catch(() => null),
-        window.floe.agent.waiting().catch(() => null)
-      ])
-      if (stopped) return
-      const now = Date.now()
-      // Filtered HERE and not in main, for the reason above: `agent.active()`
-      // has to keep telling the truth to the panel that asks about itself.
-      const own = (list: string[]): string[] => list.filter((k) => !isQueryKey(k))
-      if (keys) setBusy((prev) => reconcileLive(prev, own(keys), lastEventAt.current, now))
-      if (asking) setWaiting((prev) => reconcileLive(prev, own(asking), lastEventAt.current, now))
-    }
-    void sync()
-    const timer = setInterval(() => void sync(), 4_000)
-    // A window that was hidden may have missed the whole end of a turn.
-    const onVisible = (): void => {
-      if (!document.hidden) void sync()
-    }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      stopped = true
-      clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [])
+  //
+  // The poll itself is shared (activeTurns.ts): the query dock and every open
+  // chat correct themselves against the same answer, on the same timer.
+  useEffect(
+    () =>
+      subscribeTurns(({ active, waiting }) => {
+        const now = Date.now()
+        // Filtered HERE and not in main, for the reason above: `agent.active()`
+        // has to keep telling the truth to the panel that asks about itself.
+        const own = (list: string[]): string[] => list.filter((k) => !isQueryKey(k))
+        if (active) setBusy((prev) => reconcileLive(prev, own(active), lastEventAt.current, now))
+        if (waiting) setWaiting((prev) => reconcileLive(prev, own(waiting), lastEventAt.current, now))
+      }),
+    []
+  )
 
   return { busy, waiting, unread }
 }

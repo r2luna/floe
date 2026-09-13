@@ -200,12 +200,16 @@ test('an attached image reloads under the message it came with', () => {
   try {
     const items = loadClaudeTranscript(worktree, 'sess')
     assert.deepEqual(
-      items.map((i) => [i.role, i.text ?? i.data]),
+      items.map((i) => [i.role, i.text]),
       [
         ['user', 'olha esse bug image 01'],
-        ['image', 'AAAA']
+        ['image', undefined]
       ]
     )
+    // Served, not carried: the bytes went to the image cache and the row
+    // points at them (see the cache test below for the file itself).
+    assert.equal(items[1].data, undefined)
+    assert.match(items[1].src ?? '', /^floe-media:\/\/file\//)
     assert.equal(items[1].mediaType, 'image/jpeg')
     assert.equal(items[1].at, Date.parse('2026-08-31T00:22:00.000Z'))
   } finally {
@@ -1083,5 +1087,48 @@ test('the worktree premise folds out of the first message into its own row', () 
   } finally {
     process.env.HOME = home
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// --- images, served rather than carried ------------------------------------
+
+test('a screenshot in the JSONL loads as a served url, written to the cache once', async () => {
+  const { cachedImage, setImageCacheDir } = await import('./claudeSessions.ts')
+  const { pathFromMediaUrl } = await import('./media.ts')
+  const home = process.env.HOME
+  const cache = mkdtempSync(join(tmpdir(), 'floe-image-cache-'))
+  setImageCacheDir(cache)
+  const worktree = '/tmp/wt-img'
+  const bytes = Buffer.from('not really a png, but the bytes are the point')
+  seedSession(worktree, 'sess', [
+    { type: 'user', timestamp: '2026-08-29T10:00:00.000Z', message: { content: 'look' } },
+    {
+      type: 'user',
+      timestamp: '2026-08-29T10:00:01.000Z',
+      message: {
+        content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: bytes.toString('base64') } }]
+      }
+    }
+  ])
+  try {
+    const items = loadClaudeTranscript(worktree, 'sess')
+    const image = items.find((i) => i.role === 'image')
+    assert.ok(image, 'the image row is there')
+    assert.equal(image.data, undefined, 'no base64 crosses to the renderer')
+    const file = pathFromMediaUrl(image.src ?? '')
+    assert.ok(file?.startsWith(cache), `served from the cache: ${image.src}`)
+    assert.deepEqual(readFileSync(file!), bytes)
+
+    // Opened again, the same bytes map to the same file — nothing is rewritten.
+    const before = statSync(file!).mtimeMs
+    await new Promise((r) => setTimeout(r, 20))
+    assert.equal(loadClaudeTranscript(worktree, 'sess').find((i) => i.role === 'image')?.src, image.src)
+    assert.equal(statSync(file!).mtimeMs, before)
+
+    // A type the browser cannot draw stays inline rather than being served as
+    // something it is not.
+    assert.equal(cachedImage('image/x-portable-bitmap', bytes.toString('base64')), undefined)
+  } finally {
+    process.env.HOME = home
   }
 })

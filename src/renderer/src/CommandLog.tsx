@@ -1,10 +1,10 @@
-import { CanvasAddon } from '@xterm/addon-canvas'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
+import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
-import { XTERM_THEME } from './xtermTheme'
+import { onXtermTheme, xtermTheme } from './xtermTheme'
 
 /**
  * A command's output, read-only.
@@ -32,7 +32,7 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
       lineHeight: 1.25,
       cursorBlink: false,
       disableStdin: true,
-      theme: XTERM_THEME,
+      theme: xtermTheme(),
       allowProposedApi: true,
       allowTransparency: true
     })
@@ -40,11 +40,7 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
     term.loadAddon(fit)
     term.loadAddon(new WebLinksAddon((_e, uri) => void window.floe.openExternal(uri)))
     term.open(host)
-    try {
-      term.loadAddon(new CanvasAddon())
-    } catch {
-      /* no WebGL/canvas — the DOM renderer still works */
-    }
+    loadRenderer(term)
     fit.fit()
 
     const off = window.floe.commands.onEvent((event) => {
@@ -69,9 +65,11 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
       }
     })
     ro.observe(host)
+    const offTheme = onXtermTheme(() => (term.options.theme = xtermTheme()))
 
     return () => {
       off()
+      offTheme()
       ro.disconnect()
       term.dispose()
     }

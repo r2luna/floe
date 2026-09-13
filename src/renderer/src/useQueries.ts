@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEventEnvelope, Query } from '../../shared/types'
 import { dockRows, namesOf, type QueryRow } from './queryDock.ts'
-
-/** How often the active-key list is re-read. The events below move a row the
- *  instant it changes; this is what catches a turn that was already running
- *  before the chat was opened — which is the whole case the dock exists for. */
-const POLL_MS = 4_000
+import { subscribeTurns } from './activeTurns.ts'
 
 /**
  * The queries this chat has open, live — the dock's rows.
@@ -53,22 +49,14 @@ export function useQueries(session?: { id: string; worktreePath: string }): Quer
 
   // Which of them are working. Polled as well as streamed: the panel may be
   // opened onto a turn that started long before it mounted, and an event stream
-  // only ever tells you what happened since you started listening.
+  // only ever tells you what happened since you started listening. The poll is
+  // the shared one (activeTurns.ts) — subscribing asks at once, and the timer
+  // runs only while a panel like this one is listening.
   useEffect(() => {
     if (!sessionId) return
-    let alive = true
-    const read = (): void => {
-      void window.floe.agent
-        .active()
-        .catch(() => [] as string[])
-        .then((keys) => alive && setActive(new Set(keys)))
-    }
-    read()
-    const timer = setInterval(read, POLL_MS)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
+    return subscribeTurns(({ active }) => {
+      if (active) setActive(new Set(active))
+    })
   }, [sessionId])
 
   // What each one is on. Only tool calls move a row, so a query streaming a

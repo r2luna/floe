@@ -11,8 +11,16 @@
 import { useEffect, useState } from 'react'
 import { setDefaultChoice, setHarnessDefaults, setUserNick } from './models'
 import type { TransparencyId } from '../../shared/types'
+import {
+  OMARCHY_CSS_VARS,
+  omarchyCssVars,
+  omarchyPanelFill,
+  omarchyXtermTheme,
+  type OmarchyPalette
+} from '../../shared/omarchyPalette'
+import { setXtermTheme } from './xtermTheme'
 
-type Theme = 'system' | 'dark' | 'light'
+type Theme = 'system' | 'dark' | 'light' | 'omarchy'
 
 // `[appearance] transparency` and its amount, kept for the same reason `chosen`
 // is: an OS flip has to re-decide whether THIS theme is glassed without
@@ -45,16 +53,50 @@ function applyGlass(dark: boolean): void {
 // config — and ignored when the config names a theme outright.
 let chosen: Theme = 'system'
 
+// The Omarchy palette being worn — null unless `omarchy` is chosen AND Omarchy
+// has a theme to read. `omarchyPresent` is only the second half, for Settings.
+let omarchy: OmarchyPalette | null = null
+let omarchyPresent = false
+
+/** Whether this machine has an Omarchy theme — Settings offers `omarchy` only then. */
+export const omarchyAvailable = (): boolean => omarchyPresent
+
+/**
+ * Wear the palette, or take it off.
+ *
+ * Inline on <html>, so it outranks both the dark `:root` and the light block
+ * without a stylesheet of its own; removing the properties hands every token
+ * straight back to index.css.
+ */
+function paintOmarchy(palette: OmarchyPalette | null): void {
+  const style = document.documentElement.style
+  if (palette) {
+    for (const [name, value] of Object.entries(omarchyCssVars(palette))) style.setProperty(name, value)
+  } else {
+    for (const name of OMARCHY_CSS_VARS) style.removeProperty(name)
+  }
+  setXtermTheme(palette ? { theme: omarchyXtermTheme(palette), solidBg: omarchyPanelFill(palette) } : null)
+}
+
 /**
  * Put `light` or `dark` on <html>, which is what every themed rule keys off.
  *
- * `system` is the only value that consults the OS. The other two mean it: an app
- * pinned to dark stays dark when the Mac flips at sunset, which is the whole
- * reason to pin it.
+ * `system` consults the OS. `dark` and `light` mean it: an app pinned to dark
+ * stays dark when the Mac flips at sunset, which is the whole reason to pin it.
+ * `omarchy` takes the mode with the colours from the desktop's theme, and is
+ * `system` on a machine without Omarchy — the same floe.toml has to work there.
  */
 async function applyTheme(theme: Theme): Promise<void> {
   chosen = theme
-  const dark = theme === 'system' ? await window.floe.theme.isDark() : theme === 'dark'
+  const palette = await window.floe.omarchy.palette().catch(() => null)
+  omarchyPresent = palette !== null
+  omarchy = theme === 'omarchy' ? palette : null
+  paintOmarchy(omarchy)
+  const dark = omarchy
+    ? omarchy.mode === 'dark'
+    : theme === 'system' || theme === 'omarchy'
+      ? await window.floe.theme.isDark()
+      : theme === 'dark'
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   applyGlass(dark)
 }
@@ -138,14 +180,22 @@ export function useVimEnabled(): boolean {
 export function useAppearance(): void {
   useEffect(() => {
     const stopConfig = window.floe.config.onChange(() => void applyConfig())
-    // The OS flipping only matters under `system`; under a pinned theme it is
-    // exactly the event the user asked us to ignore.
+    // The OS flipping only matters under `system` (and `omarchy` without an
+    // Omarchy theme, which is `system`); under a pinned theme it is exactly the
+    // event the user asked us to ignore.
     const stopOs = window.floe.theme.onChange(() => {
-      if (chosen === 'system') void applyTheme('system')
+      if (chosen === 'system' || (chosen === 'omarchy' && !omarchy)) void applyTheme(chosen)
+    })
+    // An Omarchy theme switch — re-read the palette. Ignored under any other
+    // theme: the desktop changing is not a reason to repaint an app pinned away
+    // from it.
+    const stopOmarchy = window.floe.omarchy.onChange(() => {
+      if (chosen === 'omarchy') void applyTheme('omarchy')
     })
     return () => {
       stopConfig()
       stopOs()
+      stopOmarchy()
     }
   }, [])
 }

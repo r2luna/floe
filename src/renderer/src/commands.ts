@@ -33,6 +33,16 @@ export interface CommandContext {
   canOpen: (kind: string) => boolean
   /** Why `canOpen` said no, phrased for the user. */
   whyCannotOpen: (kind: string) => string
+  /** Native browser actions shared by its toolbar, keymap and MCP commands. */
+  browser: {
+    address: () => void
+    back: () => void
+    forward: () => void
+    reload: () => void
+    stop: () => void
+    focus: () => void
+    devtools: () => void
+  }
   /** The unified diff for a path. Injected so the registry needs no demo data. */
   patchFor: (path: string) => string
   /** Show the project palette. */

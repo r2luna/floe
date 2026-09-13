@@ -488,6 +488,7 @@ function registerTools(server: McpServer, token: string): void {
   registerReviewTools(server)
   registerUsageTools(server)
   registerPlanExtraTools(server)
+  registerBrowserTools(server, token)
   registerPluginToolsOn(server)
 }
 
@@ -2495,6 +2496,113 @@ function registerUsageTools(server: McpServer): void {
       }
     }
   )
+}
+
+function registerBrowserTools(server: McpServer, token: string): void {
+  server.tool(
+    'open_browser',
+    'Open the internal browser panel and optionally navigate it. Local URLs such as localhost:3000 work without a scheme.',
+    { url: z.string().optional().describe('The URL to open. Omit to show the current page.') },
+    async ({ url }) => {
+      const win = getWindow()
+      if (!win) return textResult({ error: 'No Floe window is open.' })
+      // Opening is fire-and-forget: the renderer may currently point at a
+      // remote backend, but this native view always belongs to the local window.
+      // Waiting for mcp:command-result there would route the acknowledgement to
+      // that backend even though the local renderer already opened the panel.
+      pushCommand({
+        kind: 'run_command', callerKey: token, requestId: randomUUID(), commandId: 'browser.open'
+      })
+      const browser = await import('./browser')
+      return textResult(url ? await browser.navigateBrowser(win, url) : browser.browserState(win))
+    }
+  )
+
+  server.tool(
+    'browser_navigate',
+    'Navigate the current internal browser page.',
+    { url: z.string().describe('The URL to open.') },
+    async ({ url }) => browserCall((browser, win) => browser.navigateBrowser(win, url))
+  )
+  server.tool(
+    'browser_snapshot',
+    'Read the page as text plus visible interactive elements. Elements receive refs such as b1 for browser_click and browser_type.',
+    {},
+    async () => browserCall((browser, win) => browser.snapshotBrowser(win))
+  )
+  server.tool(
+    'browser_click',
+    'Click a visible page element by snapshot ref or CSS selector.',
+    { target: z.string().describe('A snapshot ref such as b4, or a CSS selector.') },
+    async ({ target }) => browserCall((browser, win) => browser.clickBrowser(win, target))
+  )
+  server.tool(
+    'browser_type',
+    'Replace the value of an input, textarea, select, or contenteditable element and optionally submit its form.',
+    {
+      target: z.string().describe('A snapshot ref such as b4, or a CSS selector.'),
+      text: z.string().describe('Text to enter.'),
+      submit: z.boolean().optional().describe('Submit the containing form after typing.')
+    },
+    async ({ target, text, submit }) =>
+      browserCall((browser, win) => browser.typeInBrowser(win, target, text, submit))
+  )
+  server.tool(
+    'browser_press',
+    'Send a keyboard key to the current page.',
+    { key: z.string().describe('Electron keyCode, e.g. Enter, Escape, Tab, ArrowDown or a character.') },
+    async ({ key }) => browserCall((browser, win) => {
+      browser.focusBrowser(win)
+      browser.pressInBrowser(win, key)
+      return { pressed: key }
+    })
+  )
+  server.tool(
+    'browser_evaluate',
+    'Evaluate JavaScript in the page, like the DevTools console, and return a serializable result.',
+    { expression: z.string().describe('JavaScript expression or program to evaluate in the page.') },
+    async ({ expression }) => browserCall((browser, win) => browser.evaluateBrowser(win, expression))
+  )
+  server.tool('browser_screenshot', 'Capture the current internal browser page as PNG.', {}, async () => {
+    try {
+      const win = getWindow()
+      if (!win) return textResult({ error: 'No Floe window is open.' })
+      const browser = await import('./browser')
+      const shot = await browser.screenshotBrowser(win)
+      return { content: [{ type: 'image' as const, data: shot.data, mimeType: shot.mimeType }] }
+    } catch (e) {
+      return textResult({ error: (e as Error).message })
+    }
+  })
+  server.tool(
+    'browser_history',
+    'Move through or control the current page load.',
+    { action: z.enum(['back', 'forward', 'reload', 'stop']).describe('Browser action to run.') },
+    async ({ action }) => browserCall((browser, win) => {
+      if (action === 'back') return browser.browserBack(win)
+      if (action === 'forward') return browser.browserForward(win)
+      if (action === 'reload') return browser.browserReload(win)
+      return browser.browserStop(win)
+    })
+  )
+  server.tool('browser_devtools', 'Open detached Chromium DevTools for the internal browser page.', {}, async () =>
+    browserCall((browser, win) => {
+      browser.openBrowserDevTools(win)
+      return { opened: true }
+    })
+  )
+}
+
+async function browserCall(
+  run: (browser: typeof import('./browser'), win: BrowserWindow) => unknown | Promise<unknown>
+): Promise<ReturnType<typeof textResult>> {
+  try {
+    const win = getWindow()
+    if (!win) return textResult({ error: 'No Floe window is open.' })
+    return textResult(await run(await import('./browser'), win))
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
 }
 
 function registerCommandTools(server: McpServer, token: string): void {
