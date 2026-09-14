@@ -442,11 +442,11 @@ export function Composer({
         take()
         return modelFlat[modelAt]?.run()
       }
-      // Enter submits what space chose — it does NOT pick the row under the
-      // cursor. Once space is how you choose, a cursor is just where you are
-      // looking, and closing the menu must not silently take it as an answer.
+      // Enter picks the row under the cursor and closes — the last of the three
+      // choices in one key, instead of space then Enter.
       if (e.key === 'Enter') {
         take()
+        modelFlat[modelAt]?.run()
         setPicking(false)
         return input.current?.focus()
       }
