@@ -1,0 +1,412 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe panels on Omarchy's layout rules</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Floe's own panel model (.lane of .panel, flush with hairlines, head + body, focus on
+   the panel, the glyph rail on the right) kept as it is. What changes is the
+   skin and the insides, taken from Omarchy/Flea: radius 0, hairlines, one
+   mono face in 10/11/12, uppercase caption headings, cursor row = 2px accent
+   bar + accent text, the sidebar as it is today, facts table
+   inside the review panel, menu rows with a key column, dialog fields as
+   background-inside-hairline that turn accent on focus, settings as rail +
+   rows. No tabs anywhere. */
+:root{ --cap:10px; --bs:11px; --body:12px; --px:12px; --gap:8px; --row:26px; --ctl:28px; }
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; overflow-x:auto; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+.lede code,.why code{ color:var(--text-strong); }
+.frame{ margin:0 0 40px; padding:0 0 34px; border-bottom:1px solid var(--line-soft); }
+.tag{ border:1px solid var(--edge); padding:1px 7px; color:var(--dim); font-size:10px; font-weight:400; }
+.tag[data-pick]{ border-color:var(--accent); color:var(--accent); }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge);
+  font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+
+.win *, .legend *{ border-radius:0 !important; }
+.win .st, .legend .st{ border-radius:50% !important; }
+
+/* ---- window = Floe's .app: (top bar?) + .workspace + (status?) ---------- */
+.win{ min-width:1240px; border:1px solid var(--line); background:var(--bg); display:flex; flex-direction:column; height:660px; overflow:hidden; font-size:var(--body); position:relative; }
+.top{ height:30px; display:flex; align-items:center; gap:6px; padding:0 14px; color:var(--dim); border-bottom:1px solid var(--line-soft); flex:none; }
+.top b{ color:var(--text-strong); font-weight:400; }
+.top i{ color:var(--faint); font-style:normal; }
+.top .right{ margin-left:auto; color:var(--faint); font-size:var(--cap); display:flex; gap:12px; }
+.workspace{ display:flex; flex:1; min-height:0; }
+.lane{ display:flex; gap:6px; flex:1; min-width:0; padding:6px; }
+.lane-col{ display:flex; flex-direction:column; gap:6px; min-width:0; }
+.lane-col[data-w="side"]{ flex:0 0 250px; }
+.panel.wt{ flex:none; }
+.panel.wt[data-collapsed] .panel-head{ border-bottom:0; }
+.panel.wt-new{ flex:1; display:flex; flex-direction:row; align-items:center; justify-content:center; gap:10px; color:var(--faint); font-size:var(--bs); }
+.h .cnt{ float:right; letter-spacing:0; color:var(--faint); }
+.lane-col[data-w='chat']{ flex:1 1 420px; }
+.lane-col[data-w="review"]{ flex:0 0 260px; }
+.lane-col[data-w="tools"]{ flex:0 0 300px; }
+.term{ margin:0; padding:var(--gap) var(--px); color:var(--text); font-size:var(--bs); line-height:1.55; white-space:pre; }
+.term .ok{ color:var(--live); } .term .wk{ color:var(--working); }
+.term .caret{ display:inline-block; width:7px; height:12px; background:var(--dim); vertical-align:-2px; }
+.lane-col[data-w='settings']{ flex:0 0 340px; }
+
+/* ---- panel: Floe's, squared ------------------------------------------- */
+.panel{ display:flex; flex-direction:column; flex:1 1 auto; min-height:0; width:100%; background:var(--panel); border:1px solid var(--line); }
+.panel[data-focused]{ background:var(--panel-focused); }
+.panel-head{ display:flex; align-items:center; gap:7px; height:30px; padding:0 11px; border-bottom:1px solid var(--line-soft); flex:none; font-size:var(--bs); }
+.panel[data-focused] .panel-head{ border-bottom-color:var(--line); }
+.panel-icon{ color:var(--dim); flex:none; }
+.panel-name{ color:var(--text-strong); flex:none; }
+.panel[data-focused] .panel-name{ color:var(--accent); }
+.panel-sub{ color:var(--dim); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.p-act{ color:var(--faint); font-size:var(--cap); flex:none; white-space:nowrap; }
+.p-act b{ color:var(--dim); font-weight:400; }
+.panel-body{ flex:1; min-height:0; overflow:hidden; }
+.panel-body.pad{ padding:var(--gap) 0; }
+
+/* ---- rail rows (Flea's SidebarRow) ------------------------------------ */
+.h{ color:var(--dim); font-size:var(--cap); letter-spacing:1px; text-transform:uppercase; padding:2px var(--px) 6px; }
+.r + .h, .prem + .h{ padding-top:14px; }
+.r{ position:relative; display:flex; align-items:center; gap:var(--gap); height:var(--row); padding:0 var(--px); color:var(--text); }
+.r .g{ width:14px; color:var(--dim); text-align:center; flex:none; font-size:11px; }
+.r .l{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.r .d{ color:var(--dim); font-size:var(--cap); font-variant-numeric:tabular-nums; }
+.r .k{ color:var(--faint); font-size:var(--cap); }
+.r .chev{ color:var(--faint); font-size:var(--cap); }
+.r .st{ width:6px; height:6px; border-radius:50%; background:var(--faint); flex:none; }
+.r .st[data-live]{ background:var(--live); }
+.r .st[data-working]{ background:var(--working); }
+.r[data-cur]{ background:var(--bg); }
+.r[data-cur]::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent); }
+.r[data-cur] .l{ color:var(--accent); }
+.r[data-path]{ background:var(--bg); }
+.r[data-path] .l{ color:var(--text-strong); }
+.r[data-hover]{ background:var(--wash-3); }
+.r[data-sel] .g{ color:var(--accent); }
+.r[data-dim] .l{ color:var(--dim); }
+.r[data-err] .l{ color:var(--nick-you); }
+.prem{ padding:6px var(--px) 2px; color:var(--dim); font-size:var(--cap); line-height:1.4; }
+
+/* ---- explorer: two Miller columns inside one panel -------------------- */
+.cols{ display:grid; grid-template-columns:1fr 1fr; height:100%; }
+.col{ padding:var(--gap) 0; overflow:hidden; }
+.col + .col{ border-left:1px solid var(--line-soft); }
+
+/* ---- chat --------------------------------------------------------------- */
+.chatgrid{ display:grid; grid-template-rows:1fr auto; height:100%; }
+.scroll{ overflow:hidden; padding:var(--gap) var(--px); }
+.line{ display:flex; gap:var(--gap); align-items:baseline; padding:2px 0; }
+.line .t{ color:var(--faint); font-size:var(--cap); width:36px; flex:none; font-variant-numeric:tabular-nums; }
+.line .nick{ flex:none; width:52px; text-align:right; }
+.nick[data-who='you']{ color:var(--nick-you); }
+.nick[data-who='claude']{ color:var(--nick-claude); }
+.line .said{ color:var(--text); min-width:0; }
+.line .said b{ color:var(--text-strong); }
+.line .said .sys{ color:var(--dim); }
+.line[data-run] .said{ color:var(--dim); }
+.line[data-run] .said i{ color:var(--live); font-style:normal; }
+.line[data-run] .said .cmd{ color:var(--text); }
+.line .said ul{ margin:2px 0 2px 14px; padding:0; }
+.line .said .k{ color:var(--faint); font-size:var(--cap); }
+.cmp{ padding:0; display:grid; gap:0; }
+.cmp .field{ height:32px; background:var(--bg); border:0; border-top:1px solid var(--accent); border-bottom:1px solid var(--line-soft); display:flex; align-items:center; padding:0 var(--px); color:var(--dim); gap:6px; }
+.cmp .field .prompt{ color:var(--accent); }
+.cmp .field > span:last-child{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.cmp .field .caret{ display:inline-block; width:2px; height:12px; background:var(--accent); }
+.meta{ display:flex; gap:14px; white-space:nowrap; min-width:0; color:var(--dim); font-size:var(--cap); align-items:center; padding:6px var(--px); }
+.seg{ display:inline-flex; border:1px solid var(--line); }
+.seg span{ padding:1px 7px; color:var(--dim); }
+.seg span + span{ border-left:1px solid var(--line); }
+.seg span[data-on]{ color:var(--accent); background:var(--wash-2); }
+.meta .right{ margin-left:auto; color:var(--faint); overflow:hidden; text-overflow:ellipsis; }
+.meta b{ color:var(--text); font-weight:400; }
+
+/* ---- review: facts + files -------------------------------------------- */
+.review{ display:grid; grid-template-rows:auto 1fr; height:100%; }
+.media{ margin:var(--gap) var(--gap) 0; border:1px solid var(--line-soft); background:var(--bg); padding:var(--gap); color:var(--dim); font-size:var(--cap); line-height:1.45; white-space:pre; overflow:hidden; height:132px; }
+.media .add{ color:var(--live); } .media .del{ color:var(--nick-you); } .media .hd{ color:var(--faint); }
+.facts{ display:grid; grid-template-columns:70px 1fr; column-gap:8px; row-gap:0; font-size:var(--cap); padding:var(--gap) 0 4px; }
+.facts dt{ padding:3px 0 3px var(--px); } .facts dd{ padding:3px var(--px) 3px 0; }
+.facts dt[data-cur], .facts dt[data-cur] + dd{ background:var(--bg); }
+.facts dt{ color:var(--dim); } .facts dd{ margin:0; color:var(--text); font-variant-numeric:tabular-nums; }
+.facts .ok{ color:var(--live); } .facts .wk{ color:var(--working); } .facts .ac{ color:var(--accent); }
+.files{ padding:var(--gap) 0; overflow:hidden; }
+.files .r{ height:22px; font-size:var(--bs); }
+
+/* ---- right glyph rail (Floe's) ---------------------------------------- */
+.rail{ width:36px; display:flex; flex-direction:column; align-items:center; padding:10px 0; gap:4px; flex:none; }
+.rail span{ width:24px; height:24px; display:grid; place-items:center; color:var(--dim); font-size:12px; }
+.rail span[data-on]{ color:var(--accent); }
+.rail .sp{ flex:1; }
+
+/* ---- status bar (variant) --------------------------------------------- */
+.status{ height:26px; display:flex; align-items:center; white-space:nowrap; min-width:0; background:var(--panel); border-top:1px solid var(--line); padding:0 var(--px); gap:var(--gap); font-size:var(--cap); color:var(--text); flex:none; }
+.status .right{ margin-left:auto; flex:1; justify-content:flex-end; color:var(--dim); display:flex; gap:14px; min-width:0; }
+.status .right > span{ white-space:nowrap; flex:none; }
+.status .right > span:first-child{ flex:0 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.status b{ color:var(--text); font-weight:400; }
+.status .busy{ color:var(--working); } .status .err{ color:var(--nick-you); } .status .hint{ color:var(--faint); }
+
+/* ---- menu, dialog, settings ------------------------------------------- */
+.menu{ position:absolute; border:1px solid var(--line); background:var(--panel); padding:4px 0; width:210px; z-index:5; }
+.menu .mr{ display:flex; align-items:center; height:var(--row); padding:0 var(--px); color:var(--text); gap:var(--gap); }
+.menu .mr .k{ margin-left:auto; color:var(--faint); font-size:var(--cap); }
+.menu .mr[data-cur]{ background:var(--bg); color:var(--accent); }
+.menu .mr[data-cur] .k{ color:var(--accent); }
+.menu .sep{ height:1px; background:var(--line); margin:4px 0; }
+.menu .mr[data-off]{ color:var(--faint); }
+.scrim{ position:absolute; inset:0; background:color-mix(in srgb, var(--bg) 60%, transparent); display:grid; place-items:center; z-index:6; }
+.dlg{ border:1px solid var(--line); background:var(--panel); padding:var(--px); display:grid; gap:var(--gap); width:400px; }
+.dlg h3{ margin:0 0 2px; font-size:var(--cap); color:var(--dim); font-weight:400; text-transform:uppercase; letter-spacing:1px; }
+.dlg label{ color:var(--dim); font-size:var(--cap); }
+.dlg .fld{ height:var(--ctl); background:var(--bg); border:1px solid var(--line); display:flex; align-items:center; padding:0 var(--gap); color:var(--text-strong); white-space:nowrap; overflow:hidden; }
+.dlg .fld[data-focus]{ border-color:var(--accent); }
+.dlg .fld .ph{ color:var(--faint); overflow:hidden; text-overflow:ellipsis; }
+.dlg .fld .caret{ display:inline-block; width:2px; height:12px; background:var(--accent); margin-left:1px; }
+.dlg .btns{ display:flex; gap:var(--gap); justify-content:flex-end; margin-top:4px; }
+.dbtn{ height:var(--ctl); padding:0 var(--px); display:inline-flex; align-items:center; gap:var(--gap); border:1px solid var(--line); color:var(--dim); background:var(--wash-1); }
+.dbtn[data-primary]{ border-color:var(--accent); color:var(--accent); background:var(--wash-2); }
+.dbtn kbd{ font:inherit; font-size:var(--cap); color:var(--faint); }
+.setgrid{ display:grid; grid-template-columns:120px 1fr; height:100%; }
+.setgrid .srail{ border-right:1px solid var(--line-soft); padding:var(--gap) 0; }
+.setgrid .sbody{ padding:var(--gap) 0; display:grid; gap:0; align-content:start; overflow:hidden; }
+.srow{ position:relative; display:grid; grid-template-columns:1fr auto; align-items:center; gap:var(--gap); padding:6px var(--px); }
+.srow[data-cur]{ background:var(--bg); }
+.srow[data-cur]::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent); }
+.srow[data-cur] .l{ color:var(--accent); }
+.srow .l{ color:var(--text); } .srow .l small{ display:block; color:var(--dim); font-size:var(--cap); }
+.srow .seg{ font-size:var(--cap); }
+.srow .seg span{ padding:3px 8px; }
+.tog{ width:26px; height:14px; border:1px solid var(--line); position:relative; }
+.tog::after{ content:""; position:absolute; top:2px; left:2px; width:8px; height:8px; background:var(--dim); }
+.tog[data-on]{ border-color:var(--accent); } .tog[data-on]::after{ left:14px; background:var(--accent); }
+.ruler{ display:flex; gap:2px; align-items:end; height:14px; }
+.ruler i{ width:8px; background:var(--edge); height:8px; }
+.ruler i[data-on]{ background:var(--accent); height:14px; }
+
+/* ---- F3 legend --------------------------------------------------------- */
+.legend{ display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; }
+.legend .box{ border:1px solid var(--line-soft); background:var(--panel); }
+.legend .cap{ color:var(--faint); font-size:var(--cap); text-transform:uppercase; letter-spacing:1px; padding:6px 11px; border-bottom:1px solid var(--line-soft); }
+.legend .panel{ margin:10px; width:auto; height:70px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe panels on Omarchy's layout rules</h1>
+<section class="frame" style="padding-bottom:22px">
+  <h2>Rules — system-wide when this is implemented <span class="tag" data-pick>every panel, every list, every field</span></h2>
+  <ol class="rules">
+    <li><b>R1 Behaviour is untouched.</b> Layout and skin only. Same panels, same sidebar, same keys, same commands.</li>
+    <li><b>R2 Panels sit close, not flush.</b> A 6px gutter between panels and around the lane, each panel with its own 1px <code>--line</code> border. Flush was tried and felt cramped.</li>
+    <li><b>R3 No rounded corners.</b> <code>--radius: 0</code> everywhere: panels, heads, fields, chips, buttons, menus, dialogs, toggles. Dots stay dots.</li>
+    <li><b>R4 Rows span the full panel width.</b> Panel bodies carry no horizontal padding. The 12px text inset lives on the row. The cursor band and its 2px accent bar reach the panel's own edge.</li>
+    <li><b>R5 Same row everywhere.</b> Sidebar sessions, commands, changed files, settings rows, facts, menu rows: one row height, one inset, one cursor treatment (accent bar + accent text), hover an 8% wash, no fills.</li>
+    <li><b>R6 Section headings</b> are caption size, uppercase, muted, 1px letter-spacing, same inset as rows.</li>
+    <li><b>R7 The composer is a strip.</b> Full panel width at the bottom of the chat, accent hairline on top when focused, no box inside a box.</li>
+    <li><b>R8 Fields and buttons</b> are <code>background</code> inside a hairline; focus turns the hairline accent. Buttons carry their key beside the label.</li>
+    <li><b>R9 Focus on a panel</b> is its name in accent and the head hairline in <code>--line</code>. Nothing else moves.</li>
+    <li><b>R10 Three text sizes</b>, one mono face: caption 10, body-small 11, body 12.</li>
+  </ol>
+</section>
+<style>.rules{ margin:0; padding-left:18px; color:var(--dim); font-size:12px; max-width:100ch; } .rules li{ margin:0 0 4px; } .rules b{ color:var(--text-strong); font-weight:700; } .rules code{ color:var(--text-strong); }</style>
+<p class="lede">Floe's panel model stays: a lane of panels, each with its head and body, focus on the panel, the glyph rail on the right. The panels sit flush, separated by hairlines, no gutter, as in the columns frame you picked. No tabs. What comes from Omarchy/Flea is the skin and what lives inside the panels: radius <code>0</code>, hairlines, uppercase caption headings, the cursor row with the 2px accent bar, the sidebar you have today with its worktree cards, the facts table inside the review panel, and the menu, dialog and settings from F3. Status bar and breadcrumb are the two things you were unsure about, so they are variants below, not defaults.</p>
+
+<!-- ====================================================== F1 -->
+<section class="frame">
+  <h2>F1 — no breadcrumb, no status bar <span class="tag" data-pick>panels only</span></h2>
+  <p class="why">The top bar and the status bar are both gone. Each panel head carries its own context: the worktree card says its name, the chat says the session, the harness and the state, the terminal and commands panels sit beside it as today, the review says the diff size. Usage moved to the composer's meta line, where the model already is. The sidebar is the one Floe has now: one card per worktree with its sessions, <code>⌘1</code>… to jump, the premise as a caption line under the rows, no SESSIONS label since that is all a card holds, and the new-worktree card filling the rest. Only the skin changed: square, hairline, uppercase labels, the accent bar on the cursor row.</p>
+  <div class="win" data-variant="bare"></div>
+</section>
+
+<!-- ====================================================== F1b -->
+<section class="frame">
+  <h2>F1b — status bar only <span class="tag">Omarchy's one transient line</span></h2>
+  <p class="why">Same window with Omarchy's status bar at the bottom and nothing on top. It is the one place that talks: counts on the left, the running action or the last error on the right, gone after four seconds, and the key hint. If this reads as noise, F1 is the answer. If it earns its 26px, every notice, update banner and "merge refused" in Floe becomes this line.</p>
+  <div class="win" data-variant="status" style="height:640px"></div>
+</section>
+
+<!-- ====================================================== F1c -->
+<section class="frame">
+  <h2>F1c — breadcrumb only <span class="tag">Floe's current top bar, squared</span></h2>
+  <p class="why">And the other way round: the top bar Floe has today, kept but flattened into a 30px strip on the surface plane, usage on its right. No status bar. This is the least change from what runs now.</p>
+  <div class="win" data-variant="crumbs" style="height:640px"></div>
+</section>
+
+<!-- ====================================================== F2 -->
+<section class="frame">
+  <h2>F2 — menu, settings panel and dialog in context <span class="tag" data-pick>from F3</span></h2>
+  <p class="why">The row menu opens beside the worktree row, its chords in a right column so hints can be switched off without reflow. Settings is a panel in the lane like any other, a rail on its left and label + caption + control rows. The new-worktree dialog is centred over the lane: fields are background inside a hairline, accent when focused, buttons carry their key.</p>
+  <div class="win" data-variant="menu" style="height:600px"></div>
+  <div style="height:14px"></div>
+  <div class="win" data-variant="dialog" style="height:520px"></div>
+</section>
+
+<!-- ====================================================== F3 -->
+<section class="frame" style="border-bottom:none">
+  <h2>F3 — states <span class="tag">focus · cursor · hover · selection · errors</span></h2>
+  <p class="why">Four states, one rule each. A focused panel gets the <code>--edge</code> border and its name in accent; nothing else moves. The cursor row is the accent bar plus accent text. Hover is an 8% wash. Multi-select marks the glyph in accent and leaves the text alone, so a selection and the cursor can share a row. An error row is text in the error colour, no icon, no fill.</p>
+  <div class="legend">
+    <div class="box"><div class="cap">panel · unfocused</div><div class="panel"><div class="panel-head"><span class="panel-icon">▤</span><span class="panel-name">review</span><span class="panel-sub">3 files</span></div></div></div>
+    <div class="box"><div class="cap">panel · focused</div><div class="panel" data-focused><div class="panel-head"><span class="panel-icon">▤</span><span class="panel-name">review</span><span class="panel-sub">3 files</span></div></div></div>
+    <div class="box"><div class="cap">rows · cursor, hover, path</div><div style="padding:8px 0"><div class="r" data-cur><span class="g">⑂</span><span class="l">cursor</span><span class="d">2</span></div><div class="r" data-hover><span class="g">⑂</span><span class="l">hover</span></div><div class="r" data-path><span class="g">⑂</span><span class="l">on the path</span><span class="chev">›</span></div></div></div>
+    <div class="box"><div class="cap">rows · selected, dim, error</div><div style="padding:8px 0"><div class="r" data-sel><span class="g">●</span><span class="l">selected</span></div><div class="r" data-sel data-cur><span class="g">●</span><span class="l">selected + cursor</span></div><div class="r" data-err><span class="g">⑂</span><span class="l">merge refused</span><span class="d">dirty</span></div></div></div>
+  </div>
+</section>
+
+<template id="tpl">
+  <div class="top"><span>r2luna</span><i>›</i><span>floe</span><i>›</i><span>main</span><i>›</i><b>Session 2</b><span class="right"><span>5% 5h · 7% wk</span><span>1003 MB</span></span></div>
+  <div class="workspace">
+    <div class="lane">
+      <div class="lane-col" data-w="side">
+        <div class="panel wt" data-focused>
+          <div class="panel-head"><span class="panel-icon">⌄</span><span class="panel-icon">⑂</span><span class="panel-name">main</span><span class="panel-sub">0/2</span><span class="p-act"><b>⌘1</b></span></div>
+          <div class="panel-body pad">
+            <div class="r"><span class="g">○</span><span class="l">Session 1</span><span class="st" data-live></span></div>
+            <div class="r" data-cur><span class="g">●</span><span class="l">Session 2</span><span class="st" data-working></span></div>
+            <div class="prem">Keep the cursor on its row when a merge reshapes the list.</div>
+          </div>
+        </div>
+        <div class="panel wt">
+          <div class="panel-head"><span class="panel-icon">⌄</span><span class="panel-icon">⑂</span><span class="panel-name">omarchy-theme</span><span class="panel-sub">1/1</span><span class="p-act"><b>⌘2</b></span></div>
+          <div class="panel-body pad">
+            <div class="r"><span class="g">○</span><span class="l">Theme work</span><span class="st" data-live></span></div>
+          </div>
+        </div>
+        <div class="panel wt" data-collapsed>
+          <div class="panel-head"><span class="panel-icon">›</span><span class="panel-icon">⑂</span><span class="panel-name">queue-improvements</span><span class="panel-sub">1 working</span><span class="p-act"><b>⌘3</b></span></div>
+        </div>
+        <div class="panel wt-new"><span>+ new worktree</span><span class="k">n</span></div>
+      </div>
+      <div class="lane-col" data-w="chat">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-icon">●</span><span class="panel-name">Session 2</span><span class="panel-sub">main · claude opus 4.8 · working 00:48</span><span class="p-act"><b>q</b> query · <b>⌘K</b></span></div>
+          <div class="panel-body"><div class="chatgrid">
+            <div class="scroll">
+              <div class="line"><span class="t">14:02</span><span class="nick" data-who="you">you</span><span class="said">que versao é essa? "version": "0.9.0" .. olha o @package.json</span></div>
+              <div class="line" data-run><span class="t">14:02</span><span class="nick" data-who="claude">claude</span><span class="said"><i>✓</i> <span class="cmd">cat package.json</span> · 1 action Bash</span></div>
+              <div class="line"><span class="t">14:02</span><span class="nick" data-who="claude">claude</span><span class="said">Build assinado. Agora instalar:</span></div>
+              <div class="line" data-run><span class="t">14:03</span><span class="nick" data-who="claude">claude</span><span class="said"><i>✓</i> <span class="cmd">pnpm build && pnpm dist</span> · 1 action Bash · 48s</span></div>
+              <div class="line"><span class="t">14:04</span><span class="nick" data-who="claude">claude</span><span class="said"><b>Resumo</b></span></div>
+              <div class="line"><span class="t"></span><span class="nick"></span><span class="said">Commit f704381 — "Tipografia mais legível no terminal e no chat".</span></div>
+              <div class="line"><span class="t"></span><span class="nick"></span><span class="said">Versão 0.3.1 buildada, assinada e instalada:<ul><li>dist/Floe-0.3.1-arm64.dmg (103 MB, assinado com seu cert local)</li><li>/Applications/Floe.app — sem quarentena, abre com duplo-clique</li></ul></span></div>
+              <div class="line"><span class="t">14:06</span><span class="nick" data-who="you">you</span><span class="said">que versao é essa? "version": "0.9.0" .. olha o @package.json</span></div>
+              <div class="line" data-run><span class="t">14:06</span><span class="nick" data-who="claude">claude</span><span class="said"><i>✓</i> <span class="cmd">git log --oneline -3</span> · 2 actions Bash ×2</span></div>
+              <div class="line"><span class="t">14:06</span><span class="nick" data-who="claude">claude</span><span class="said"><span class="sys">thinking… 4s</span> <span class="k">⏎ open · c copy · y yank last</span></span></div>
+            </div>
+            <div class="cmp">
+              <div class="field"><span class="prompt">›</span><span class="caret"></span><span>Describe what you'd like the agent to do… / commands, @ files</span></div>
+              <div class="meta"><span class="seg"><span>ask</span><span data-on>accept</span><span>plan</span><span>danger</span></span><span>claude · <b>opus 4.8</b></span><span>effort <b>high</b></span><span class="right">0k / 1M · 5% 5h · 7% wk · ⏎ send · ⇧⏎ newline</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <div class="lane-col" data-w="tools">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-icon">▣</span><span class="panel-name">Terminal 1</span><span class="panel-sub">zsh · main</span><span class="p-act"><b>⌘T</b></span></div>
+          <div class="panel-body"><pre class="term">$ pnpm gate
+<span class="ok">✓</span> lint        0 warnings
+<span class="ok">✓</span> typecheck   node + web
+<span class="ok">✓</span> test        412 passed
+<span class="wk">…</span> crap        src/main 31 of 31 files
+$ <span class="caret"></span></pre></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><span class="panel-icon">▶</span><span class="panel-name">commands</span><span class="panel-sub">1 running</span><span class="p-act"><b>r</b> run · <b>s</b> stop</span></div>
+          <div class="panel-body pad">
+            <div class="r" data-cur><span class="g">▶</span><span class="l">npm dev</span><span class="d">12:04</span><span class="st" data-live></span></div>
+            <div class="r"><span class="g">▷</span><span class="l">pnpm gate</span><span class="d">exit 0</span></div>
+            <div class="r"><span class="g">▷</span><span class="l">pnpm build:web</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="lane-col" data-w="review">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-icon">▤</span><span class="panel-name">review</span><span class="panel-sub">3 files · +41 −9</span><span class="p-act"><b>a</b> stage · <b>d</b> diff</span></div>
+          <div class="panel-body"><div class="review">            <dl class="facts"><dt>Branch</dt><dd>main · ahead 2</dd><dt>Base</dt><dd>master · 0bec927</dd><dt>Changed</dt><dd><span class="ac">3 files</span> · +41 −9</dd><dt>Tokens</dt><dd>84k in · 12k out</dd><dt>Cost</dt><dd>$0.41</dd><dt>Queue</dt><dd>1 message waiting</dd></dl>
+            <div class="files">
+              <div class="h">Changed files</div>
+              <div class="r" data-cur><span class="g">M</span><span class="l">package.json</span><span class="d">+2 −2</span></div>
+              <div class="r"><span class="g">M</span><span class="l">src/renderer/src/index.css</span><span class="d">+37 −7</span></div>
+              <div class="r"><span class="g">A</span><span class="l">mocks/font-preview.html</span><span class="d">+2</span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+      <div class="lane-col" data-w="settings">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-icon">⚙</span><span class="panel-name">settings</span><span class="panel-sub">display</span><span class="p-act"><b>esc</b> close</span></div>
+          <div class="panel-body"><div class="setgrid">
+            <aside class="srail">
+              <div class="r"><span class="l">General</span></div>
+              <div class="r" data-cur><span class="l">Display</span></div>
+              <div class="r"><span class="l">Keys</span></div>
+              <div class="r"><span class="l">Harnesses</span></div>
+              <div class="r"><span class="l">Plugins</span><span class="d">4</span></div>
+              <div class="r"><span class="l">Machines</span><span class="d">2</span></div>
+            </aside>
+            <div class="sbody">
+              <div class="srow"><span class="l">Text size<small>Base 12, or pin a stop</small></span><span class="ruler"><i></i><i></i><i data-on></i><i></i><i></i></span></div>
+              <div class="srow" data-cur><span class="l">Explorer<small>Columns or a flat list</small></span><span class="seg"><span>list</span><span data-on>columns</span></span></div>
+              <div class="srow"><span class="l">Review panel<small>Facts and the file under review</small></span><span class="tog" data-on></span></div>
+              <div class="srow"><span class="l">Key hints in menus</span><span class="tog" data-on></span></div>
+              <div class="srow"><span class="l">Keys<small>Default, Vim, Mac or Windows</small></span><span class="seg"><span>default</span><span data-on>vim</span><span>mac</span></span></div>
+              <div class="srow"><span class="l">Status bar<small>The one transient line</small></span><span class="tog"></span></div>
+              <div class="srow"><span class="l">Breadcrumb</span><span class="tog"></span></div>
+            </div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+    <div class="rail"><span data-on>≡</span><span>▤</span><span>▣</span><span>✎</span><span>⚙</span><span class="sp"></span><span>⌕</span></div>
+  </div>
+  <div class="status"><span>4 worktrees · 2 sessions · 1 working</span><span class="right"><span class="busy">⟳ claude is running pnpm gate…</span><span><b>1003 MB</b></span><span class="hint">? keys</span></span></div>
+  <div class="menu" style="left:120px;top:42px">
+    <div class="mr">New session<span class="k">c</span></div>
+    <div class="mr" data-cur>Open in terminal<span class="k">t</span></div>
+    <div class="mr">Rename<span class="k">r</span></div>
+    <div class="mr">Set premise<span class="k">p</span></div>
+    <div class="sep"></div>
+    <div class="mr">Merge into master<span class="k">m</span></div>
+    <div class="mr">Review base…<span class="k">b</span></div>
+    <div class="sep"></div>
+    <div class="mr" data-off>Remove worktree<span class="k">d</span></div>
+  </div>
+  <div class="scrim"><div class="dlg">
+    <h3>New worktree · floe</h3>
+    <label>Name</label><div class="fld" data-focus>omarchy-layout<span class="caret"></span></div>
+    <label>Base</label><div class="fld">master <span class="ph">· 0bec927 fix(worktrees): keep the cursor on its row…</span></div>
+    <label>Premise</label><div class="fld"><span class="ph">one line, or leave it and Floe infers it</span></div>
+    <div class="btns"><span class="dbtn">Cancel <kbd>esc</kbd></span><span class="dbtn" data-primary>Create <kbd>⏎</kbd></span></div>
+  </div></div>
+</template>
+
+<script>
+const tpl = document.getElementById('tpl')
+document.querySelectorAll('.win[data-variant]').forEach(win => {
+  const v = win.dataset.variant
+  win.append(tpl.content.cloneNode(true))
+  const keep = {
+    top:      v === 'crumbs',
+    status:   v === 'status',
+    menu:     v === 'menu',
+    scrim:    v === 'dialog',
+    settings: v === 'menu',
+  }
+  if (!keep.top) win.querySelector('.top').remove()
+  if (!keep.status) win.querySelector('.status').remove()
+  if (!keep.menu) win.querySelector('.menu').remove()
+  if (!keep.scrim) win.querySelector('.scrim').remove()
+  if (!keep.settings) win.querySelector('[data-w="settings"]').remove()
+  else win.querySelector('[data-w="review"]').remove()
+  if (v === 'menu') {
+    // the menu sits beside the worktree row it was opened on; the explorer keeps focus
+    const row = win.querySelector('.wt .r[data-cur]')
+    row.removeAttribute('data-cur'); row.setAttribute('data-path','')
+  }
+})
+</script>
+</body>
+</html>

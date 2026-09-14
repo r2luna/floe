@@ -1,0 +1,137 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Squarer icon sets for Floe</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* The same sixteen marks Floe's rail, heads and rows need, drawn by five
+   candidates. Every SVG is fetched from its CDN and inlined, so the colour is
+   currentColor and the Tabler-square column can override stroke caps in CSS.
+   O1 Tabler as shipped (what Floe uses today, @tabler/icons-react)
+   O2 Tabler with square caps and mitre joins, a CSS-only change
+   O3 Pixelarticons, MIT, pixel-art on a 24 grid, 1000+ marks
+   O4 Mono Icons, MIT, 180 geometric marks
+   O5 Radix Icons, MIT, 15px grid, 330 marks */
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:26px 0 6px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:96ch; }
+.lede code{ color:var(--text-strong); }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge);
+  font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+table{ border-collapse:collapse; border:1px solid var(--line); }
+th{ text-align:left; font-weight:400; color:var(--dim); font-size:10px; letter-spacing:1px; text-transform:uppercase; padding:8px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+th small{ display:block; color:var(--faint); letter-spacing:0; text-transform:none; margin-top:2px; }
+td{ padding:6px 14px; border-bottom:1px solid var(--line-soft); vertical-align:middle; }
+td:first-child{ color:var(--dim); font-size:11px; width:90px; }
+td .ic{ display:inline-grid; place-items:center; width:20px; height:20px; color:var(--text); }
+td .ic svg{ width:16px; height:16px; display:block; }
+td .nm{ color:var(--faint); font-size:10px; margin-left:8px; }
+td[data-missing]{ color:var(--faint); font-size:10px; }
+.sq svg{ stroke-linecap:square !important; stroke-linejoin:miter !important; }
+.sq svg *{ stroke-linecap:square !important; stroke-linejoin:miter !important; }
+/* in context: a rail and a sidebar row per set */
+.ctx{ display:grid; grid-template-columns:repeat(5, 1fr); gap:14px; margin-top:8px; }
+.ctx .box{ border:1px solid var(--line-soft); background:var(--panel); }
+.ctx .cap{ color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:1px; padding:6px 11px; border-bottom:1px solid var(--line-soft); }
+.ctx .demo{ display:grid; grid-template-columns:1fr 34px; height:150px; }
+.ctx .rows{ padding:8px 0; }
+.ctx .r{ display:flex; align-items:center; gap:8px; height:26px; padding:0 12px; color:var(--text); position:relative; }
+.ctx .r .ic{ width:14px; height:14px; color:var(--dim); display:grid; place-items:center; }
+.ctx .r .ic svg{ width:14px; height:14px; }
+.ctx .r[data-cur]{ background:var(--bg); }
+.ctx .r[data-cur]::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:2px; background:var(--accent); }
+.ctx .r[data-cur] span:last-child{ color:var(--accent); }
+.ctx .rail{ border-left:1px solid var(--line-soft); display:flex; flex-direction:column; align-items:center; gap:6px; padding:8px 0; }
+.ctx .rail .ic{ width:22px; height:22px; display:grid; place-items:center; color:var(--dim); }
+.ctx .rail .ic[data-on]{ color:var(--accent); }
+.ctx .rail .ic svg{ width:15px; height:15px; }
+.ctx .head{ display:flex; align-items:center; gap:7px; height:30px; padding:0 11px; border-bottom:1px solid var(--line-soft); font-size:11px; }
+.ctx .head .ic{ width:14px; height:14px; color:var(--dim); display:grid; place-items:center; }
+.ctx .head .ic svg{ width:14px; height:14px; }
+.ctx .head b{ color:var(--text-strong); font-weight:400; }
+.ctx .head span:last-child{ color:var(--dim); }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Squarer icon sets for Floe</h1>
+<p class="lede">Floe ships Tabler today (<code>@tabler/icons-react</code>): round caps, round joins, 2px stroke. Five options side by side, the sixteen marks the rail, panel heads and sidebar rows use. All MIT/ISC, all with SVG sources on a CDN, fetched live here so the colour follows the theme. O2 is not a new set: it is Tabler with <code>stroke-linecap: square; stroke-linejoin: miter</code> from CSS, zero migration. Flea itself uses Lucide (round). Omarchy's wordmark is pixel art, which is what O3 rhymes with.</p>
+
+<table id="tbl"></table>
+
+<h2>In context</h2>
+<div class="ctx" id="ctx"></div>
+
+<script>
+const T = n => `https://unpkg.com/@tabler/icons@3/icons/outline/${n}.svg`
+const P = n => n && `https://unpkg.com/pixelarticons@1/svg/${n}.svg`
+const M = n => n && `https://unpkg.com/mono-icons@1/svg/${n}.svg`
+const R = n => `https://cdn.jsdelivr.net/gh/radix-ui/icons@master/packages/radix-icons/icons/${n}.svg`
+const SETS = [
+  { key:'tabler', label:'O1 Tabler', note:'as shipped', url:T },
+  { key:'tabler-sq', label:'O2 Tabler square', note:'CSS caps + joins', url:T, cls:'sq' },
+  { key:'pixel', label:'O3 Pixelarticons', note:'MIT · 1036 · 24px', url:P },
+  { key:'mono', label:'O4 Mono Icons', note:'MIT · 180 · 24px', url:M },
+  { key:'radix', label:'O5 Radix Icons', note:'MIT · 332 · 15px', url:R },
+]
+//               tabler            pixel          mono        radix
+const ROWS = [
+  ['chat',       'message',        'message',     'message',  'chat-bubble'],
+  ['files',      'folder',         'folder',      'folder',   'file'],
+  ['terminal',   'terminal-2',     'code',        null,       'code'],
+  ['branch',     'git-branch',     'git-branch',  null,       'commit'],
+  ['draw',       'pencil',         'edit',        'edit',     'pencil-1'],
+  ['settings',   'settings',       'sliders',     'settings', 'gear'],
+  ['search',     'search',         'search',      'search',   'magnifying-glass'],
+  ['plus',       'plus',           'plus',        'add',      'plus'],
+  ['close',      'x',              'close',       'close',    'cross-1'],
+  ['play',       'player-play',    'play',        'play',     'play'],
+  ['check',      'check',          'check',       'check',    'check'],
+  ['chevron →',  'chevron-right',  'chevron-right','chevron-right','chevron-right'],
+  ['chevron ↓',  'chevron-down',   'chevron-down','chevron-down','chevron-down'],
+  ['machine',    'device-desktop', 'monitor',     'home',     'desktop'],
+  ['list',       'list',           'bulletlist',  'list',     'list-bullet'],
+  ['grid',       'layout-grid',    'layout',      'grid',     'grid'],
+]
+const nameFor = (row, set) => ({ tabler:row[1], 'tabler-sq':row[1], pixel:row[2], mono:row[3], radix:row[4] })[set.key]
+const cache = new Map()
+async function svg(url){
+  if (!url) return null
+  if (!cache.has(url)) cache.set(url, fetch(url).then(r => r.ok ? r.text() : null).catch(() => null))
+  const txt = await cache.get(url)
+  if (!txt) return null
+  // strip fixed sizes so CSS owns them; keep viewBox
+  return txt.replace(/<\?xml[^>]*>/, "").replace(/(fill|stroke)="#[0-9a-fA-F]{3,6}"/g, "$1=\"currentColor\"").replace(/\s(width|height)="[^"]*"/g, '')
+}
+async function build(){
+  const tbl = document.getElementById('tbl')
+  tbl.innerHTML = `<tr><th>mark</th>${SETS.map(s => `<th>${s.label}<small>${s.note}</small></th>`).join('')}</tr>` +
+    ROWS.map(r => `<tr><td>${r[0]}</td>${SETS.map(s => `<td class="${s.cls||''}" data-set="${s.key}" data-row="${r[0]}"></td>`).join('')}</tr>`).join('')
+  for (const row of ROWS) for (const s of SETS) {
+    const cell = tbl.querySelector(`td[data-set="${s.key}"][data-row="${row[0]}"]`)
+    const n = nameFor(row, s); const body = await svg(n && s.url(n))
+    if (!body) { cell.textContent = n ? `${n} · 404` : 'none'; cell.setAttribute('data-missing',''); continue }
+    cell.innerHTML = `<span class="ic">${body}</span><span class="nm">${n}</span>`
+  }
+  const ctx = document.getElementById('ctx')
+  const pick = (s, label) => { const r = ROWS.find(x => x[0]===label); return svg(nameFor(r, s) && s.url(nameFor(r, s))) }
+  for (const s of SETS) {
+    const [chat, files, term, branch, draw, settings, search, play, chev] = await Promise.all(['chat','files','terminal','branch','draw','settings','search','play','chevron ↓'].map(l => pick(s, l)))
+    const ic = b => `<span class="ic">${b||''}</span>`
+    ctx.insertAdjacentHTML('beforeend', `<div class="box ${s.cls||''}"><div class="cap">${s.label}</div>
+      <div class="head">${ic(chev)}${ic(branch)}<b>main</b><span>⌘1</span></div>
+      <div class="demo"><div class="rows">
+        <div class="r">${ic(chat)}<span>Session 1</span></div>
+        <div class="r" data-cur>${ic(chat)}<span>Session 2</span></div>
+        <div class="r">${ic(term)}<span>Terminal 1</span></div>
+        <div class="r">${ic(play)}<span>npm dev</span></div>
+      </div><div class="rail">${ic(chat).replace('class="ic"','class="ic" data-on')}${ic(files)}${ic(term)}${ic(draw)}${ic(settings)}${ic(search)}</div></div></div>`)
+  }
+}
+build()
+</script>
+</body>
+</html>

@@ -107,7 +107,7 @@
      that default, so the sheet stands on its own before the config is read. */
   --glass: 0.82;
 
-  --radius: 5px;
+  --radius: 0px;
   /* Hairline bars — meters, pipeline segments, the cursor tick. They are 3–5px
      tall, so the box radius would round them into pills. Derived, not typed,
      so they stay in proportion when --radius moves. */
@@ -279,15 +279,13 @@ button {
 
 .lane {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
-  /* Even 8px all round: with no titlebar above, the top gutter is the lane's
-     own or the panels sit flush against the window edge. */
-  padding: 8px;
+  padding: 6px;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-padding-inline: 8px;
+  scroll-padding-inline: 0;
   /* The lane's position is communicated by the panels themselves; a scrollbar
      across the bottom of the window would just eat a row of every panel. */
   scrollbar-width: none;
@@ -312,7 +310,7 @@ button {
   background: var(--wash-5);
   border: 2px solid transparent;
   background-clip: padding-box;
-  border-radius: 999px;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -336,7 +334,7 @@ button {
 .lane-col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
   /* A column shrinks only as far as its own floor, then the lane scrolls. Lists
      declare no floor and so never shrink; panels holding prose or code give up
@@ -350,6 +348,8 @@ button {
    shrinkable, so the moment the lane runs out of room it collapses back to its
    kind's default and the drag looks like it was ignored — the lane scrolls
    instead, which is what it is for. */
+/* Flush columns: the hairline between two columns, and between two panels
+   stacked in one column, is the only separation. No gutter, no card. */
 .lane-col[data-sized] {
   flex: 0 0 var(--panel-w);
   min-width: var(--panel-w);
@@ -374,14 +374,22 @@ button {
   min-height: 0;
   width: 100%;
   background: var(--panel);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius);
+  border: 1px solid var(--line);
   outline: none;
 }
 
 .panel[data-focused] {
   background: var(--panel-focused);
-  border-color: var(--line);
+}
+
+/* R9 — focus is the name in accent and the head's hairline stepping up to
+   --line. Nothing else moves. */
+.panel[data-focused] > .panel-head {
+  border-bottom-color: var(--line);
+}
+
+.panel[data-focused] > .panel-head .panel-name {
+  color: var(--accent);
 }
 
 /* A bare panel keeps its slot in the lane but drops the card: no fill, no
@@ -397,7 +405,7 @@ button {
   align-items: center;
   gap: 7px;
   height: var(--head-h);
-  padding-inline: 11px;
+  padding-inline: 12px;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -475,7 +483,7 @@ button {
   margin-left: auto;
   padding: 2px 7px;
   border: 1px solid var(--line);
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--well);
   color: var(--dim);
   font-size: 11px;
@@ -503,7 +511,7 @@ button {
   margin-left: auto;
   padding: 2px 7px;
   border: 1px solid #352829;
-  border-radius: 1px;
+  border-radius: 0;
   background: #221b1c;
   color: #c49495;
   font-size: 11px;
@@ -701,7 +709,7 @@ button {
   color: var(--muted);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 1px;
+  border-radius: 0;
 }
 
 .browser-toolbar button:hover,
@@ -737,7 +745,7 @@ button {
   color: var(--text);
   background: var(--panel-2);
   border: 1px solid var(--border);
-  border-radius: 1px;
+  border-radius: 0;
   font: inherit;
 }
 
@@ -798,7 +806,7 @@ button {
   flex: none;
   /* Matches the lane's gutter on the three edges it touches; no left padding —
      the lane's own right padding already separates them. */
-  padding: 8px 8px 8px 0;
+  padding: 6px 6px 6px 0;
 }
 
 /* Panels that answer the same question sit in one block, with a hairline
@@ -904,10 +912,12 @@ button {
 }
 
 .group-label {
-  padding: 4px 8px;
+  margin-inline: -8px;
+  padding: 4px 12px;
   color: var(--dim);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 /* Square, like the diff row and for the same reason: a list row's highlight is
@@ -916,12 +926,16 @@ button {
    between each pair — which reads as a gap in the selection rather than as one
    block. Every list in every panel uses this row, so flat here is flat
    everywhere. */
+/* Full width: the body keeps its 8px inset for prose and forms, and the row
+   bleeds through it so the cursor band and its bar reach the panel's own edge.
+   The 12px text inset lives on the row. */
 .row {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 4px 8px;
+  width: calc(100% + 16px);
+  margin-inline: -8px;
+  padding: 4px 12px;
   border-radius: 0;
   text-align: left;
 }
@@ -960,7 +974,7 @@ button {
 }
 
 .row-session {
-  padding-left: 24px;
+  padding-left: 28px;
 }
 
 /* A subagent: a session another chat opened over create_session. Indented only
@@ -968,7 +982,7 @@ button {
    worktree gets the glyph and nothing else, because there is nothing here for
    it to sit under. */
 .row-session[data-under] {
-  padding-left: 36px;
+  padding-left: 40px;
 }
 
 /* Dimmer than the title it precedes: it answers "whose", and the row is still
@@ -1238,14 +1252,17 @@ button {
    "an input is here", which the caret already says. */
 .composer {
   border-top: 1px solid var(--line-soft);
-  padding-inline: 11px;
+  padding-inline: 0;
   /* Its own width is what decides whether the bar stays one line — a panel is
      resized by hand, so the window's width says nothing about this one's. */
   container: composer / inline-size;
 }
 
-/* Deliberately NOT lit on focus. The header does not change when you use the
-   panel, and neither does this: the caret is what says where you are typing. */
+/* Lit on focus: the strip's top hairline turns accent while you type, the way
+   a field's hairline does. */
+.composer:focus-within {
+  border-top-color: var(--accent);
+}
 
 /* R6 — the launcher mounts the same Composer, and it is not a footer there: it
    sits in the middle of an empty panel as the one thing on screen. A hairline
@@ -1261,7 +1278,7 @@ button {
 }
 
 .composer[data-boxed]:focus-within {
-  border-color: var(--edge);
+  border-color: var(--accent);
 }
 
 /* Stacked, the way it always was: the text takes the width, the tools sit on
@@ -1296,6 +1313,7 @@ button {
   align-items: center;
   gap: 7px;
   min-height: var(--head-h);
+  padding-inline: 12px;
 }
 
 /* The text takes whatever the actions do not. */
@@ -1576,7 +1594,7 @@ button {
 /* The chips ride above the bar, inside the same footer, so a long list of
    attachments grows upward and the one-line bar stays one line. */
 .composer > .attachments {
-  padding-block: 6px 0;
+  padding: 6px 12px 0;
 }
 
 /* --- markdown source colours --------------------------------------------- */
@@ -1638,7 +1656,7 @@ button {
    place. `box-shadow` gives the chip its breathing room by painting OUTSIDE the
    box without taking any space, which is the one way to fake padding here. */
 .md-ref {
-  border-radius: 3px;
+  border-radius: 0;
   background: #ffffff0f;
   box-shadow: 0 0 0 3px #ffffff0f;
   color: var(--text-strong);
@@ -1658,7 +1676,7 @@ button {
    by `box-shadow`, which takes no width — the mirror has to stay glyph for
    glyph over the textarea or the caret lands in the wrong place. */
 .md-attach {
-  border-radius: 3px;
+  border-radius: 0;
   box-shadow:
     0 0 0 3px var(--panel),
     0 0 0 4px var(--line);
@@ -1965,13 +1983,16 @@ button {
 /* Outline, never a fill — same as every other selected chip in the app. The
    wash is barely there on purpose: it marks the row without turning it into a
    button that shouts louder than the four beside it. */
+.model-option {
+  position: relative;
+}
+
 .model-option[data-at] {
-  background: var(--wash-4);
+  background: var(--bg);
+  color: var(--accent);
 }
 
 .model-option[data-on] {
-  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
   color: var(--accent);
 }
 
@@ -1980,9 +2001,7 @@ button {
    light token block in this stylesheet yet; when there is, this becomes a
    `--accent` value and this rule goes away.) */
 :root[data-theme='light'] .model-option[data-on] {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: #a2603a;
+  color: var(--accent);
 }
 
 /* --- the mode tones ------------------------------------------------------- */
@@ -2779,7 +2798,7 @@ button {
   display: grid;
   place-items: center;
   padding: 2px;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--dim);
   opacity: 0;
 }
@@ -2850,7 +2869,7 @@ button {
   gap: 8px;
   padding: 0 4px;
   margin: 0 -4px;
-  border-radius: 4px;
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -3516,7 +3535,7 @@ button {
    into one row meant truncating whichever mattered. */
 .cmd-row {
   display: block;
-  padding: 5px 8px;
+  padding: 5px 12px;
 }
 
 .cmd-l1 {
@@ -3754,7 +3773,7 @@ button {
 .merge-other {
   padding: 1px 5px;
   border: 1px solid var(--line-soft);
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--dim);
   white-space: nowrap;
 }
@@ -3951,7 +3970,7 @@ button {
 
 .merge-chip {
   border: 1px solid var(--line);
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--panel);
   color: var(--dim);
   font: inherit;
@@ -4231,7 +4250,7 @@ button {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0;
   background: none;
   line-height: 0;
   cursor: zoom-in;
@@ -4271,7 +4290,7 @@ button {
   width: 100%;
   max-height: 260px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0;
   background: #000;
   outline: none;
 }
@@ -4311,7 +4330,7 @@ button {
 .irc-video-dead {
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -4336,7 +4355,7 @@ button {
 .lightbox-image {
   max-width: 100%;
   max-height: 100%;
-  border-radius: 4px;
+  border-radius: 0;
   object-fit: contain;
   cursor: default;
 }
@@ -4351,7 +4370,7 @@ button {
   width: 30px;
   height: 46px;
   border: 1px solid var(--muted-2);
-  border-radius: 1px;
+  border-radius: 0;
   background: #16181d99;
   color: var(--text-strong);
   font-size: 18px;
@@ -4789,7 +4808,7 @@ button {
   width: 9px;
   height: 9px;
   border: 1px solid currentColor;
-  border-radius: 2px;
+  border-radius: 0;
   vertical-align: middle;
 }
 
@@ -4889,7 +4908,7 @@ button {
 .md-bullet[data-dot][data-depth="2"]::before {
   width: 5px;
   height: 1.5px;
-  border-radius: 1px;
+  border-radius: 0;
   vertical-align: 0.35em;
   color: #6b74ae;
 }
@@ -5011,7 +5030,7 @@ button {
 [data-cursor]::before {
   content: "";
   position: absolute;
-  inset-block: 2px;
+  inset-block: 0;
   left: 0;
   width: 2px;
   border-radius: 0;
@@ -5026,21 +5045,36 @@ button {
 }
 
 .panel[data-focused] [data-cursor] {
-  background: var(--wash-2);
+  background: var(--bg);
 }
 
 .panel[data-focused] [data-cursor]::before {
-  background: #55688f;
+  background: var(--accent);
 }
 
 :root[data-theme='light'] .panel[data-focused] [data-cursor]::before {
-  background: #3a64a8;
+  background: var(--accent);
 }
 
 .panel[data-focused] [data-cursor] .row-name,
 .panel[data-focused] [data-cursor].diff-hunk,
 .panel[data-focused] [data-cursor].irc-fold {
-  color: var(--text-strong);
+  color: var(--accent);
+}
+
+/* The overlays' cursor (palette, menus, pickers) is the same mark as a focused
+   panel's: the band in --bg, the 2px accent bar on the left edge, the name in
+   accent. One cursor, wherever a list is. */
+.palette-row[data-at]::before,
+.composer-menu-row[data-at]::before,
+.row-menu-item[data-at]::before,
+.model-option[data-at]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
 }
 
 /* --- moving a project ----------------------------------------------------- */
@@ -5333,7 +5367,7 @@ button {
   flex: none;
   border: 1px solid var(--line);
   /* Square, like the mode chips — this is the same outline-chip family. */
-  border-radius: 1px;
+  border-radius: 0;
   overflow: hidden;
 }
 
@@ -5381,10 +5415,9 @@ button {
 .palette-list {
   flex: 1;
   min-width: 0;
-  /* A ceiling, not a height — the box ends where the list ends. */
   max-height: 52vh;
   overflow-y: auto;
-  padding: 5px;
+  padding: 5px 0;
 }
 
 /* The list takes the slack, the pane below is what is fixed — a row of prose is
@@ -5498,7 +5531,8 @@ button {
   align-items: baseline;
   gap: 10px;
   width: 100%;
-  padding: 6px 10px;
+  position: relative;
+  padding: 6px 12px;
   border-radius: 0;
   color: var(--text);
   text-align: left;
@@ -5525,7 +5559,7 @@ button {
 }
 
 .palette-row[data-at] {
-  background: var(--wash-4);
+  background: var(--bg);
 }
 
 /* The dim half of a row — the directory of a path, the group of a project.
@@ -5569,7 +5603,7 @@ button {
 }
 
 .palette-row[data-at] .palette-title {
-  color: var(--text-strong);
+  color: var(--accent);
 }
 
 .palette-hit {
@@ -5595,7 +5629,7 @@ button {
 }
 
 .palette-row[data-at] .palette-keys {
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* Every palette ends in the same hint strip the panels use — the keys that act
@@ -5662,9 +5696,12 @@ kbd {
 }
 
 .dialog-head {
-  padding: 12px 16px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--line-soft);
-  color: var(--text-strong);
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 }
 
 .dialog-body {
@@ -5764,7 +5801,7 @@ kbd {
 }
 
 .dialog-input:focus {
-  border-color: var(--edge);
+  border-color: var(--accent);
 }
 
 .dialog-input::placeholder {
@@ -5802,8 +5839,16 @@ kbd {
 }
 
 .btn-primary:not(:disabled) {
-  color: var(--text-strong);
-  border-color: #4a5a7a;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The key that presses it, beside the label — a button says how it is reached. */
+.btn kbd {
+  margin-left: 6px;
+  color: var(--faint);
+  font: inherit;
+  font-size: 10px;
 }
 
 /* Dark's borders step UP from the line colour; on white they have to step down
@@ -5817,7 +5862,7 @@ kbd {
 }
 
 :root[data-theme='light'] .btn-primary:not(:disabled) {
-  border-color: #a8c2e6;
+  border-color: var(--accent);
 }
 
 /* --- new-worktree form (inline in the worktrees panel) -------------------- */
@@ -5825,13 +5870,28 @@ kbd {
 /* Reuses the dialog's field styles, sized down for a 330px column. A rule
    under the form, not a box around it: it is part of the panel, not a modal
    that happens to be docked. */
+/* A veil over the lane for the one modal the app has. Not black: the same page
+   at half strength, so what is under it still reads as the app. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
 .wt-new {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 8px;
-  padding: 2px 2px 12px;
-  border-bottom: 1px solid var(--line-soft);
+}
+
+/* Narrower than the generic dialog, and NOT clipped: the base picker hangs
+   its list below the field. */
+.wt-new.dialog {
+  width: min(460px, calc(100vw - 32px));
+  overflow: visible;
+  background: var(--panel);
 }
 
 .wt-new .dialog-input,
@@ -5924,13 +5984,30 @@ kbd {
   text-align: left;
 }
 
+.wt-base-row {
+  position: relative;
+}
+
 .wt-base-row[data-at] {
-  background: var(--wash-4);
-  color: var(--text-strong);
+  background: var(--bg);
+  color: var(--accent);
+}
+
+.wt-base-row[data-at]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
 }
 
 .wt-base-row[data-on] .wt-base-label {
   color: var(--text-strong);
+}
+
+.wt-base-row[data-at] .wt-base-label {
+  color: var(--accent);
 }
 
 .wt-new .dialog-actions {
@@ -5974,7 +6051,7 @@ kbd {
   align-self: flex-start;
   padding: 4px 10px;
   border: 1px solid var(--line);
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--panel);
   color: var(--text-strong);
   font: inherit;
@@ -5983,7 +6060,7 @@ kbd {
 
 .wt-new-fix:hover,
 .wt-new-fix:focus-visible {
-  border-color: var(--edge);
+  border-color: var(--accent);
 }
 
 /* --- composer menus (/ and @) --------------------------------------------- */
@@ -6001,7 +6078,7 @@ kbd {
   z-index: 25;
   max-height: 240px;
   overflow-y: auto;
-  padding: 5px;
+  padding: 5px 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
@@ -6027,14 +6104,19 @@ kbd {
   align-items: baseline;
   gap: 10px;
   width: 100%;
-  padding: 6px 10px;
+  position: relative;
+  padding: 6px 12px;
   border-radius: 0;
   color: var(--text);
   text-align: left;
 }
 
 .composer-menu-row[data-at] {
-  background: var(--wash-4);
+  background: var(--bg);
+}
+
+.composer-menu-row[data-at] .composer-menu-title {
+  color: var(--accent);
 }
 
 .composer-menu-title {
@@ -6061,7 +6143,7 @@ kbd {
   display: flex;
   align-items: baseline;
   gap: 10px;
-  margin: -5px -5px 3px;
+  margin: -5px 0 3px;
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--line);
   background: var(--well);
@@ -6361,7 +6443,7 @@ kbd {
 
 .heat-cell {
   aspect-ratio: 1;
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--wash-2);
 }
 
@@ -6829,7 +6911,7 @@ kbd {
 .settings-slider::-webkit-slider-runnable-track {
   height: 2px;
   background: var(--line);
-  border-radius: 1px;
+  border-radius: 0;
 }
 
 .settings-slider::-webkit-slider-thumb {
@@ -7045,7 +7127,7 @@ kbd {
 .update-restart {
   padding: 4px 10px;
   border: 1px solid #282f3a;
-  border-radius: 1px;
+  border-radius: 0;
   background: #1b1e25;
   color: #95a6c0;
   font: inherit;
@@ -7144,7 +7226,7 @@ kbd {
    are choosing. */
 .find-hit {
   background: var(--find-hit);
-  border-radius: 2px;
+  border-radius: 0;
   /* Shiki writes its colour as an inline style, which outranks any rule here —
      so the box is all this owns, and that is the intent. */
 }
@@ -7262,7 +7344,7 @@ kbd {
   flex: none;
   padding: 1px 6px;
   border: 1px solid var(--muted-2);
-  border-radius: 1px;
+  border-radius: 0;
   font-size: 10px;
   color: var(--dim);
   background: none;
@@ -7313,7 +7395,7 @@ kbd {
   position: fixed;
   z-index: 60;
   min-width: 200px;
-  padding: 4px;
+  padding: 4px 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--well);
@@ -7328,7 +7410,8 @@ kbd {
   align-items: baseline;
   gap: 16px;
   width: 100%;
-  padding: 5px 9px;
+  position: relative;
+  padding: 5px 12px;
   border-radius: 0;
   color: var(--text);
   text-align: left;
@@ -7337,8 +7420,8 @@ kbd {
 /* One highlight, driven by the menu's own cursor — the pointer moves it, and so
    do j/k. Hover and keyboard must not be able to light up two different rows. */
 .row-menu-item[data-at] {
-  background: var(--wash-4);
-  color: var(--text-strong);
+  background: var(--bg);
+  color: var(--accent);
 }
 
 .row-menu-item:disabled {
@@ -7360,7 +7443,7 @@ kbd {
 }
 
 .row-menu-item[data-at] .row-menu-keys {
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* A file reference inside a message — `docs/plan.md:12-30` drawn as one thing.
@@ -7437,7 +7520,7 @@ kbd {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0 10px;
-  padding: 6px 8px;
+  padding: 6px 12px;
 }
 
 .cmd-l1 {
@@ -8277,7 +8360,7 @@ kbd {
 
 .fkind {
   border: 1px solid var(--line);
-  border-radius: 1px;
+  border-radius: 0;
   color: var(--dimmer);
   font-size: 10px;
   padding: 0 5px;
@@ -8995,7 +9078,7 @@ kbd {
   margin-left: auto;
   flex: none;
   border: 1px solid var(--edge);
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--wash-1);
   color: var(--dimmer);
   font: inherit;

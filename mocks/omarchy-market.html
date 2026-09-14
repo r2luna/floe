@@ -1,0 +1,610 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe plugins — Omarchy marketplace layout</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Omarchy's plugin marketplace layout (plugins.omarchy.org) redrawn on Floe's
+   tokens: 1px --line separators, --panel surfaces, --radius corners, outline
+   chips, no fills, no shadows. Structure is theirs, skin is ours. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); }
+a{ color:inherit; text-decoration:none; }
+button{ font:inherit; cursor:pointer; }
+h1,h2,h3,h4{ margin:0; color:var(--text-strong); }
+.view{ display:none; }
+.view[data-on]{ display:block; }
+.wrap{ width:min(1104px, calc(100% - 40px)); margin:0 auto; }
+
+/* --- header ------------------------------------------------------------- */
+.hdr{ position:sticky; top:0; z-index:50; height:var(--head-h); background:var(--panel);
+  border-bottom:1px solid var(--line); }
+.hdr .wrap{ display:flex; align-items:center; justify-content:space-between; height:100%; }
+.brand{ display:inline-flex; align-items:center; gap:8px; padding:0 7px; height:26px;
+  border:1px solid transparent; border-radius:var(--radius); font-weight:700; letter-spacing:.04em; }
+.brand:hover{ border-color:var(--line); }
+.brand .mark{ color:var(--accent); font-size:14px; letter-spacing:-.06em; }
+.brand span:last-child{ color:var(--dim); font-size:10px; font-weight:700; }
+.nav{ display:flex; align-items:center; gap:2px; }
+.nav button{ height:26px; padding:0 9px; border:1px solid transparent; border-radius:var(--radius);
+  background:transparent; color:var(--dim); font-size:10px; letter-spacing:.05em; text-transform:uppercase; }
+.nav button:hover{ border-color:var(--line); color:var(--text-strong); }
+.nav button[data-on]{ color:var(--text-strong); }
+.nav button kbd{ color:var(--faint); font-size:9px; margin-left:5px; font-family:inherit; }
+.nav .support{ color:var(--accent); }
+.nav .support i{ display:inline-block; width:5px; height:5px; border-radius:50%; background:var(--accent);
+  margin-right:6px; vertical-align:1px; }
+.nav .theme{ margin-left:8px; width:26px; padding:0; border-color:var(--line); color:var(--dim); font-size:11px; }
+
+/* --- hero --------------------------------------------------------------- */
+.hero{ display:grid; grid-template-columns:minmax(0,1fr) 360px; gap:46px; align-items:center;
+  padding:60px 0 46px; min-height:300px; }
+.eyebrow{ color:var(--faint); font-size:10px; letter-spacing:.08em; text-transform:uppercase; margin:0 0 10px; }
+.hero h1{ font-size:34px; letter-spacing:-.03em; text-transform:lowercase; line-height:1.05; margin:0 0 14px; }
+.hero p{ margin:0; max-width:62ch; color:var(--dim); font-size:13px; }
+.hero p a{ color:var(--accent); }
+.actions{ display:flex; gap:8px; margin-top:24px; }
+.btn{ display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 11px;
+  border:1px solid var(--line); border-radius:var(--radius); background:var(--panel);
+  color:var(--dim); font-size:11px; }
+.btn:hover{ border-color:var(--edge); color:var(--text-strong); }
+.btn[data-primary]{ border-color:var(--accent); color:var(--accent); }
+.btn[data-live]{ border-color:var(--live); color:var(--live); }
+.btn kbd{ font-family:inherit; color:var(--faint); font-size:10px; }
+.ray{ border:1px solid var(--line); border-radius:var(--radius); background:var(--panel);
+  height:220px; position:relative; overflow:hidden; }
+.ray pre{ margin:0; padding:14px 16px; color:var(--dim); font-size:11px; line-height:1.5; }
+.ray pre b{ color:var(--text-strong); font-weight:400; }
+.ray pre i{ color:var(--accent); font-style:normal; }
+.ray .lbl{ position:absolute; right:10px; bottom:8px; color:var(--faint); font-size:9px; letter-spacing:.08em; }
+
+/* --- sections ----------------------------------------------------------- */
+.sect{ padding:34px 0 0; }
+.sect-head{ display:flex; align-items:end; justify-content:space-between; margin:0 0 16px; }
+.sect-head h2{ font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); font-weight:700; }
+.sect-head a{ color:var(--faint); font-size:11px; }
+.sect-head a:hover{ color:var(--accent); }
+.catalog{ position:relative; margin-top:54px; padding:48px 0 80px; border-top:1px solid var(--line-soft); }
+.catalog::after{ content:""; position:absolute; top:-6px; left:50%; width:1px; height:13px; background:var(--accent); }
+.cat-head{ display:flex; align-items:end; justify-content:space-between; margin:0 0 20px; }
+.cat-head h2{ font-size:26px; letter-spacing:-.03em; text-transform:lowercase; }
+.cat-head p{ margin:0; color:var(--dim); font-size:11px; }
+.cat-head p b{ color:var(--text-strong); font-weight:400; }
+
+/* controls */
+.controls{ display:grid; grid-template-columns:minmax(0,1fr) 180px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--well); overflow:hidden; }
+.search{ display:flex; align-items:center; gap:8px; min-height:38px; padding:0 12px; }
+.search .glyph{ color:var(--dim); }
+.search .term{ display:inline-flex; align-items:center; gap:6px; height:22px; padding:0 4px 0 7px;
+  border:1px solid var(--edge); border-radius:var(--radius); background:var(--panel); color:var(--text-strong); font-size:10.5px; }
+.search .term i{ color:var(--faint); font-style:normal; }
+.search .term b{ color:var(--faint); font-weight:400; padding:0 3px; }
+.search .in{ flex:1; color:var(--dim); }
+.search .in .caret{ display:inline-block; width:0; border-left:1px solid var(--text-strong); height:1em;
+  vertical-align:text-bottom; margin-left:1px; }
+.search kbd{ color:var(--faint); font-size:10px; font-family:inherit; border:1px solid var(--line);
+  border-radius:var(--radius); padding:1px 5px; }
+.sort{ display:flex; align-items:center; justify-content:space-between; padding:0 12px;
+  border-left:1px solid var(--line); color:var(--text-strong); font-size:11px; }
+.sort span:last-child{ color:var(--faint); }
+.bar{ display:flex; align-items:center; gap:8px; padding:10px 0 0; }
+.bar > span{ color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em; width:52px; flex:none; }
+.bar .list{ display:flex; flex-wrap:wrap; gap:4px; flex:1; }
+.bar .reset{ border:0; background:transparent; color:var(--faint); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+.bar .reset:hover{ color:var(--text-strong); }
+.chip{ display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--panel); color:var(--dim); font-size:10px; letter-spacing:.03em; text-transform:uppercase; }
+.chip span:last-child{ color:var(--faint); text-transform:none; }
+.chip:hover{ border-color:var(--edge); color:var(--text-strong); }
+.chip[data-on]{ border-color:var(--accent); color:var(--accent); }
+.chip[data-on] span:last-child{ color:var(--accent); }
+
+/* grid + cards */
+.grid{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:18px; }
+.grid.catalog-grid{ margin-top:24px; }
+.card{ position:relative; display:flex; flex-direction:column; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--panel); overflow:hidden; cursor:pointer; --ca:var(--accent); }
+.card:hover{ border-color:var(--edge); }
+.card[data-cursor]{ border-color:var(--accent); background:var(--panel-focused); }
+.card .preview{ position:relative; height:140px; display:grid; place-items:center; border-bottom:1px solid var(--line);
+  background:
+    linear-gradient(color-mix(in srgb, var(--ca) 9%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--ca) 9%, transparent) 1px, transparent 1px),
+    var(--well);
+  background-size:24px 24px; }
+.card .preview .mark{ color:var(--ca); font-size:34px; font-weight:800; letter-spacing:-.08em; }
+.card .preview .cap{ position:absolute; left:10px; top:8px; color:var(--faint); font-size:9px; letter-spacing:.08em; text-transform:uppercase; }
+.card .preview .shot{ position:absolute; inset:14px 14px 0; border:1px solid var(--line); border-bottom:0;
+  border-radius:var(--radius) var(--radius) 0 0; background:var(--panel); padding:8px 10px; color:var(--faint); font-size:10px; line-height:1.5; }
+.card .preview .shot b{ color:var(--text-strong); font-weight:400; }
+.card .preview .shot i{ color:var(--ca); font-style:normal; }
+.card .body{ display:flex; flex-direction:column; flex:1; padding:12px 12px 10px; min-height:140px; }
+.title{ display:flex; align-items:center; gap:8px; }
+.title h3{ font-size:13px; font-weight:700; }
+.badge{ padding:1px 6px; border:1px solid var(--line); border-radius:var(--radius); color:var(--dim);
+  font-size:9px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.badge[data-builtin]{ border-color:var(--working); color:var(--working); }
+.badge[data-soon]{ border-color:var(--accent); color:var(--accent); }
+.social{ margin-left:auto; color:var(--faint); font-size:10px; display:flex; gap:8px; }
+.social .up{ color:var(--dim); }
+.by{ color:var(--dim); font-size:10.5px; margin-top:2px; }
+.by b{ color:var(--dimmest); font-weight:400; }
+.desc{ margin:8px 0 10px; color:var(--text); font-size:12px; line-height:1.55; }
+.status{ display:flex; gap:10px; margin:0 0 8px; font-size:10px; }
+.status .new{ color:var(--accent); }
+.status .upd{ color:var(--working); }
+.status .ver{ color:var(--live); }
+.status .unv{ color:var(--faint); }
+.bottom{ margin-top:auto; display:flex; align-items:end; justify-content:space-between; gap:8px; }
+.tags{ display:flex; flex-wrap:wrap; gap:4px; }
+.tag{ border:1px solid var(--line); border-radius:var(--radius); padding:0 6px; height:20px; display:inline-flex; align-items:center;
+  color:var(--dim); font-size:10px; }
+.act{ display:inline-flex; align-items:center; gap:6px; height:24px; padding:0 8px; border:1px solid var(--line);
+  border-radius:var(--radius); background:transparent; color:var(--dim); font-size:10px; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }
+.act:hover{ border-color:var(--edge); color:var(--text-strong); }
+.act[data-live]{ border-color:var(--live); color:var(--live); }
+.act[data-off]{ color:var(--faint); cursor:default; }
+.act kbd{ font-family:inherit; color:var(--faint); font-size:9px; }
+.act[data-live] kbd{ color:var(--live); }
+
+/* pagination + empty */
+.pager{ display:flex; align-items:center; justify-content:space-between; margin-top:24px; border:1px solid var(--line);
+  border-radius:var(--radius); background:var(--panel); }
+.pager button{ background:transparent; border:0; padding:10px 14px; text-align:left; color:var(--dim); font-size:11px; }
+.pager button:hover{ color:var(--text-strong); }
+.pager button small{ display:block; color:var(--faint); font-size:10px; }
+.pager .sum{ color:var(--faint); font-size:11px; }
+.pager .sum b{ color:var(--text-strong); font-weight:400; }
+
+/* keys */
+.keys{ display:flex; gap:14px; color:var(--faint); font-size:10px; margin-top:14px; }
+.keys b{ color:var(--dim); font-weight:400; }
+
+/* footer */
+.foot{ border-top:1px solid var(--line-soft); margin-top:40px; padding:22px 0 60px; }
+.foot .wrap{ display:flex; align-items:center; justify-content:space-between; color:var(--faint); font-size:10px;
+  letter-spacing:.06em; text-transform:uppercase; }
+.foot .mark{ color:var(--accent); font-size:14px; letter-spacing:-.06em; text-transform:none; }
+.foot .links{ display:flex; gap:16px; }
+.foot a:hover{ color:var(--text-strong); }
+
+/* --- doc layout (detail / develop / publish) ---------------------------- */
+.doc{ display:grid; grid-template-columns:200px minmax(0,1fr) 200px; gap:0; min-height:calc(100vh - var(--head-h)); }
+.doc .side{ border-right:1px solid var(--line); padding:20px 14px; font-size:11px; }
+.doc .aside{ border-left:1px solid var(--line); padding:20px 14px; font-size:11px; }
+.grp{ margin:0 0 18px; }
+.grp .t{ color:var(--faint); font-size:9px; letter-spacing:.08em; text-transform:uppercase; margin:0 0 6px; }
+.grp a,.grp button{ display:block; width:100%; text-align:left; background:transparent; border:1px solid transparent;
+  border-radius:var(--radius); padding:3px 7px; color:var(--dim); font-size:11px; }
+.grp a:hover,.grp button:hover{ color:var(--text-strong); border-color:var(--line); }
+.grp a[data-on],.grp button[data-on]{ color:var(--text-strong); border-color:var(--line); background:var(--panel); }
+.side .back{ color:var(--faint); margin:0 0 18px; display:block; }
+.meta dl{ margin:0; display:grid; grid-template-columns:auto 1fr; gap:4px 10px; }
+.meta dt{ color:var(--faint); }
+.meta dd{ margin:0; color:var(--text); }
+.meta dd .ok{ color:var(--live); }
+.center{ padding:0 0 60px; }
+.topbar{ height:var(--head-h); display:flex; align-items:center; justify-content:space-between; padding:0 22px;
+  border-bottom:1px solid var(--line); color:var(--faint); font-size:11px; }
+.topbar b{ color:var(--text-strong); font-weight:400; }
+.page{ padding:26px 22px; max-width:760px; }
+.page .eyebrow{ margin-bottom:6px; }
+.page h1{ font-size:24px; letter-spacing:-.02em; margin:0 0 6px; }
+.metaline{ display:flex; gap:12px; color:var(--faint); font-size:10.5px; margin:0 0 18px; }
+.metaline .st{ color:var(--live); }
+.lede{ color:var(--text); font-size:13px; margin:0 0 16px; }
+.note{ border:1px solid var(--line); border-left:2px solid var(--accent); border-radius:var(--radius);
+  background:var(--panel); padding:10px 12px; color:var(--dim); font-size:11.5px; margin:0 0 26px; }
+.step{ margin:0 0 30px; padding-top:18px; border-top:1px solid var(--line-soft); }
+.step h2{ font-size:15px; margin:0 0 6px; }
+.step h2 i{ color:var(--accent); font-style:normal; font-size:11px; margin-right:10px; letter-spacing:.06em; }
+.step p{ color:var(--dim); margin:0 0 12px; font-size:12px; }
+.step p code,.lede code,.note code{ color:var(--text-strong); font-size:11px; }
+.block{ border:1px solid var(--line); border-radius:var(--radius); background:var(--well); margin:0 0 12px; overflow:hidden; }
+.block .bh{ display:flex; align-items:center; justify-content:space-between; padding:5px 10px; border-bottom:1px solid var(--line);
+  color:var(--faint); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
+.block .bh .act{ height:20px; font-size:9px; }
+.block pre{ margin:0; padding:10px 12px; color:var(--text); font-size:11px; line-height:1.5; white-space:pre; overflow:auto; }
+.block pre b{ color:var(--text-strong); font-weight:400; }
+.block pre i{ color:var(--accent); font-style:normal; }
+.block pre em{ color:var(--faint); font-style:normal; }
+.tbl{ width:100%; border-collapse:collapse; font-size:11px; margin:0 0 12px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.tbl th{ text-align:left; color:var(--faint); font-weight:400; font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  padding:6px 10px; border-bottom:1px solid var(--line); background:var(--panel); }
+.tbl td{ padding:6px 10px; border-bottom:1px solid var(--line-soft); color:var(--dim); vertical-align:top; }
+.tbl tr:last-child td{ border-bottom:0; }
+.tbl td:first-child{ color:var(--text-strong); }
+.tbl td code{ color:var(--text-strong); font-size:11px; }
+.checks{ list-style:none; padding:0; margin:0 0 12px; display:grid; gap:4px; font-size:11.5px; color:var(--dim); }
+.checks li::before{ content:"✓ "; color:var(--live); }
+.checks li[data-opt]::before{ content:"+ "; color:var(--faint); }
+.rows{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:0 0 14px; }
+.rows div{ border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:9px 11px; font-size:11px; color:var(--dim); }
+.rows div b{ display:block; color:var(--text-strong); font-weight:400; margin-bottom:3px; }
+.rows div i{ color:var(--accent); font-style:normal; margin-right:6px; }
+
+/* detail header */
+.dhead{ display:grid; grid-template-columns:44px 1fr auto; gap:14px; align-items:start; margin:0 0 14px; }
+.dhead .icon{ width:42px; height:42px; display:grid; place-items:center; border:1px solid var(--line); border-radius:var(--radius);
+  background:color-mix(in srgb, var(--ca) 10%, var(--panel)); color:var(--ca); font-weight:800; font-size:11px; }
+.dhead h1{ font-size:20px; margin:0; }
+.dhead .actions{ margin:0; }
+.dprev{ height:220px; border:1px solid var(--line); border-radius:var(--radius); background:var(--well); display:grid; place-items:center;
+  color:var(--faint); font-size:10px; letter-spacing:.08em; text-transform:uppercase; margin:0 0 18px; }
+.explore{ display:grid; grid-template-columns:minmax(0,1fr) 300px; gap:18px; margin-top:24px; }
+.graph{ height:420px; border:1px solid var(--line); border-radius:var(--radius); background:var(--well); position:relative; overflow:hidden; }
+.graph .n{ position:absolute; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:3px 8px; font-size:10px; color:var(--dim); }
+.graph .n[data-on]{ border-color:var(--accent); color:var(--accent); }
+.graph svg{ position:absolute; inset:0; width:100%; height:100%; }
+.graph line{ stroke:var(--line); }
+.graph .hint{ position:absolute; left:12px; bottom:10px; color:var(--faint); font-size:10px; }
+.stats{ display:grid; gap:10px; }
+.stats div{ border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:10px 12px; }
+.stats b{ display:block; color:var(--text-strong); font-weight:400; font-size:18px; }
+.stats span{ color:var(--faint); font-size:10px; letter-spacing:.06em; text-transform:uppercase; }
+.stats .sel{ color:var(--dim); font-size:11px; margin-top:6px; }
+</style>
+</head>
+<body>
+
+<header class="hdr"><div class="wrap">
+  <a class="brand" href="#" onclick="go('browse');return false"><span class="mark">floe</span><span>Plugin marketplace</span></a>
+  <nav class="nav">
+    <button class="support"><i></i>Support ↗</button>
+    <button data-view="browse" data-on onclick="go('browse')">Browse plugins<kbd>1</kbd></button>
+    <button data-view="explore" onclick="go('explore')">Explore<kbd>2</kbd></button>
+    <button data-view="develop" onclick="go('develop')">Develop a plugin<kbd>3</kbd></button>
+    <button onclick="go('develop')">Contribute a plugin ↗</button>
+    <button data-view="publish" onclick="go('publish')">Publish a plugin →<kbd>4</kbd></button>
+    <button class="theme" title="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">◐</button>
+  </nav>
+</div></header>
+
+<!-- ============================================================ BROWSE -->
+<section class="view" id="v-browse" data-on><div class="wrap">
+
+  <div class="hero">
+    <div>
+      <p class="eyebrow">Community registry</p>
+      <h1>discover floe plugins</h1>
+      <p>Browse community-built plugins for <a href="#">Floe</a>. Inspect the source, install from the keyboard, and shape the app around the way you work — every plugin ships its palette commands and MCP tools together.</p>
+      <div class="actions">
+        <a class="btn" data-primary href="#catalog">Browse plugins →</a>
+        <a class="btn" onclick="go('develop')">Develop a plugin →</a>
+        <a class="btn" data-live onclick="go('publish')">Publish a plugin →</a>
+      </div>
+    </div>
+    <div class="ray"><pre><b>~/.config/floe/plugins/</b>
+├── <i>server</i>/            backend · daemon
+│   ├── manifest.json
+│   └── dist/main.cjs
+├── <i>linear-inbox</i>/      panel
+├── <i>ollama-local</i>/      harness
+└── <i>tmux-bridge</i>/       command
+
+<em style="color:var(--faint)">4 enabled · 1 update available</em></pre><span class="lbl">INSTALLED 04/12</span></div>
+  </div>
+
+  <div class="sect">
+    <div class="sect-head"><h2>Recently added</h2><a href="#catalog">view all →</a></div>
+    <div class="grid" id="recent"></div>
+  </div>
+
+  <div class="catalog" id="catalog">
+    <div class="cat-head">
+      <div><p class="eyebrow">Registry</p><h2>browse all plugins</h2></div>
+      <p><b>12</b> community plugins</p>
+    </div>
+    <div class="controls">
+      <div class="search">
+        <span class="glyph">⌕</span>
+        <span class="term"><i>tag:</i>panel<b>×</b></span>
+        <span class="in">Search plugins, tag:panel, kind:tool, or @author…<span class="caret"></span></span>
+        <kbd>⌘ K</kbd>
+      </div>
+      <div class="sort"><span>Recently added</span><span>⌄</span></div>
+    </div>
+    <div class="bar"><span>Source</span><div class="list">
+      <button class="chip" data-on><span>Community</span><span>12</span></button>
+      <button class="chip"><span>Built-in</span><span>4</span></button>
+    </div></div>
+    <div class="bar"><span>Filter</span><div class="list">
+      <button class="chip" data-on><span>All</span><span>12</span></button>
+      <button class="chip"><span>Backend</span><span>2</span></button>
+      <button class="chip"><span>Harness</span><span>2</span></button>
+      <button class="chip"><span>Panel</span><span>4</span></button>
+      <button class="chip"><span>Tool</span><span>3</span></button>
+      <button class="chip"><span>Command</span><span>1</span></button>
+      <button class="chip"><span>Agent</span><span>6</span></button>
+      <button class="chip"><span>Remote</span><span>3</span></button>
+      <button class="chip"><span>Keyboard</span><span>9</span></button>
+    </div><button class="reset">Reset</button></div>
+
+    <div class="grid catalog-grid" id="grid"></div>
+
+    <nav class="pager">
+      <button>← Previous<small>First page</small></button>
+      <span class="sum">Page <b>1 / 2</b></span>
+      <button style="text-align:right">Next →<small>Last page</small></button>
+    </nav>
+    <div class="keys"><span><b>/</b> search</span><span><b>⇥</b> next filter</span><span><b>j k</b> move</span><span><b>⏎</b> open</span><span><b>i</b> install</span><span><b>s</b> sort</span><span><b>1–4</b> pages</span><span><b>esc</b> back</span></div>
+  </div>
+
+</div></section>
+
+<!-- ============================================================ EXPLORE -->
+<section class="view" id="v-explore"><div class="wrap">
+  <div class="hero" style="min-height:0;padding:50px 0 10px">
+    <div>
+      <p class="eyebrow">Community registry</p>
+      <h1>explore community plugins</h1>
+      <p>Discover related plugins through semantic communities or inspect registry growth over time.</p>
+      <div class="actions"><a class="btn" data-primary>Graph view</a><a class="btn">Growth</a><span class="btn" style="border-color:transparent;color:var(--faint)">Data updated · today 04:17 UTC</span></div>
+    </div>
+  </div>
+  <div class="explore">
+    <div class="graph">
+      <svg><line x1="120" y1="90" x2="260" y2="180"/><line x1="260" y1="180" x2="420" y2="120"/><line x1="260" y1="180" x2="300" y2="300"/><line x1="420" y1="120" x2="560" y2="200"/><line x1="560" y1="200" x2="640" y2="90"/><line x1="300" y1="300" x2="480" y2="330"/><line x1="480" y1="330" x2="560" y2="200"/><line x1="120" y1="90" x2="60" y2="230"/></svg>
+      <span class="n" style="left:90px;top:80px">server</span>
+      <span class="n" data-on style="left:225px;top:170px">linear-inbox</span>
+      <span class="n" style="left:390px;top:110px">agent-usage</span>
+      <span class="n" style="left:270px;top:290px">pr-review</span>
+      <span class="n" style="left:530px;top:190px">ollama-local</span>
+      <span class="n" style="left:610px;top:80px">lmstudio-bridge</span>
+      <span class="n" style="left:450px;top:320px">sqlite-inspect</span>
+      <span class="n" style="left:30px;top:220px">tmux-bridge</span>
+      <span class="hint">drag to pan · scroll to zoom · ⏎ opens the plugin · arrows move through plugins</span>
+    </div>
+    <div class="stats">
+      <div><span>Selected plugin</span><b style="font-size:13px">linear-inbox</b><div class="sel">Influence 0.62 · Listed 3 Sep 2026<br>Related: pr-review, agent-usage, server</div></div>
+      <div><span>Community plugins</span><b>12</b></div>
+      <div><span>Links</span><b>8</b></div>
+      <div><span>Communities</span><b>3</b><div class="sel">Local TF-IDF similarity</div></div>
+    </div>
+  </div>
+  <div class="keys"><span><b>← →</b> move</span><span><b>⏎</b> open</span><span><b>g</b> growth</span><span><b>esc</b> back</span></div>
+</div></section>
+
+<!-- ============================================================ DETAIL -->
+<section class="view" id="v-detail"><div class="doc">
+  <aside class="side">
+    <a class="back" onclick="go('browse')">← Back to marketplace</a>
+    <div class="grp"><p class="t">Workspace</p><a>Floe plugins</a></div>
+    <div class="grp"><p class="t">Plugin</p><a data-on>Overview</a><a>Install</a><a>Verification status</a><a>Security notice</a><a>Terms of use</a></div>
+    <div class="grp"><p class="t">Marketplace</p><a onclick="go('browse')">Browse plugins</a><a onclick="go('explore')">Explore plugins</a><a>Contribute ↗</a></div>
+  </aside>
+  <div class="center">
+    <div class="topbar"><span>Floe / Plugins / <b>Linear inbox</b></span><span><button class="act" onclick="go('browse')">Browse</button></span></div>
+    <div class="page">
+      <div class="dhead" style="--ca:#5db9f7">
+        <div class="icon">LI</div>
+        <div><h1>Linear inbox</h1><div class="by">by <b>@mira</b> · panel · <span class="ver" style="color:var(--live)">Verified</span></div></div>
+        <div class="actions"><button class="act" data-live>Install <kbd>⏎</kbd></button><button class="act">Repository ↗</button></div>
+      </div>
+      <div class="metaline"><span>v1.4.0</span><span>Updated 9 Sep 2026</span><span>★ 128</span><span class="st">Available</span></div>
+      <div class="dprev">preview · 1280×720</div>
+      <p class="lede">Your Linear issues as a Floe panel. Move with <code>j</code>/<code>k</code>, press Enter to open a session on the issue's branch, and let the agent update the ticket through the plugin's MCP tools.</p>
+      <div class="step"><h2><i>01</i>Install</h2>
+        <p>Installs into <code>~/.config/floe/plugins/linear-inbox</code> and enables it without a relaunch. The same action is <code>plugin:install</code> in ⌘K and <code>install_plugin</code> on the MCP server.</p>
+        <div class="block"><div class="bh"><span>Terminal · from outside the app</span><button class="act">Copy</button></div><pre><i>floe</i> plugin add <b>github:mira/floe-linear-inbox</b></pre></div>
+        <div class="block"><div class="bh"><span>Palette · inside the app</span></div><pre>⌘K → <b>Plugins: install</b> → <b>linear-inbox</b></pre></div>
+      </div>
+      <div class="step"><h2><i>02</i>What it registers</h2>
+        <table class="tbl"><tr><th>Surface</th><th>Id</th><th>Notes</th></tr>
+          <tr><td>Panel</td><td><code>plugin:linear-inbox:panel.inbox</code></td><td>Declarative list with row actions</td></tr>
+          <tr><td>Commands</td><td><code>…:open</code> · <code>…:start-session</code> · <code>…:sync</code></td><td>Bindable in keybindings.toml</td></tr>
+          <tr><td>MCP tools</td><td><code>linear_list</code> · <code>linear_update</code></td><td>Same dispatch as the panel rows</td></tr>
+        </table>
+      </div>
+      <div class="step"><h2><i>03</i>Verification status</h2>
+        <p>Validated at commit <code>8f2c1d0</code> on 9 Sep 2026. Manifest parses, <code>main</code> exists, no symlinks, <code>apiVersion</code> 2 within range.</p>
+      </div>
+      <div class="step"><h2><i>04</i>Security notice</h2>
+        <p>Plugins run inside Floe's plugin host with your user permissions. Review every dependency and command before installing. The marketplace validates listings, not plugin security.</p>
+      </div>
+      <div class="keys"><span><b>⏎</b> install</span><span><b>r</b> repository</span><span><b>esc</b> back</span></div>
+    </div>
+  </div>
+  <aside class="aside">
+    <div class="grp"><p class="t">On this page</p><a data-on>Overview</a><a>Install</a><a>What it registers</a><a>Verification status</a><a>Security notice</a><a>Terms of use</a></div>
+    <div class="grp meta"><p class="t">Metadata</p><dl><dt>Availability</dt><dd><span class="ok">Available</span></dd><dt>Verification</dt><dd><span class="ok">Verified</span></dd><dt>Version</dt><dd>1.4.0</dd><dt>API</dt><dd>2</dd><dt>License</dt><dd>MIT</dd><dt>Owner</dt><dd>@mira</dd></dl></div>
+  </aside>
+</div></section>
+
+<!-- ============================================================ DEVELOP -->
+<section class="view" id="v-develop"><div class="doc">
+  <aside class="side">
+    <a class="back" onclick="go('browse')">← Back to marketplace</a>
+    <div class="grp"><p class="t">Workspace</p><a>Floe plugins</a></div>
+    <div class="grp"><p class="t">Authoring</p><a data-on>Development guide</a><a onclick="go('publish')">Publishing guide</a><a>Submit a plugin ↗</a></div>
+    <div class="grp"><p class="t">References</p><a>Plugin context (types.ts) ↗</a><a>Built-in examples ↗</a></div>
+    <div class="grp"><p class="t">Marketplace</p><a onclick="go('browse')">Browse plugins</a><a onclick="go('explore')">Explore plugins</a><a>Contribute ↗</a></div>
+  </aside>
+  <div class="center">
+    <div class="topbar"><span>Floe / Marketplace / <b>Develop</b></span><span><button class="act" onclick="go('publish')">Publish</button></span></div>
+    <div class="page">
+      <p class="eyebrow">Development</p>
+      <h1>Develop a custom plugin</h1>
+      <div class="metaline"><span>Updated 13 Sep 2026</span><span>9 min read</span><span class="st">Stable</span></div>
+      <p class="lede">Build in your user-owned plugin directory, start from a working built-in, and validate the finished folder with the same manifest rules the plugin host enforces at boot.</p>
+      <div class="note">Plugins share Floe's plugin host process and run with your user permissions. Review every dependency, avoid unnecessary privileges, and keep state inside <code>ctx.dir</code>.</div>
+
+      <div class="step"><h2><i>01</i>Clone a built-in plugin</h2>
+        <p>Pick the built-in with the same kind and interaction pattern as the plugin you want. This tutorial builds a panel with row actions, so the built-in <code>hello</code> panel is the closest start.</p>
+        <div class="rows"><div><b><i>1</i>Match the contract</b>Same kind, same dispatch shape.</div><div><b><i>2</i>Work in a user copy</b>Edit under ~/.config/floe, never Floe's source.</div><div><b><i>3</i>Expect an immediate load</b>The clone is discovered and enabled at once.</div></div>
+        <div class="block"><div class="bh"><span>Terminal · create local copy</span><button class="act">Copy</button></div><pre><i>floe</i> plugin clone <b>floe.hello</b> --edit</pre></div>
+        <div class="block"><div class="bh"><span>Files · local plugin</span></div><pre>~/.config/floe/plugins/<b>yourname.hello</b>/
+├── manifest.json
+├── src/main.ts
+└── dist/main.cjs</pre></div>
+      </div>
+
+      <div class="step"><h2><i>02</i>Define the plugin contract</h2>
+        <table class="tbl"><tr><th>Plugin kind</th><th>Registers via</th><th>Use it for</th></tr>
+          <tr><td>command</td><td><code>ctx.registerCommands</code></td><td>Palette rows, bindable keys</td></tr>
+          <tr><td>tool</td><td><code>ctx.registerTool</code></td><td>MCP tools beside the built-ins</td></tr>
+          <tr><td>panel</td><td><code>ctx.registerPanel</code></td><td>Declarative panel with Settings rows</td></tr>
+          <tr><td>ui</td><td><code>ctx.registerUi</code></td><td>Isolated custom document (v2)</td></tr>
+          <tr><td>backend</td><td><code>ctx.backends.set</code></td><td>Remote Floe backends</td></tr>
+          <tr><td>harness</td><td><code>ctx.registerHarness</code></td><td>A new agent runtime</td></tr>
+        </table>
+        <div class="block"><div class="bh"><span>JSON · manifest.json</span><button class="act">Copy</button></div><pre>{
+  <b>"name"</b>: <i>"yourname.hello"</i>,
+  <b>"version"</b>: <i>"1.0.0"</i>,
+  <b>"author"</b>: <i>"Your name"</i>,
+  <b>"license"</b>: <i>"MIT"</i>,
+  <b>"description"</b>: <i>"A small panel with row actions."</i>,
+  <b>"main"</b>: <i>"dist/main.cjs"</i>,
+  <b>"apiVersion"</b>: 2,
+  <b>"minFloeVersion"</b>: <i>"0.40.0"</i>,
+  <b>"kinds"</b>: [<i>"panel"</i>, <i>"command"</i>, <i>"tool"</i>],
+  <b>"floe"</b>: { <b>"clonedFrom"</b>: <i>"floe.hello"</i> }
+}</pre></div>
+      </div>
+
+      <div class="step"><h2><i>03</i>Implement the panel</h2>
+        <p>Section ids name the plugin's own commands, so a panel row, its ⌘K entry and its MCP tool are one dispatch.</p>
+        <div class="block"><div class="bh"><span>JS · src/main.ts</span><button class="act">Copy</button></div><pre>module.exports = {
+  activate(ctx) {
+    ctx.registerCommands([{ id: <i>'greet'</i>, title: <i>'Say hello'</i>, run: () => ctx.log(<i>'hello!'</i>) }])
+    ctx.registerTool({ name: <i>'hello_status'</i>, description: <i>'Report status.'</i>, run: () => ({ ok: true }) })
+    ctx.registerPanel({ id: <i>'main'</i>, title: <i>'Hello'</i>,
+      body: () => [{ kind: <i>'list'</i>, rows: [{ id: <i>'greet'</i>, label: <i>'Say hello'</i> }] }] })
+  }
+}</pre></div>
+      </div>
+
+      <div class="step"><h2><i>04</i>Validate the folder</h2>
+        <div class="block"><div class="bh"><span>Terminal · validate</span><button class="act">Copy</button></div><pre><i>floe</i> plugin validate ~/.config/floe/plugins/yourname.hello</pre></div>
+        <ul class="checks"><li>Manifest parses as JSON — name, version, main, apiVersion present</li><li>Kinds and registrations agree — a panel kind must call registerPanel</li><li>Every referenced file exists — main resolves inside the plugin dir</li><li>No forbidden id or symlink — third-party ids cannot use floe.*</li></ul>
+      </div>
+
+      <div class="step"><h2><i>05</i>Run and inspect</h2>
+        <div class="block"><div class="bh"><span>Terminal · inspect status</span></div><pre><i>floe</i> plugin list
+<em>yourname.hello  1.0.0  enabled  panel command tool</em></pre></div>
+        <p>From the app: ⌘K → <code>Plugins: reload</code>. From an agent: <code>list_plugins</code> on the MCP server.</p>
+      </div>
+    </div>
+  </div>
+  <aside class="aside">
+    <div class="grp"><p class="t">On this page</p><a data-on>Overview</a><a>Clone</a><a>Contract</a><a>Implement</a><a>Validate</a><a>Run</a></div>
+    <div class="grp meta"><p class="t">Metadata</p><dl><dt>Status</dt><dd><span class="ok">Stable</span></dd><dt>Owner</dt><dd>r2luna</dd><dt>Visibility</dt><dd>Public</dd><dt>Updated</dt><dd>13 Sep 2026</dd></dl></div>
+  </aside>
+</div></section>
+
+<!-- ============================================================ PUBLISH -->
+<section class="view" id="v-publish"><div class="doc">
+  <aside class="side">
+    <a class="back" onclick="go('browse')">← Back to marketplace</a>
+    <div class="grp"><p class="t">Workspace</p><a>Floe plugins</a></div>
+    <div class="grp"><p class="t">Authoring</p><a onclick="go('develop')">Development guide</a><a data-on>Publishing guide</a><a>Submit a plugin ↗</a></div>
+    <div class="grp"><p class="t">Marketplace</p><a onclick="go('browse')">Browse plugins</a><a onclick="go('explore')">Explore plugins</a><a>Contribute ↗</a></div>
+  </aside>
+  <div class="center">
+    <div class="topbar"><span>Floe / Marketplace / <b>Publish</b></span><span><button class="act" onclick="go('browse')">Browse</button></span></div>
+    <div class="page">
+      <p class="eyebrow">Publishing</p>
+      <h1>Publish your plugin</h1>
+      <div class="metaline"><span>Updated 13 Sep 2026</span><span>3 min read</span><span class="st">Stable</span></div>
+      <p class="lede">List your plugin in three steps. Keep the code in a public git repository and ship a prebuilt <code>dist/</code> with a valid <code>manifest.json</code>.</p>
+      <div class="note">The marketplace validates listings, not plugin security. You remain responsible for your code, assets, documentation and license.</div>
+      <div class="step"><h2><i>01</i>Prepare the repository</h2>
+        <ul class="checks"><li>Public git repository (GitHub or Forgejo)</li><li>Valid manifest.json in the repository root</li><li>Prebuilt dist/main.cjs committed — no build at install</li><li>README and license</li><li>Safe install and removal</li><li data-opt>Optional preview image, optimized automatically</li></ul>
+      </div>
+      <div class="step"><h2><i>02</i>Add a manifest</h2>
+        <p>Run <code>floe plugin clone</code>, then <code>floe plugin validate</code>.</p>
+        <table class="tbl"><tr><th>Field</th><th>Purpose</th><th>Required</th></tr>
+          <tr><td>name</td><td>Kebab-case slug, namespaces everything the plugin registers</td><td>Yes</td></tr>
+          <tr><td>version</td><td>Current version, shown in the marketplace</td><td>Yes</td></tr>
+          <tr><td>main</td><td>CJS bundle exporting activate(ctx)</td><td>Yes</td></tr>
+          <tr><td>apiVersion</td><td>Additive plugin API gate</td><td>Yes</td></tr>
+          <tr><td>author</td><td>Shown in the marketplace</td><td>Yes</td></tr>
+          <tr><td>description</td><td>Short marketplace summary</td><td>Yes</td></tr>
+          <tr><td>kinds</td><td>Surfaces the plugin registers</td><td>Yes</td></tr>
+          <tr><td>minFloeVersion</td><td>Refuse to load on an older Floe</td><td>No</td></tr>
+        </table>
+      </div>
+      <div class="step"><h2><i>03</i>Submit your plugin</h2>
+        <p>Open the issue form with your repository link, category and tags. Automated validation checks the current commit before a maintainer approves the listing.</p>
+        <div class="actions"><a class="btn" data-primary>Submit your plugin ↗</a></div>
+      </div>
+    </div>
+  </div>
+  <aside class="aside">
+    <div class="grp"><p class="t">On this page</p><a data-on>Overview</a><a>Prepare</a><a>Manifest</a><a>Submit</a></div>
+    <div class="grp meta"><p class="t">Metadata</p><dl><dt>Status</dt><dd><span class="ok">Stable</span></dd><dt>Owner</dt><dd>r2luna</dd><dt>Visibility</dt><dd>Public</dd><dt>Updated</dt><dd>13 Sep 2026</dd></dl></div>
+  </aside>
+</div></section>
+
+<footer class="foot"><div class="wrap">
+  <a>r2luna ↗</a>
+  <span class="mark">floe</span>
+  <div class="links"><a>MIT license ↗</a><a>Forgejo ↗</a></div>
+</div></footer>
+
+<script>
+const P = [
+  { id:'linear-inbox', name:'Linear inbox', by:'@mira', kind:'panel', ca:'#5db9f7', ini:'LI', stars:128, ver:true, state:'new',
+    desc:'Your Linear issues as a panel. Enter opens a session on the issue branch; the agent updates the ticket through MCP.',
+    tags:['panel','agent','keyboard'], shot:'<b>FLO-231</b> composer drops focus after palette\n<b>FLO-228</b> merge keeps cursor row\n<i>FLO-227</i> queue: retry on 429' },
+  { id:'ollama-local', name:'Ollama local', by:'@pinguim', kind:'harness', ca:'#c2a3ea', ini:'OL', stars:64, ver:true, state:'upd',
+    desc:'Run local models through Ollama as a first-class harness with the same MCP projection as claude and codex.',
+    tags:['harness','agent'], },
+  { id:'server', name:'Floe server', by:'@r2luna', kind:'backend', ca:'#6ea86e', ini:'FS', stars:47, ver:true, state:'new',
+    desc:'Serve this Floe as a daemon and attach other machines over Tailscale with a paired token.',
+    tags:['backend','remote','daemon'], shot:'<b>link</b>   attached · 100.72.153.33\n<b>mac</b>    serving · :41680\n<i>pair</i>   floe://pair/…' },
+  { id:'agent-usage', name:'Agent usage', by:'@hancore', kind:'panel', ca:'#d3956d', ini:'AU', stars:312, ver:true, state:'',
+    desc:'Token and cost usage per harness, per project, per day, in one panel with a sparkline row per session.',
+    tags:['panel','agent'], },
+  { id:'tmux-bridge', name:'tmux bridge', by:'@kz', kind:'command', ca:'#b9b368', ini:'TB', stars:22, ver:false, state:'',
+    desc:'Attach any session output to a tmux pane and send keys back from the composer.',
+    tags:['command','keyboard'], },
+  { id:'pr-review', name:'PR review', by:'@dev', kind:'panel', ca:'#f494b2', ini:'PR', stars:91, ver:true, state:'', manual:true,
+    desc:'Open pull requests as review lanes; each one gets its own worktree and a codex + claude pair.',
+    tags:['panel','agent','remote'], },
+  { id:'sqlite-inspect', name:'SQLite inspect', by:'@tao', kind:'ui', ca:'#42c4af', ini:'SQ', stars:37, ver:false, state:'',
+    desc:'Custom UI panel over the project database: tables, a query box and the result grid, all keyboard.',
+    tags:['ui','keyboard'], },
+  { id:'notion-notes', name:'Notion notes', by:'@ines', kind:'tool', ca:'#e399d1', ini:'NN', stars:0, ver:false, state:'', soon:true,
+    desc:'Read and append to Notion pages from any session through two MCP tools.',
+    tags:['tool','agent'], },
+  { id:'lmstudio-bridge', name:'LM Studio bridge', by:'@ana', kind:'harness', ca:'#19c0e9', ini:'LM', stars:18, ver:false, state:'',
+    desc:'Point a harness at a running LM Studio server and pick the loaded model from the composer.',
+    tags:['harness'], },
+]
+function card(p, i){
+  const badge = p.soon ? '<span class="badge" data-soon>Coming soon</span>' : ''
+  const st = [p.state==='new'?'<span class="new">New</span>':'', p.state==='upd'?'<span class="upd">Updated</span>':'',
+    p.ver?'<span class="ver">Verified</span>':'<span class="unv">Unverified</span>'].join('')
+  const act = p.soon ? '<button class="act" data-off>Preview only</button>'
+    : p.manual ? '<button class="act" data-off>Manual</button>'
+    : `<button class="act" data-live>Install <kbd>i</kbd></button>`
+  const prev = p.shot ? `<div class="preview"><div class="shot">${p.shot.replace(/\n/g,'<br>')}</div></div>`
+    : `<div class="preview"><span class="cap">${p.kind}</span><span class="mark">${p.ini}</span></div>`
+  return `<article class="card" style="--ca:${p.ca}" ${i===0?'data-cursor':''} onclick="go('detail')">${prev}
+    <div class="body">
+      <div class="title"><h3>${p.name}</h3>${badge}<span class="social"><span>★ <span class="up">${p.stars}</span></span><span>♡ ${Math.round(p.stars/4)}</span></span></div>
+      <div class="by">by <b>${p.by}</b> · ${p.kind}</div>
+      <p class="desc">${p.desc}</p>
+      <div class="status">${st}</div>
+      <div class="bottom"><div class="tags">${p.tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>${act}</div>
+    </div></article>`
+}
+document.getElementById('recent').innerHTML = P.slice(0,3).map((p,i)=>card(p,i)).join('')
+document.getElementById('grid').innerHTML = P.map((p,i)=>card(p,-1)).join('')
+if (location.hash) addEventListener("load", () => go(location.hash.slice(1)))
+function go(v){
+  document.querySelectorAll('.view').forEach(s=>s.removeAttribute('data-on'))
+  document.getElementById('v-'+v).setAttribute('data-on','')
+  document.querySelectorAll('.nav [data-view]').forEach(b=>b.toggleAttribute('data-on', b.dataset.view===v))
+  window.scrollTo(0,0)
+}
+addEventListener('keydown', e=>{
+  const m = {'1':'browse','2':'explore','3':'develop','4':'publish'}
+  if (m[e.key]) go(m[e.key]); else if (e.key==='Escape') go('browse')
+})
+</script>
+</body>
+</html>

@@ -23,3 +23,24 @@ Reuse the canonical mode-chip tones (in `index.css`) instead of inventing colors
 | Neutral | `var(--tab-active)` / `var(--muted-2)` | (theme variables) |
 
 Prefer theme variables (`var(--muted)`, `var(--border)`, `var(--panel-2)`, …) wherever a tone isn't needed, so the control follows the appearance automatically.
+
+## Layout — Omarchy rules (2026-09-13)
+
+The skin follows Omarchy Quattro's application layout (reference: Flea). These
+are system-wide, every panel and every list; the mock that defines them is
+`mocks/omarchy-panels.html` (rules R1–R10 at its top).
+
+- **No rounded corners.** `--radius` is `0` and no selector sets a literal
+  radius; dots (`50%`) are the one exception.
+- **Panels sit close, not flush.** A 6px gutter between panels and around the
+  lane; each panel carries its own 1px `--line` border. Flush was tried on
+  2026-09-13 and felt cramped.
+- **Rows span the panel.** `.row` bleeds through the body's 8px inset and
+  carries the 12px text inset itself, so the cursor band and its 2px accent
+  bar reach the panel edge. Group labels are caption size, uppercase,
+  1px letter-spacing, same inset.
+- **Cursor** in the focused panel: `--bg` band, accent bar, accent name.
+- **Composer** is a full-width strip; its top hairline turns accent on
+  `:focus-within`. Fields do the same: `--edge` on focus is now `--accent`.
+- **Panel focus** is the name in accent and the head hairline stepping to
+  `--line`; nothing else moves.
