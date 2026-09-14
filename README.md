@@ -13,7 +13,7 @@ you review, steer and merge each one from the keyboard.
 Claude Code, Codex, Gemini, OpenCode, LM Studio and Ollama are all first-class. Pick the harness
 per session, or ask a second one for a side opinion while the first keeps working.
 
-<!-- screenshot: docs/screenshot.png -->
+![Floe: worktrees, an agent reviewing a change, and the changes list](docs/images/hero.png)
 
 ## Highlights
 
@@ -34,6 +34,18 @@ per session, or ask a second one for a side opinion while the first keeps workin
 - **Agents can drive Floe.** A built-in MCP server lets any harness open sessions, run commands,
   read diffs and merge worktrees. Everything you can do, an agent can do.
 - **Plugins.** Extend Floe with runtime plugins loaded from `~/.config/floe/plugins`.
+
+## See it
+
+**The colony board.** Every card is a task in its own worktree, moving through specify, code and
+review with an agent at each stage. Open a card and its session runs beside the board.
+
+![The colony board with tasks in several stages and a live agent session](docs/images/colony.png)
+
+**Review.** Walk the changes, select lines in the diff with `v`, and press `c` to send them to
+the agent as context.
+
+![A diff with selected lines and the Send to composer action](docs/images/review.png)
 
 ## Install
 

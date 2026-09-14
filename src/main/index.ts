@@ -256,6 +256,14 @@ import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, Fil
 // worktree path. Packaged builds keep the shared, canonical userData.
 function isolateUserDataPerWorktree(): void {
   if (app.isPackaged) return
+  // A throwaway profile, for demos and screenshots: nothing from the shared dev
+  // stores can show up. Pair it with XDG_CONFIG_HOME for projects and keys.
+  const demo = process.env.FLOE_DATA_DIR
+  if (demo) {
+    setSharedDataDir(demo)
+    app.setPath('userData', demo)
+    return
+  }
   const root = process.cwd()
   const hash = createHash('sha1').update(root).digest('hex').slice(0, 8)
   const base = app.getPath('userData')
