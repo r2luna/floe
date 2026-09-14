@@ -18,6 +18,10 @@ const TMP = realpathSync(tmpdir())
 process.env.GIT_CEILING_DIRECTORIES = TMP
 process.env.GIT_CONFIG_GLOBAL = '/dev/null'
 process.env.GIT_CONFIG_SYSTEM = '/dev/null'
+// With no config there is no user.email, and a merge commit needs one. macOS
+// invents it from the hostname; a Linux CI runner cannot, and the merge fails.
+process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Floe Test'
+process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'test@floe.invalid'
 
 // reviewBase() reads a checkpoint from sessionStore, which persists into
 // electron's userData — point that at a throwaway dir, not the real store.
