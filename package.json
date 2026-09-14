@@ -1,6 +1,6 @@
 {
   "name": "floe",
-  "version": "0.29.0",
+  "version": "0.29.1",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
   "license": "SEE LICENSE IN LICENSE",
