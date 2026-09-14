@@ -239,6 +239,29 @@ export function remember(
   return rememberIn(bySession, key, persistable(panels), MAX_SESSIONS)
 }
 
+/**
+ * Add a panel to a session that is not on screen, so it is there when you go
+ * back. It replaces a remembered panel of the same slot, like `open` does.
+ *
+ * Filed under the name the set is already saved as, or under every name when
+ * there is none yet: the lane keys a session `claudeId ?? id`, and only one of
+ * the names main sent will be the one it looks up.
+ */
+export function fileIntoSession(
+  bySession: Record<string, Panel[]>,
+  keys: string[],
+  panel: Panel
+): Record<string, Panel[]> {
+  const saved = keys.filter((k) => k in bySession)
+  let next = bySession
+  for (const key of saved.length ? saved : keys) {
+    const slot = panel.slot ?? panel.kind
+    const kept = (bySession[key] ?? []).filter((p) => p.id !== panel.id && (p.slot ?? p.kind) !== slot)
+    next = remember(next, key, [...kept, panel])
+  }
+  return next
+}
+
 /** Record which worktree a project was last left on. */
 export function rememberWorktree(
   byProject: Record<string, string>,

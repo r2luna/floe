@@ -59,6 +59,7 @@ import {
   setCreatedSessionSpawnedBy,
   type CreatedSession
 } from './sessionStore'
+import { agentIdentityNames, resolveAgentIdentity } from './identity'
 import { readSessionBuffer, sessionRuntime, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
@@ -2510,8 +2511,12 @@ function registerBrowserTools(server: McpServer, token: string): void {
       // remote backend, but this native view always belongs to the local window.
       // Waiting for mcp:command-result there would route the acknowledgement to
       // that backend even though the local renderer already opened the panel.
+      // Scoped to the caller: an agent working in a chat you have since left
+      // must not drop its browser into the chat you are reading now.
       pushCommand({
-        kind: 'run_command', callerKey: token, requestId: randomUUID(), commandId: 'browser.open'
+        kind: 'open_browser',
+        callerKey: token,
+        sessionKeys: resolveAgentIdentity(token) ? agentIdentityNames(token) : []
       })
       const browser = await import('./browser')
       return textResult(url ? await browser.navigateBrowser(win, url) : browser.browserState(win))
@@ -2584,6 +2589,12 @@ function registerBrowserTools(server: McpServer, token: string): void {
       if (action === 'reload') return browser.browserReload(win)
       return browser.browserStop(win)
     })
+  )
+  server.tool(
+    'browser_screenshot_to_desk',
+    'Capture the full internal browser page as PNG and hand it to the user: CleanShot annotate when installed, otherwise copy it to the clipboard and open it in Preview.',
+    {},
+    async () => browserCall((browser, win) => browser.screenshotPageToDesk(win))
   )
   server.tool('browser_devtools', 'Open detached Chromium DevTools for the internal browser page.', {}, async () =>
     browserCall((browser, win) => {

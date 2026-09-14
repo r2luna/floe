@@ -38,6 +38,7 @@ import { useNeedsYouNotifier } from './useNotify'
 import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
+  fileIntoSession,
   load as loadLane,
   projectRailOf,
   remember,
@@ -1858,7 +1859,8 @@ export default function App() {
       reload: () => void window.floe.browser.reload(),
       stop: () => void window.floe.browser.stop(),
       focus: () => void window.floe.browser.focus(),
-      devtools: () => void window.floe.browser.devtools()
+      devtools: () => void window.floe.browser.devtools(),
+      screenshot: () => void window.floe.browser.screenshot().catch((e) => console.error('browser screenshot', e))
     },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it
@@ -2209,6 +2211,21 @@ export default function App() {
           open(l, mkPanel('chat', command.title, { id: command.sessionId, worktreePath: command.worktreePath }))
         )
         worktrees.reload()
+        return
+      }
+      case 'open_browser': {
+        // Into the chat that asked. An agent keeps working after you move to
+        // another project, and opening into the lane on screen put its preview
+        // beside a chat that never asked for it. Off screen, the panel is filed
+        // with that chat's set and comes up when you go back — the same rule a
+        // query panel follows.
+        const keys = command.sessionKeys
+        const shown = sessionKeyOf(ctxRef.current.lane)
+        if (!keys.length || (shown && keys.includes(shown))) {
+          runCommand(REGISTRY, ctxRef.current, 'browser.open')
+          return
+        }
+        bySession.current = fileIntoSession(bySession.current, keys, mkPanel('browser'))
         return
       }
       case 'open_plan': {

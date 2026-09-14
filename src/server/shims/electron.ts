@@ -42,7 +42,8 @@ export const app = {
   commandLine: { appendSwitch: (): void => {} },
   getLoginItemSettings: (): { openAtLogin: boolean } => ({ openAtLogin: false }),
   setLoginItemSettings: (): void => {},
-  getAppMetrics: (): unknown[] => []
+  getAppMetrics: (): unknown[] => [],
+  getApplicationNameForProtocol: (): string => ''
 }
 
 class FakeWebContents {
@@ -179,7 +180,8 @@ export const clipboard = { writeText: (): void => {}, writeImage: (): void => {}
 // URL" is an empty image: `media:copyImage` checks isEmpty first and reports
 // the copy as failed instead of throwing at the caller.
 export const nativeImage = {
-  createFromDataURL: (): { isEmpty: () => boolean } => ({ isEmpty: () => true })
+  createFromDataURL: (): { isEmpty: () => boolean } => ({ isEmpty: () => true }),
+  createFromPath: (): { isEmpty: () => boolean } => ({ isEmpty: () => true })
 }
 
 export const shell = {

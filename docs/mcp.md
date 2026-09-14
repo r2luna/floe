@@ -128,7 +128,8 @@ as that session under a token it was lent (`peerMcp`).
      `browser_type`, `browser_press`, `browser_evaluate` and
      `browser_screenshot` let an agent inspect and operate the page;
      `browser_history` controls navigation and `browser_devtools` opens the
-     detached Chromium developer tools.
+     detached Chromium developer tools. `browser_screenshot_to_desk` captures the
+     full page and opens it in CleanShot (or copies it and opens Preview).
 2. **UI commands** — everything the renderer's command registry dispatches
    (the palette, the keymap): `list_commands` and `run_command`. These do a
    round-trip to the renderer (`mcp:command` → `mcp:command-result`), which runs

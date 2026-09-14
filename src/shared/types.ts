@@ -330,6 +330,10 @@ export type McpCommand =
       worktreePath: string
       projectPath: string
     }
+  // Open the browser panel in the CALLER's session, not the one on screen.
+  // `sessionKeys` is every name that session answers to (identity.ts), empty
+  // when the caller is no Floe session — then it opens where you are.
+  | { kind: 'open_browser'; callerKey: string; sessionKeys: string[] }
   // Run a registry command (the same ids the palette and the keymap dispatch).
   | { kind: 'run_command'; callerKey: string; requestId: string; commandId: string; arg?: string }
   // List the registry's commands with their palette metadata and availability.

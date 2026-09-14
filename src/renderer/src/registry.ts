@@ -727,6 +727,13 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.browser.devtools()
       },
       {
+        id: 'browser.screenshot',
+        title: 'Screenshot browser page',
+        group: 'Browser',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
+        run: (c) => c.browser.screenshot()
+      },
+      {
         id: 'cursor.down',
         title: 'Move cursor down',
         group: 'Cursor',
