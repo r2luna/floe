@@ -1,5 +1,7 @@
 # Floe
 
+![Floe's launcher: Good afternoon, and a box to describe the task](docs/images/greeting.png)
+
 **Run a colony of coding agents in parallel, one git worktree each, without touching the mouse.**
 
 [![CI](https://github.com/r2luna/floe/actions/workflows/ci.yml/badge.svg)](https://github.com/r2luna/floe/actions/workflows/ci.yml)
