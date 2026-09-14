@@ -8167,11 +8167,18 @@ kbd {
 
    Everything below follows from that. */
 
+.panel-body:has(> .board) {
+  display: flex;
+  flex-direction: column;
+}
+
 .board {
   display: flex;
   gap: 6px;
   align-items: stretch;
-  height: 100%;
+  /* Fills what the policy line leaves, not the whole body: at 100% it was one
+     policy line taller than the panel and the body scrolled for nothing. */
+  flex: 1;
   min-height: 0;
   /* Cards are targets, not prose: dragging across one painted a selection down
      its padding, which read as a stray bar drawn on the card. */
@@ -8340,8 +8347,10 @@ kbd {
 
 /* Holding sits in the column the task is trying to ENTER, at the bottom, pinned:
    with five cards working above it, a queue that scrolled away would hide the
-   only thing that explains why nothing is moving. */
-.fband[data-hold] {
+   only thing that explains why nothing is moving. Inbox and done have no cap and
+   no working cards to sit under, so their backlog and landed lists start at the
+   top like any other list. */
+.fband[data-pin] {
   margin-top: auto;
   position: sticky;
   bottom: -6px;
@@ -8453,11 +8462,11 @@ kbd {
   margin-left: 6px;
 }
 
+/* Wraps instead of clipping: the name is the only thing telling two cards
+   apart, and a narrow column was cutting it mid-word at the column edge. */
 .fcard-name {
   color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .fcard-line {
