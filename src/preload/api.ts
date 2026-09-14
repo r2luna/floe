@@ -167,6 +167,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       stop: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:stop'),
       focus: (): Promise<void> => ipcRenderer.invoke('browser:focus'),
       devtools: (): Promise<void> => ipcRenderer.invoke('browser:devtools'),
+      /** Full-page PNG, handed to CleanShot or copied and opened in Preview. */
+      screenshot: (): Promise<{ path: string; openedIn: 'cleanshot' | 'preview' } | null> =>
+        ipcRenderer.invoke('browser:screenshot'),
       onState: (cb: (state: BrowserState) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, state: BrowserState): void => cb(state)
         ipcRenderer.on('browser:state', listener)
@@ -500,8 +503,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('agent:start', key, worktreePath, prompt, options, images, files, route),
       answer: (key: string, toolUseId: string, answer: string, answers?: string[][]): Promise<void> =>
         ipcRenderer.invoke('agent:answer', key, toolUseId, answer, answers),
-      permission: (key: string, requestId: string, allow: boolean): Promise<void> =>
-        ipcRenderer.invoke('agent:permission', key, requestId, allow),
+      permission: (key: string, requestId: string, allow: boolean, always = false): Promise<void> =>
+        ipcRenderer.invoke('agent:permission', key, requestId, allow, always),
       stop: (key: string): Promise<void> => ipcRenderer.invoke('agent:stop', key),
       // The turn in flight, for a panel that mounts mid-turn (see AgentReplay).
       replay: (key: string): Promise<AgentReplay> => ipcRenderer.invoke('agent:replay', key),

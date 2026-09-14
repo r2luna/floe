@@ -330,6 +330,10 @@ export type McpCommand =
       worktreePath: string
       projectPath: string
     }
+  // Open the browser panel in the CALLER's session, not the one on screen.
+  // `sessionKeys` is every name that session answers to (identity.ts), empty
+  // when the caller is no Floe session — then it opens where you are.
+  | { kind: 'open_browser'; callerKey: string; sessionKeys: string[] }
   // Run a registry command (the same ids the palette and the keymap dispatch).
   | { kind: 'run_command'; callerKey: string; requestId: string; commandId: string; arg?: string }
   // List the registry's commands with their palette metadata and availability.
@@ -948,6 +952,7 @@ export interface AgentPermission {
   requestId: string // echo back in the control_response
   toolName: string
   summary?: string // a short, human-readable target (file path, command, …)
+  remember?: boolean // the CLI offered a rule to save, so "don't ask again" can be honoured
 }
 
 // A subagent the session spawned via the Task/Agent tool. Claude Code runs these

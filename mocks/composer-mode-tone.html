@@ -1,0 +1,57 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><title>Floe — composer line follows the mode</title>
+<!-- The app's real stylesheet: the tone rules under test are not re-declared here. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" /><style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { padding: 20px 24px; }
+  .lbl { margin: 0 0 8px; color: var(--dim); font-size: 11px; }
+  .modes { display: flex; gap: 6px; margin: 0 0 16px; }
+  .modes button { padding: 3px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: none; color: var(--text); font: inherit; cursor: pointer; }
+  .chat { width: 640px; height: 120px; display: flex; flex-direction: column; justify-content: flex-end; background: var(--panel); border: 1px solid var(--line); margin: 0 0 20px; }
+  .launch { width: 640px; padding: 18px; background: var(--panel); border: 1px solid var(--line); }
+</style></head><body><div class="page">
+<p class="lbl">click a mode, then click into an input: the focused line takes the mode's tone ("ask" keeps the accent)</p>
+<div class="modes"></div>
+
+<p class="lbl"><b>chat footer</b></p>
+<div class="chat">
+  <div class="composer" id="foot"><div class="composer-bar">
+    <div class="composer-stack"><textarea class="composer-input" rows="1" placeholder="Message…"></textarea></div>
+    <div class="composer-tools">
+      <button class="model"><span class="model-mode"></span></button>
+    </div>
+  </div></div>
+</div>
+
+<p class="lbl"><b>greeting launcher</b></p>
+<div class="launch">
+  <div class="composer" data-boxed id="boxed"><div class="composer-bar">
+    <div class="composer-stack"><textarea class="composer-input" rows="2" placeholder="Describe the task…"></textarea></div>
+    <div class="composer-tools">
+      <button class="model"><span class="model-harness">claude</span><span class="model-name">opus-5</span><span class="model-mode"></span></button>
+    </div>
+  </div></div>
+</div>
+</div>
+<script>
+  const LABEL = { plan: 'plan', default: 'ask', acceptEdits: 'auto', skip: 'bypass' }
+  const q = new URLSearchParams(location.search)
+  if (q.get('theme')) document.documentElement.dataset.theme = q.get('theme')
+  const set = (tone) => {
+    for (const c of document.querySelectorAll('.composer')) {
+      c.dataset.tone = tone
+      const m = c.querySelector('.model-mode')
+      m.dataset.tone = tone
+      m.textContent = LABEL[tone]
+    }
+  }
+  const bar = document.querySelector('.modes')
+  for (const tone of Object.keys(LABEL)) {
+    const b = document.createElement('button')
+    b.textContent = LABEL[tone]
+    b.onpointerdown = (e) => { e.preventDefault(); set(tone) }
+    bar.append(b)
+  }
+  set(q.get('tone') || 'skip')
+  document.querySelector(`#${q.get('focus') || 'foot'} textarea`).focus()
+</script>
+</body></html>

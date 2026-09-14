@@ -155,7 +155,6 @@ declare global {
 }
 
 const {
-  answerProvisionAsk,
   dropWorktreeDatabase,
   ensureContainerUp,
   getAppUrl,
@@ -210,7 +209,7 @@ async function provision(
   root: string,
   worktree: string,
   branch = 'feat/one',
-  opts: { from?: string; skip?: string[] } | null = {},
+  opts: { from?: string; skip?: string[]; premiseAnswer?: string } | null = {},
   destroyed = false
 ): Promise<ProvisionEvent[]> {
   const events: ProvisionEvent[] = []
@@ -613,9 +612,9 @@ function currentAsk(events: ProvisionEvent[]): Extract<ProvisionEvent, { kind: '
 /** Let the interview's pending model call / await settle. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 
-test('the interview asks, then writes the premise the answer composes', async () => {
+test('the form answer writes the premise without a question on screen', async () => {
   reset()
-  // One model call: the composed file. The question itself is fixed.
+  // One model call: the composed file.
   globalThis.__provSpawnPlan = (cmd) =>
     cmd === 'claude' ? { stdout: '## Goal\nShip the premise flow.' } : { code: 0 }
 
@@ -623,27 +622,19 @@ test('the interview asks, then writes the premise the answer composes', async ()
   const wt = checkout('floe-wt-', { 'README.md': '#\n' })
 
   await withInterview(async () => {
-    const events = await provision(root, wt)
+    const events = await provision(root, wt, 'feat/one', { premiseAnswer: 'the premise flow' })
     assert.deepEqual(planIds(events), ['premise'], 'the row is on the checklist even with no stack')
 
     await settle()
-    const ask = currentAsk(events)
-    assert.match(ask!.question, /deliver/)
-    assert.equal(ask?.index, 1)
-    assert.equal(ask?.total, 1)
-    assert.deepEqual(globalThis.__provSpawns, [], 'the question costs no model call')
-
-    answerProvisionAsk(ask!.requestId, 'the premise flow')
-    await settle()
     await settle()
 
-    assert.equal(currentAsk(events), null, 'the question is withdrawn when the interview ends')
+    assert.equal(currentAsk(events), null, 'the checklist never asks')
     assert.equal(status(events, 'premise'), 'done')
     assert.equal(readFileSync(join(wt, '.floe', 'premise.md'), 'utf8'), '## Goal\nShip the premise flow.\n')
   })
 })
 
-test('skipping the interview leaves no premise and no more questions', async () => {
+test('without a form answer the checklist neither asks nor writes a premise', async () => {
   reset()
   globalThis.__provSpawnPlan = (cmd) => (cmd === 'claude' ? { stdout: '## Goal\nUnused.' } : { code: 0 })
 
@@ -653,15 +644,10 @@ test('skipping the interview leaves no premise and no more questions', async () 
   await withInterview(async () => {
     const events = await provision(root, wt)
     await settle()
-    const first = currentAsk(events)
-    assert.ok(first)
 
-    answerProvisionAsk(first!.requestId, null)
-    await settle()
-
+    assert.deepEqual(planIds(events), [])
     assert.equal(currentAsk(events), null)
-    assert.equal(status(events, 'premise'), 'skipped')
-    assert.equal(existsSync(join(wt, '.floe', 'premise.md')), false, 'a refused interview writes nothing')
+    assert.equal(existsSync(join(wt, '.floe', 'premise.md')), false)
   })
 })
 

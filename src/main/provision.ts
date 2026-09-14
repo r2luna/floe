@@ -866,13 +866,16 @@ type Emit = (e: WithoutWorktree<ProvisionEvent>) => void
 /**
  * Whether this run interviews the worktree.
  *
- * Not on a retry (the `from` path re-runs a recipe that failed halfway — the
- * user is fixing composer, not being asked about scope again), unless the
- * premise step is itself what they retried. Never when the file is already
- * there: a premise is written once and edited by hand after that.
+ * Only with an answer from the new-worktree form: the checklist no longer asks
+ * the question itself, so a run without one (a re-run, a form left blank) has
+ * nothing to write. Not on a retry (the `from` path re-runs a recipe that
+ * failed halfway), unless the premise step is itself what they retried. Never
+ * when the file is already there: a premise is written once and edited by hand
+ * after that.
  */
 function wantsInterview(worktreePath: string, opts: ProvisionOpts): boolean {
   if (!floeConfig().premise.enabled) return false
+  if (!opts.premiseAnswer?.trim()) return false
   if (hasPremise(worktreePath)) return false
   if ((opts.skip ?? []).includes(PREMISE_STEP_ID)) return false
   return !opts.from || opts.from === PREMISE_STEP_ID

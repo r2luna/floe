@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  fileIntoSession,
   load,
   persistable,
   projectRailOf,
@@ -253,4 +254,24 @@ test('the saved focus never points past what was saved', () => {
   const back = load()
   assert.deepEqual(back?.lane.panels.map((p) => p.kind), ['worktrees'])
   assert.equal(back?.lane.focus, 0, 'the checklist it pointed at is gone')
+})
+
+// An agent opening its browser while you read another chat: the panel waits in
+// that chat's own set instead of landing beside yours.
+test('a panel filed into a session off screen joins its saved set', () => {
+  const by = { claude1: [panel('terminal', 50)], other: [panel('changes', 40)] }
+  const next = fileIntoSession(by, ['s1', 'claude1'], panel('browser', 50))
+  assert.deepEqual(next.claude1.map((p) => p.kind), ['terminal', 'browser'])
+  assert.deepEqual(next.other.map((p) => p.kind), ['changes'])
+  assert.equal('s1' in next, false, 'only the name the set is saved under')
+})
+
+test('a session with no saved set gets the panel under every name', () => {
+  const next = fileIntoSession({}, ['s1', 'claude1'], panel('browser', 50))
+  assert.deepEqual(Object.keys(next).sort(), ['claude1', 's1'])
+})
+
+test('filing a panel twice keeps one', () => {
+  const once = fileIntoSession({}, ['s1'], panel('browser', 50))
+  assert.equal(fileIntoSession(once, ['s1'], panel('browser', 50)).s1.length, 1)
 })

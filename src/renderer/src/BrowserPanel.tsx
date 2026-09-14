@@ -2,6 +2,7 @@ import {
   IconArrowLeft,
   IconArrowRight,
   IconExternalLink,
+  IconPhoto,
   IconPlayerStop,
   IconRefresh,
   IconTool
@@ -144,6 +145,14 @@ export function BrowserPanel({ onCommand }: { onCommand?: (id: string) => void }
           onClick={() => onCommand?.('browser.focus')}
         >
           <IconExternalLink size={14} stroke={1.6} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="Screenshot full page"
+          title="Screenshot full page (⌘⇧S)"
+          onClick={() => onCommand?.('browser.screenshot')}
+        >
+          <IconPhoto size={14} stroke={1.6} aria-hidden="true" />
         </button>
         <button
           type="button"

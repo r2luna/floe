@@ -1,4 +1,7 @@
-import { BrowserWindow, WebContentsView, type Rectangle } from 'electron'
+import { app, BrowserWindow, clipboard, nativeImage, shell, WebContentsView, type Rectangle } from 'electron'
+import { execFile } from 'node:child_process'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { BrowserSnapshot, BrowserState } from '../shared/types'
 
 type Session = {
@@ -64,6 +67,7 @@ export function browserShortcut(input: Electron.Input): string | undefined {
   return (
     (commandOrControl ? primary[key] : undefined) ??
     (commandOrControl && input.alt && key === 'i' ? 'browser.devtools' : undefined) ??
+    (commandOrControl && input.shift && key === 's' ? 'browser.screenshot' : undefined) ??
     (input.control ? control[key] : undefined)
   )
 }
@@ -325,4 +329,96 @@ export function pressInBrowser(win: BrowserWindow, key: string): void {
 export async function screenshotBrowser(win: BrowserWindow): Promise<{ data: string; mimeType: 'image/png' }> {
   const image = await withBrowserTimeout('Browser screenshot', sessionFor(win).view.webContents.capturePage())
   return { data: image.toPNG().toString('base64'), mimeType: 'image/png' }
+}
+
+/**
+ * The whole document, not just the viewport: CDP renders beyond the visible
+ * area. Falls back to the viewport when the debugger cannot attach (DevTools
+ * already holds it, or there is no page process).
+ */
+export async function captureFullPage(contents: Electron.WebContents): Promise<Buffer> {
+  const dbg = contents.debugger
+  let attachedHere = false
+  try {
+    if (!dbg.isAttached()) {
+      dbg.attach('1.3')
+      attachedHere = true
+    }
+    const metrics = await dbg.sendCommand('Page.getLayoutMetrics')
+    const size = metrics.cssContentSize ?? metrics.contentSize
+    const shot = await dbg.sendCommand('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+      clip: { x: 0, y: 0, width: Math.ceil(size.width), height: Math.ceil(size.height), scale: 1 }
+    })
+    return Buffer.from(shot.data as string, 'base64')
+  } catch {
+    return (await contents.capturePage()).toPNG()
+  } finally {
+    if (attachedHere && dbg.isAttached()) dbg.detach()
+  }
+}
+
+/** `localhost-5173-2026-09-14-153012.png` — the host keeps a folder of shots readable. */
+export function screenshotFileName(url: string, now: Date): string {
+  let host = 'page'
+  try {
+    host = new URL(url).host.replace(/[^a-z\d.-]+/gi, '-').replace(/^-+|-+$/g, '') || 'page'
+  } catch {
+    // about:blank and friends keep the generic name.
+  }
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `${host}-${stamp}.png`
+}
+
+export type ScreenshotDesk = {
+  platform: NodeJS.Platform
+  hasCleanShot: () => boolean
+  openUrl: (url: string) => Promise<void>
+  copyImage: (file: string) => void
+  openInPreview: (file: string) => Promise<void>
+}
+
+export type ScreenshotHandoff = { path: string; openedIn: 'cleanshot' | 'preview' }
+
+/** CleanShot's annotate window when it is installed; otherwise clipboard + Preview. */
+export async function handOffScreenshot(file: string, desk: ScreenshotDesk): Promise<ScreenshotHandoff> {
+  if (desk.platform === 'darwin' && desk.hasCleanShot()) {
+    await desk.openUrl(`cleanshot://open-annotate?filepath=${encodeURIComponent(file)}`)
+    return { path: file, openedIn: 'cleanshot' }
+  }
+  desk.copyImage(file)
+  await desk.openInPreview(file)
+  return { path: file, openedIn: 'preview' }
+}
+
+const electronDesk: ScreenshotDesk = {
+  platform: process.platform,
+  hasCleanShot: () => app.getApplicationNameForProtocol('cleanshot://') !== '',
+  openUrl: (url) => shell.openExternal(url),
+  copyImage: (file) => clipboard.writeImage(nativeImage.createFromPath(file)),
+  // Preview by name on macOS; elsewhere the desktop's default image viewer.
+  openInPreview: (file) =>
+    process.platform === 'darwin'
+      ? new Promise((resolve, reject) =>
+          execFile('open', ['-a', 'Preview', file], (error) => (error ? reject(error) : resolve()))
+        )
+      : shell.openPath(file).then((error) => {
+          if (error) throw new Error(error)
+        })
+}
+
+/** Capture the full page to a temp PNG and hand it to the desk (CleanShot or Preview). */
+export async function screenshotPageToDesk(
+  win: BrowserWindow,
+  desk: ScreenshotDesk = electronDesk
+): Promise<ScreenshotHandoff> {
+  const contents = sessionFor(win).view.webContents
+  const png = await withBrowserTimeout('Browser screenshot', captureFullPage(contents))
+  const dir = join(app.getPath('temp'), 'floe-screenshots')
+  await mkdir(dir, { recursive: true })
+  const file = join(dir, screenshotFileName(contents.getURL(), new Date()))
+  await writeFile(file, png)
+  return handOffScreenshot(file, desk)
 }

@@ -87,7 +87,8 @@ const {
   sendToAgent,
   stopAgent,
   hasActiveTurn,
-  readSessionBuffer
+  readSessionBuffer,
+  permissionResponse
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
 const { addCreatedSession, setCreatedSessionSpawnedBy, linkCreatedSession } = await import(
@@ -115,6 +116,7 @@ function fakeConn(over: Partial<Conn> = {}): Conn {
     optionsKey: '',
     stderr: '',
     pendingPerms: new Map(),
+    permSuggestions: new Map(),
     subagents: new Set(),
     transcriptBuffer: [],
     lastAssistantText: '',
@@ -580,11 +582,36 @@ test('handleLine: a normal tool control_request surfaces a permission prompt', (
     },
     conn
   )
-  const perm = only(events, 'permission')[0] as { permission: { requestId: string; toolName: string; summary?: string } }
+  const perm = only(events, 'permission')[0] as { permission: { requestId: string; toolName: string; summary?: string; remember?: boolean } }
   assert.equal(perm.permission.requestId, 'r2')
   assert.equal(perm.permission.toolName, 'Bash')
   assert.equal(perm.permission.summary, 'rm -rf x')
   assert.ok(conn.pendingPerms.has('r2'))
+  assert.equal(perm.permission.remember, false, 'no suggestions, no "don\'t ask again"')
+})
+
+test('handleLine: a permission with suggestions offers "don\'t ask again" and keeps them', () => {
+  const conn = fakeConn()
+  const suggestions = [{ type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'cat:*' }], behavior: 'allow', destination: 'localSettings' }]
+  const { events } = run(
+    {
+      type: 'control_request',
+      request_id: 'r4',
+      request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'cat x' }, permission_suggestions: suggestions }
+    },
+    conn
+  )
+  const perm = only(events, 'permission')[0] as { permission: { remember?: boolean } }
+  assert.equal(perm.permission.remember, true)
+  assert.deepEqual(conn.permSuggestions.get('r4'), suggestions)
+})
+
+test('permissionResponse: deny, allow, and allow with the rules to save', () => {
+  const input = { command: 'cat x' }
+  const rules = [{ type: 'addRules' }]
+  assert.deepEqual(permissionResponse(false, input, rules), { behavior: 'deny', message: 'The user declined this action.' })
+  assert.deepEqual(permissionResponse(true, input), { behavior: 'allow', updatedInput: input })
+  assert.deepEqual(permissionResponse(true, input, rules), { behavior: 'allow', updatedInput: input, updatedPermissions: rules })
 })
 
 test('handleLine: result ends the turn WITHOUT touching the token gauge', () => {

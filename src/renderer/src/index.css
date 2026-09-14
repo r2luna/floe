@@ -1281,6 +1281,40 @@ button {
   border-color: var(--accent);
 }
 
+/* The lit line takes the mode's tone (see "the mode tones"), so switching mode
+   shows on the field you are typing in. "ask" has no tone and keeps the accent. */
+.composer[data-tone='plan']:focus-within {
+  --composer-lit: #95a6c0;
+}
+
+.composer[data-tone='acceptEdits']:focus-within {
+  --composer-lit: #93b8a1;
+}
+
+.composer[data-tone='skip']:focus-within {
+  --composer-lit: #c49495;
+}
+
+:root[data-theme='light'] .composer[data-tone='plan']:focus-within {
+  --composer-lit: #3a64a8;
+}
+
+:root[data-theme='light'] .composer[data-tone='acceptEdits']:focus-within {
+  --composer-lit: #2f7d52;
+}
+
+:root[data-theme='light'] .composer[data-tone='skip']:focus-within {
+  --composer-lit: #b1454a;
+}
+
+.composer[data-tone]:not([data-boxed], [data-dropping]):focus-within {
+  border-top-color: var(--composer-lit, var(--accent));
+}
+
+.composer[data-boxed][data-tone]:not([data-dropping]):focus-within {
+  border-color: var(--composer-lit, var(--accent));
+}
+
 /* Stacked, the way it always was: the text takes the width, the tools sit on
    their own row beneath it. */
 .composer[data-boxed] .composer-bar {
@@ -8205,11 +8239,18 @@ kbd {
 
    Everything below follows from that. */
 
+.panel-body:has(> .board) {
+  display: flex;
+  flex-direction: column;
+}
+
 .board {
   display: flex;
   gap: 6px;
   align-items: stretch;
-  height: 100%;
+  /* Fills what the policy line leaves, not the whole body: at 100% it was one
+     policy line taller than the panel and the body scrolled for nothing. */
+  flex: 1;
   min-height: 0;
   /* Cards are targets, not prose: dragging across one painted a selection down
      its padding, which read as a stray bar drawn on the card. */
@@ -8378,8 +8419,10 @@ kbd {
 
 /* Holding sits in the column the task is trying to ENTER, at the bottom, pinned:
    with five cards working above it, a queue that scrolled away would hide the
-   only thing that explains why nothing is moving. */
-.fband[data-hold] {
+   only thing that explains why nothing is moving. Inbox and done have no cap and
+   no working cards to sit under, so their backlog and landed lists start at the
+   top like any other list. */
+.fband[data-pin] {
   margin-top: auto;
   position: sticky;
   bottom: -6px;
@@ -8491,11 +8534,11 @@ kbd {
   margin-left: 6px;
 }
 
+/* Wraps instead of clipping: the name is the only thing telling two cards
+   apart, and a narrow column was cutting it mid-word at the column edge. */
 .fcard-name {
   color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .fcard-line {

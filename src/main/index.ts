@@ -192,6 +192,7 @@ import {
   mountBrowser,
   navigateBrowser,
   openBrowserDevTools,
+  screenshotPageToDesk,
   setBrowserBounds,
   setBrowserVisible,
   unmountBrowser
@@ -674,8 +675,8 @@ export function registerAgentIpc(): void {
     if (answerCodexQuestion(key, answers ?? [[answer]])) return
     answerQuestion(key, requestId, answer)
   })
-  handle('agent:permission', (_event, key: string, requestId: string, allow: boolean) =>
-    respondPermission(key, requestId, allow)
+  handle('agent:permission', (_event, key: string, requestId: string, allow: boolean, always?: boolean) =>
+    respondPermission(key, requestId, allow, always)
   )
   // What a panel opening mid-turn missed: the streamed events since turn start.
   handle('agent:replay', (_event, key: string) => replaySnapshot(key))
@@ -952,6 +953,8 @@ const browserFocusIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, focusBrowser)
 const browserDevToolsIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, openBrowserDevTools)
+const browserScreenshotIpc = (event: IpcMainInvokeEvent): ReturnType<typeof screenshotPageToDesk> | null =>
+  withBrowserWindow(event, (win) => screenshotPageToDesk(win))
 
 export function registerBrowserIpc(): void {
   handle('browser:mount', browserMountIpc)
@@ -966,6 +969,7 @@ export function registerBrowserIpc(): void {
   handle('browser:stop', browserStopIpc)
   handle('browser:focus', browserFocusIpc)
   handle('browser:devtools', browserDevToolsIpc)
+  handle('browser:screenshot', browserScreenshotIpc)
 }
 
 // The file tree, media probes and the review diff.

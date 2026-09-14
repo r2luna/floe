@@ -53,6 +53,8 @@ export interface PendingQuestion {
 
 /** The one label that means yes. Compared against, so it lives in one place. */
 const ALLOW = 'Allow'
+/** Yes, and save the CLI's suggested rule so this call stops asking. */
+const ALLOW_ALWAYS = "Allow and don't ask again"
 
 /**
  * How quiet a turn has to be before main's "not running" is believed over this
@@ -69,6 +71,7 @@ function permissionQuestion(p: AgentPermission): AgentQuestion {
     question: p.summary ?? `The agent wants to use ${p.toolName}.`,
     options: [
       { label: ALLOW, description: 'Run it with the input it asked for.' },
+      ...(p.remember ? [{ label: ALLOW_ALWAYS, description: 'Run it, and stop asking for calls like this one.' }] : []),
       { label: 'Deny', description: 'Refuse this one call. The turn continues.' }
     ]
   }
@@ -710,7 +713,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // "allow" runs the tool: free text typed at the prompt is not consent, so
       // anything else refuses — the safe reading of an ambiguous answer.
       if (question.kind === 'permission') {
-        void window.floe.agent.permission(key, question.requestId, labels[0] === ALLOW)
+        const always = labels[0] === ALLOW_ALWAYS
+        void window.floe.agent.permission(key, question.requestId, always || labels[0] === ALLOW, always)
         return
       }
       // Both shapes travel: Claude's control channel takes the joined message,

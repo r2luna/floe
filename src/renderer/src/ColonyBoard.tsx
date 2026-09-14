@@ -185,7 +185,7 @@ function Column({
           <Card key={task.id} task={task} col={index} onOpen={onOpen} onCommand={onCommand} />
         ))}
         {held.length > 0 && (
-          <div className="fband" data-hold>
+          <div className="fband" data-hold data-pin={column.cap !== undefined || undefined}>
             <span className="fband-tag">
               {column.cap === undefined
                 ? `${column.name === 'done' ? 'landed' : 'backlog'} ${held.length}`

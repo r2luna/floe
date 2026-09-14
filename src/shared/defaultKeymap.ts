@@ -153,6 +153,7 @@ key applies in, so a key never points at the panel it is pressed in — which is
       { key: 'super+[', command: 'browser.back', when: 'panel == "browser"' },
       { key: 'super+]', command: 'browser.forward', when: 'panel == "browser"' },
       { key: 'super+alt+i', command: 'browser.devtools', when: 'panel == "browser"' },
+      { key: 'super+shift+s', command: 'browser.screenshot', when: 'panel == "browser"' },
       { key: 'l', command: 'panel.goto', arg: 'active', when: 'panel == "projects"' },
       { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel == "active"' },
       { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel == "active"' },
