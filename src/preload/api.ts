@@ -250,10 +250,12 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       return () => ipcRenderer.removeListener('notification:click', listener)
     },
     // An auto-update has been downloaded and will install on next restart; the
-    // payload carries the version that's waiting. Drives the in-app update
-    // banner and the `update.install` command.
-    onUpdateDownloaded: (cb: (version: string) => void): (() => void) => {
-      const listener = (_event: IpcRendererEvent, payload: { version: string }): void => cb(payload.version)
+    // payload carries the version that's waiting. `download` is true on macOS,
+    // where the update is not installed in place and the user downloads it.
+    // Drives the in-app update banner and the `update.install` command.
+    onUpdateDownloaded: (cb: (update: { version: string; download: boolean }) => void): (() => void) => {
+      const listener = (_event: IpcRendererEvent, payload: { version: string; download?: boolean }): void =>
+        cb({ version: payload.version, download: !!payload.download })
       ipcRenderer.on('update:downloaded', listener)
       return () => ipcRenderer.removeListener('update:downloaded', listener)
     },
@@ -261,7 +263,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // Resolves to the line to show the user — up to date, downloading, or why it
     // failed — so the caller never has to interpret an updater result itself.
     checkForUpdate: (): Promise<string> => ipcRenderer.invoke('update:check'),
-    // Relaunch into the downloaded update right now (quitAndInstall).
+    // Relaunch into the downloaded update right now (quitAndInstall), or on
+    // macOS open the release page.
     installUpdate: (): Promise<void> => ipcRenderer.invoke('update:install'),
     // OS light/dark appearance. `isDark` is the snapshot for the initial render;
     // `onChange` fires on every live switch (driven by nativeTheme in the main

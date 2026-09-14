@@ -59,10 +59,12 @@ const g = globalThis as typeof globalThis & {
   __floeUpdater?: FakeUpdater
   __floeApp?: { isPackaged: boolean; version: string }
   __floeNotifications?: { supported: boolean; shown: FakeNotification[] }
+  __floeOpened?: string[]
 }
 g.__floeUpdater = updater
 g.__floeApp = { isPackaged: false, version: '1.2.3' }
 g.__floeNotifications = { supported: true, shown: [] }
+g.__floeOpened = []
 
 const hookSource = `
 import { existsSync } from 'node:fs'
@@ -79,6 +81,7 @@ const ELECTRON = [
   '  on(event, fn) { if (event === "click") this.click = fn }',
   '  show() { globalThis.__floeNotifications.shown.push(this) }',
   '}',
+  'export const shell = { openExternal: (url) => { globalThis.__floeOpened.push(url); return Promise.resolve() } };',
   'export const ipcMain = { handle(){}, removeHandler(){} };',
   'export default {};'
 ].join('\\n')
@@ -127,7 +130,7 @@ function fakeWindow(focused: boolean): FakeWindow & { isFocused: () => boolean }
 
 // initAutoUpdate is called once per test, so listeners are dropped first — the
 // real app calls it once, and stacked listeners would fire N times here.
-function init(win?: ReturnType<typeof fakeWindow>): { intervals: number[] } {
+function init(win?: ReturnType<typeof fakeWindow>, selfInstall = true): { intervals: number[] } {
   updater.listeners.clear()
   const intervals: number[] = []
   const real = globalThis.setInterval
@@ -139,7 +142,7 @@ function init(win?: ReturnType<typeof fakeWindow>): { intervals: number[] } {
   }) as typeof globalThis.setInterval
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    initAutoUpdate(() => win as any)
+    initAutoUpdate(() => win as any, { selfInstall })
   } finally {
     globalThis.setInterval = real
   }
@@ -226,7 +229,7 @@ test('a downloaded update tells the focused window, and nothing else', () => {
 
   captureLogs(() => updater.emit('update-downloaded', { version: '9.9.9' }))
 
-  assert.deepEqual(win.sent, [['update:downloaded', { version: '9.9.9' }]])
+  assert.deepEqual(win.sent, [['update:downloaded', { version: '9.9.9', download: false }]])
   assert.deepEqual(g.__floeNotifications?.shown, [])
 })
 
@@ -248,7 +251,7 @@ test('behind another window it takes an OS notification that restarts on click',
   // And a repeat check now points at the restart instead of re-downloading.
   assert.equal(
     await check(),
-    'Floe 9.9.9 is downloaded — run "Restart to update" to apply it.'
+    'Floe 9.9.9 is downloaded — run "Install update" to apply it.'
   )
 })
 
@@ -259,4 +262,25 @@ test('the restart command hands the swap to the updater', async () => {
   const before = updater.installs
   await invokeHandler('update:install', undefined)
   assert.equal(updater.installs, before + 1)
+})
+
+// macOS: unsigned builds cannot be swapped in by Squirrel, so the updater only
+// finds the release and points at its page.
+test('on macOS an update is announced, not downloaded', async () => {
+  g.__floeApp = { isPackaged: true, version: '1.2.3' }
+  const win = fakeWindow(true)
+  init(win, false)
+
+  assert.equal(updater.autoDownload, false)
+  updater.reply = () => Promise.resolve({ isUpdateAvailable: true, updateInfo: { version: '9.9.9' } })
+  assert.equal(await check(), 'Floe 9.9.9 is out — run "Install update" to download it.')
+  updater.reply = () => Promise.resolve({ isUpdateAvailable: false, updateInfo: { version: '1.2.3' } })
+
+  captureLogs(() => updater.emit('update-available', { version: '9.9.9' }))
+  assert.deepEqual(win.sent, [['update:downloaded', { version: '9.9.9', download: true }]])
+
+  const before = updater.installs
+  await invokeHandler('update:install', undefined)
+  assert.equal(updater.installs, before, 'never hands an unsigned bundle to Squirrel')
+  assert.deepEqual(g.__floeOpened, ['https://github.com/r2luna/floe/releases/tag/v9.9.9'])
 })

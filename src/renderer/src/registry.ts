@@ -938,7 +938,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         // refuses to swap the bundle on quit, so quitting and reopening keeps
         // you on the old version. The banner's button dispatches this id.
         id: 'update.install',
-        title: 'Restart to update…',
+        title: 'Install update…',
         group: 'App',
         enabled: (c) => !!c.pendingUpdate,
         unavailable: () => 'no update downloaded yet',

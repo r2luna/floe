@@ -1,0 +1,35 @@
+# The quality gate on every push and pull request: lint, typecheck, tests, CRAP.
+# Both platforms Floe ships on, because node-pty and git behave differently.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      # Tests build throwaway repos and commit into them.
+      - run: |
+          git config --global user.name "Floe CI"
+          git config --global user.email "ci@floe.invalid"
+          git config --global init.defaultBranch master
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm gate

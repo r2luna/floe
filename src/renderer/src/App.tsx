@@ -2058,7 +2058,7 @@ export default function App() {
     // Undefined until there IS one, which is also how the command knows to dim
     // itself: on the first chat of a session there is nowhere to go back to.
     alternateSession: alternate.current?.session ? alternateSession : undefined,
-    pendingUpdate: pendingUpdate ?? undefined,
+    pendingUpdate: pendingUpdate?.version,
     newWorktree: () => {
       if (!projects.current) return
       // Branches with no worktree yet: checking one out is a valid answer, and
@@ -3552,13 +3552,13 @@ export default function App() {
           the palette row and the click are the same one action. */}
       {pendingUpdate && (
         <div className="update-banner" role="status">
-          <span>Floe {pendingUpdate} is ready</span>
+          <span>Floe {pendingUpdate.version} {pendingUpdate.download ? 'is out' : 'is ready'}</span>
           <button
             type="button"
             className="update-restart"
             onClick={() => runCommand(REGISTRY, ctxRef.current, 'update.install')}
           >
-            Restart
+            {pendingUpdate.download ? 'Download' : 'Restart'}
           </button>
         </div>
       )}

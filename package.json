@@ -3,6 +3,12 @@
   "version": "0.28.1",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/r2luna/floe",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/r2luna/floe.git"
+  },
   "main": "./out/main/index.js",
   "packageManager": "pnpm@11.6.0",
   "scripts": {
