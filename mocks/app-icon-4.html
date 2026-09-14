@@ -1,0 +1,109 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe app icon — evolving D1</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge); font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.sizes{ display:flex; align-items:flex-end; gap:26px; }
+.sz{ display:grid; justify-items:center; gap:8px; color:var(--faint); font-size:10px; }
+.sz svg{ display:block; }
+.dock{ display:flex; align-items:center; gap:14px; padding:10px 14px; background:#2a2d33; border:1px solid var(--line); margin-top:12px; width:max-content; }
+.dock .app{ width:48px; height:48px; border-radius:11px; }
+.grid{ display:grid; grid-template-columns:max-content; gap:40px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe app icon — evolving D1</h1>
+<p class="lede">D1 as the base, one move per variant. V1 is D1 with the reflection fixed (it read as a shadow thrown sideways; now it sits under the floe). Every other variant changes one thing against V1, so the ones you like can be combined.</p>
+
+<div class="grid" id="out"></div>
+
+<script>
+let uid = 0
+const BG = '#0d0e11', ICE0 = '#f4f6f8', ICE2 = '#c9ccd2', ICE3 = '#8f96a4', ICE4 = '#575d6a', ACC = '#d3956d', WORK = '#6d93c9'
+// One floe = a top face polygon (points), a thickness, and where it sits.
+function floe(id, o) {
+  const { top, front, t = 6, tint = 0, rim = false, refl = 0.22, tone = 1 } = o
+  const poly = (ps) => ps.map((p) => p.join(',')).join(' ')
+  const pts = top
+  const low = pts.map(([px, py]) => [px, py + t])
+  // The front edge, given in contour order, is the run of vertices that face
+  // the viewer; the side band joins it to the same edge lowered by t.
+  const side = [...front.map((i) => pts[i]), ...front.slice().reverse().map((i) => low[i])]
+  const topFill = tint ? `url(#${id}topb)` : `url(#${id}top)`
+  const sideFill = tone === 2 ? `url(#${id}side2)` : `url(#${id}side)`
+  const hi = pts.slice(1, 4)
+  // Reflection: the bottom face mirrored below its lowest edge, squashed.
+  const base = Math.max(...low.map((p) => p[1]))
+  const reflPts = low.map(([px, py]) => [px, base + (base - py) * 0.55 + 1])
+  return `
+    <polygon points="${poly(reflPts)}" fill="url(#${id}refl)" opacity="${refl}"/>
+    <polygon points="${poly(side)}" fill="${sideFill}"/>
+    <clipPath id="${id}c${pts[0][0]}${pts[0][1]}"><polygon points="${poly(pts)}"/></clipPath>
+    <polygon points="${poly(pts)}" fill="${topFill}"/>
+    <polygon clip-path="url(#${id}c${pts[0][0]}${pts[0][1]})" points="${poly(hi.map(([px, py]) => [px + (32 - px) * 0.35, py + 3]))}" fill="#ffffff" opacity="0.5"/>
+    ${rim ? `<polyline points="${poly(pts.slice(0, 4))}" fill="none" stroke="${ACC}" stroke-width="0.9" opacity="0.9" stroke-linejoin="round"/>` : ''}`
+}
+const BIG = [[12,32],[20,22],[40,18],[54,24],[57,31],[48,37],[22,39]], F7 = [4,5,6,0], F5 = [2,3,4,0]
+const SMALL = [[44,44],[52,42],[60,45],[58,50],[46,50]]
+const BIGGER = [[6,34],[16,20],[40,14],[58,22],[62,32],[50,40],[18,43]]
+const CENTER = [[8,36],[18,22],[36,16],[52,20],[58,30],[50,42],[20,45]]
+const defs = (id, glow) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"/><stop offset="1" stop-color="${BG}"/></linearGradient>
+      <radialGradient id="${id}glow" cx="0.3" cy="0.15" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="${glow}"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${id}sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="${BG}"/></linearGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${ICE0}"/><stop offset="1" stop-color="${ICE2}"/></linearGradient>
+      <linearGradient id="${id}topb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f9fc"/><stop offset="1" stop-color="#b9c8dc"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE3}"/><stop offset="1" stop-color="${ICE4}"/></linearGradient>
+      <linearGradient id="${id}side2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7b0be"/><stop offset="1" stop-color="#3f4552"/></linearGradient>
+      <linearGradient id="${id}refl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE2}"/><stop offset="1" stop-color="${ICE2}" stop-opacity="0"/></linearGradient>
+    </defs>`
+const scene = (id, o) => {
+  const { glow = 0.18, horizon = 33, ripples = false, floes, glint = [16, 41.6, 8] } = o
+  return defs(id, glow) + `
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#${id}glow)"/>
+    <rect x="0" y="${horizon}" width="64" height="${64 - horizon}" fill="url(#${id}sea)" opacity="0.9"/>
+    <rect x="0" y="${horizon}" width="64" height="0.8" fill="${ICE3}" opacity="0.35"/>
+    ${ripples ? [horizon + 9, horizon + 15, horizon + 21].map((yy, i) => `<rect x="${6 + i * 5}" y="${yy}" width="${40 - i * 8}" height="0.7" fill="${ICE3}" opacity="${0.22 - i * 0.05}"/>`).join('') : ''}
+    ${floes.map((f) => floe(id, f)).join('')}
+    ${glint ? `<rect x="${glint[0]}" y="${glint[1]}" width="${glint[2]}" height="0.9" fill="${ACC}" opacity="0.9"/>` : ''}`
+}
+const OPTIONS = [
+  { id:'V1', title:'D1, reflection under the floe', why:'The base. The reflection now sits straight under the slab and fades down, instead of the shadow that leaned left.', o:{ floes:[{ top:BIG, front:F7, front:F7 }, { top:SMALL, front:F5, t:4, refl:0.14 }] } },
+  { id:'V2', title:'bigger, closer', why:'The floe fills the tile: less empty sky, more ice at 16px. The small floe goes.', o:{ horizon:35, floes:[{ top:BIGGER, front:F7, t:7 }], glint:[12, 44, 10] } },
+  { id:'V3', title:'one floe, centred', why:'A single centred slab, the logo reading: the shape is the mark.', o:{ horizon:36, floes:[{ top:CENTER, front:F7, t:7 }], glint:[14, 46, 9] } },
+  { id:'V4', title:'cool ice', why:'V1 with a faint blue in the ice’s shadow side of the gradient, borrowed from --working. Colder, still the app’s greys.', o:{ floes:[{ top:BIG, front:F7, tint:1 }, { top:SMALL, front:F5, t:4, refl:0.14, tint:1 }] } },
+  { id:'V5', title:'harder light', why:'Stronger key light: brighter glow in the corner, the side band with more contrast. Reads as a colder, clearer day.', o:{ glow:0.3, floes:[{ top:BIG, front:F7, tone:2 }, { top:SMALL, front:F5, t:4, refl:0.14, tone:2 }] } },
+  { id:'V6', title:'thicker slab', why:'Twice the thickness. The floe reads as a block of ice rather than a plate.', o:{ floes:[{ top:BIG, front:F7, t:11 }, { top:SMALL, front:F5, t:7, refl:0.14 }] } },
+  { id:'V7', title:'ripples', why:'Three faint ripple lines on the water so the sea reads as water at 128 and up; they vanish at 32.', o:{ ripples:true, floes:[{ top:BIG, front:F7, front:F7 }, { top:SMALL, front:F5, t:4, refl:0.14 }] } },
+  { id:'V8', title:'accent rim', why:'The lit edge of the top face traced in the accent, like low sun on the ice. The accent becomes part of the mark, not a glint on the water.', o:{ glint:null, floes:[{ top:BIG, front:F7, rim:true }, { top:SMALL, front:F5, t:4, refl:0.14 }] } },
+]
+function svg(o, size, square){
+  const id = 'g' + (uid++) + '_'
+  let body = scene(id, o)
+  if (square) body = body.replace(/rx="14"/g, 'rx="0"')
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${body}</svg>`
+}
+const out = document.getElementById('out')
+for (const o of OPTIONS) {
+  const sizes = [512, 128, 64, 32, 16]
+  out.insertAdjacentHTML('beforeend', `<section>
+    <h2>${o.id} — ${o.title}</h2><p class="why">${o.why}</p>
+    <div class="sizes">${sizes.map(s => `<div class="sz">${svg(o.o, s)}<span>${s}</span></div>`).join('')}<div class="sz">${svg(o.o, 96, true)}<span>square</span></div></div>
+    <div class="dock"><div class="app" style="background:linear-gradient(#f7f7f7,#d8d8d8)"></div>${svg(o.o, 48)}<div class="app" style="background:linear-gradient(#5b6470,#3a414b)"></div></div>
+  </section>`)
+}
+</script>
+</body>
+</html>

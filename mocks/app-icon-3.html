@@ -1,0 +1,138 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe app icon — dark palette</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge); font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.sizes{ display:flex; align-items:flex-end; gap:26px; }
+.sz{ display:grid; justify-items:center; gap:8px; color:var(--faint); font-size:10px; }
+.sz svg{ display:block; }
+.dock{ display:flex; align-items:center; gap:14px; padding:10px 14px; background:#2a2d33; border:1px solid var(--line); margin-top:12px; width:max-content; }
+.dock .app{ width:48px; height:48px; border-radius:11px; }
+:root[data-theme='light'] .dock{ background:#d9dde3; }
+.grid{ display:grid; grid-template-columns:max-content; gap:40px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe app icon — the app's dark palette</h1>
+<p class="lede">The third round's lighting and depth, in the colours the app is made of: the tile runs from <code>--panel</code> to <code>--bg</code>, ice is the text scale (<code>#e8eaee</code> down to <code>#575d6a</code> in shadow), water is the dark surface with a faint cool sheen, and the accent <code>#d3956d</code> is spent only on the beak, the feet, the sun and one glint. Square variant beside the sizes.</p>
+
+<div class="grid" id="out"></div>
+
+<script>
+let uid = 0
+// The app's own tokens.
+const BG = '#0d0e11', PANEL = '#141519', WELL = '#1b1d23', LINE = '#23252b', EDGE = '#343a45'
+const ICE0 = '#f4f6f8', ICE1 = '#e8eaee', ICE2 = '#c9ccd2', ICE3 = '#8f96a4', ICE4 = '#575d6a'
+const ACC = '#d3956d', WORK = '#6d93c9', LIVE = '#6ea86e'
+const tile = (id, glow = 0.18, cx = 0.3, cy = 0.15) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"/><stop offset="1" stop-color="${BG}"/></linearGradient>
+      <radialGradient id="${id}glow" cx="${cx}" cy="${cy}" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="${glow}"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${id}sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="${BG}"/></linearGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${ICE0}"/><stop offset="1" stop-color="${ICE2}"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE3}"/><stop offset="1" stop-color="${ICE4}"/></linearGradient>
+      <linearGradient id="${id}refl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE2}" stop-opacity="0.22"/><stop offset="1" stop-color="${ICE2}" stop-opacity="0"/></linearGradient>
+      <linearGradient id="${id}body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2a2e38"/><stop offset="1" stop-color="#0a0b0e"/></linearGradient>
+      <linearGradient id="${id}belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE0}"/><stop offset="1" stop-color="${ICE2}"/></linearGradient>
+      <linearGradient id="${id}beak" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8b088"/><stop offset="1" stop-color="${ACC}"/></linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#${id}glow)"/>`
+const ART = {
+  floe: (id) => tile(id) + `
+    <rect x="0" y="33" width="64" height="31" fill="url(#${id}sea)" opacity="0.9"/>
+    <rect x="0" y="33" width="64" height="0.8" fill="${ICE3}" opacity="0.35"/>
+    <polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39" fill="url(#${id}top)"/>
+    <polygon points="12,32 22,39 48,37 57,31 57,37 48,43 22,45 12,38" fill="url(#${id}side)"/>
+    <polygon points="24,23 39,20 45,22 28,27" fill="#ffffff" opacity="0.55"/>
+    <polygon points="14,47 22,46 48,45 55,47 48,54 22,55" fill="url(#${id}refl)"/>
+    <polygon points="44,44 52,42 60,45 58,50 46,50" fill="url(#${id}top)"/>
+    <polygon points="44,44 46,50 58,50 60,45 60,49 58,53 46,53 44,48" fill="url(#${id}side)"/>
+    <rect x="16" y="41.6" width="8" height="0.9" fill="${ACC}" opacity="0.9"/>`,
+  penguin: (id) => tile(id, 0.16, 0.5, 0.1) + `
+    <rect x="0" y="40" width="64" height="24" fill="url(#${id}sea)" opacity="0.9"/>
+    <polygon points="8,44 18,38 44,36 58,42 54,50 14,52" fill="url(#${id}top)"/>
+    <polygon points="8,44 14,52 54,50 58,42 58,47 54,55 14,57 8,49" fill="url(#${id}side)"/>
+    <ellipse cx="32" cy="42" rx="11" ry="3" fill="${BG}" opacity="0.35"/>
+    <path d="M20 40 C18 26, 24 10, 32 10 C40 10, 46 26, 44 40 Z" fill="url(#${id}body)"/>
+    <path d="M24 40 C23 30, 26 20, 32 19 C38 20, 41 30, 40 40 Z" fill="url(#${id}belly)"/>
+    <path d="M20 26 C15 30, 15 38, 19 41 L22 34 Z" fill="#14171d"/>
+    <path d="M44 26 C49 30, 49 38, 45 41 L42 34 Z" fill="#14171d"/>
+    <circle cx="28" cy="18" r="2.2" fill="${ICE0}"/><circle cx="36" cy="18" r="2.2" fill="${ICE0}"/>
+    <circle cx="28.6" cy="18.4" r="1.2" fill="#0a0b0e"/><circle cx="36.6" cy="18.4" r="1.2" fill="#0a0b0e"/>
+    <circle cx="28.2" cy="17.8" r="0.45" fill="#ffffff"/><circle cx="36.2" cy="17.8" r="0.45" fill="#ffffff"/>
+    <polygon points="30,21 34,21 32,24.5" fill="url(#${id}beak)"/>
+    <ellipse cx="25" cy="22" rx="1.8" ry="1" fill="${ACC}" opacity="0.35"/><ellipse cx="39" cy="22" rx="1.8" ry="1" fill="${ACC}" opacity="0.35"/>
+    <path d="M25 41 h5 v2.6 h-5 Z M34 41 h5 v2.6 h-5 Z" fill="url(#${id}beak)"/>`,
+  iceberg: (id) => tile(id, 0.22, 0.75, 0.12) + `
+    <rect x="0" y="30" width="64" height="34" fill="url(#${id}sea)" opacity="0.95"/>
+    <polygon points="16,32 22,18 32,10 42,16 50,29 46,32" fill="url(#${id}top)"/>
+    <polygon points="32,10 42,16 50,29 46,32 34,30" fill="${ICE2}" opacity="0.6"/>
+    <polygon points="14,30 52,30 48,50 36,58 22,52" fill="${ICE3}" opacity="0.28"/>
+    <polygon points="14,30 52,30 50,38 16,38" fill="${ICE2}" opacity="0.16"/>
+    <rect x="6" y="29.4" width="52" height="1.2" fill="${ICE1}" opacity="0.55"/>
+    <rect x="40" y="29.4" width="10" height="1.2" fill="${ACC}"/>`,
+  face: (id) => tile(id, 0.14, 0.5, 0.2) + `
+    <circle cx="32" cy="34" r="24" fill="url(#${id}body)"/>
+    <path d="M18 36 C18 24, 26 22, 32 26 C38 22, 46 24, 46 36 C46 48, 38 54, 32 54 C26 54, 18 48, 18 36 Z" fill="url(#${id}belly)"/>
+    <circle cx="25" cy="33" r="4.2" fill="${ICE0}"/><circle cx="39" cy="33" r="4.2" fill="${ICE0}"/>
+    <circle cx="26" cy="33.6" r="2.5" fill="#0a0b0e"/><circle cx="40" cy="33.6" r="2.5" fill="#0a0b0e"/>
+    <circle cx="25" cy="32.4" r="0.9" fill="#ffffff"/><circle cx="39" cy="32.4" r="0.9" fill="#ffffff"/>
+    <polygon points="28,39 36,39 32,45" fill="url(#${id}beak)"/>
+    <ellipse cx="20" cy="41" rx="3" ry="1.7" fill="${ACC}" opacity="0.35"/><ellipse cx="44" cy="41" rx="3" ry="1.7" fill="${ACC}" opacity="0.35"/>`,
+  block: (id) => tile(id, 0.2, 0.3, 0.2) + `
+    <ellipse cx="32" cy="52" rx="20" ry="4" fill="#000000" opacity="0.45"/>
+    <polygon points="12,26 32,15 52,26 32,37" fill="url(#${id}top)"/>
+    <polygon points="12,26 32,37 32,50 12,39" fill="url(#${id}side)"/>
+    <polygon points="32,37 52,26 52,39 32,50" fill="${ICE4}"/>
+    <polygon points="32,37 52,26 52,39 32,50" fill="url(#${id}side)" opacity="0.5"/>
+    <polyline points="16,29 24,25 24,42" fill="none" stroke="${ICE1}" stroke-width="1.2" opacity="0.35"/>
+    <polyline points="36,44 44,30 48,28" fill="none" stroke="${ICE1}" stroke-width="1.2" opacity="0.3"/>
+    <circle cx="22" cy="21" r="2" fill="#ffffff" opacity="0.85"/>
+    <rect x="12" y="55" width="40" height="0.9" fill="${ACC}" opacity="0.8"/>`,
+  sunset: (id) => tile(id, 0.1, 0.5, 0.3) + `
+    <defs><radialGradient id="${id}sun2" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="${ACC}"/><stop offset="0.55" stop-color="${ACC}" stop-opacity="0.55"/><stop offset="1" stop-color="${ACC}" stop-opacity="0"/></radialGradient></defs>
+    <rect x="0" y="40" width="64" height="24" fill="url(#${id}sea)" opacity="0.9"/>
+    <circle cx="32" cy="26" r="15" fill="url(#${id}sun2)"/>
+    <polygon points="8,44 18,38 44,36 58,42 54,50 14,52" fill="url(#${id}top)"/>
+    <polygon points="8,44 14,52 54,50 58,42 58,47 54,55 14,57 8,49" fill="url(#${id}side)"/>
+    <path d="M23 40 C21 30, 26 18, 32 18 C38 18, 43 30, 41 40 Z" fill="#0a0b0e"/>
+    <circle cx="32" cy="17" r="5" fill="#0a0b0e"/>
+    <polygon points="36,17 42,18.5 36,20" fill="${ACC}"/>`
+}
+function svg(kind, size, square){
+  const id = 'g' + (uid++) + '_'
+  let body = ART[kind](id)
+  if (square) body = body.replace(/rx="14"/g, 'rx="0"')
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${body}</svg>`
+}
+const OPTIONS = [
+  { id:'D1', title:'floe at sea', why:'The lit floe over the dark sea. Ice in the text scale, one accent glint on the water.', kind:'floe' },
+  { id:'D2', title:'penguin on the floe', why:'The mascot on the dark tile: body with a sheen, ice-white belly, accent beak and feet, accent blush.', kind:'penguin' },
+  { id:'D3', title:'iceberg', why:'Tip in ice, the mass below as a faint grey ghost in the dark water, the waterline with an accent segment.', kind:'iceberg' },
+  { id:'D4', title:'penguin face', why:'The face, big, on the dark radial. Accent beak, faint accent blush.', kind:'face' },
+  { id:'D5', title:'ice block', why:'The translucent block with the app greys as its three faces, a specular, an accent rule under the shadow.', kind:'block' },
+  { id:'D6', title:'accent sun', why:'Sunset in the app’s own accent instead of a pink gradient: an orange glow behind the silhouette on the dark tile.', kind:'sunset' },
+]
+const out = document.getElementById('out')
+for (const o of OPTIONS) {
+  const sizes = [512, 128, 64, 32, 16]
+  out.insertAdjacentHTML('beforeend', `<section>
+    <h2>${o.id} — ${o.title}</h2><p class="why">${o.why}</p>
+    <div class="sizes">${sizes.map(s => `<div class="sz">${svg(o.kind, s)}<span>${s}</span></div>`).join('')}<div class="sz">${svg(o.kind, 96, true)}<span>square</span></div></div>
+    <div class="dock"><div class="app" style="background:linear-gradient(#f7f7f7,#d8d8d8)"></div>${svg(o.kind, 48)}<div class="app" style="background:linear-gradient(#5b6470,#3a414b)"></div></div>
+  </section>`)
+}
+</script>
+</body>
+</html>

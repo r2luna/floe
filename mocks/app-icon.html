@@ -1,0 +1,158 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe app icon — flat geometric options</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge); font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.sizes{ display:flex; align-items:flex-end; gap:26px; }
+.sz{ display:grid; justify-items:center; gap:8px; color:var(--faint); font-size:10px; }
+.sz svg{ display:block; }
+.dock{ display:flex; align-items:center; gap:14px; padding:10px 14px; background:#2a2d33; border:1px solid var(--line); margin-top:12px; width:max-content; }
+.dock .app{ width:48px; height:48px; border-radius:11px; background:linear-gradient(#5b6470,#3a414b); }
+:root[data-theme='light'] .dock{ background:#d9dde3; }
+.grid{ display:grid; grid-template-columns:max-content; gap:40px; }
+.cur{ display:flex; gap:14px; align-items:center; margin:0 0 26px; color:var(--faint); font-size:10px; }
+.cur img{ width:96px; height:96px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe app icon — options</h1>
+<p class="lede">Not pixel art. The same two floes, redrawn with the rules the app now follows: straight edges, square joins and caps, no curves, no gradients, a square tile. Tile is the icon's own <code>#1b2026</code>, ice <code>#eaf3fa</code>, water the accent. Shown at 512, 128, 64, 32 and 16, and in a fake dock beside a normal icon.</p>
+<div class="cur"><img src="../resources/icon.png" alt=""><span>today</span></div>
+
+<div class="grid" id="out"></div>
+
+<script>
+const ICE = '#eaf3fa', TILE = '#1b2026', ACC = '#d3956d', DIM = '#5f6f82'
+const ART = {
+  flat: (c) => `
+    <polygon points="8,30 18,17 36,13 50,16 58,24 53,31" fill="${c.ice}"/>
+    <polyline points="4,36 10,33 16,36 22,33 28,36 34,33 40,36 46,33 52,36 58,33" fill="none" stroke="${c.water}" stroke-width="2.4" stroke-linejoin="miter" stroke-linecap="square"/>
+    <polygon points="34,49 42,40 55,38 61,44 56,50" fill="${c.ice}"/>
+    <polyline points="10,55 16,52 22,55 28,52 34,55 40,52 46,55 52,52 58,55" fill="none" stroke="${c.water}" stroke-width="2.4" stroke-linejoin="miter" stroke-linecap="square"/>`,
+  slab: (c) => `
+    <polygon points="8,30 18,17 36,13 50,16 58,24 53,31" fill="${c.ice}"/>
+    <polygon points="8,30 53,31 53,34 8,33" fill="${c.water}"/>
+    <rect x="4" y="38" width="56" height="2.2" fill="${c.water}"/>
+    <polygon points="34,49 42,40 55,38 61,44 56,50" fill="${c.ice}"/>
+    <polygon points="34,49 56,50 56,53 34,52" fill="${c.water}"/>
+    <rect x="10" y="57" width="50" height="2.2" fill="${c.water}"/>`,
+  outline: (c) => `
+    <g fill="none" stroke="${c.ice}" stroke-width="3.2" stroke-linejoin="miter" stroke-linecap="square">
+      <polygon points="8,30 18,17 36,13 50,16 58,24 53,31"/>
+      <polygon points="34,49 42,40 55,38 61,44 56,50"/>
+    </g>
+    <g fill="none" stroke="${c.water}" stroke-width="2.4" stroke-linejoin="miter" stroke-linecap="square">
+      <polyline points="4,37 10,34 16,37 22,34 28,37 34,34 40,37 46,34 52,37 58,34"/>
+      <polyline points="10,56 16,53 22,56 28,53 34,56 40,53 46,56 52,53 58,56"/>
+    </g>`,
+  one: (c) => `
+    <polygon points="6,38 18,20 38,15 54,19 60,30 52,40" fill="${c.ice}"/>
+    <polygon points="6,38 52,40 52,44 6,42" fill="${c.water}"/>
+    <rect x="4" y="50" width="56" height="2.4" fill="${c.water}"/>`,
+  pinguim: (c) => `
+    <path d="M32 10 A20 20 0 1 0 52 30 L52 12 L34 12 Z M32 17 A13 13 0 1 1 32 43 A13 13 0 1 1 32 17 Z" fill="${c.ice}" fill-rule="evenodd"/>
+    <rect x="26" y="26" width="6" height="6" fill="${c.water}"/>`,
+  iceberg: (c) => `
+    <polygon points="22,14 38,9 48,26 36,30 18,28" fill="${c.ice}"/>
+    <polygon points="14,33 52,33 46,56 24,52" fill="#7f96b0" opacity="0.85"/>
+    <rect x="4" y="30" width="56" height="2.6" fill="${c.water}"/>`,
+  penguin: (c) => `
+    <polygon points="6,46 18,38 46,36 60,44 52,52 10,52" fill="${c.ice}"/>
+    <ellipse cx="32" cy="30" rx="9" ry="13" fill="#0d0e11"/>
+    <ellipse cx="32" cy="33" rx="5.5" ry="9" fill="${c.ice}"/>
+    <circle cx="32" cy="15" r="7" fill="#0d0e11"/>
+    <circle cx="34.5" cy="13.5" r="1.4" fill="${c.ice}"/>
+    <polygon points="38,15 45,17 38,19" fill="${c.water}"/>
+    <rect x="26" y="42" width="5" height="3" fill="${c.water}"/><rect x="33" y="42" width="5" height="3" fill="${c.water}"/>`,
+  crack: (c) => `
+    <rect x="9" y="9" width="46" height="46" fill="${c.ice}"/>
+    <polyline points="30,9 34,24 27,38 33,55" fill="none" stroke="#1b2026" stroke-width="2.6" stroke-linejoin="miter" stroke-linecap="butt"/>
+    <polyline points="34,24 45,33 42,48" fill="none" stroke="${c.water}" stroke-width="2.6" stroke-linejoin="miter" stroke-linecap="butt"/>`,
+  graph: (c) => `
+    <g fill="none" stroke="${c.water}" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter">
+      <polyline points="18,50 18,16"/><polyline points="18,30 44,30 44,42"/>
+    </g>
+    <polygon points="11,10 25,10 27,16 25,22 11,22 9,16" fill="${c.ice}"/>
+    <polygon points="11,44 25,44 27,50 25,56 11,56 9,50" fill="${c.ice}"/>
+    <polygon points="37,40 51,40 53,46 51,52 37,52 35,46" fill="${c.ice}"/>`,
+  crystal: (c) => `
+    <g stroke="${c.ice}" stroke-width="3" stroke-linecap="square" fill="none">
+      <line x1="32" y1="8" x2="32" y2="56"/><line x1="11" y1="20" x2="53" y2="44"/><line x1="11" y1="44" x2="53" y2="20"/>
+      <polyline points="26,14 32,20 38,14"/><polyline points="26,50 32,44 38,50"/>
+      <polyline points="14,30 20,32 14,38"/><polyline points="50,30 44,32 50,38"/>
+    </g>
+    <rect x="28" y="28" width="8" height="8" fill="${c.water}"/>`,
+  monogram: (c) => `
+    <polygon points="14,12 50,12 50,21 24,21 24,52 14,52" fill="${c.ice}"/>
+    <polygon points="24,30 44,30 44,38 24,38" fill="${c.ice}"/>
+    <polygon points="14,52 24,52 24,55 14,55" fill="${c.water}"/><polygon points="24,38 44,38 44,41 24,41" fill="${c.water}"/><polygon points="24,21 50,21 50,24 24,24" fill="${c.water}"/>`,
+  aurora: (c) => `
+    <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0d0e11"/><stop offset="0.45" stop-color="#1e3a3a"/><stop offset="0.7" stop-color="#3b2f4f"/><stop offset="1" stop-color="#0d0e11"/></linearGradient></defs>
+    <rect width="64" height="64" fill="url(#sky)"/>
+    <path d="M6 26 C18 14, 30 30, 42 18 S58 22, 60 14" fill="none" stroke="#6fd3b8" stroke-width="2.2" opacity="0.9"/>
+    <path d="M4 34 C16 24, 28 38, 40 28 S56 30, 60 24" fill="none" stroke="#b58ee0" stroke-width="2.2" opacity="0.8"/>
+    <polygon points="8,48 20,40 44,38 58,46 50,54 12,54" fill="${c.ice}"/>`,
+  head: (c) => `
+    <g transform="translate(6 8) scale(0.068)"><path fill-rule="evenodd" fill="${c.water}" d="M735.075 408.15 C738.826 386.087 748.092 110.305 745.224 107.437 C744.341 106.555 713.454 104.79 676.609 103.466 L609.539 101.039 L594.978 88.2429 C550.632 48.9715 494.152 20.0697 434.363 6.17028 C419.14 2.64027 405.681 1.3165 373.029 0.875252 C350.084 0.434001 328.242 0.654674 324.491 1.09592 A361 361 0 1 0 735.075 408.15 Z M118.5 353.0a258.0 258.0 0 1 0 516.0 0a258.0 258.0 0 1 0 -516.0 0Z"/></g>
+    <rect x="22" y="28" width="7" height="7" fill="${c.ice}"/>`,
+  iso: (c) => `
+    <polygon points="10,26 34,14 58,26 34,38" fill="${c.ice}"/>
+    <polygon points="10,26 34,38 34,48 10,36" fill="#9fb3c8"/>
+    <polygon points="34,38 58,26 58,36 34,48" fill="#6f8399"/>
+    <rect x="6" y="54" width="52" height="2.4" fill="${c.water}"/>`,
+  word: (c) => `
+    <text x="32" y="41" text-anchor="middle" font-family="CommitMonoPinguim, ui-monospace, monospace" font-weight="700" font-size="24" fill="${c.ice}">floe</text>
+    <rect x="12" y="46" width="40" height="2.4" fill="${c.water}"/>`,
+  moon: (c) => `
+    <circle cx="44" cy="18" r="8" fill="${c.ice}"/><circle cx="47.5" cy="15.5" r="7" fill="#1b2026"/>
+    <polygon points="6,44 18,36 42,34 58,42 50,50 10,50" fill="${c.ice}"/>
+    <rect x="4" y="56" width="56" height="2.2" fill="${c.water}"/>`
+}
+function svg(kind, size, opts = {}){
+  const c = { ice: opts.ice ?? ICE, water: opts.water ?? ACC }
+  const tile = opts.tile ?? TILE
+  const bg = opts.rounded ? `<rect width="64" height="64" rx="14" fill="${tile}"/>` : `<rect width="64" height="64" fill="${tile}"/>`
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${bg}${ART[kind](c)}</svg>`
+}
+const OPTIONS = [
+  { id:'O1', title:'flat — the two floes, straight edges', why:'The original composition: two slabs, water as zigzag hairlines. Every curve replaced by a straight segment, joins mitred. Square tile.', kind:'flat', opts:{} },
+  { id:'O2', title:'slab — floes with an underside, straight water', why:'Each floe gets a thin accent underside so it reads as a slab with thickness, and the water is two straight bars. The calmest of the set, and the clearest at 16px.', kind:'slab', opts:{} },
+  { id:'O3', title:'outline — the in-app mark, square joins', why:'The FloeMark the app already draws in its own chrome, with square joins and caps instead of round. Lighter; better on a light tile than a dark one.', kind:'outline', opts:{} },
+  { id:'O4', title:'one — a single floe', why:'One slab, one water line. Loses the “two floes” reading but survives 16px without effort.', kind:'one', opts:{} },
+  { id:'O5', title:'slab on the macOS squircle', why:'O2 inside the rounded tile the Mac dock expects. The art stays square inside it. If you want square everywhere, O2 is the file for both platforms.', kind:'slab', opts:{ rounded:true } },
+  { id:'O6', title:'slab, ice water', why:'O2 with the water in dim ice instead of accent: two tones, quieter in a dock.', kind:'slab', opts:{ water: DIM } },
+  { id:'O7', title:'pinguim, geometric', why:'The penguin head as a square-cut ring with a wedge beak and a square eye. Vector, not pixel.', kind:'pinguim', opts:{} },
+  { id:'O8', title:'iceberg', why:'Breaks the pattern: what you see is the tip, the mass is under the waterline in a dimmer ice. The truest thing about the app, which runs most of its work below the surface.', kind:'iceberg', opts:{} },
+  { id:'O9', title:'pinguim on a floe', why:'A character. The penguin on its floe, belly, beak and feet in accent. The only option that smiles.', kind:'penguin', opts:{} },
+  { id:'O10', title:'crack', why:'A slab of ice with a crack that forks — a branch. Worktrees, in one glyph, with the fork in accent.', kind:'crack', opts:{} },
+  { id:'O11', title:'graph of floes', why:'The git graph drawn with floes as nodes: a trunk and a branch. Literal about what Floe manages.', kind:'graph', opts:{} },
+  { id:'O12', title:'crystal', why:'An ice crystal, six arms, square caps, accent core. Abstract, symmetric, survives 16px as a star.', kind:'crystal', opts:{} },
+  { id:'O13', title:'monogram F', why:'An F built from two slabs, each with its accent underside. Reads as a letter first and as ice second.', kind:'monogram', opts:{} },
+  { id:'O14', title:'aurora', why:'Gradient sky, two aurora ribbons, a floe silhouette. Breaks every rule on purpose: the one atmospheric option.', kind:'aurora', opts:{} },
+  { id:'O15', title:'pinguim head, accent', why:'The app’s own avatar ring in the accent colour on the dark tile, with an ice eye. The brand mark as the icon.', kind:'head', opts:{} },
+  { id:'O16', title:'isometric slab', why:'One floe as a solid: top face ice, two shaded sides, a water line. Depth without gradients.', kind:'iso', opts:{} },
+  { id:'O17', title:'wordmark', why:'The name in the app’s own font, an accent rule under it. Nothing to interpret.', kind:'word', opts:{} },
+  { id:'O18', title:'moon over a floe', why:'Night on the ice: a crescent, a floe, the waterline. Quiet, and different from every neighbour in a dock.', kind:'moon', opts:{} },
+]
+const out = document.getElementById('out')
+for (const o of OPTIONS) {
+  const sizes = [512, 128, 64, 32, 16]
+  out.insertAdjacentHTML('beforeend', `<section>
+    <h2>${o.id} — ${o.title}</h2><p class="why">${o.why}</p>
+    <div class="sizes">${sizes.map(s => `<div class="sz">${svg(o.kind, s, o.opts)}<span>${s}</span></div>`).join('')}</div>
+    <div class="dock"><div class="app"></div>${svg(o.kind, 48, o.opts)}<div class="app"></div></div>
+  </section>`)
+}
+</script>
+</body>
+</html>

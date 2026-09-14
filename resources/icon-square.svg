@@ -1,0 +1,30 @@
+<svg width="1024" height="1024" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="g57_bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"/><stop offset="1" stop-color="#0d0e11"/></linearGradient>
+      <radialGradient id="g57_glow" cx="0.3" cy="0.15" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="g57_sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="#0d0e11"/></linearGradient>
+      <linearGradient id="g57_top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f6f8"/><stop offset="1" stop-color="#c9ccd2"/></linearGradient>
+      <linearGradient id="g57_topb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f9fc"/><stop offset="1" stop-color="#b9c8dc"/></linearGradient>
+      <linearGradient id="g57_side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8f96a4"/><stop offset="1" stop-color="#575d6a"/></linearGradient>
+      <linearGradient id="g57_side2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7b0be"/><stop offset="1" stop-color="#3f4552"/></linearGradient>
+      <linearGradient id="g57_refl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9ccd2"/><stop offset="1" stop-color="#c9ccd2" stop-opacity="0"/></linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="0" fill="url(#g57_bg)"/>
+    <rect width="64" height="64" rx="0" fill="url(#g57_glow)"/>
+    <rect x="0" y="33" width="64" height="31" fill="url(#g57_sea)" opacity="0.9"/>
+    <rect x="0" y="33" width="64" height="0.8" fill="#8f96a4" opacity="0.35"/>
+    
+    
+    <polygon points="12,49.85 20,55.35 40,57.55 54,54.25 57,50.4 48,47.1 22,46" fill="url(#g57_refl)" opacity="0.22"/>
+    <polygon points="57,31 48,37 22,39 12,32 12,38 22,45 48,43 57,37" fill="url(#g57_side)"/>
+    <clipPath id="g57_c1232"><polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39"/></clipPath>
+    <polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39" fill="url(#g57_top)"/>
+    <polygon clip-path="url(#g57_c1232)" points="24.2,25 37.2,21 46.3,27" fill="#ffffff" opacity="0.5"/>
+    <polyline points="12,32 20,22 40,18 54,24" fill="none" stroke="#d3956d" stroke-width="0.9" opacity="0.9" stroke-linejoin="round"/>
+    <polygon points="44,58.3 52,59.4 60,57.75 58,55 46,55" fill="url(#g57_refl)" opacity="0.14"/>
+    <polygon points="60,45 58,50 46,50 44,44 44,48 46,54 58,54 60,49" fill="url(#g57_side)"/>
+    <clipPath id="g57_c4444"><polygon points="44,44 52,42 60,45 58,50 46,50"/></clipPath>
+    <polygon points="44,44 52,42 60,45 58,50 46,50" fill="url(#g57_top)"/>
+    <polygon clip-path="url(#g57_c4444)" points="45,45 50.2,48 48.9,53" fill="#ffffff" opacity="0.5"/>
+    
+    </svg>

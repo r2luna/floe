@@ -1,0 +1,164 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe app icon — lit ice and a penguin</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge); font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.sizes{ display:flex; align-items:flex-end; gap:26px; }
+.sz{ display:grid; justify-items:center; gap:8px; color:var(--faint); font-size:10px; }
+.sz svg{ display:block; }
+.dock{ display:flex; align-items:center; gap:14px; padding:10px 14px; background:#2a2d33; border:1px solid var(--line); margin-top:12px; width:max-content; }
+.dock .app{ width:48px; height:48px; border-radius:11px; }
+:root[data-theme='light'] .dock{ background:#d9dde3; }
+.grid{ display:grid; grid-template-columns:max-content; gap:40px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe app icon — lit ice and a penguin</h1>
+<p class="lede">Third round. Dimensional: light, depth, translucency, colour. Every option sits on the macOS tile (a square tile is one attribute away). Shown at 512, 128, 64, 32 and 16, then in a dock between two real-looking neighbours.</p>
+
+<div class="grid" id="out"></div>
+
+<script>
+let uid = 0
+const ART = {
+  // P1 — a floe at sea, lit from the upper left
+  floe: (id) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8fd6ff"/><stop offset="0.48" stop-color="#3d9be6"/><stop offset="0.5" stop-color="#1f6fc4"/><stop offset="1" stop-color="#0d3b86"/></linearGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6ecfb"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9dcf6"/><stop offset="1" stop-color="#5aa9e0"/></linearGradient>
+      <linearGradient id="${id}refl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff" stop-opacity="0.45"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+      <radialGradient id="${id}sun" cx="0.25" cy="0.15" r="0.5"><stop offset="0" stop-color="#ffffff" stop-opacity="0.55"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#${id}sun)"/>
+    <polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39" fill="url(#${id}top)"/>
+    <polygon points="12,32 22,39 48,37 57,31 57,37 48,43 22,45 12,38" fill="url(#${id}side)"/>
+    <polygon points="24,23 39,20 45,22 28,27" fill="#ffffff" opacity="0.8"/>
+    <polygon points="14,47 22,46 48,45 55,47 48,54 22,55" fill="url(#${id}refl)"/>
+    <polygon points="44,44 52,42 60,45 58,50 46,50" fill="url(#${id}top)" opacity="0.9"/>
+    <polygon points="44,44 46,50 58,50 60,45 60,49 58,53 46,53 44,48" fill="url(#${id}side)" opacity="0.9"/>`,
+  // P2 — the penguin on that floe, drawn round and glossy
+  penguin: (id) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a5e0ff"/><stop offset="0.52" stop-color="#4aa6ec"/><stop offset="0.54" stop-color="#1f6fc4"/><stop offset="1" stop-color="#0d3b86"/></linearGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6ecfb"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9dcf6"/><stop offset="1" stop-color="#5aa9e0"/></linearGradient>
+      <linearGradient id="${id}body" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2b3140"/><stop offset="1" stop-color="#0e1118"/></linearGradient>
+      <linearGradient id="${id}belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dbe9f4"/></linearGradient>
+      <linearGradient id="${id}beak" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb35c"/><stop offset="1" stop-color="#e8812c"/></linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <polygon points="8,44 18,38 44,36 58,42 54,50 14,52" fill="url(#${id}top)"/>
+    <polygon points="8,44 14,52 54,50 58,42 58,47 54,55 14,57 8,49" fill="url(#${id}side)"/>
+    <ellipse cx="32" cy="42" rx="11" ry="3" fill="#0d3b86" opacity="0.25"/>
+    <path d="M20 40 C18 26, 24 10, 32 10 C40 10, 46 26, 44 40 Z" fill="url(#${id}body)"/>
+    <path d="M24 40 C23 30, 26 20, 32 19 C38 20, 41 30, 40 40 Z" fill="url(#${id}belly)"/>
+    <path d="M20 26 C15 30, 15 38, 19 41 L22 34 Z" fill="#161a24"/>
+    <path d="M44 26 C49 30, 49 38, 45 41 L42 34 Z" fill="#161a24"/>
+    <circle cx="28" cy="18" r="2.2" fill="#ffffff"/><circle cx="36" cy="18" r="2.2" fill="#ffffff"/>
+    <circle cx="28.6" cy="18.4" r="1.2" fill="#0e1118"/><circle cx="36.6" cy="18.4" r="1.2" fill="#0e1118"/>
+    <circle cx="28.2" cy="17.8" r="0.45" fill="#ffffff"/><circle cx="36.2" cy="17.8" r="0.45" fill="#ffffff"/>
+    <polygon points="30,21 34,21 32,24.5" fill="url(#${id}beak)"/>
+    <ellipse cx="25" cy="22" rx="1.8" ry="1" fill="#ff8aa0" opacity="0.55"/><ellipse cx="39" cy="22" rx="1.8" ry="1" fill="#ff8aa0" opacity="0.55"/>
+    <path d="M25 41 h5 v2.6 h-5 Z M34 41 h5 v2.6 h-5 Z" fill="url(#${id}beak)"/>`,
+  // P3 — an iceberg, most of it under a clear sea
+  iceberg: (id) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#bfe8ff"/><stop offset="0.45" stop-color="#6cc0f4"/><stop offset="0.46" stop-color="#2a8ad6"/><stop offset="1" stop-color="#0b2f6e"/></linearGradient>
+      <linearGradient id="${id}tip" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfe6f8"/></linearGradient>
+      <linearGradient id="${id}deep" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9fdcff" stop-opacity="0.85"/><stop offset="1" stop-color="#3a8fd8" stop-opacity="0.35"/></linearGradient>
+      <radialGradient id="${id}glow" cx="0.75" cy="0.12" r="0.35"><stop offset="0" stop-color="#ffffff" stop-opacity="0.9"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#${id}glow)"/>
+    <polygon points="16,32 22,18 32,10 42,16 50,29 46,32" fill="url(#${id}tip)"/>
+    <polygon points="32,10 42,16 50,29 46,32 34,30" fill="#b9dcf3" opacity="0.7"/>
+    <polygon points="14,30 52,30 48,50 36,58 22,52" fill="url(#${id}deep)"/>
+    <rect x="6" y="28.6" width="52" height="1.6" fill="#ffffff" opacity="0.7"/>`,
+  // P4 — the penguin's face, big, a mascot
+  face: (id) => `
+    <defs>
+      <radialGradient id="${id}bg" cx="0.5" cy="0.35" r="0.8"><stop offset="0" stop-color="#7fd0ff"/><stop offset="1" stop-color="#1d5fbf"/></radialGradient>
+      <linearGradient id="${id}head" x1="0" y1="0" x2="0.6" y2="1"><stop offset="0" stop-color="#343b4c"/><stop offset="1" stop-color="#0d1017"/></linearGradient>
+      <linearGradient id="${id}face" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#e3edf6"/></linearGradient>
+      <linearGradient id="${id}beak" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffbb62"/><stop offset="1" stop-color="#e57e28"/></linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <circle cx="32" cy="34" r="24" fill="url(#${id}head)"/>
+    <path d="M18 36 C18 24, 26 22, 32 26 C38 22, 46 24, 46 36 C46 48, 38 54, 32 54 C26 54, 18 48, 18 36 Z" fill="url(#${id}face)"/>
+    <circle cx="25" cy="33" r="4.2" fill="#ffffff"/><circle cx="39" cy="33" r="4.2" fill="#ffffff"/>
+    <circle cx="26" cy="33.6" r="2.5" fill="#0e1118"/><circle cx="40" cy="33.6" r="2.5" fill="#0e1118"/>
+    <circle cx="25" cy="32.4" r="0.9" fill="#ffffff"/><circle cx="39" cy="32.4" r="0.9" fill="#ffffff"/>
+    <polygon points="28,39 36,39 32,45" fill="url(#${id}beak)"/>
+    <ellipse cx="20" cy="41" rx="3" ry="1.7" fill="#ff8aa0" opacity="0.55"/><ellipse cx="44" cy="41" rx="3" ry="1.7" fill="#ff8aa0" opacity="0.55"/>`,
+  // P5 — a block of ice, translucent, with refractions
+  block: (id) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1a7fd1"/><stop offset="1" stop-color="#0a3d8f"/></linearGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#cfe9fb"/></linearGradient>
+      <linearGradient id="${id}left" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9bdaf8"/><stop offset="1" stop-color="#4aa3e0"/></linearGradient>
+      <linearGradient id="${id}right" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6fc0ee"/><stop offset="1" stop-color="#2c84cc"/></linearGradient>
+      <radialGradient id="${id}glow" cx="0.3" cy="0.2" r="0.5"><stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <rect width="64" height="64" rx="14" fill="url(#${id}glow)"/>
+    <ellipse cx="32" cy="52" rx="20" ry="4" fill="#061f4f" opacity="0.35"/>
+    <polygon points="12,26 32,15 52,26 32,37" fill="url(#${id}top)"/>
+    <polygon points="12,26 32,37 32,50 12,39" fill="url(#${id}left)"/>
+    <polygon points="32,37 52,26 52,39 32,50" fill="url(#${id}right)"/>
+    <polyline points="16,29 24,25 24,42" fill="none" stroke="#ffffff" stroke-width="1.2" opacity="0.5"/>
+    <polyline points="36,44 44,30 48,28" fill="none" stroke="#ffffff" stroke-width="1.2" opacity="0.45"/>
+    <circle cx="22" cy="21" r="2.2" fill="#ffffff" opacity="0.9"/>`,
+  // P6 — sunset, the floe and the penguin as a silhouette
+  sunset: (id) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb457"/><stop offset="0.45" stop-color="#ff6b8b"/><stop offset="0.6" stop-color="#7d3f9e"/><stop offset="1" stop-color="#22184f"/></linearGradient>
+      <radialGradient id="${id}sun" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#fff2c2"/><stop offset="0.6" stop-color="#ffd27a"/><stop offset="1" stop-color="#ffb457" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${id}top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff6ea"/><stop offset="1" stop-color="#e9d4e0"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9a6c9"/><stop offset="1" stop-color="#7b5a9a"/></linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="14" fill="url(#${id}bg)"/>
+    <circle cx="32" cy="26" r="14" fill="url(#${id}sun)"/>
+    <polygon points="8,44 18,38 44,36 58,42 54,50 14,52" fill="url(#${id}top)"/>
+    <polygon points="8,44 14,52 54,50 58,42 58,47 54,55 14,57 8,49" fill="url(#${id}side)"/>
+    <path d="M23 40 C21 30, 26 18, 32 18 C38 18, 43 30, 41 40 Z" fill="#22184f"/>
+    <circle cx="32" cy="17" r="5" fill="#22184f"/>
+    <polygon points="36,17 42,18.5 36,20" fill="#ff9d3f"/>`
+}
+function svg(kind, size, square){
+  const id = 'g' + (uid++) + '_'
+  let body = ART[kind](id)
+  if (square) body = body.replace(/rx="14"/g, 'rx="0"')
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${body}</svg>`
+}
+const OPTIONS = [
+  { id:'P1', title:'floe at sea', why:'One floe, lit from the upper left: a bright top face, a translucent side, a reflection on the water and a small second floe. Sky to deep sea in the tile.', kind:'floe' },
+  { id:'P2', title:'penguin on the floe', why:'The same sea and floe with a round, glossy penguin: body with a sheen, white belly, orange beak and feet, blush. The mascot option.', kind:'penguin' },
+  { id:'P3', title:'iceberg', why:'A white tip with a shaded facet above a clear sea, the mass below it translucent and fading into the deep. A sun glow in the corner.', kind:'iceberg' },
+  { id:'P4', title:'penguin face', why:'The face, big, filling the tile: glossy eyes with catchlights, beak, blush, on a radial blue. Reads at 16px as a face. The Finder-style mascot.', kind:'face' },
+  { id:'P5', title:'ice block', why:'A translucent block with three lit faces, refraction lines and a specular, over a deep blue. Premium, abstract, no scene.', kind:'block' },
+  { id:'P6', title:'sunset', why:'Warm: a sunset gradient, the sun behind the floe, the penguin as a silhouette with an orange beak. The one that is not blue.', kind:'sunset' },
+]
+const out = document.getElementById('out')
+for (const o of OPTIONS) {
+  const sizes = [512, 128, 64, 32, 16]
+  out.insertAdjacentHTML('beforeend', `<section>
+    <h2>${o.id} — ${o.title}</h2><p class="why">${o.why}</p>
+    <div class="sizes">${sizes.map(s => `<div class="sz">${svg(o.kind, s)}<span>${s}</span></div>`).join('')}<div class="sz">${svg(o.kind, 96, true)}<span>square</span></div></div>
+    <div class="dock"><div class="app" style="background:linear-gradient(#f7f7f7,#d8d8d8)"></div>${svg(o.kind, 48)}<div class="app" style="background:linear-gradient(#5b6470,#3a414b)"></div></div>
+  </section>`)
+}
+</script>
+</body>
+</html>
