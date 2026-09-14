@@ -97,7 +97,7 @@ export interface CommandContext {
   editPremise: () => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
-  /** Forget the project the cursor is on, after asking. */
+  /** Forget the project the cursor is on — or, off the list, the one picked — after asking. */
   deleteProject: () => void
   /**
    * Pick up the project the cursor is on, so `j`/`k` carry it between groups.

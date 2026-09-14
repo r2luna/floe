@@ -1678,10 +1678,12 @@ export const REGISTRY: Map<string, Command> = new Map(
       {
         // The row the cursor is on, not the current project: `d` acts on what
         // you are looking at, which is the only reading that matches the list.
+        // Not gated on the projects panel: from the palette there is no row, so
+        // the command asks which project instead — gating it left a row that
+        // only ever answered "not available now".
         id: 'project.delete',
         title: 'Remove project from Floe…',
         group: 'App',
-        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
         run: (c) => c.deleteProject()
       },
       {

@@ -1888,17 +1888,29 @@ export default function App() {
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
     reloadProjects: () => projects.reload(),
     deleteProject: () => {
-      const project = projectAtCursor()
-      if (!project) return
       // What is being removed is Floe's record of the project, not the code:
       // say so, because "delete" over a folder full of work reads much worse
       // than what this does.
-      void askConfirm({
-        question: `Remove "${project.name}" from Floe?`,
-        verb: 'Remove project',
-        detail: 'the folder stays on disk'
-      }).then((yes) => {
-        if (yes) void projects.remove(project.path)
+      const confirmRemoval = (project: Project): void => {
+        void askConfirm({
+          question: `Remove "${project.name}" from Floe?`,
+          verb: 'Remove project',
+          detail: 'the folder stays on disk'
+        }).then((yes) => {
+          if (yes) void projects.remove(project.path)
+        })
+      }
+      const project = projectAtCursor()
+      if (project) return confirmRemoval(project)
+      // From the palette, or with the cursor off the list, there is no row to
+      // read: ask which one, the way `project.move` does.
+      setPicker({
+        placeholder: 'Remove which project?',
+        items: projects.all.map((p) => ({ id: p.path, title: p.name, detail: p.group })),
+        onPick: (path) => {
+          const picked = projects.all.find((p) => p.path === path)
+          if (picked) confirmRemoval(picked)
+        }
       })
     },
     startMoveProject: () => {
@@ -3333,6 +3345,11 @@ export default function App() {
 
       {picker && (
         <Palette
+          // One step, one instance: a pick that opens the next question swaps
+          // the picker in the same render, and an unkeyed Palette would carry
+          // the previous step's typed filter into it — "Remove project" behind
+          // a query of "stale" is an empty list, and Enter picks nothing.
+          key={picker.placeholder}
           placeholder={picker.placeholder}
           items={picker.items}
           value={picker.value}
