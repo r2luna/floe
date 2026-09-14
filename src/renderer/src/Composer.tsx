@@ -237,15 +237,15 @@ export function Composer({
   // codex. The panel only pins once per session, so this never fights a pick.
   useEffect(() => {
     if (!pinned) return
-    // The transcript records who answered, never what it was allowed to do — a
-    // mode is a property of the next turn, not of the last one. So the mode you
-    // have keeps travelling, snapped to what the pinned harness can do.
+    // A mode recorded for this session wins: switching one chat to plan must not
+    // put every other chat on plan. Only a session with no recorded mode takes
+    // the one you have, snapped to what the pinned harness can do.
     setChoice((prev) => {
       const next = {
         ...pinned,
         mode: modeLocked
           ? (pinned.mode ?? DEFAULT_MODE)
-          : nearestMode(prev.mode ?? DEFAULT_MODE, pinned.provider)
+          : nearestMode(pinned.mode ?? prev.mode ?? DEFAULT_MODE, pinned.provider)
       }
       onChoice?.(next)
       return next

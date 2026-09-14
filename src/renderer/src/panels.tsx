@@ -1889,6 +1889,10 @@ function ChatPanel({
               route
             })
           else send(text, going, attached?.images, attached?.files, linking)
+          // The mode this chat actually ran on, so reopening it restores that
+          // mode rather than whatever another chat last picked.
+          if (!route && session?.id && choice.mode)
+            void window.floe.claude.setChoice(session.id, { mode: choice.mode }).catch(() => {})
           setText('')
           setLinking(false)
         }}
