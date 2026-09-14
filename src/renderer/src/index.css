@@ -1281,6 +1281,40 @@ button {
   border-color: var(--accent);
 }
 
+/* The lit line takes the mode's tone (see "the mode tones"), so switching mode
+   shows on the field you are typing in. "ask" has no tone and keeps the accent. */
+.composer[data-tone='plan']:focus-within {
+  --composer-lit: #95a6c0;
+}
+
+.composer[data-tone='acceptEdits']:focus-within {
+  --composer-lit: #93b8a1;
+}
+
+.composer[data-tone='skip']:focus-within {
+  --composer-lit: #c49495;
+}
+
+:root[data-theme='light'] .composer[data-tone='plan']:focus-within {
+  --composer-lit: #3a64a8;
+}
+
+:root[data-theme='light'] .composer[data-tone='acceptEdits']:focus-within {
+  --composer-lit: #2f7d52;
+}
+
+:root[data-theme='light'] .composer[data-tone='skip']:focus-within {
+  --composer-lit: #b1454a;
+}
+
+.composer[data-tone]:not([data-boxed], [data-dropping]):focus-within {
+  border-top-color: var(--composer-lit, var(--accent));
+}
+
+.composer[data-boxed][data-tone]:not([data-dropping]):focus-within {
+  border-color: var(--composer-lit, var(--accent));
+}
+
 /* Stacked, the way it always was: the text takes the width, the tools sit on
    their own row beneath it. */
 .composer[data-boxed] .composer-bar {

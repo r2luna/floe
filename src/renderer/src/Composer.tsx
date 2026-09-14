@@ -888,6 +888,7 @@ export function Composer({
     <div
       className="composer"
       data-boxed={boxed || undefined}
+      data-tone={modes.length ? mode : undefined}
       ref={box}
       data-model-left={modelLeft || undefined}
       data-dropping={dropping || undefined}
