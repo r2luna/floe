@@ -407,7 +407,8 @@ export const KINDS = {
   // global servers exist with no project open, and that is where you add one.
   mcp: {
     icon: IconPlug,
-    title: 'mcp',
+    // Marked in the title so the rail, the drawer and the panel header all say it.
+    title: 'mcp · wip',
     width: 300,
     min: 220,
     order: 47,
@@ -574,8 +575,9 @@ export function panelForFile(relPath: string): PanelKind {
 }
 
 // Contextual panels — you reach them by picking something, never from the rail.
-// Putting them there would offer "open a branch" with no branch chosen.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'merge', 'remove', 'setup', 'provision', 'query', 'lane']
+// Putting them there would offer "open a branch" with no branch chosen. The nanny
+// is one: she exists only for a board in use, and colony's `n` and ESC reach her.
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'merge', 'remove', 'setup', 'provision', 'query', 'lane', 'nanny']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -6403,6 +6405,8 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
         </button>
       </div>
 
+      <ServerSetting />
+
       {/* Which build this is. A div and not a button: there is nothing to
           activate, so the lane's cursor walks past it rather than stopping on a
           row that answers Enter with silence. */}
@@ -6413,6 +6417,59 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           <span className="settings-value">{window.floe.appVersion}</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Server mode — whether other machines can attach to this one.
+ *
+ * The state lives in the `server` plugin, not in floe.toml, so this row reads the
+ * plugin's own panel and flips its own toggle command: one source of truth, and
+ * the Server panel and this row can never disagree. No plugin, no row.
+ */
+function ServerSetting() {
+  const sub = 'server:main'
+  const [toggle, setToggle] = useState<Extract<PluginPanelSection, { kind: 'toggle' }> | null>(null)
+  const [daemon, setDaemon] = useState('')
+  // Turning it on can wait up to 10s on the daemon health check.
+  const [busy, setBusy] = useState(false)
+
+  const refetch = useCallback(() => {
+    void window.floe.plugins.panel(sub).then((body) => {
+      const sections = body?.sections ?? []
+      setToggle(sections.find((s) => s.kind === 'toggle') ?? null)
+      const line = sections.find((s) => s.kind === 'text' && s.text.startsWith('daemon: '))
+      setDaemon(line?.kind === 'text' ? line.text.slice('daemon: '.length) : '')
+    })
+  }, [])
+  useEffect(() => refetch(), [refetch])
+  useEffect(() => window.floe.plugins.onPanelChanged((s) => (s === sub ? refetch() : undefined)), [refetch])
+
+  if (!toggle) return null
+
+  const flip = (): void => {
+    if (busy) return
+    setBusy(true)
+    void window.floe.plugins
+      .run(toggle.id)
+      .then(refetch)
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <div className="group">
+      <div className="group-label">SERVER</div>
+      <button
+        className="row settings-row"
+        onClick={flip}
+        title={`other machines can attach to this one while it is on${daemon ? ` — ${daemon}` : ''}`}
+      >
+        <span className="row-name">Serve this machine</span>
+        <span className={`settings-value${!busy && !toggle.value ? ' settings-off' : ''}`}>
+          {busy ? '…' : toggle.value ? `on${daemon ? ` · ${daemon}` : ''}` : 'off'}
+        </span>
+      </button>
     </div>
   )
 }
