@@ -2899,6 +2899,38 @@ button {
   color: var(--dim);
 }
 
+/* Confirms a multi-select with the mouse. Outline chip in the question's purple. */
+.irc-q-ok {
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px solid #3a3d5c;
+  border-radius: var(--radius);
+  background: #1d1e2b;
+  color: #9aa1e8;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.irc-q-ok:hover:not(:disabled) {
+  border-color: #7f86d8;
+}
+
+.irc-q-ok:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+:root[data-theme='light'] .irc-q-ok {
+  border-color: #c9cdef;
+  background: #f1f2fb;
+  color: #5560b4;
+}
+
+:root[data-theme='light'] .irc-q-ok:hover:not(:disabled) {
+  border-color: #5560b4;
+}
+
 .irc-sys[data-error] {
   color: #c08c86;
 }

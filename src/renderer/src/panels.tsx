@@ -2455,6 +2455,19 @@ export function QuestionBlock({
                   </span>
                 </div>
               ))}
+              {/* The mouse twin of ⏎ in the composer. mousedown is swallowed so
+                  the click never pulls focus off the composer. */}
+              {qq.multiSelect && (
+                <button
+                  type="button"
+                  className="irc-q-ok"
+                  disabled={!q.picks.length}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onAnswer(q.picks)}
+                >
+                  OK ⏎
+                </button>
+              )}
             </div>
           )
         })}
