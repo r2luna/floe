@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { IconAlertCircle, IconQuestionMark } from '@tabler/icons-react'
+import { IconAlertCircle, IconQuestionMark } from './icons'
 import { useColony } from './useColony'
 import { busyOf, isFull, type BoardColumn, type ColonyTask } from '../../shared/colony'
 import type { OpenFn } from './panels'

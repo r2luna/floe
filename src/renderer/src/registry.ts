@@ -26,6 +26,7 @@ import type { Command, CommandContext } from './commands.ts'
 import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
+import { previewTarget, previewUrl } from './previewTarget.ts'
 import { startSkillDraft } from './skillDraft.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
@@ -1140,6 +1141,24 @@ export const REGISTRY: Map<string, Command> = new Map(
           if (!command || !cwd) return
           c.setLane((l) => open(l, c.makePanel('terminal', cwd)))
           sendToTerminal(`term:${cwd}`, command)
+        }
+      },
+      {
+        id: 'bash.preview',
+        title: 'Open this command’s page in the browser panel',
+        group: 'Chat',
+        keys: 'p',
+        enabled: (c) => !!c.worktree && !!previewTarget(bashCommand(c) ?? ''),
+        // The Preview button on a shell block, from the keyboard: the page the
+        // command opens (a mock, a served URL) shown in the browser panel — the
+        // same open-then-navigate the MCP open_browser tool does.
+        run: (c) => {
+          const command = bashCommand(c)
+          const cwd = c.worktree?.path
+          const target = command ? previewTarget(command) : null
+          if (!target || !cwd) return
+          c.setLane((l) => open(l, c.makePanel('browser')))
+          void window.floe.browser.navigate(previewUrl(target, cwd))
         }
       },
       {

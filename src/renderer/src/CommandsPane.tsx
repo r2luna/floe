@@ -1,4 +1,4 @@
-import { IconPlayerPlay, IconPlayerStop, IconRefresh } from '@tabler/icons-react'
+import { IconPlayerPlay, IconPlayerStop, IconRefresh } from './icons'
 import type { OpenFn } from './panels'
 import type { ProjectCommand } from '../../main/commands'
 import type { CommandRunState, Commands } from './useCommands'

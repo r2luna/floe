@@ -451,7 +451,7 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         root: string,
         worktreePath: string,
         branch: string,
-        opts?: { from?: string; skip?: string[] }
+        opts?: { from?: string; skip?: string[]; premiseAnswer?: string }
       ): Promise<void> => ipcRenderer.invoke('provision:run', root, worktreePath, branch, opts),
       // Answer the premise interview's current question. `null` skips the rest.
       answer: (requestId: string, answer: string | null): Promise<void> =>

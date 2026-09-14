@@ -33,7 +33,7 @@ import {
   IconWorld,
   IconX,
   type IconProps
-} from '@tabler/icons-react'
+} from './icons'
 import {
   Fragment,
   lazy,
@@ -129,7 +129,8 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
-import { RunInTerminal } from './runInTerminal'
+import { PreviewInBrowser, RunInTerminal } from './runInTerminal'
+import { previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
@@ -1704,6 +1705,20 @@ function ChatPanel({
         : null,
     [cwd]
   )
+  // The same shape as runInTerminal: open the panel, then hand the page to the
+  // native view — the order the MCP open_browser tool already uses.
+  const previewInBrowser = useMemo(
+    () =>
+      cwd
+        ? (command: string) => {
+            const target = previewTarget(command)
+            if (!target) return
+            onOpenRef.current?.({ kind: 'browser' })
+            void window.floe.browser.navigate(previewUrl(target, cwd))
+          }
+        : null,
+    [cwd]
+  )
   // The names alone, so a message can tell `/deploy` (a skill this app expanded
   // into instructions) from `/usage` (the harness's own, sent as typed).
   const skillNamesList = useSkills(cwd).all
@@ -1737,6 +1752,7 @@ function ChatPanel({
         )}
         <SkillNames.Provider value={skillNames}>
           <RunInTerminal.Provider value={runInTerminal}>
+          <PreviewInBrowser.Provider value={previewInBrowser}>
             <Log items={shown} cwd={cwd} base={cut} pending={pending} />
             {tail && (
               // The streaming tail lives outside the memoised Log: a delta flush
@@ -1746,6 +1762,7 @@ function ChatPanel({
                 isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))}
               />
             )}
+          </PreviewInBrowser.Provider>
           </RunInTerminal.Provider>
         </SkillNames.Provider>
         {question && (

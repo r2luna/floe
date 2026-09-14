@@ -14,7 +14,7 @@
 // it, Enter opens, Escape closes and hands focus back to the button it came
 // from.
 
-import type { IconProps } from '@tabler/icons-react'
+import type { IconProps } from './icons'
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react'
 
 export interface RailMenuItem {

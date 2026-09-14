@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { IconMovie } from '@tabler/icons-react'
+import { IconMovie } from './icons'
 import { findVideoRefs } from '../../shared/videoRefs'
 import type { MediaFile } from '../../shared/types'
 

@@ -41,6 +41,7 @@ export const COMMAND_IDS: string[] = [
   'find.prev',
   'bash.copy',
   'bash.run',
+  'bash.preview',
   'files.expand',
   'files.rename',
   'files.move',

@@ -871,14 +871,28 @@ type Emit = (e: WithoutWorktree<ProvisionEvent>) => void
  * premise step is itself what they retried. Never when the file is already
  * there: a premise is written once and edited by hand after that.
  */
-function wantsInterview(worktreePath: string, opts: { from?: string; skip?: string[] }): boolean {
+function wantsInterview(worktreePath: string, opts: ProvisionOpts): boolean {
   if (!floeConfig().premise.enabled) return false
   if (hasPremise(worktreePath)) return false
   if ((opts.skip ?? []).includes(PREMISE_STEP_ID)) return false
   return !opts.from || opts.from === PREMISE_STEP_ID
 }
 
-async function runInterview(worktreePath: string, branch: string, emit: Emit): Promise<void> {
+/** What `provision:run` may be asked for besides the recipe itself. */
+export interface ProvisionOpts {
+  from?: string
+  skip?: string[]
+  /** The interview's one answer, given up front (the new-worktree form asks
+   *  it) — the premise is composed and written without a question on screen. */
+  premiseAnswer?: string
+}
+
+async function runInterview(
+  worktreePath: string,
+  branch: string,
+  emit: Emit,
+  given?: string
+): Promise<void> {
   const step = (status: ProvisionStep['status'], detail?: string): void =>
     emit({ kind: 'step', id: PREMISE_STEP_ID, status, detail })
   const clear = (): void => emit({ kind: 'ask', ask: null })
@@ -888,7 +902,9 @@ async function runInterview(worktreePath: string, branch: string, emit: Emit): P
   step('running')
 
   const answers: PremiseAnswer[] = []
-  for (const [i, q] of questions.entries()) {
+  // Answered already: the same one question, only nobody has to be asked it.
+  if (given?.trim()) answers.push({ question: questions[0].question, answer: given })
+  for (const [i, q] of given?.trim() ? [] : questions.entries()) {
     const requestId = randomUUID()
     emit({
       kind: 'ask',
@@ -934,7 +950,7 @@ export async function provisionWorktree(
   // Over the web bridge an omitted trailing arg arrives as `null` (JSON has no
   // `undefined`), which a `= {}` default doesn't catch — so accept null and
   // normalize, or `opts.skip` throws and takes the whole server down.
-  opts: { from?: string; skip?: string[] } | null = {}
+  opts: ProvisionOpts | null = {}
 ): Promise<void> {
   opts = opts ?? {}
   const emit = (e: WithoutWorktree<ProvisionEvent>): void => {
@@ -954,7 +970,7 @@ export async function provisionWorktree(
     ? [{ id: PREMISE_STEP_ID, label: 'What this worktree is for', status: 'pending' }]
     : []
   const startInterview = (): void => {
-    if (interviewing) void runInterview(worktreePath, branch, emit)
+    if (interviewing) void runInterview(worktreePath, branch, emit, opts.premiseAnswer)
   }
 
   // Only wait when the main checkout itself is a known stack — otherwise a

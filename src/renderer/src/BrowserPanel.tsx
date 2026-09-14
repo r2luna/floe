@@ -5,7 +5,7 @@ import {
   IconPlayerStop,
   IconRefresh,
   IconTool
-} from '@tabler/icons-react'
+} from './icons'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
 import type { BrowserState } from '../../shared/types'
 

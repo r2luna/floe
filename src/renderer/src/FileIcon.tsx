@@ -39,7 +39,7 @@ import {
   IconToml,
   IconVideo,
   type Icon
-} from '@tabler/icons-react'
+} from './icons'
 import type { ReactNode } from 'react'
 import { fileType, type FileType } from './fileType.ts'
 

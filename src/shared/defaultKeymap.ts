@@ -58,7 +58,8 @@ terminal — the same two things the icons on the row do, because the command an
 agent ran is often the one you want to run yourself.`,
     binds: [
       { key: 'y', command: 'bash.copy', when: 'panel == "chat"' },
-      { key: 'x', command: 'bash.run', when: 'panel == "chat"' }
+      { key: 'x', command: 'bash.run', when: 'panel == "chat"' },
+      { key: 'p', command: 'bash.preview', when: 'panel == "chat"' }
     ]
   },
   {

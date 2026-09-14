@@ -6,7 +6,7 @@ import {
   IconPlus,
   IconTrash,
   IconX
-} from '@tabler/icons-react'
+} from './icons'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { loadChoice, type ModelChoice } from './models'
 import type { Lane, Panel } from './lane'
@@ -2337,7 +2337,7 @@ export default function App() {
             // would hand focus to a button about to disappear.
             requestAnimationFrame(backToLane)
           },
-          onCreate: ({ branch, base, resetBranch }) => {
+          onCreate: ({ branch, base, resetBranch, premise }) => {
             // The form stays up until git agrees. Closing it first is what used
             // to send a refusal to the console and leave the panel looking as
             // if nothing had been asked for.
@@ -2361,11 +2361,10 @@ export default function App() {
                 // worktree is a checkout you cannot run, and the site you open
                 // is still serving the main checkout.
                 if (made)
-                  provision.start({
-                    root: projects.current!.path,
-                    worktreePath: made.path,
-                    branch: made.branch
-                  })
+                  provision.start(
+                    { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
+                    premise ? { premiseAnswer: premise } : undefined
+                  )
               })
               .catch((e: Error) => {
                 setNewWtBusy(false)

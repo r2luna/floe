@@ -6,7 +6,7 @@ import {
   IconPlayerStopFilled,
   IconPlus,
   IconX
-} from '@tabler/icons-react'
+} from './icons'
 import {
   Fragment,
   useCallback,

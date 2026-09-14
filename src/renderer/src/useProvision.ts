@@ -45,7 +45,10 @@ export interface Provision {
   /** Worktrees provisioning right now — the sidebar's "still working" set. */
   runningPaths: string[]
   /** Run the recipe for a worktree. Called on create, and by ⌘K's re-run. */
-  start: (target: { root: string; worktreePath: string; branch: string }) => void
+  start: (
+    target: { root: string; worktreePath: string; branch: string },
+    opts?: { premiseAnswer?: string }
+  ) => void
   /** Re-run from the step that failed, keeping what already succeeded. */
   retry: () => void
   /** Answer the premise question on screen. `null` ends the interview. */
@@ -90,7 +93,10 @@ export function useProvision(deps: {
     setFlows((all) => (all[path] ? { ...all, [path]: fn(all[path]) } : all))
   }
 
-  function start(target: { root: string; worktreePath: string; branch: string }, from?: string): void {
+  function start(
+    target: { root: string; worktreePath: string; branch: string },
+    opts?: { from?: string; premiseAnswer?: string }
+  ): void {
     setFlows((all) => ({
       ...all,
       [target.worktreePath]: {
@@ -107,7 +113,7 @@ export function useProvision(deps: {
     }))
     show()
     void window.floe.provision
-      .run(target.root, target.worktreePath, target.branch, from ? { from } : undefined)
+      .run(target.root, target.worktreePath, target.branch, opts?.from || opts?.premiseAnswer ? opts : undefined)
       .catch((e: Error) => {
         patch(target.worktreePath, (f) => ({
           ...f,
@@ -126,7 +132,7 @@ export function useProvision(deps: {
     // Without a failed step there is nothing to resume from, so this re-runs
     // the whole recipe. Every step is idempotent — that is what makes the
     // re-run safe to offer at all.
-    start({ root: f.root, worktreePath: f.worktreePath, branch: f.branch }, failed?.id)
+    start({ root: f.root, worktreePath: f.worktreePath, branch: f.branch }, { from: failed?.id })
   }
 
   function dismiss(): void {
@@ -232,5 +238,5 @@ export function useProvision(deps: {
     void window.floe.provision.answer(requestId, text)
   }
 
-  return { flow, runningPaths, start: (t) => start(t), retry, answer, dismiss }
+  return { flow, runningPaths, start: (t, o) => start(t, o), retry, answer, dismiss }
 }

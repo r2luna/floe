@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { slugifyBranch } from '../../shared/slug'
 import type { WorktreeFailure } from '../../shared/worktreeError'
 
@@ -8,6 +9,8 @@ export interface NewWorktreeResult {
   base?: string
   /** The branch already existed and a base was picked anyway — rebuild it there. */
   resetBranch?: boolean
+  /** The one interview sentence, answered up front. Empty means: ask later. */
+  premise?: string
 }
 
 /** Everything the inline form needs — built in App, threaded through PanelBody. */
@@ -64,6 +67,7 @@ export function NewWorktreeForm({
   // branch, the worktree you are in for a new one), and a stored default would
   // go stale the moment the name flips between the two.
   const [base, setBase] = useState<string | null>(null)
+  const [premise, setPremise] = useState('')
   const input = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -99,8 +103,9 @@ export function NewWorktreeForm({
   // the suggested one — so taking the suggestion never quietly re-bases it.
   const create = (named: string): void => {
     if (!named || busy) return
-    if (picked === KEEP) return onCreate({ branch: named })
-    onCreate({ branch: named, base: picked || undefined, resetBranch: exists })
+    const brief = premise.trim() || undefined
+    if (picked === KEEP) return onCreate({ branch: named, premise: brief })
+    onCreate({ branch: named, base: picked || undefined, resetBranch: exists, premise: brief })
   }
 
   const commit = (): void => create(branch)
@@ -114,9 +119,22 @@ export function NewWorktreeForm({
     }))
   ]
 
-  return (
+  // A modal over the lane, not a row in the panel: the form is the one thing on
+  // screen while it is open, centred, with a scrim; Esc and a click outside
+  // both cancel. Portaled to <body> so no panel clips it, while React events
+  // still bubble through the tree the panel owns.
+  return createPortal(
+    <div
+      className="modal-scrim"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+    >
     <form
-      className="wt-new"
+      className="wt-new dialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="wt-new-title"
       onSubmit={(e) => {
         e.preventDefault()
         commit()
@@ -134,8 +152,12 @@ export function NewWorktreeForm({
         onCancel()
       }}
     >
-      <label className="chips-label" htmlFor="wt-new-name">
+      <div className="dialog-head" id="wt-new-title">
         New worktree
+      </div>
+      <div className="dialog-body">
+      <label className="chips-label" htmlFor="wt-new-name">
+        Name
       </label>
       <input
         id="wt-new-name"
@@ -178,6 +200,20 @@ export function NewWorktreeForm({
         value={picked}
         onChange={setBase}
       />
+      {/* The setup interview's one question, asked here instead: leave it
+          empty and the checklist asks it later, as before. */}
+      <label className="chips-label" htmlFor="wt-new-premise">
+        Premise
+      </label>
+      <input
+        id="wt-new-premise"
+        className="dialog-input"
+        placeholder="In one sentence, what does this worktree have to deliver? Optional."
+        value={premise}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(e) => setPremise(e.target.value)}
+      />
       <div className="dialog-actions">
         {/* What Enter will actually create, when the slug is not what you
             typed — a surprise rename explained before it happens. */}
@@ -185,13 +221,16 @@ export function NewWorktreeForm({
           {branch && branch !== typed ? `→ ${branch}` : ''}
         </span>
         <button type="button" className="btn" onClick={onCancel}>
-          Cancel
+          Cancel <kbd>esc</kbd>
         </button>
         <button type="submit" className="btn btn-primary" disabled={!branch || busy}>
-          {busy ? 'Creating…' : exists ? 'Check out' : 'Create'}
+          {busy ? 'Creating…' : exists ? 'Check out' : 'Create'} <kbd>⏎</kbd>
         </button>
       </div>
+      </div>
     </form>
+    </div>,
+    document.body
   )
 }
 

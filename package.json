@@ -28,7 +28,6 @@
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@tabler/icons-react": "^3.44.0",
     "@xterm/addon-canvas": "^0.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -56,6 +55,7 @@
     "electron-vite": "^2.3.0",
     "esbuild": "^0.28.1",
     "oxlint": "^1.81.0",
+    "pixelarticons": "^1.8.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",

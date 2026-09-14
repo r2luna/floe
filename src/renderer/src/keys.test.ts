@@ -220,6 +220,7 @@ test('x and d tick and delete sessions, and only in the worktrees list', () => {
   assert.deepEqual(r({ key: 'x' }, { kind: 'worktrees' }), { id: 'session.mark' })
   assert.deepEqual(r({ key: 'd' }, { kind: 'worktrees' }), { id: 'session.deleteMarked' })
   assert.deepEqual(r({ key: 'x' }, { kind: 'chat' }), { id: 'bash.run' })
+  assert.deepEqual(r({ key: 'p' }, { kind: 'chat' }), { id: 'bash.preview' })
   assert.deepEqual(r({ key: 'd' }, { kind: 'files' }), { id: 'files.delete' })
   assert.equal(r({ key: 'x' }, { kind: 'files' }), null)
 })
