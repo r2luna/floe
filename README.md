@@ -125,6 +125,9 @@ Floe stands on ideas from apps that got there first. Go try them.
   own worktree, with remote machines as first-class runtimes.
 - **[T3 Code](https://t3.codes)** by Theo and the T3 team: one control plane for Claude Code,
   Codex, OpenCode and friends, treated as equals.
+- **[herdr](https://herdr.dev)**: agents kept alive on a background runtime you detach from and
+  attach to again, with each one's state (blocked, done, idle) surfaced so you go straight to the
+  one that needs you.
 
 ## License
 
