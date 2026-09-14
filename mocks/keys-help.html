@@ -1,0 +1,150 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — ? opens the key help: three layouts</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; padding: 16px; }
+  .opt { margin-bottom: 36px; }
+  .opt-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+  .opt-id { color: var(--text-strong); }
+  .opt-name { color: var(--dimmer); }
+  .opt-note { color: var(--faint); font-size: 11px; margin: 0 0 10px; max-width: 900px; }
+
+  /* A fake app window behind the overlay. */
+  .stage { position: relative; width: 1040px; height: 600px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); overflow: hidden; display: flex; }
+  .fake-rail { width: 34px; border-right: 1px solid var(--line); }
+  .fake-panel { width: 240px; border-right: 1px solid var(--line); background: var(--panel); }
+  .fake-panel.focus { background: var(--panel-focused); }
+  .fake-title { padding: 6px 10px; color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; border-bottom: 1px solid var(--line-soft); }
+  .scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 70%, transparent); display: flex; align-items: center; justify-content: center; }
+
+  .help { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-focused); display: flex; flex-direction: column; overflow: hidden; }
+  .help-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .help-title { color: var(--text-strong); }
+  .help-ctx { color: var(--accent); }
+  .help-find { margin-left: auto; color: var(--faint); }
+  .help-foot { padding: 5px 12px; border-top: 1px solid var(--line); color: var(--faint); font-size: 11px; }
+
+  .sec-label { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; margin: 0 0 4px; }
+  .sec-label.here { color: var(--accent); }
+  .bind { display: flex; gap: 10px; padding: 1px 0; }
+  .bind-keys { flex: 0 0 74px; text-align: right; color: var(--text-strong); white-space: nowrap; }
+  .bind-what { color: var(--dim); }
+
+  /* O1 — cheat sheet grid */
+  .o1 .help { width: 900px; max-height: 520px; }
+  .o1 .grid { padding: 12px; columns: 3; column-gap: 22px; overflow: auto; }
+  .o1 .sec { break-inside: avoid; margin-bottom: 14px; }
+  .o1 .sec.here { border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 8px; }
+
+  /* O2 — two tiers: "the model" on the left, lookup on the right */
+  .o2 .help { width: 900px; height: 520px; }
+  .o2 .split { display: flex; flex: 1; min-height: 0; }
+  .o2 .model { flex: 0 0 330px; border-right: 1px solid var(--line); padding: 12px; overflow: auto; }
+  .o2 .model p { margin: 0 0 10px; color: var(--dim); }
+  .o2 .model b { color: var(--text-strong); font-weight: normal; }
+  .o2 .lookup { flex: 1; padding: 12px; overflow: auto; columns: 2; column-gap: 20px; }
+  .o2 .sec { break-inside: avoid; margin-bottom: 14px; }
+  .diagram { border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 8px; margin: 4px 0 12px; color: var(--dimmer); white-space: pre; font-size: 11px; line-height: 1.45; }
+
+  /* O3 — a panel in the lane */
+  .o3 .fake-panel.help-panel { width: 360px; background: var(--panel-focused); display: flex; flex-direction: column; }
+  .o3 .body { padding: 10px; overflow: auto; }
+  .o3 .sec { margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<div class="opt o1">
+  <div class="opt-head"><span class="opt-id">O1</span><span class="opt-name">cheat sheet overlay</span></div>
+  <p class="opt-note">
+    One modal, every section on one screen in three columns. The section for the focused panel comes first and is boxed.
+    <kbd>/</kbd> filters, <kbd>esc</kbd> or <kbd>?</kbd> closes. Fastest to scan, weakest at teaching how the pieces fit.
+  </p>
+  <div class="stage">
+    <div class="fake-rail"></div>
+    <div class="fake-panel"><div class="fake-title">projects</div></div>
+    <div class="fake-panel focus"><div class="fake-title">files</div></div>
+    <div class="scrim"><div class="help">
+      <div class="help-head"><span class="help-title">Keys</span><span class="help-ctx">in files</span><span class="help-find"><kbd>/</kbd> filter</span></div>
+      <div class="grid" id="o1grid"></div>
+      <div class="help-foot">every binding lives in keybindings.toml · <kbd>esc</kbd> close</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="opt o2">
+  <div class="opt-head"><span class="opt-id">O2</span><span class="opt-name">how it works + lookup</span></div>
+  <p class="opt-note">
+    Same modal, split. The left column teaches the navigation model in a few lines and a diagram (lane, panels, cursor, composer).
+    The right column is the lookup, focused panel first. Best for a new user of an open-source release. Recommended.
+  </p>
+  <div class="stage">
+    <div class="fake-rail"></div>
+    <div class="fake-panel"><div class="fake-title">worktrees</div></div>
+    <div class="fake-panel focus"><div class="fake-title">chat</div></div>
+    <div class="scrim"><div class="help">
+      <div class="help-head"><span class="help-title">Keys</span><span class="help-ctx">in chat</span><span class="help-find"><kbd>/</kbd> filter</span></div>
+      <div class="split">
+        <div class="model">
+          <div class="sec-label">How to move</div>
+          <div class="diagram">rail │ projects │ worktrees │ chat │ files
+     │          │           │  ▲   │
+     │    ⌃H ◀──┼───────────┼──┘   ├──▶ ⌃L
+     │          │           │ ⌃J/⌃K stack</div>
+          <p><b>The lane.</b> Panels sit side by side. <kbd>⌃H</kbd> <kbd>⌃L</kbd> cross them, <kbd>⌃1</kbd>–<kbd>⌃9</kbd> jump by position, <kbd>⌘W</kbd> closes one.</p>
+          <p><b>The cursor.</b> Inside a panel <kbd>j</kbd> <kbd>k</kbd> move, <kbd>g</kbd> goes to the top, <kbd>⏎</kbd> opens. Bare letters act on the row under the cursor.</p>
+          <p><b>The composer.</b> <kbd>i</kbd> to type, <kbd>esc</kbd> to leave. Ctrl keys keep working while you type.</p>
+          <p><b>When lost.</b> <kbd>⌘⇧P</kbd> lists every command, <kbd>⌘K</kbd> starts a chord, <kbd>?</kbd> opens this.</p>
+        </div>
+        <div class="lookup" id="o2lookup"></div>
+      </div>
+      <div class="help-foot">every binding lives in keybindings.toml · <kbd>esc</kbd> close</div>
+    </div></div>
+  </div>
+</div>
+
+<div class="opt o3">
+  <div class="opt-head"><span class="opt-id">O3</span><span class="opt-name">help panel in the lane</span></div>
+  <p class="opt-note">
+    <kbd>?</kbd> opens a panel beside the focused one instead of a modal. It stays open while you try the keys, and re-renders when focus moves.
+    Costs a column of the lane.
+  </p>
+  <div class="stage">
+    <div class="fake-rail"></div>
+    <div class="fake-panel"><div class="fake-title">worktrees</div></div>
+    <div class="fake-panel"><div class="fake-title">changes</div></div>
+    <div class="fake-panel help-panel">
+      <div class="fake-title">keys · changes</div>
+      <div class="body" id="o3body"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const S = {
+    files: ['Files', [['j k', 'move'], ['l h', 'open / close dir'], ['.', 'root here'], ['-', 'root up'], ['r', 'rename'], ['m', 'move'], ['d', 'delete'], ['e', 'open in editor'], ['o', 'default app']]],
+    chat: ['Chat', [['i', 'type'], ['esc', 'leave composer'], ['y', 'copy command'], ['x', 'run in terminal'], ['p', 'preview'], ['⌃I ⌃O', 'prev / next session'], ['⌃W', 'other chat']]],
+    changes: ['Changes', [['j k', 'move'], ['⏎', 'open diff'], ['e', 'open in editor'], ['o', 'default app']]],
+    panels: ['Panels', [['⌃H ⌃L', 'left / right'], ['⌃J ⌃K', 'down / up'], ['⌃1–9', 'panel by position'], ['⌘W', 'close'], ['⌘K /', 'dock beside / below']]],
+    palettes: ['Palettes', [['⌘⇧P', 'every command'], ['⌘/', 'switch project'], ['⌘P', 'chats and files'], ['⌘K', 'chord']]],
+    goto: ['Go to', [['⌘A', 'active'], ['⌘E', 'worktrees'], ['⌘⇧E', 'projects'], ['⌘Y', 'terminal'], ['⌘K B', 'colony'], ['⌘K G', 'changes'], ['⌘K F', 'files'], ['⌘K P', 'plans']]],
+    cursor: ['Cursor', [['j k', 'down / up'], ['g', 'top'], ['⌃D ⌃U', 'half page'], ['/', 'find'], ['n', 'next match']]],
+    sessions: ['Sessions', [['⌘T', 'new session'], ['⌘N', 'new worktree'], ['⌘1–9', 'worktree by position'], ['⌘⇧W', 'forget session'], ['⌘⇧U', 'mark unread']]],
+    diff: ['Diff', [[']  [', 'next / prev change'], ['p', 'prose / source'], ['v', 'select lines'], ['c', 'comment']]],
+    merge: ['Worktree', [['⌘K M', 'guided merge'], ['⌘K X', 'guided remove'], ['⌘K W', 'setup again']]]
+  }
+  const sec = (key, here) => {
+    const [title, binds] = S[key]
+    return `<div class="sec${here ? ' here' : ''}"><div class="sec-label${here ? ' here' : ''}">${here ? 'here · ' : ''}${title}</div>` +
+      binds.map(([k, w]) => `<div class="bind"><span class="bind-keys">${k}</span><span class="bind-what">${w}</span></div>`).join('') + '</div>'
+  }
+  const rest = (here) => ['panels', 'palettes', 'goto', 'cursor', 'sessions', 'diff', 'merge'].filter((k) => k !== here)
+  document.getElementById('o1grid').innerHTML = sec('files', true) + rest().map((k) => sec(k)).join('')
+  document.getElementById('o2lookup').innerHTML = sec('chat', true) + rest().map((k) => sec(k)).join('')
+  document.getElementById('o3body').innerHTML = sec('changes', true) + ['panels', 'goto', 'cursor', 'palettes'].map((k) => sec(k)).join('')
+</script>
+</body>
+</html>

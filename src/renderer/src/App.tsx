@@ -54,6 +54,7 @@ import { setKeymap } from './keys'
 import { useAppearance } from './appearance'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
+import { KeysHelp } from './KeysHelp'
 import { AddProject } from './AddProject'
 import { reason } from './ipcError'
 import { attach, backendLabel, backendOf, currentBackend, dropLanding, handOff, LOCAL, peekLanding } from './backends'
@@ -527,6 +528,8 @@ export default function App() {
     onClose?: () => void
   } | null>(null)
   const [commandsOpen, setCommandsOpen] = useState(false)
+  // `?` — every binding, see KeysHelp.
+  const [keysOpen, setKeysOpen] = useState(false)
   // ⌘P's files, or null while it is closed — which is also what says the
   // palette is up. The list is fetched when it opens rather than kept in sync:
   // files appear and vanish behind the app all day, and a list read at the
@@ -661,6 +664,7 @@ export default function App() {
     const overlay =
       paletteOpen ||
       commandsOpen ||
+      keysOpen ||
       finderFiles !== null ||
       adding ||
       newWt ||
@@ -668,7 +672,7 @@ export default function App() {
       picker !== null ||
       (narrow && railMenu)
     void window.floe.browser.visible(!overlay)
-  }, [lane.panels, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+  }, [lane.panels, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
 
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
@@ -1866,6 +1870,7 @@ export default function App() {
     patchFor: () => lastPatch.current,
     openPalette: () => setPaletteOpen(true),
     openCommands: () => setCommandsOpen(true),
+    openKeys: () => setKeysOpen(true),
     openFiles: () => {
       if (!here) return
       // Opens empty and fills: reading a large repo takes a moment, and a
@@ -2314,7 +2319,7 @@ export default function App() {
       // already keeps bare letters out of its input and the form stops its own
       // Escape and ⌥⏎ before they get here.
       const blocked =
-        paletteOpen || commandsOpen || finderFiles !== null || adding || finding !== null || picker !== null
+        paletteOpen || commandsOpen || keysOpen || finderFiles !== null || adding || finding !== null || picker !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2354,7 +2359,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, finding, moving, picker])
+  }, [lane, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, finding, moving, picker])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -2416,7 +2421,7 @@ export default function App() {
     document.addEventListener('focusin', onFocusIn)
     return () => document.removeEventListener('focusin', onFocusIn)
   }, [])
-  const overlayUp = paletteOpen || commandsOpen || finderFiles !== null || adding || picker !== null
+  const overlayUp = paletteOpen || commandsOpen || keysOpen || finderFiles !== null || adding || picker !== null
   useLayoutEffect(() => {
     if (!overlayUp) {
       // Closed: what was captured has been handed back (or could not be). A
@@ -3473,6 +3478,18 @@ export default function App() {
         />
       )}
 
+      {keysOpen && (
+        <KeysHelp
+          binds={binds}
+          kind={lane.panels[lane.focus]?.kind}
+          titleOf={keyTitle}
+          onClose={() => {
+            setKeysOpen(false)
+            restoreFocus()
+          }}
+        />
+      )}
+
       {paletteOpen && (
         <Palette
           placeholder="Switch project…"
@@ -3645,6 +3662,20 @@ function finderItems(
  * binding — you reach for the palette when the project you want isn't open, and
  * sometimes that is because it isn't added yet.
  */
+/**
+ * A binding's name in the keys help: the registry's title, or null for a command
+ * the palette does not offer either. `panel.goto` and the position jumps take an
+ * argument, so they are named by it.
+ */
+function keyTitle(command: string, arg?: string): string | null {
+  const cmd = REGISTRY.get(command)
+  if (!cmd || cmd.hidden) return null
+  if (command === 'panel.goto' && arg) return `Go to ${arg}`
+  if (command === 'panel.focusAt') return 'Panel by position'
+  if (command === 'worktree.focusAt') return 'Worktree by position'
+  return cmd.title
+}
+
 function paletteItems(projects: ReturnType<typeof useProjects>): PaletteItem[] {
   return [
     ...projects.all.map((p) => ({

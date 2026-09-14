@@ -896,6 +896,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.openCommands()
       },
       {
+        id: 'help.keys',
+        title: 'Show keyboard shortcuts',
+        group: 'App',
+        run: (c) => c.openKeys()
+      },
+      {
         id: 'palette.files',
         title: 'Find a chat or a file…',
         group: 'App',
@@ -1525,6 +1531,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.open',
         title: 'MCP servers…',
         group: 'App',
+        hidden: true,
         run: (c) => c.setLane((l) => toggleKind(l, 'mcp', () => c.makePanel('mcp')))
       },
       {
@@ -1533,6 +1540,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.new',
         title: 'Add MCP server…',
         group: 'MCP',
+        hidden: true,
         run: (c) => {
           if (!c.lane.panels.some((p) => p.kind === 'mcp')) {
             c.setLane((l) => open(l, c.makePanel('mcp')))

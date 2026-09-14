@@ -67,6 +67,7 @@ export const COMMAND_IDS: string[] = [
   'palette.chord',
   'palette.open',
   'palette.commands',
+  'help.keys',
   'palette.files',
   'project.add',
   'project.reload',

@@ -49,6 +49,8 @@ export interface CommandContext {
   openPalette: () => void
   /** Show the palette listing every command. */
   openCommands: () => void
+  /** Show every key binding — `?`. */
+  openKeys: () => void
   /** Show the palette listing the worktree's files — ⌘P. */
   openFiles: () => void
   /** Open the find bar over the focused panel — `/`. */
@@ -322,6 +324,8 @@ export interface Command {
    * row to dim.
    */
   unavailable?: (ctx: CommandContext, arg?: string) => string
+  /** Kept out of the palette and command listings: the feature is not ready to ship. */
+  hidden?: boolean
   run: (ctx: CommandContext, arg?: string) => void
 }
 
@@ -403,6 +407,7 @@ export function listCommands(
 ): CommandRow[] {
   const rows: CommandRow[] = []
   for (const c of registry.values()) {
+    if (c.hidden) continue
     if (ctx && c.args) {
       for (const { arg, title } of c.args(ctx)) {
         rows.push({

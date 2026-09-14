@@ -597,9 +597,8 @@ export const RAIL_GROUPS: PanelKind[][] = [
   ['projects', 'active', 'worktrees', 'colony'],
   // What the work did to the tree — read it, review it, land it.
   ['changes', 'files', 'plans', 'draw'],
-  // What the agents are made of: the skills they can run and the servers they
-  // get. Both are global, both are edited the same way, so they sit together.
-  ['skills', 'mcp'],
+  // What the agents are made of: the skills they can run.
+  ['skills'],
   // Things that run: the project's own processes, and a shell for everything
   // else.
   ['commands', 'terminal', 'browser'],
@@ -609,8 +608,11 @@ export const RAIL_GROUPS: PanelKind[][] = [
 
 // A new panel joins a group above; until it does it lands in a trailing group of
 // its own rather than dropping off the rail entirely.
+// Panels that are not ready to ship stay off the rail until they are.
+const HIDDEN: PanelKind[] = ['mcp']
+
 const UNGROUPED: PanelKind[] = (Object.keys(KINDS) as PanelKind[]).filter(
-  (k) => !CONTEXTUAL.includes(k) && !RAIL_GROUPS.some((g) => g.includes(k))
+  (k) => !CONTEXTUAL.includes(k) && !HIDDEN.includes(k) && !RAIL_GROUPS.some((g) => g.includes(k))
 )
 
 export const RAIL: PanelKind[][] = UNGROUPED.length ? [...RAIL_GROUPS, UNGROUPED] : RAIL_GROUPS
@@ -6418,8 +6420,6 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
         </button>
       </div>
 
-      <ServerSetting />
-
       {/* Which build this is. A div and not a button: there is nothing to
           activate, so the lane's cursor walks past it rather than stopping on a
           row that answers Enter with silence. */}
@@ -6430,59 +6430,6 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           <span className="settings-value">{window.floe.appVersion}</span>
         </div>
       </div>
-    </div>
-  )
-}
-
-/**
- * Server mode — whether other machines can attach to this one.
- *
- * The state lives in the `server` plugin, not in floe.toml, so this row reads the
- * plugin's own panel and flips its own toggle command: one source of truth, and
- * the Server panel and this row can never disagree. No plugin, no row.
- */
-function ServerSetting() {
-  const sub = 'server:main'
-  const [toggle, setToggle] = useState<Extract<PluginPanelSection, { kind: 'toggle' }> | null>(null)
-  const [daemon, setDaemon] = useState('')
-  // Turning it on can wait up to 10s on the daemon health check.
-  const [busy, setBusy] = useState(false)
-
-  const refetch = useCallback(() => {
-    void window.floe.plugins.panel(sub).then((body) => {
-      const sections = body?.sections ?? []
-      setToggle(sections.find((s) => s.kind === 'toggle') ?? null)
-      const line = sections.find((s) => s.kind === 'text' && s.text.startsWith('daemon: '))
-      setDaemon(line?.kind === 'text' ? line.text.slice('daemon: '.length) : '')
-    })
-  }, [])
-  useEffect(() => refetch(), [refetch])
-  useEffect(() => window.floe.plugins.onPanelChanged((s) => (s === sub ? refetch() : undefined)), [refetch])
-
-  if (!toggle) return null
-
-  const flip = (): void => {
-    if (busy) return
-    setBusy(true)
-    void window.floe.plugins
-      .run(toggle.id)
-      .then(refetch)
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <div className="group">
-      <div className="group-label">SERVER</div>
-      <button
-        className="row settings-row"
-        onClick={flip}
-        title={`other machines can attach to this one while it is on${daemon ? ` — ${daemon}` : ''}`}
-      >
-        <span className="row-name">Serve this machine</span>
-        <span className={`settings-value${!busy && !toggle.value ? ' settings-off' : ''}`}>
-          {busy ? '…' : toggle.value ? `on${daemon ? ` · ${daemon}` : ''}` : 'off'}
-        </span>
-      </button>
     </div>
   )
 }

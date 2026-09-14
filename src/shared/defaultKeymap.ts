@@ -17,6 +17,12 @@ export interface KeymapSection {
 
 export const KEYMAP_SECTIONS: KeymapSection[] = [
   {
+    title: 'Help',
+    doc: `\`?\` shows every binding in force, read from this file, with the keys for the
+focused panel first. It is a bare key, so it types a \`?\` in the composer as usual.`,
+    binds: [{ key: 'shift+?', command: 'help.keys' }]
+  },
+  {
     title: 'Palettes',
     doc: `Three palettes, on purpose. \`⌘⇧P\` is every command; \`⌘/\` is the narrower
 "switch project" list, because the common case should not make you read past

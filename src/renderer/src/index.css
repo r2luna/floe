@@ -5701,6 +5701,78 @@ button {
   color: var(--dim);
 }
 
+/* --- keys help (`?`) ------------------------------------------------------ */
+
+.keys-help {
+  width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 112px);
+}
+
+.keys-help-ctx {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+/* Columns rather than a grid: sections differ wildly in length, and columns
+   pack them without leaving holes under the short ones. */
+.keys-help-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  columns: 3 240px;
+  column-gap: 22px;
+}
+
+.keys-help-sec {
+  break-inside: avoid;
+  margin-bottom: 14px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+
+.keys-help-sec[data-here] {
+  padding-block: 6px;
+  border-color: var(--line);
+}
+
+.keys-help-label {
+  margin-bottom: 4px;
+  color: var(--dimmer);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.keys-help-sec[data-here] .keys-help-label {
+  color: var(--accent);
+}
+
+.keys-help-row {
+  display: flex;
+  gap: 10px;
+  padding: 1px 0;
+  font-size: 11px;
+}
+
+.keys-help-keys {
+  flex: 0 0 64px;
+  text-align: right;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+
+.keys-help-what {
+  min-width: 0;
+  color: var(--dim);
+}
+
+.keys-help-where {
+  color: var(--faint);
+}
+
 .empty.error {
   color: #c08c86;
 }

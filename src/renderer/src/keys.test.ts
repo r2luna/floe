@@ -206,8 +206,10 @@ test('no default is a bare shift+letter', () => {
   for (const bind of DEFAULT_KEYMAP) {
     const first = normalizeChord(bind.key).split(' ')[0]
     const mods = first.split('+').slice(0, -1)
+    // `?` is shift+/ on the keyboard, not a capital, so only letters count.
+    const letter = /^[a-z]$/.test(first.split('+').pop() ?? '')
     assert.ok(
-      !(mods.length === 1 && mods[0] === 'shift'),
+      !(letter && mods.length === 1 && mods[0] === 'shift'),
       `${bind.key} (${bind.command}) shadows a capital letter`
     )
   }
@@ -247,4 +249,9 @@ test('the setup checklist answers ⏎, r and escape, and only in its own panel',
   assert.deepEqual(r({ key: 'Escape' }, { kind: 'setup' }), { id: 'setup.cancel' })
   assert.notDeepEqual(r({ key: 'Enter' }, { kind: 'chat' }), { id: 'setup.chat' })
   assert.notDeepEqual(r({ key: 'r' }, { kind: 'merge' }), { id: 'setup.retry' })
+})
+
+test('? opens the keys help, and types a ? in the composer', () => {
+  assert.deepEqual(resolveKey({ key: '?', shift: true }), { id: 'help.keys' })
+  assert.equal(resolveKey({ key: '?', shift: true }, { typing: true }), null)
 })
