@@ -1083,8 +1083,10 @@ button {
   flex-direction: column;
   align-items: stretch;
   gap: 1px;
-  width: 100%;
-  padding: 5px 8px;
+  /* Full width, the `.row` rule: bleeds through the body's 8px inset. */
+  width: calc(100% + 16px);
+  margin-inline: -8px;
+  padding: 5px 12px;
   border-radius: 0;
   text-align: left;
 }
