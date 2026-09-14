@@ -112,6 +112,20 @@ project's principles and layout.
 Pushing a `vX.Y.Z` tag that matches `package.json` runs the release workflow: the gate, then macOS
 and Linux builds published to GitHub Releases, which is where the in-app updater looks.
 
+## Inspiration
+
+Floe stands on ideas from apps that got there first. Go try them.
+
+- **[Conductor](https://conductor.build)** by Melty Labs: running a team of coding agents in
+  parallel, each in its own git worktree.
+- **[Solo](https://soloterm.com)** by Aaron Francis: a project's processes detected, started and
+  watched in one place, next to an embedded terminal.
+- **[Polyscope](https://getpolyscope.com)**: pointing at code and talking to the agent about it.
+- **[Orca](https://www.onorca.dev)** by Stably AI: a fleet of CLI agents, any harness, each in its
+  own worktree, with remote machines as first-class runtimes.
+- **[T3 Code](https://t3.codes)** by Theo and the T3 team: one control plane for Claude Code,
+  Codex, OpenCode and friends, treated as equals.
+
 ## License
 
 [MIT + Commons Clause](LICENSE). Use, modify and fork Floe freely, at work too. You may not sell
