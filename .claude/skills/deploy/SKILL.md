@@ -21,8 +21,16 @@ Run these in order. **Stop and report** at the first failure — never tag past 
 ### 1. Preflight — abort if any fails
 - **Branch + clean tree:** on `master`, `git status --porcelain` empty. On a feature branch, tell
   the user to merge to `master` first.
-- **Remote:** `git remote get-url github` points at `github.com/r2luna/floe`. `git fetch github`,
-  and `master` is not behind `github/master`.
+- **GitHub remote:** GitHub is where releases go. `origin` is the old Forgejo mirror
+  (`git.pinguim.io`) and never receives tags. Resolve the remote by URL, not by name:
+  `git remote -v | grep 'github.com[:/]r2luna/floe' | head -1 | cut -f1`. None → add it as
+  `github` pointing at `git@github.com:r2luna/floe.git`. Use that name as `$GH` below.
+- **In sync:** fetch `$GH`. `master` must contain `$GH/master` (`git merge-base --is-ancestor`), so
+  the push is a fast-forward. If not, GitHub has commits `master` lacks: stop and list them
+  (`git log --oneline master..$GH/master`). Never force-push.
+- **Tag is new:** `git ls-remote --tags $GH` must not already hold the version you are about to
+  cut. Old `v0.x` tags exist locally from the Forgejo era: never `git push --tags`, it would start
+  a release for each one.
 - **Gate:** `pnpm gate` passes.
 
 ### 2. Version bump
@@ -31,8 +39,10 @@ Run these in order. **Stop and report** at the first failure — never tag past 
   user-facing feature → `minor`; only fixes, refactors or chores → `patch`; `major` only when the
   user says so. State the level and why in one line.
 - Edit `package.json`, commit `chore(release): vX.Y.Z`, tag `vX.Y.Z` on that commit.
-- `git push github master` then `git push github vX.Y.Z`. Also push `master` to `origin` if it
-  exists, so the mirrors agree.
+- Push `master` to `$GH`, then push only the tag `vX.Y.Z` to `$GH`. The tag push starts the
+  release workflow.
+- Then push `master` (no tag) to `origin` if it exists, so the Forgejo mirror has the code. A
+  failure there is reported but does not stop the release.
 
 ### 3. Watch the workflow
 - `gh run list --repo r2luna/floe --workflow release.yml --limit 1` to get the run, then
