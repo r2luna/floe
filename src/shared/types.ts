@@ -952,6 +952,7 @@ export interface AgentPermission {
   requestId: string // echo back in the control_response
   toolName: string
   summary?: string // a short, human-readable target (file path, command, …)
+  remember?: boolean // the CLI offered a rule to save, so "don't ask again" can be honoured
 }
 
 // A subagent the session spawned via the Task/Agent tool. Claude Code runs these

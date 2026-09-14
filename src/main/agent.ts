@@ -33,6 +33,7 @@ export interface Conn {
   sessionId?: string // captured for --resume on restart
   stderr: string
   pendingPerms: Map<string, unknown> // requestId → tool input, awaiting allow/deny
+  permSuggestions: Map<string, unknown[]> // requestId → the CLI's permission_suggestions, saved on "don't ask again"
   subagents: Set<string> // active Task/Agent tool_use ids → emit `done` when their result returns
   // The MCP control server reads these so another session can watch this one:
   transcriptBuffer: string[] // recent human-readable lines (assistant text + tool summaries), capped
@@ -547,6 +548,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     sessionId: resumeId,
     stderr: '',
     pendingPerms: new Map(),
+    permSuggestions: new Map(),
     subagents: new Set(),
     transcriptBuffer: [],
     lastAssistantText: '',
@@ -895,19 +897,29 @@ export function waitingKeys(): string[] {
 
 // Answer a tool-permission prompt over the control channel. `allow` runs the
 // tool (with its original input); otherwise it's refused with a short reason.
-export function respondPermission(key: string, requestId: string, allow: boolean): void {
+// `always` also hands the CLI back its own suggested rules, which it saves so
+// the same call stops asking.
+export function respondPermission(key: string, requestId: string, allow: boolean, always = false): void {
   const found = resolveConn(key)
   if (!found) return log('permission-no-conn', { key, requestId })
   const [connKey, conn] = found
   // Echo back the original tool input the CLI handed us when it asked.
   const toolInput = conn.pendingPerms.get(requestId) ?? {}
+  const suggestions = always ? conn.permSuggestions.get(requestId) : undefined
   conn.pendingPerms.delete(requestId)
+  conn.permSuggestions.delete(requestId)
   dropSettled(key, requestId)
   dropSettled(connKey, requestId)
-  const response = allow
-    ? { behavior: 'allow', updatedInput: toolInput }
-    : { behavior: 'deny', message: 'The user declined this action.' }
+  const response = permissionResponse(allow, toolInput, suggestions)
   write(conn, { type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })
+}
+
+/** The answer to a `can_use_tool`. Suggestions, when given, are saved by the CLI. */
+export function permissionResponse(allow: boolean, toolInput: unknown, suggestions?: unknown[]): Record<string, unknown> {
+  if (!allow) return { behavior: 'deny', message: 'The user declined this action.' }
+  return suggestions
+    ? { behavior: 'allow', updatedInput: toolInput, updatedPermissions: suggestions }
+    : { behavior: 'allow', updatedInput: toolInput }
 }
 
 // What a spawned session hears instead of the user: it was opened by another
@@ -1437,9 +1449,11 @@ function handleControlRequest(win: BrowserWindow, key: string, conn: Conn, msg: 
   if (req.subtype !== 'can_use_tool' || !requestId) return
   if (req.tool_name === 'AskUserQuestion' && handleAskUserQuestion(win, key, conn, req, requestId)) return
   conn.pendingPerms.set(requestId, req.input)
+  const remember = Array.isArray(req.permission_suggestions) && req.permission_suggestions.length > 0
+  if (remember) conn.permSuggestions.set(requestId, req.permission_suggestions as unknown[])
   send(win, key, {
     kind: 'permission',
-    permission: { requestId, toolName: String(req.tool_name ?? 'tool'), summary: permissionSummary(req) }
+    permission: { requestId, toolName: String(req.tool_name ?? 'tool'), summary: permissionSummary(req), remember }
   })
 }
 

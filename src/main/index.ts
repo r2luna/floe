@@ -667,8 +667,8 @@ export function registerAgentIpc(): void {
     if (answerCodexQuestion(key, answers ?? [[answer]])) return
     answerQuestion(key, requestId, answer)
   })
-  handle('agent:permission', (_event, key: string, requestId: string, allow: boolean) =>
-    respondPermission(key, requestId, allow)
+  handle('agent:permission', (_event, key: string, requestId: string, allow: boolean, always?: boolean) =>
+    respondPermission(key, requestId, allow, always)
   )
   // What a panel opening mid-turn missed: the streamed events since turn start.
   handle('agent:replay', (_event, key: string) => replaySnapshot(key))
