@@ -5,7 +5,7 @@ import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
 import { resolveKey } from './keys'
-import { SOLID_BG, XTERM_THEME, rgbChannels } from './xtermTheme'
+import { onXtermTheme, rgbChannels, xtermSolidBg, xtermTheme } from './xtermTheme'
 import { attachTerminal, detachTerminal, noteTerminalOutput } from './terminalBus'
 
 /**
@@ -67,7 +67,7 @@ export function TerminalPanel({
       // gaps between box-drawing characters.
       lineHeight: 1.25,
       cursorBlink: true,
-      theme: XTERM_THEME,
+      theme: xtermTheme(),
       allowProposedApi: true,
       // A TUI with mouse reporting on (claude, nvim, lazygit) eats drag —
       // ⌥-drag forces a local selection anyway.
@@ -135,8 +135,8 @@ export function TerminalPanel({
       term.input(`\x1b]${osc};rgb:${rgbChannels(hex)}\x07`, false)
       return true
     }
-    term.parser.registerOscHandler(10, (d) => (d === '?' ? reply(10, XTERM_THEME.foreground) : false))
-    term.parser.registerOscHandler(11, (d) => (d === '?' ? reply(11, SOLID_BG) : false))
+    term.parser.registerOscHandler(10, (d) => (d === '?' ? reply(10, xtermTheme().foreground) : false))
+    term.parser.registerOscHandler(11, (d) => (d === '?' ? reply(11, xtermSolidBg()) : false))
 
     term.open(host)
     // The panel has no rows, so the lane would otherwise land focus on its
@@ -249,11 +249,13 @@ export function TerminalPanel({
       }
     })
     resize.observe(host)
+    const offTheme = onXtermTheme(() => (term.options.theme = xtermTheme()))
 
     return () => {
       gone = true
       detachTerminal(termId)
       off()
+      offTheme()
       input.dispose()
       resize.disconnect()
       term.dispose()

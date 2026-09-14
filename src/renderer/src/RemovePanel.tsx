@@ -16,7 +16,9 @@ const DESTRUCTIVE = new Set<string>(['database', 'worktree', 'branch'])
  * a chain of git steps you watch — and giving it a shape of its own would say
  * they are unrelated. What differs is where it stops. A dirty tree pauses the
  * chain and lists what is about to be destroyed, because that is the last
- * moment the answer can still be no.
+ * moment the answer can still be no; a branch with commits base has not got
+ * pauses it again before `-D`, with the count, because that is the other thing
+ * this flow can lose for good.
  *
  * Its buttons dispatch command ids rather than acting, so the chips and the
  * keys are the same commands — `⏎` confirm, `esc` cancel — and cannot drift.
@@ -31,7 +33,7 @@ export function RemovePanel({
 }) {
   if (!flow) return <p className="empty">No removal running. ⌘K X removes this worktree.</p>
 
-  const { steps, awaiting, done, branch, changes } = flow
+  const { steps, awaiting, done, branch, changes, ahead } = flow
   const errored = steps.find((s) => s.status === 'error')
   const settled = steps.filter((s) => s.status === 'done' || s.status === 'skipped').length
 
@@ -41,7 +43,9 @@ export function RemovePanel({
       ? '⏎ retry · esc cancel · re-runs from the failed step'
       : awaiting === 'force'
         ? '⏎ force · esc cancel · the changes are not recoverable'
-        : 'esc cancel · runs in the background'
+        : awaiting === 'delete'
+          ? `⏎ delete branch · esc keep it · ${ahead} commit${ahead === 1 ? '' : 's'} only the reflog would remember`
+          : 'esc cancel · runs in the background'
 
   return (
     <>
@@ -80,7 +84,7 @@ function Step({
   onCommand
 }: {
   step: RemoveStep
-  awaiting: 'force' | null
+  awaiting: 'force' | 'delete' | null
   changes: string[]
   onCommand: (id: string) => void
 }) {
@@ -135,6 +139,22 @@ function Step({
           </button>
           <button className="merge-chip" onClick={() => onCommand('remove.cancel')}>
             esc cancel
+          </button>
+        </div>
+      )}
+
+      {/* The worktree is already gone by now, so "cancel" here means the branch
+          stays — which is the answer that keeps the work, and the chip says so. */}
+      {step.status === 'blocked' && awaiting === 'delete' && (
+        <div className="merge-acts">
+          <button
+            className="merge-chip merge-chip-danger"
+            onClick={() => onCommand('remove.confirm')}
+          >
+            ⏎ delete branch
+          </button>
+          <button className="merge-chip" onClick={() => onCommand('remove.cancel')}>
+            esc keep branch
           </button>
         </div>
       )}

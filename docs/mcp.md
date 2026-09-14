@@ -132,7 +132,11 @@ as that session under a token it was lent (`peerMcp`).
 2. **UI commands** — everything the renderer's command registry dispatches
    (the palette, the keymap): `list_commands` and `run_command`. These do a
    round-trip to the renderer (`mcp:command` → `mcp:command-result`), which runs
-   the same `runCommand(REGISTRY, ctx, id, arg)` a key press does.
+   the same `runCommand(REGISTRY, ctx, id, arg)` a key press does. A command
+   that takes an argument (`panel.goto`, `worktree.focusAt`, `panel.focusAt`)
+   is listed as one row per argument, each with its own `arg`, `title` and
+   `enabled` — pass the row's `arg` back to `run_command`. `keys` on a row is
+   read from the live keymap, so it is the user's binding, not a default.
 
 ## Floe's MCP registry (third-party servers)
 

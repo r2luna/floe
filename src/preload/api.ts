@@ -22,6 +22,7 @@ import type { PluginPanelSection } from '../main/plugins/types'
 import type { ConfigError } from '../main/config/errors'
 import type { Board, BoardEvent, ColonyTask, TaskKind } from '../shared/colony'
 import type { Route } from '../shared/mentions'
+import type { OmarchyPalette } from '../shared/omarchyPalette'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -273,14 +274,25 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('theme:changed', listener)
       }
     },
+    // The Omarchy desktop's current theme, for `theme = "omarchy"`. `palette` is
+    // null where Omarchy is not installed; `onChange` fires on every Omarchy
+    // theme switch, and the listener re-reads `palette` for the new colours.
+    omarchy: {
+      palette: (): Promise<OmarchyPalette | null> => ipcRenderer.invoke('omarchy:get'),
+      onChange: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('omarchy:changed', listener)
+        return () => ipcRenderer.removeListener('omarchy:changed', listener)
+      }
+    },
     // User keybinding overrides. `load` returns the parsed config (overrides +
     // any parse errors); `reveal` opens the file to edit; `onChange` fires when
     // the file is saved so the renderer can hot-reload the merged keymap.
     keybindings: {
       load: (): Promise<KeybindingsConfig> => ipcRenderer.invoke('keybindings:load'),
       reveal: (): Promise<void> => ipcRenderer.invoke('keybindings:reveal'),
-      rebind: (command: string, chord: string): Promise<void> =>
-        ipcRenderer.invoke('keybindings:rebind', command, chord),
+      rebind: (command: string, chord: string, arg?: string): Promise<void> =>
+        ipcRenderer.invoke('keybindings:rebind', command, chord, arg),
       reset: (): Promise<string> => ipcRenderer.invoke('keybindings:reset'),
       onChange: (cb: () => void): (() => void) => {
         const listener = (): void => cb()

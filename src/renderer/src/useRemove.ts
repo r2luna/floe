@@ -16,11 +16,19 @@ export interface RemoveFlow {
   hasBranch: boolean
   /** Already merged into base → a safe `-d`; otherwise deletion has to force. */
   merged: boolean
+  /** Commits base has not got — what deleting the branch throws away. */
+  ahead: number
+  /** The base those commits are counted against. */
+  base?: string
   /** Porcelain lines from preflight, shown under the step while they matter. */
   changes: string[]
   steps: RemoveStep[]
-  /** The one checkpoint: a dirty tree needs a yes before anything is thrown away. */
-  awaiting: 'force' | null
+  /**
+   * The two checkpoints, each a yes before something unrecoverable: `force` is
+   * the dirty tree, before any destructive step; `delete` is the unmerged
+   * branch, after the worktree is gone and before `-D` takes its commits.
+   */
+  awaiting: 'force' | 'delete' | null
   done: boolean
   cancelled: boolean
 }
@@ -40,7 +48,7 @@ export interface Remove {
   flow: RemoveFlow | null
   /** Begin a removal. Returns why it refused, or null when it started. */
   start: (wt: Worktree) => string | null
-  /** Answer the force checkpoint with yes: remove the dirty tree anyway. */
+  /** Answer the open checkpoint with yes: force past the dirty tree, or delete the unmerged branch. */
   force: () => void
   /** Re-run the step that failed. */
   retry: () => void
@@ -53,9 +61,10 @@ export interface Remove {
  * delete its branch.
  *
  * A state machine for the same reason the merge is one — each step fails on its
- * own and the answer differs per step — and it stops in exactly one place: a
- * tree with uncommitted work. Everything this flow does is unrecoverable, so
- * that stop is the whole point of having a panel rather than one IPC.
+ * own and the answer differs per step — and it stops in two places: a tree with
+ * uncommitted work, and a branch with commits base has not got. Everything this
+ * flow does is unrecoverable, so those stops are the whole point of having a
+ * panel rather than one IPC. A clean branch that is fully merged stops nowhere.
  */
 export function useRemove(deps: {
   /** The open project. Which flow the panel shows follows it. */
@@ -118,6 +127,8 @@ export function useRemove(deps: {
             branch: pf.branch ?? f.branch,
             hasBranch: pf.hasBranch,
             merged: pf.merged,
+            ahead: pf.ahead,
+            base: pf.base,
             changes: pf.changes,
             steps: f.steps.map((s) =>
               s.id === 'preflight'
@@ -231,6 +242,31 @@ export function useRemove(deps: {
       finish()
       return
     }
+    if (!f.merged && f.ahead > 0) {
+      // The second checkpoint. `-D` on a branch base has not got is the one
+      // step here git itself would refuse without force, and the reflog is the
+      // only way back — so it waits for a yes, with the count on the row.
+      // Escape here keeps the branch: the worktree is already gone, and the
+      // branch is exactly what still holds the work.
+      patchFlow((fl) =>
+        fl
+          ? {
+              ...fl,
+              awaiting: 'delete',
+              steps: fl.steps.map((s) =>
+                s.id === 'branch'
+                  ? {
+                      ...s,
+                      status: 'blocked',
+                      detail: `${f.ahead} commit${f.ahead === 1 ? '' : 's'} not in ${f.base ?? 'base'} — confirm to delete`
+                    }
+                  : s
+              )
+            }
+          : fl
+      )
+      return
+    }
     await runDeleteBranch()
   }
 
@@ -290,6 +326,7 @@ export function useRemove(deps: {
       branch: wt.branch,
       hasBranch: false,
       merged: false,
+      ahead: 0,
       changes: [],
       steps,
       awaiting: null,
@@ -304,9 +341,11 @@ export function useRemove(deps: {
   function force(): void {
     if (!root) return
     runRoot.current = root
-    if (running()?.awaiting !== 'force') return
+    const at = running()?.awaiting
+    if (!at) return
     patchFlow((f) => (f ? { ...f, awaiting: null } : f))
-    void runDropDatabase()
+    if (at === 'force') void runDropDatabase()
+    else void runDeleteBranch()
   }
 
   function retry(): void {

@@ -56,7 +56,9 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     movingProject: false,
     deleteGroup: () => {},
     newWorktree: () => {},
-    worktreeCount: 0,
+    worktreeNames: [],
+    gotoTargets: ['projects', 'worktrees', 'files'],
+    confirm: async () => true,
     enterWorktreeAt: () => {},
     useBackend: () => {},
     deleteSession: () => {},
@@ -96,7 +98,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     remove: {
       active: false,
       failed: false,
-      awaitingForce: false,
+      awaiting: false,
       start: () => {},
       force: () => {},
       retry: () => {},
@@ -177,6 +179,54 @@ test('listCommands reports what is available right now', () => {
   const compose = rows.find((r) => r.id === 'composer.focus')
   assert.equal(compose?.enabled, false, 'no chat panel open')
   assert.equal(rows.find((r) => r.id === 'panel.right')?.enabled, true)
+})
+
+test('a parametrized command is one row per argument, each judged on its own', () => {
+  // "Go to panel" as a single row opened the projects list and could say
+  // nothing about files — so the list is the destinations, not the verb.
+  const ctx = { ...context(), canOpen: (kind: string) => kind !== 'files' }
+  const rows = listCommands(REGISTRY, ctx)
+  const gotos = rows.filter((r) => r.id === 'panel.goto')
+  assert.deepEqual(
+    gotos.map((r) => [r.arg, r.title, r.enabled]),
+    [
+      ['projects', 'Go to projects', true],
+      ['worktrees', 'Go to worktrees', true],
+      ['files', 'Go to files', false]
+    ]
+  )
+  // No branches, so no rows: an empty project offers nothing to jump to.
+  assert.equal(rows.some((r) => r.id === 'worktree.focusAt'), false)
+})
+
+test('the key chip comes from the keymap handed in, never from the registry', () => {
+  const rows = listCommands(REGISTRY, context(), (id, arg) => (id === 'panel.goto' && arg === 'files' ? '⌘K F' : undefined))
+  assert.equal(rows.find((r) => r.id === 'panel.goto' && r.arg === 'files')?.keys, '⌘K F')
+  assert.equal(rows.find((r) => r.id === 'panel.right')?.keys, undefined)
+  // Without a keymap there are no chips at all — there is nothing to copy them from.
+  assert.ok(listCommands(REGISTRY, context()).every((r) => r.keys === undefined))
+})
+
+test('a destructive command asks through the context, not through the browser', () => {
+  // The registry used to call window.confirm, which a plain node run has not
+  // got — and which handed focus back to nowhere in the app. Refusing here
+  // proves the question went through `confirm`.
+  let asked = ''
+  const ctx = { ...context(), confirm: async (o: { question: string }) => ((asked = o.question), false) }
+  // The skill row is read off the focused element inside the panel (fileRow),
+  // so both are stood in for: a plain node run has no DOM.
+  const row = { dataset: { skill: 'greet' } } as unknown as HTMLElement
+  ctx.panelEl = () => ({ contains: () => true }) as unknown as HTMLElement
+  ctx.lane = { panels: [{ ...panel('skills'), cursor: 0 }], focus: 0 }
+  const before = globalThis.document
+  // @ts-expect-error — the registry reads document.activeElement; a plain node run has none.
+  globalThis.document = { activeElement: row }
+  try {
+    assert.equal(runCommand(REGISTRY, ctx, 'skill.delete').ok, true)
+  } finally {
+    globalThis.document = before
+  }
+  assert.match(asked, /Delete the skill "greet"/)
 })
 
 test('panel.goto refuses with a reason instead of doing nothing', () => {

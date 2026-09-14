@@ -349,11 +349,12 @@ stopped on a failed step never blocks the next one.`,
 the same kind of checklist: it inspects the tree, drops the branch's database,
 removes the worktree and deletes the branch.
 
-It stops in exactly one place. A tree with uncommitted work pauses and lists
-what is about to be destroyed, and \`⏎\` is what says yes to that — the same
-key that retries a step that failed, since it never stops at both. Escape drops
-the checklist and its panel with it, and does not put back what has already
-gone.
+It stops in two places. A tree with uncommitted work pauses and lists what is
+about to be destroyed, and a branch with commits its base has not got pauses
+again before the branch is deleted, with the count — \`⏎\` is what says yes at
+either, the same key that retries a step that failed, since it never waits for
+both at once. Escape drops the checklist and its panel with it, and does not
+put back what has already gone; at the second stop it keeps the branch.
 
 There is no rail icon for it: an icon you can click at any time is an
 invitation, and this is not one.`,

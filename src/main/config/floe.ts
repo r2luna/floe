@@ -30,7 +30,8 @@ import { EFFORTS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export { EFFORTS } from '../../shared/types'
-export const THEMES = ['system', 'dark', 'light'] as const
+// `omarchy` follows the Omarchy desktop's theme — see main/omarchyTheme.ts.
+export const THEMES = ['system', 'dark', 'light', 'omarchy'] as const
 
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
 // Who can run the premise interview. A subset of PROVIDERS on purpose: the flow

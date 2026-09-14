@@ -80,6 +80,7 @@ export const PINNED_CHANNELS = new Set([
   'files:openDownload',
   'notify:show',
   'theme:get',
+  'omarchy:get',
   'update:install',
   'update:check',
   'user:name',

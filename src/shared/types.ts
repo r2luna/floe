@@ -362,8 +362,11 @@ export interface McpServerEntry {
 // One registry command as `list_commands` reports it — the palette row's data.
 export interface McpUiCommand {
   id: string
+  /** Set on a row that stands for one argument of a parametrized command — pass it back as `run_command`'s `arg`. */
+  arg?: string
   title: string
   group: string
+  /** What presses it, read from the live keymap. Absent when nothing does. */
   keys?: string
   enabled: boolean
 }
@@ -1386,6 +1389,10 @@ export interface RemovePreflight {
   changes: string[] // porcelain lines (e.g. " M src/app.ts"), for display
   hasBranch: boolean // a real branch exists → we can offer to delete it
   merged: boolean // branch already merged into base → safe `-d` vs force `-D`
+  /** Commits on the branch that base does not have — what `-D` would throw away. 0 when merged or unknown. */
+  ahead: number
+  /** The base those commits are counted against, when there is a branch. */
+  base?: string
   message?: string // why ok is false
 }
 

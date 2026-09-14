@@ -4,7 +4,7 @@ import { Terminal as Xterm } from '@xterm/xterm'
 import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
-import { XTERM_THEME } from './xtermTheme'
+import { onXtermTheme, xtermTheme } from './xtermTheme'
 
 /**
  * A command's output, read-only.
@@ -32,7 +32,7 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
       lineHeight: 1.25,
       cursorBlink: false,
       disableStdin: true,
-      theme: XTERM_THEME,
+      theme: xtermTheme(),
       allowProposedApi: true,
       allowTransparency: true
     })
@@ -65,9 +65,11 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
       }
     })
     ro.observe(host)
+    const offTheme = onXtermTheme(() => (term.options.theme = xtermTheme()))
 
     return () => {
       off()
+      offTheme()
       ro.disconnect()
       term.dispose()
     }

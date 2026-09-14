@@ -377,20 +377,26 @@ export function resetKeybindings(): string {
  * rebind from the palette would appear to do nothing. Falls back to appending
  * only when the command has no entry at all (one of the unbound suggestions).
  */
-export function rebindCommand(command: string, chord: string): void {
+export function rebindCommand(command: string, chord: string, arg?: string): void {
   ensureKeybindings()
   const path = keybindingsPath()
   const raw = readFileSync(path, 'utf8')
   const parsed = parseToml<{ keybind?: Array<Record<string, unknown>> }>(raw)
   if (!parsed.ok) throw new Error(`cannot rebind while ${basename(path)} has an error on line ${parsed.error.line}`)
   const key = normalizeChord(chord)
-  const index = (parsed.value.keybind ?? []).findIndex((e) => e.command === command)
+  // The entry for THIS argument: `panel.goto files` is a different binding from
+  // `panel.goto plans`, and rebinding one must not move the other.
+  const index = (parsed.value.keybind ?? []).findIndex(
+    (e) => e.command === command && (arg === undefined ? e.arg === undefined : e.arg === arg)
+  )
+  const fields: Array<[string, string]> = [['key', key], ['command', command]]
+  if (arg !== undefined) fields.push(['arg', arg])
   writeTomlFile(
     path,
     editToml(raw, [
       index >= 0
         ? { op: 'setInEntry', table: 'keybind', index, key: 'key', value: key }
-        : { op: 'appendEntry', table: 'keybind', fields: [['key', key], ['command', command]] }
+        : { op: 'appendEntry', table: 'keybind', fields }
     ])
   )
 }

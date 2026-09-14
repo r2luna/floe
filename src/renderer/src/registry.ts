@@ -572,14 +572,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.right',
         title: 'Focus panel to the right',
         group: 'Panels',
-        keys: '⌃L',
         run: (c) => c.setLane((l) => focusDir(l, 1, 0))
       },
       {
         id: 'panel.left',
         title: 'Focus panel to the left',
         group: 'Panels',
-        keys: '⌃H',
         run: (c) => c.setLane((l) => focusDir(l, -1, 0))
       },
       {
@@ -588,21 +586,27 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.down',
         title: 'Focus panel below (in a stack)',
         group: 'Panels',
-        keys: '⌃J',
         run: (c) => c.setLane((l) => focusDir(l, 0, 1))
       },
       {
         id: 'panel.up',
         title: 'Focus panel above (in a stack)',
         group: 'Panels',
-        keys: '⌃K',
         run: (c) => c.setLane((l) => focusDir(l, 0, -1))
       },
       {
         id: 'panel.focusAt',
         title: 'Focus panel by position',
         group: 'Panels',
-        keys: '⌃1–9',
+        // One row per open panel, named by what it shows — "3 · files" — so the
+        // palette offers the lane as it is, not a number to guess.
+        args: (c) =>
+          c.lane.panels.map((p, i) => ({
+            arg: String(i),
+            title: `Focus panel ${i + 1} · ${p.title}${p.sub ? ` ${p.sub}` : ''}`
+          })),
+        enabled: (c, arg) => Number(arg ?? 0) < c.lane.panels.length,
+        unavailable: (c, arg) => `no panel ${Number(arg ?? 0) + 1} — ${c.lane.panels.length} open`,
         run: (c, arg) => c.setLane((l) => focusAt(l, Number(arg ?? 0)))
       },
       {
@@ -611,7 +615,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.dock',
         title: 'Dock panel below its neighbour',
         group: 'Panels',
-        keys: '⌘K /',
         enabled: (c) => c.lane.focus > 0 && !!c.lane.panels[c.lane.focus],
         run: (c) => c.setLane((l) => toggleDock(l, l.focus))
       },
@@ -643,7 +646,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.close',
         title: 'Close panel',
         group: 'Panels',
-        keys: '⌘W',
         enabled: (c) => c.lane.panels.length > 0,
         // Closing the chat lands on the launcher — see closePanel.
         run: (c) => c.setLane((l) => closePanel(l, l.focus, () => c.makePanel('branch')))
@@ -652,7 +654,9 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'panel.goto',
         title: 'Go to panel',
         group: 'Panels',
-        keys: '⌘E / ⌘⇧E / ⌘K G',
+        // A row per destination. "Go to panel" as one row opened the projects
+        // list, and nothing in the palette could say "go to files".
+        args: (c) => c.gotoTargets.map((kind) => ({ arg: kind, title: `Go to ${kind}` })),
         // Some panels read the checked-out tree — git status, the file list, a
         // patch — so without a worktree there is nothing for them to show. That
         // is a refusal with a reason, not a no-op: this used to return silently,
@@ -669,7 +673,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.open',
         title: 'Open browser',
         group: 'Browser',
-        keys: '⌘K O',
         enabled: (c) => c.canOpen('browser'),
         unavailable: (c) => c.whyCannotOpen('browser'),
         run: (c) => c.setLane((l) => open(l, c.makePanel('browser')))
@@ -678,7 +681,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.address',
         title: 'Focus browser address',
         group: 'Browser',
-        keys: '⌘L',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.address()
       },
@@ -686,7 +688,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.back',
         title: 'Browser back',
         group: 'Browser',
-        keys: '⌘[',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.back()
       },
@@ -694,7 +695,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.forward',
         title: 'Browser forward',
         group: 'Browser',
-        keys: '⌘]',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.forward()
       },
@@ -702,7 +702,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.reload',
         title: 'Reload browser',
         group: 'Browser',
-        keys: '⌘R',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.reload()
       },
@@ -724,7 +723,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'browser.devtools',
         title: 'Open browser developer tools',
         group: 'Browser',
-        keys: '⌘⌥I',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.devtools()
       },
@@ -732,14 +730,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'cursor.down',
         title: 'Move cursor down',
         group: 'Cursor',
-        keys: 'j / ↓',
         run: (c) => moveCursor(c, 1)
       },
       {
         id: 'cursor.up',
         title: 'Move cursor up',
         group: 'Cursor',
-        keys: 'k / ↑',
         run: (c) => moveCursor(c, -1)
       },
       // gg and G are two presses in vim because `g` is a prefix there. Here it
@@ -749,7 +745,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'cursor.top',
         title: 'Move cursor to the top',
         group: 'Cursor',
-        keys: 'g',
         run: (c) => landOn(c, c.rowsOf(c.panelEl(c.lane.focus)), 0)
       },
       {
@@ -765,28 +760,24 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'cursor.halfDown',
         title: 'Move cursor half a screen down',
         group: 'Cursor',
-        keys: '⌃D',
         run: (c) => moveCursor(c, pageStep(c, c.rowsOf(c.panelEl(c.lane.focus))))
       },
       {
         id: 'cursor.halfUp',
         title: 'Move cursor half a screen up',
         group: 'Cursor',
-        keys: '⌃U',
         run: (c) => moveCursor(c, -pageStep(c, c.rowsOf(c.panelEl(c.lane.focus))))
       },
       {
         id: 'find.open',
         title: 'Search this panel',
         group: 'Cursor',
-        keys: '/',
         run: (c) => c.openFind()
       },
       {
         id: 'find.next',
         title: 'Next match',
         group: 'Cursor',
-        keys: 'n',
         run: (c) => c.findNext(1)
       },
       {
@@ -799,21 +790,18 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'scroll.down',
         title: 'Scroll down',
         group: 'Cursor',
-        keys: '⌃J',
         run: (c) => scrollPanel(c, 1)
       },
       {
         id: 'scroll.up',
         title: 'Scroll up',
         group: 'Cursor',
-        keys: '⌃K',
         run: (c) => scrollPanel(c, -1)
       },
       {
         id: 'composer.focus',
         title: 'Write a message',
         group: 'Chat',
-        keys: 'i',
         // Which panels have a composer is a DOM question, not a list of kinds:
         // the chat has one and so does the branch launcher, and the next panel
         // that grows one would otherwise have to be remembered here too.
@@ -824,14 +812,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'composer.leave',
         title: 'Leave the composer',
         group: 'Chat',
-        keys: 'Esc',
-        run: () => (document.activeElement as HTMLElement | null)?.blur()
+        // Onto the panel, not onto nothing: a blur alone left focus on `body`,
+        // where Tab order and every panel-scoped key had lost their place.
+        run: (c) => {
+          ;(document.activeElement as HTMLElement | null)?.blur()
+          c.panelEl(c.lane.focus)?.focus({ preventScroll: true })
+        }
       },
       {
         id: 'selection.toggle',
         title: 'Start or end line selection',
         group: 'Selection',
-        keys: 'v',
         enabled: (c) => {
           const kind = c.lane.panels[c.lane.focus]?.kind
           return kind === 'diff' || kind === 'file'
@@ -852,7 +843,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'diff.view',
         title: 'Read markdown as prose, or as a patch',
         group: 'Diff',
-        keys: 'p',
         enabled: (c) => {
           const panel = c.lane.panels[c.lane.focus]
           return panel?.kind === 'diff' && READS_AS_PROSE.test(panel.sub ?? '')
@@ -872,28 +862,24 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'diff.nextChange',
         title: 'Go to the next change',
         group: 'Diff',
-        keys: ']',
         run: (c) => stepChange(c, 1)
       },
       {
         id: 'diff.prevChange',
         title: 'Go to the previous change',
         group: 'Diff',
-        keys: '[',
         run: (c) => stepChange(c, -1)
       },
       {
         id: 'selection.cancel',
         title: 'Cancel line selection',
         group: 'Selection',
-        keys: 'Esc',
         run: (c) => c.setLane((l) => patchPanel(l, l.focus, { selection: null }))
       },
       {
         id: 'selection.comment',
         title: 'Send selected lines to the composer',
         group: 'Selection',
-        keys: 'c',
         enabled: (c) => !!c.lane.panels[c.lane.focus]?.selection,
         run: (c) => commentOnSelection(c)
       },
@@ -901,21 +887,18 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'palette.open',
         title: 'Switch project…',
         group: 'App',
-        keys: '⌘/',
         run: (c) => c.openPalette()
       },
       {
         id: 'palette.commands',
         title: 'Show all commands',
         group: 'App',
-        keys: '⌘⇧P',
         run: (c) => c.openCommands()
       },
       {
         id: 'palette.files',
         title: 'Find a chat or a file…',
         group: 'App',
-        keys: '⌘P',
         // The list is the checked-out tree's, so it needs one — same refusal,
         // and the same sentence, as opening the Files panel. The chats would
         // survive without a worktree, but half a palette is not worth a second
@@ -995,7 +978,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'editor.open',
         title: 'Edit in your editor',
         group: 'Files',
-        keys: 'e',
         enabled: (c) => !!editTargetOf(c) && !!c.worktree,
         run: (c) => {
           const target = editTargetOf(c)
@@ -1019,7 +1001,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'file.open',
         title: 'Open in the default app',
         group: 'Files',
-        keys: 'o',
         enabled: (c) => !!c.worktree && !!openTargetOf(c),
         unavailable: () => 'put the cursor on a file first',
         run: (c) => {
@@ -1044,7 +1025,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.expand',
         title: 'Open directory',
         group: 'Cursor',
-        keys: 'l',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
         run: (c) => {
           // The row already draws whether it is open, so the DOM answers this —
@@ -1059,7 +1039,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.root',
         title: 'Open folder here',
         group: 'Files',
-        keys: '.',
         enabled: (c) =>
           c.lane.panels[c.lane.focus]?.kind === 'files' && fileRow(c)?.dataset.dir !== undefined,
         unavailable: () => 'put the cursor on a directory first',
@@ -1076,7 +1055,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.unroot',
         title: 'Leave folder',
         group: 'Files',
-        keys: '-',
         enabled: (c) => {
           const panel = c.lane.panels[c.lane.focus]
           return panel?.kind === 'files' && !!panel.sub
@@ -1097,7 +1075,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.collapse',
         title: 'Close directory',
         group: 'Cursor',
-        keys: 'h',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
         run: (c) => {
           const row = fileRow(c)
@@ -1116,7 +1093,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'bash.copy',
         title: 'Copy this command',
         group: 'Chat',
-        keys: 'y',
         enabled: (c) => !!bashCommand(c),
         run: (c) => {
           const command = bashCommand(c)
@@ -1129,7 +1105,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'bash.run',
         title: 'Run this command in the terminal',
         group: 'Chat',
-        keys: 'x',
         enabled: (c) => !!bashCommand(c) && !!c.worktree,
         // The same thing the ▶ on the row does, and the same thing a shell block
         // in a message does: open this worktree's terminal and type it in. The
@@ -1147,7 +1122,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'bash.preview',
         title: 'Open this command’s page in the browser panel',
         group: 'Chat',
-        keys: 'p',
         enabled: (c) => !!c.worktree && !!previewTarget(bashCommand(c) ?? ''),
         // The Preview button on a shell block, from the keyboard: the page the
         // command opens (a mock, a served URL) shown in the browser panel — the
@@ -1165,7 +1139,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.rename',
         title: 'Rename file…',
         group: 'Files',
-        keys: 'r',
         enabled: (c) => !!fileTarget(c) && !!c.worktree,
         run: (c) => {
           const path = fileTarget(c)
@@ -1187,7 +1160,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.move',
         title: 'Move file…',
         group: 'Files',
-        keys: 'm',
         enabled: (c) => !!fileTarget(c) && !!c.worktree,
         run: (c) => {
           const path = fileTarget(c)
@@ -1210,7 +1182,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.delete',
         title: 'Delete file…',
         group: 'Files',
-        keys: 'd',
         enabled: (c) => !!fileTarget(c) && !!c.worktree,
         run: (c) => {
           const path = fileTarget(c)
@@ -1218,15 +1189,15 @@ export const REGISTRY: Map<string, Command> = new Map(
           if (!path || !root) return
           // This one really does delete from disk, so it says so — unlike
           // removing a project, which only forgets it.
-          if (!window.confirm(`Delete "${path}" from the worktree? This removes it from disk.`)) return
-          applyOps(c, root, [{ kind: 'delete', path }])
+          void c
+            .confirm({ question: `Delete "${path}" from the worktree?`, verb: 'Delete file', detail: 'removes it from disk' })
+            .then((yes) => yes && applyOps(c, root, [{ kind: 'delete', path }]))
         }
       },
       {
         id: 'commands.open',
         title: 'Commands…',
         group: 'App',
-        keys: '⌘K C',
         enabled: (c) => c.canOpen('commands'),
         unavailable: (c) => c.whyCannotOpen('commands'),
         run: (c) => c.setLane((l) => toggleKind(l, 'commands', () => c.makePanel('commands')))
@@ -1247,7 +1218,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'skill.new',
         title: 'New skill…',
         group: 'Skills',
-        keys: 'n',
         run: (c) => {
           if (!c.lane.panels.some((p) => p.kind === 'skills')) {
             c.setLane((l) => open(l, c.makePanel('skills')))
@@ -1259,7 +1229,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'skill.rename',
         title: 'Rename skill…',
         group: 'Skills',
-        keys: 'r',
         enabled: (c) => !!skillRow(c),
         run: (c) => {
           const name = skillRow(c)?.dataset.skill
@@ -1273,22 +1242,23 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'skill.delete',
         title: 'Delete skill…',
         group: 'Skills',
-        keys: 'd',
         enabled: (c) => !!skillRow(c),
         run: (c) => {
           const name = skillRow(c)?.dataset.skill
           if (!name) return
           // Like a file and unlike a project: this one really does remove from
           // disk, so it says the word.
-          if (!window.confirm(`Delete the skill "${name}"? This removes the file from disk.`)) return
-          void window.floe.skills.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
+          void c
+            .confirm({ question: `Delete the skill "${name}"?`, verb: 'Delete skill', detail: 'removes the file from disk' })
+            .then((yes) => {
+              if (yes) void window.floe.skills.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
+            })
         }
       },
       {
         id: 'skill.edit',
         title: 'Edit skill in your editor',
         group: 'Skills',
-        keys: 'e',
         enabled: (c) => !!skillRow(c),
         run: (c) => {
           const row = skillRow(c)
@@ -1304,7 +1274,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.open',
         title: 'Drawings…',
         group: 'App',
-        keys: '⏎ / ⌘K D',
         enabled: (c) => c.canOpen('draw'),
         unavailable: (c) => c.whyCannotOpen('draw'),
         // On a row, open THAT drawing — the same thing ⏎ does, so the palette
@@ -1325,7 +1294,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.new',
         title: 'New drawing…',
         group: 'Draw',
-        keys: 'n',
         enabled: (c) => !!c.worktree,
         unavailable: () => 'draw — open a project first',
         run: (c) => {
@@ -1354,7 +1322,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.rename',
         title: 'Rename drawing…',
         group: 'Draw',
-        keys: 'r',
         enabled: (c) => !!drawRow(c),
         run: (c) => {
           const rel = drawRow(c)?.dataset.drawing
@@ -1380,7 +1347,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.delete',
         title: 'Delete drawing…',
         group: 'Draw',
-        keys: 'd',
         enabled: (c) => !!drawRow(c),
         run: (c) => {
           const rel = drawRow(c)?.dataset.drawing
@@ -1388,8 +1354,9 @@ export const REGISTRY: Map<string, Command> = new Map(
           if (!rel || !root) return
           // Like a file and unlike a project: this one really does remove from
           // disk, so it says the word.
-          if (!window.confirm(`Delete "${rel}"? This removes the file from disk.`)) return
-          applyOps(c, root, [{ kind: 'delete', path: rel }])
+          void c
+            .confirm({ question: `Delete "${rel}"?`, verb: 'Delete drawing', detail: 'removes the file from disk' })
+            .then((yes) => yes && applyOps(c, root, [{ kind: 'delete', path: rel }]))
         }
       },
       {
@@ -1399,7 +1366,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.promote',
         title: 'Save drawing into the project',
         group: 'Draw',
-        keys: 's',
         enabled: (c) => !!drawRow(c) && !drawRow(c)?.dataset.drawingGroup,
         unavailable: (c) => (drawRow(c) ? 'already in the project' : 'no drawing selected'),
         run: (c) => {
@@ -1421,7 +1387,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'draw.reveal',
         title: 'Reveal drawing on disk',
         group: 'Draw',
-        keys: 'o',
         enabled: (c) => !!drawRow(c),
         run: (c) => {
           const rel = drawRow(c)?.dataset.drawing
@@ -1438,7 +1403,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'colony.nanny',
         title: 'Ask the nanny',
         group: 'Colony',
-        keys: 'Escape',
         enabled: (c) => !!c.project,
         unavailable: () => 'the nanny belongs to a project — open one first',
         run: (c) => {
@@ -1482,7 +1446,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'colony.new',
         title: 'New task…',
         group: 'Colony',
-        keys: 'n',
         enabled: (c) => !!c.project,
         unavailable: () => 'a task belongs to a project — open one first',
         run: (c) => {
@@ -1503,14 +1466,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'colony.left',
         title: 'Previous column',
         group: 'Colony',
-        keys: 'h',
         run: (c) => colonyStep(c, -1)
       },
       {
         id: 'colony.right',
         title: 'Next column',
         group: 'Colony',
-        keys: 'l',
         run: (c) => colonyStep(c, 1)
       },
       {
@@ -1521,7 +1482,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'colony.start',
         title: 'Start this task',
         group: 'Colony',
-        keys: 's',
         enabled: (c) => !!taskRow(c),
         unavailable: () => 'put the cursor on a task first',
         run: (c) => {
@@ -1533,7 +1493,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'colony.archive',
         title: 'Archive this task',
         group: 'Colony',
-        keys: 'x',
         enabled: (c) => !!taskRow(c),
         unavailable: () => 'put the cursor on a task first',
         run: (c) => {
@@ -1574,7 +1533,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.new',
         title: 'Add MCP server…',
         group: 'MCP',
-        keys: 'n',
         run: (c) => {
           if (!c.lane.panels.some((p) => p.kind === 'mcp')) {
             c.setLane((l) => open(l, c.makePanel('mcp')))
@@ -1588,7 +1546,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.edit',
         title: 'Edit MCP server in your editor',
         group: 'MCP',
-        keys: 'e',
         enabled: (c) => !!mcpRow(c),
         run: (c) => {
           const file = mcpRow(c)?.dataset.mcpFile
@@ -1601,7 +1558,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.toggle',
         title: 'Enable/disable MCP server',
         group: 'MCP',
-        keys: 't',
         enabled: (c) => !!mcpRow(c),
         run: (c) => {
           const row = mcpRow(c)
@@ -1619,7 +1575,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.auth',
         title: 'Authenticate MCP server…',
         group: 'MCP',
-        keys: 'a',
         enabled: (c) => !!mcpRow(c),
         run: (c) => {
           const name = mcpRow(c)?.dataset.mcp
@@ -1631,22 +1586,23 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'mcp.delete',
         title: 'Delete MCP server…',
         group: 'MCP',
-        keys: 'd',
         enabled: (c) => !!mcpRow(c),
         run: (c) => {
           const name = mcpRow(c)?.dataset.mcp
           if (!name) return
           // Removes the entry from mcp.toml — the server itself is untouched,
           // but every future session loses it, so it still asks.
-          if (!window.confirm(`Remove "${name}" from Floe's MCP registry?`)) return
-          void window.floe.mcp.servers.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
+          void c
+            .confirm({ question: `Remove "${name}" from Floe's MCP registry?`, verb: 'Remove server', detail: 'every future session loses it' })
+            .then((yes) => {
+              if (yes) void window.floe.mcp.servers.remove(name, c.worktree?.path).catch((err: unknown) => c.say(reason(err)))
+            })
         }
       },
       {
         id: 'settings.open',
         title: 'Settings…',
         group: 'App',
-        keys: '⌘,',
         run: (c) => c.setLane((l) => toggleKind(l, 'settings', () => c.makePanel('settings')))
       },
       {
@@ -1695,7 +1651,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.add',
         title: 'Add project…',
         group: 'App',
-        keys: 'n',
         run: (c) => c.addProject()
       },
       {
@@ -1705,7 +1660,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.reload',
         title: 'Reload projects',
         group: 'App',
-        keys: 'r',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
         run: (c) => c.reloadProjects()
       },
@@ -1727,7 +1681,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.delete',
         title: 'Remove project from Floe…',
         group: 'App',
-        keys: 'd',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
         run: (c) => c.deleteProject()
       },
@@ -1735,7 +1688,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.move.start',
         title: 'Move project between groups',
         group: 'App',
-        keys: 'm',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'projects',
         run: (c) => c.startMoveProject()
       },
@@ -1743,7 +1695,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.move.down',
         title: 'Carry the held project down a group',
         group: 'App',
-        keys: 'j',
         enabled: (c) => c.movingProject,
         run: (c) => c.stepMoveProject(1)
       },
@@ -1751,7 +1702,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.move.up',
         title: 'Carry the held project up a group',
         group: 'App',
-        keys: 'k',
         enabled: (c) => c.movingProject,
         run: (c) => c.stepMoveProject(-1)
       },
@@ -1759,7 +1709,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.move.commit',
         title: 'Drop the held project in this group',
         group: 'App',
-        keys: '↵',
         enabled: (c) => c.movingProject,
         run: (c) => c.endMoveProject(true)
       },
@@ -1767,7 +1716,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'project.move.cancel',
         title: 'Put the held project back',
         group: 'App',
-        keys: 'Esc',
         enabled: (c) => c.movingProject,
         run: (c) => c.endMoveProject(false)
       },
@@ -1781,7 +1729,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.new',
         title: 'New session',
         group: 'Sessions',
-        keys: '⌘T',
         // A session with nothing said yet IS the launcher, so this opens it
         // rather than creating a record: an empty session persisted before you
         // type anything would litter the list with things you abandoned.
@@ -1799,7 +1746,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.prev',
         title: 'Newer session',
         group: 'Sessions',
-        keys: '⌃I',
         enabled: (c) => !!c.worktree,
         run: (c) => c.cycleSession(-1)
       },
@@ -1809,7 +1755,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.alternate',
         title: 'Back to the last chat',
         group: 'Sessions',
-        keys: '⌃W',
         enabled: (c) => !!c.alternateSession,
         run: (c) => c.alternateSession?.()
       },
@@ -1817,7 +1762,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.next',
         title: 'Older session',
         group: 'Sessions',
-        keys: '⌃O',
         enabled: (c) => !!c.worktree,
         run: (c) => c.cycleSession(1)
       },
@@ -1834,7 +1778,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.unread',
         title: 'Mark this chat unread, or read',
         group: 'Sessions',
-        keys: 'u / ⌘⇧U',
         enabled: (c) => !!unreadTarget(c),
         unavailable: () => 'put the cursor on a session, or open a chat',
         run: (c) => {
@@ -1855,7 +1798,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.delete',
         title: 'Delete session…',
         group: 'Sessions',
-        keys: '⌘⇧W',
         enabled: (c) => c.lane.panels.some((p) => p.session),
         run: (c) => c.deleteSession()
       },
@@ -1922,7 +1864,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'query.peek',
         title: 'Peek: let the chat read the query',
         group: 'Queries',
-        keys: '⌘⇧G',
         enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'peek')
       },
@@ -1930,7 +1871,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'query.merge',
         title: 'Merge the query into the chat',
         group: 'Queries',
-        keys: '⌘⇧M',
         enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'merge')
       },
@@ -1941,7 +1881,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'query.discard',
         title: 'Discard the query',
         group: 'Queries',
-        keys: '⌘⇧D',
         enabled: (c) => queryPanels(c).length > 0,
         run: (c) => runQuery(c, 'discard')
       },
@@ -1990,7 +1929,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'subagents.toggle',
         title: 'Fold / unfold the dock',
         group: 'Queries',
-        keys: '⌥A',
         run: () => toggleSubagentDock()
       },
       {
@@ -2064,7 +2002,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.mark',
         title: 'Select or unselect this session',
         group: 'Sessions',
-        keys: 'x',
         // A DOM question, like `project.delete`'s: the branch rows are cursor
         // rows too, and there is nothing on one to tick.
         enabled: (c) => !!sessionOnRow(c),
@@ -2078,7 +2015,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.markClear',
         title: 'Unselect every session',
         group: 'Sessions',
-        keys: 'Esc',
         enabled: (c) => c.markedSessions.length > 0,
         unavailable: () => 'no session is selected',
         run: (c) => c.clearMarkedSessions()
@@ -2091,7 +2027,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'session.deleteMarked',
         title: 'Delete the selected sessions…',
         group: 'Sessions',
-        keys: 'd',
         enabled: (c) => c.markedSessions.length > 0 || !!sessionOnRow(c),
         unavailable: () => 'select a session first, or put the cursor on one',
         run: (c) => c.deleteSession('marked')
@@ -2100,7 +2035,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'worktree.new',
         title: 'New worktree',
         group: 'Worktrees',
-        keys: '⌘N',
         run: (c) => c.newWorktree()
       },
       {
@@ -2110,10 +2044,13 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'worktree.focusAt',
         title: 'Go to worktree by position',
         group: 'Worktrees',
-        keys: '⌘1–9',
-        enabled: (c, arg) => Number(arg ?? 0) < c.worktreeCount,
+        // Named by branch, numbered as the sidebar numbers them — the row you
+        // pick here is the row ⌘3 lands on.
+        args: (c) =>
+          c.worktreeNames.map((name, i) => ({ arg: String(i), title: `Go to worktree ${i + 1} · ${name}` })),
+        enabled: (c, arg) => Number(arg ?? 0) < c.worktreeNames.length,
         unavailable: (c, arg) =>
-          `no worktree ${Number(arg ?? 0) + 1} — this project has ${c.worktreeCount}`,
+          `no worktree ${Number(arg ?? 0) + 1} — this project has ${c.worktreeNames.length}`,
         run: (c, arg) => c.enterWorktreeAt(Number(arg ?? 0))
       },
       // --- guided merge ---------------------------------------------------
@@ -2123,7 +2060,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'worktree.merge',
         title: 'Merge worktree into its base',
         group: 'Worktrees',
-        keys: '⌘K M',
         enabled: (c) => !!c.worktree,
         unavailable: () => 'no worktree to merge — open one first',
         run: (c) => c.merge.start()
@@ -2134,7 +2070,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         // either at the review checkpoint or on a failed step, never both.
         title: 'Merge: approve, or retry the failed step',
         group: 'Worktrees',
-        keys: '⏎',
         enabled: (c) => c.merge.awaitingReview || c.merge.failed,
         unavailable: () => 'the merge is not waiting on you',
         run: (c) => (c.merge.failed ? c.merge.retry() : c.merge.approve())
@@ -2143,7 +2078,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'merge.review',
         title: 'Merge: review the changes',
         group: 'Worktrees',
-        keys: 'r',
         // The flow stays paused at the checkpoint — this only puts the diff on
         // screen, so approving is still a deliberate second key.
         enabled: (c) => c.merge.awaitingReview && c.canOpen('changes'),
@@ -2155,7 +2089,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'merge.stash',
         title: 'Merge: stash the uncommitted changes and retry',
         group: 'Worktrees',
-        keys: 's',
         enabled: (c) => c.merge.canStash,
         unavailable: () => 'nothing to stash — the merge is not blocked on a dirty tree',
         run: (c) => c.merge.stashRetry()
@@ -2164,7 +2097,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'merge.cancel',
         title: 'Merge: cancel',
         group: 'Worktrees',
-        keys: 'esc',
         enabled: (c) => c.merge.active,
         unavailable: () => 'no merge running',
         // What git has already done stays done — this drops the checklist, it
@@ -2188,19 +2120,18 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'worktree.remove',
         title: 'Remove worktree and delete its branch',
         group: 'Worktrees',
-        keys: '⌘K X',
         enabled: (c) => !!c.worktree,
         unavailable: () => 'no worktree to remove — open one first',
         run: (c) => c.remove.start()
       },
       {
         id: 'remove.confirm',
-        // One key for the one thing the checklist is waiting for: it stops
-        // either at the force checkpoint or on a failed step, never both.
-        title: 'Remove: force past the dirty tree, or retry the failed step',
+        // One key for the one thing the checklist is waiting for: a checkpoint
+        // (the dirty tree, or the unmerged branch) or a failed step, never both
+        // at once.
+        title: 'Remove: answer the checkpoint, or retry the failed step',
         group: 'Worktrees',
-        keys: '⏎',
-        enabled: (c) => c.remove.awaitingForce || c.remove.failed,
+        enabled: (c) => c.remove.awaiting || c.remove.failed,
         unavailable: () => 'the removal is not waiting on you',
         run: (c) => (c.remove.failed ? c.remove.retry() : c.remove.force())
       },
@@ -2208,7 +2139,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'remove.cancel',
         title: 'Remove: cancel',
         group: 'Worktrees',
-        keys: 'esc',
         enabled: (c) => c.remove.active,
         unavailable: () => 'no removal running',
         // What git has already removed stays removed — this drops the checklist,
@@ -2232,7 +2162,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'worktree.provision',
         title: 'Set up this worktree’s environment',
         group: 'Worktrees',
-        keys: '⌘K W',
         enabled: (c) => !!c.worktree,
         unavailable: () => 'no worktree to set up — open one first',
         // Every step is idempotent, so this is also the repair: run it on a
@@ -2255,7 +2184,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'provision.confirm',
         title: 'Provision: retry from the failed step',
         group: 'Worktrees',
-        keys: '⏎',
         enabled: (c) => c.provision.idle,
         unavailable: () => 'the setup is still running',
         run: (c) => c.provision.retry()
@@ -2264,7 +2192,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'provision.cancel',
         title: 'Provision: hide the checklist',
         group: 'Worktrees',
-        keys: 'esc',
         enabled: (c) => c.provision.active,
         unavailable: () => 'no setup to hide',
         // Only the checklist goes. The steps run in main and carry on — this is
@@ -2294,7 +2221,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'setup.retry',
         title: 'Setup: retry the failed step',
         group: 'Projects',
-        keys: 'r',
         enabled: (c) => c.setup.failed,
         unavailable: () => 'the setup has not failed',
         run: (c) => c.setup.retry()
@@ -2303,7 +2229,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'setup.chat',
         title: 'Setup: open the session\u2019s chat',
         group: 'Projects',
-        keys: '\u23ce',
         // The session runs in the background (D1), so this is the only way to
         // the question it is waiting on.
         enabled: (c) => c.setup.awaitingChoice,
@@ -2314,7 +2239,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'setup.cancel',
         title: 'Setup: cancel',
         group: 'Projects',
-        keys: 'esc',
         enabled: (c) => c.setup.active,
         unavailable: () => 'no setup running',
         // The session stays where it is — this drops the checklist, it does not
@@ -2333,7 +2257,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.run',
         title: 'Run command',
         group: 'Commands',
-        keys: 'r',
         enabled: (c) => !!commandTarget(c),
         unavailable: () => 'no command under the cursor',
         // One key for both, because the question you are answering is "run
@@ -2349,7 +2272,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.stop',
         title: 'Stop command',
         group: 'Commands',
-        keys: 's',
         enabled: (c) => commandLive(c),
         unavailable: (c) => (commandTarget(c) ? 'that command is not running' : 'no command under the cursor'),
         run: (c) => {
@@ -2372,7 +2294,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.logs',
         title: 'Show command output',
         group: 'Commands',
-        keys: '⏎',
         enabled: (c) => !!commandTarget(c) && !!c.worktree,
         unavailable: () => 'no command under the cursor',
         run: (c) => {
@@ -2403,7 +2324,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.add',
         title: 'Add command…',
         group: 'Commands',
-        keys: 'a',
         enabled: (c) => !!c.worktree,
         unavailable: () => 'no worktree open',
         // Two prompts rather than a form: the palette is what the app already
@@ -2430,7 +2350,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.edit',
         title: 'Edit command…',
         group: 'Commands',
-        keys: 'e',
         enabled: (c) => !!commandTarget(c),
         unavailable: () => 'no command under the cursor',
         run: (c) => {
@@ -2491,7 +2410,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'command.delete',
         title: 'Delete command…',
         group: 'Commands',
-        keys: 'd',
         enabled: (c) => !!commandTarget(c),
         unavailable: () => 'no command under the cursor',
         // Stopped first: deleting the row while the process runs would leave it
@@ -2524,7 +2442,6 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'palette.chord',
         title: 'Command palette',
         group: 'App',
-        keys: '⌘K',
         // ponytail: the chord is handled in the key dispatcher today. When the
         // palette exists this opens it, and ⌘K G stays a shortcut through it.
         run: () => {}

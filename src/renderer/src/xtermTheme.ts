@@ -35,6 +35,26 @@ export const XTERM_THEME = {
 // transparent fill, which every program reads as black.
 export const SOLID_BG = '#141519'
 
+// The palette in force. Only `theme = "omarchy"` moves it off the literals
+// above (see appearance.ts); every live terminal is re-tinted when it does.
+let current: { theme: Record<string, string>; solidBg: string } = { theme: XTERM_THEME, solidBg: SOLID_BG }
+const watchers = new Set<() => void>()
+
+export const xtermTheme = (): Record<string, string> => current.theme
+export const xtermSolidBg = (): string => current.solidBg
+
+/** Swap the palette — null goes back to Floe's own. */
+export function setXtermTheme(next: { theme: Record<string, string>; solidBg: string } | null): void {
+  current = next ?? { theme: XTERM_THEME, solidBg: SOLID_BG }
+  for (const w of watchers) w()
+}
+
+/** Call `cb` whenever the palette changes; returns the unsubscribe. */
+export function onXtermTheme(cb: () => void): () => void {
+  watchers.add(cb)
+  return () => void watchers.delete(cb)
+}
+
 // xterm's OSC colour replies use 16-bit channels — `rgb:rrrr/gggg/bbbb`. A plain
 // hex answer is not the format the query asks for and programs ignore it.
 export const rgbChannels = (hex: string): string =>

@@ -57,11 +57,45 @@ class FakeWebContents {
     return Promise.resolve({ toPNG: () => Buffer.alloc(0) })
   }
   reload(): void {}
+  stop(): void {}
+  focus(): void {}
+  close(): void {}
+  openDevTools(): void {}
+  getURL(): string {
+    return ''
+  }
+  getTitle(): string {
+    return ''
+  }
+  navigationHistory = {
+    canGoBack: (): boolean => false,
+    canGoForward: (): boolean => false,
+    goBack: (): void => {},
+    goForward: (): void => {}
+  }
+  loadURL(): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+// Native embedded browser view (src/main/browser.ts) — desktop-only; the
+// daemon has no compositor, so the view is a no-op that never mounts.
+export class WebContentsView {
+  webContents = new FakeWebContents()
+  setBounds(): void {}
+  setVisible(): void {}
+  setBackgroundColor(): void {}
+}
+
+class FakeContentView {
+  addChildView(): void {}
+  removeChildView(): void {}
 }
 
 export class BrowserWindow {
   private static wins: BrowserWindow[] = []
   webContents = new FakeWebContents()
+  contentView = new FakeContentView()
   constructor() {
     BrowserWindow.wins.push(this)
   }
@@ -168,4 +202,4 @@ export const protocol = {
 // Type-only names (IpcMainInvokeEvent, WebContents, MenuItemConstructorOptions)
 // erase at compile time and need no runtime value.
 
-export default { app, BrowserWindow, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, nativeImage, shell, safeStorage, protocol }
+export default { app, BrowserWindow, WebContentsView, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, nativeImage, shell, safeStorage, protocol }
