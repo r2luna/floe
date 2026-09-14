@@ -35,6 +35,11 @@ export const FLOE_TOML = `# ====================================================
 # | the OS and flips live when it does; the other two pin the app to one theme.
 # | Light is a full palette of its own, not a filter over dark.
 # |
+# | \`omarchy\` wears the Omarchy desktop's current theme — its colours, its
+# | light or dark, and its terminal palette — and follows every theme switch
+# | live. Where Omarchy is not installed it behaves as \`system\`, so one file
+# | can be shared between an Omarchy box and a Mac.
+# |
 # | \`penguin\` picks which pinguim head greets you on a new session. Same head,
 # | 24 faces — \`classic\`, \`sleepy\`, \`surprised\`, \`focused\`, \`skeptical\`,
 # | \`cool\`, \`wink\`, \`cute\`, \`zen\`, \`robot\`, \`punk\`, \`tired\`, \`happy\`,

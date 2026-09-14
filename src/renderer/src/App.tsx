@@ -1,5 +1,6 @@
 import {
   IconGitCompare,
+  IconGitMerge,
   IconMenu2,
   IconLayoutColumns,
   IconLayoutRows,
@@ -25,7 +26,7 @@ import {
   toggleDock
 } from './lane'
 import { dragAnchor, selRange } from './diff'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
@@ -652,6 +653,23 @@ export default function App() {
     if (!narrow) setRailMenu(false)
   }, [narrow])
 
+  // A native WebContentsView sits above renderer HTML. Hide it while one of
+  // Floe's overlays is open, or it would cover the palette instead of yielding
+  // to it like every DOM-backed panel does.
+  useEffect(() => {
+    if (window.floe.version === 'web' || !lane.panels.some((panel) => panel.kind === 'browser')) return
+    const overlay =
+      paletteOpen ||
+      commandsOpen ||
+      finderFiles !== null ||
+      adding ||
+      newWt ||
+      finding !== null ||
+      picker !== null ||
+      (narrow && railMenu)
+    void window.floe.browser.visible(!overlay)
+  }, [lane.panels, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
   const menuRef = useRef<HTMLButtonElement>(null)
@@ -723,17 +741,27 @@ export default function App() {
   // would race the load. A project that is gone, or a first run with none saved,
   // releases the wait instead of holding it open forever.
   const landedProject = useRef(false)
+  // A remote machine's list lands after this one's. Settling as soon as local
+  // answered sent every reload of a project on another machine back to the
+  // first local project, so the wait holds until each remote answers or is
+  // given up on.
+  const remotesLoading = projects.remotes.some((r) => r.state === 'loading')
   useEffect(() => {
     if (landedProject.current || projects.loading) return
-    landedProject.current = true
     // A landing is waiting: this instance was brought up to be somewhere, and
     // the saved project can live on the machine we just left — selecting it
     // would point the window straight back and throw the landing away.
-    if (peekLanding(self)) return
+    if (peekLanding(self)) {
+      landedProject.current = true
+      return
+    }
     const want = restored.current?.project
-    if (want && projects.all.some((p) => p.path === want)) projects.select(want)
+    const found = !!want && projects.all.some((p) => p.path === want)
+    if (want && !found && remotesLoading) return
+    landedProject.current = true
+    if (found) projects.select(want)
     else if (pending.current) pending.current = { ...pending.current, project: undefined }
-  }, [projects.loading, projects.all])
+  }, [projects.loading, projects.all, remotesLoading])
 
   // Delete the session the lane is showing. "Delete" is Floe's record of it:
   // the Claude transcript stays on disk and `claude --resume` still finds it,
@@ -742,7 +770,9 @@ export default function App() {
   // status, the file list, a patch. Without the thing they read there is nothing
   // to show, so they can't be opened at all: better than opening one onto an
   // empty list or an error.
-  const canOpen = (kind: string): boolean => !needsProject(kind) || !!projects.current
+  const canOpen = (kind: string): boolean =>
+    (!needsProject(kind) || !!projects.current) &&
+    (!needsDesktop(kind) || window.floe.version !== 'web')
 
   /**
    * The same sentence the rail puts in its tooltip, for the keyboard.
@@ -752,9 +782,11 @@ export default function App() {
    * deserve the identical answer.
    */
   const whyCannotOpen = (kind: string): string =>
-    needsProject(kind) && !projects.current
-      ? `${kind} — open a project first`
-      : `${kind} is not available right now`
+    needsDesktop(kind) && window.floe.version === 'web'
+      ? `${kind} — available in the desktop app`
+      : needsProject(kind) && !projects.current
+        ? `${kind} — open a project first`
+        : `${kind} is not available right now`
 
   /**
    * Every session in the project, in the order the list draws them.
@@ -1047,6 +1079,9 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
+    // Going somewhere on purpose ends the boot restore, which may still be
+    // waiting on a remote list and would pull the selection back when it lands.
+    landedProject.current = true
     projects.select(path)
     // Its worktrees are a fetch away, so the rest of the restore happens when
     // they arrive.
@@ -1722,16 +1757,42 @@ export default function App() {
     setLane((l) => setCursor(l, at, row))
   }, [sessionKey, lane.panels, worktrees.rows])
 
+  // Each panel's cursor and the `data-key` of every row at the last paint.
+  const cursorRows = useRef(new Map<string, { cursor: number; keys: (string | undefined)[] }>())
+
   // Paint the cursor. It's an attribute rather than a class passed down because
   // no panel body knows it has a cursor — the lane owns that, for every panel
   // that exists now or later. A row keeps its mark while the panel is unfocused,
   // which is what makes "where was I" answerable at a glance.
+  //
+  // The cursor is an index, so a list that changes under it — a merge tearing
+  // down a worktree above it — would leave the mark on whichever row inherited
+  // the position. Rows that carry a `data-key` keep the cursor on the same row
+  // instead; a row that is gone hands it to the next row that survived.
   useEffect(() => {
     lane.panels.forEach((panel, i) => {
       const rows = rowsOf(panelAt(i))
       const sel = selRange(panel.selection)
+      const keys = rows.map((r) => r.dataset.key)
+      let cursor = panel.cursor
+      const last = cursorRows.current.get(panel.id)
+      const was = cursor != null && last?.cursor === cursor ? last.keys[cursor] : undefined
+      if (cursor != null && was && rows.length && keys[cursor] !== was) {
+        const old = last!.keys
+        const survivors = [...old.slice(cursor), ...old.slice(0, cursor).reverse()]
+        const heir = survivors.find((k) => k && keys.includes(k))
+        cursor = heir ? keys.indexOf(heir) : Math.min(cursor, rows.length - 1)
+        const moved = cursor
+        setLane((l) => setCursor(l, i, moved))
+        // The focused row went with its worktree: focus fell to the body, and
+        // the next j would have nowhere to start from.
+        if (i === lane.focus && document.activeElement === document.body)
+          rows[cursor]?.focus({ preventScroll: true })
+      }
+      // An empty list is a panel still loading, not a list that lost its rows.
+      if (cursor != null && rows.length) cursorRows.current.set(panel.id, { cursor, keys })
       rows.forEach((row: HTMLElement, j: number) => {
-        if (panel.cursor === j) row.setAttribute('data-cursor', '')
+        if (cursor === j) row.setAttribute('data-cursor', '')
         else row.removeAttribute('data-cursor')
         if (sel && j >= sel[0] && j <= sel[1]) row.setAttribute('data-sel', '')
         else row.removeAttribute('data-sel')
@@ -1790,6 +1851,15 @@ export default function App() {
     makePanel: (kind, sub, root) => mkPanel(kind as PanelKind, sub, undefined, undefined, undefined, root),
     canOpen,
     whyCannotOpen,
+    browser: {
+      address: () => document.querySelector<HTMLInputElement>('.browser-address input')?.focus(),
+      back: () => void window.floe.browser.back(),
+      forward: () => void window.floe.browser.forward(),
+      reload: () => void window.floe.browser.reload(),
+      stop: () => void window.floe.browser.stop(),
+      focus: () => void window.floe.browser.focus(),
+      devtools: () => void window.floe.browser.devtools()
+    },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it
     // here rather than re-fetching keeps the quote and the highlight in step.
@@ -2228,8 +2298,11 @@ export default function App() {
       // bindings, or ⌘↵ inside the palette would fire a command behind it. The
       // picker counts: without it Escape on a question ALSO ran composer.leave
       // through here, and the focus the palette had just handed back moved on.
+      // The new-worktree form is not one: it is inline in a panel, so `typing`
+      // already keeps bare letters out of its input and the form stops its own
+      // Escape and ⌥⏎ before they get here.
       const blocked =
-        paletteOpen || commandsOpen || finderFiles !== null || adding || newWt || finding !== null || picker !== null
+        paletteOpen || commandsOpen || finderFiles !== null || adding || finding !== null || picker !== null
       const action =
         resolveKey(input, {
           typing,
@@ -2269,7 +2342,7 @@ export default function App() {
     // No keymap dependency: resolveKey reads the installed bindings at call
     // time, so a reload takes effect on the next press without rebinding this
     // listener.
-  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, newWt, finding, moving, picker])
+  }, [lane, paletteOpen, commandsOpen, finderFiles, adding, finding, moving, picker])
 
   // Every group command asks the same question, so they ask it the same way.
   // `create` adds the "New group <name>" row built from the query — the one row
@@ -2917,6 +2990,24 @@ export default function App() {
                       </button>
                     )}
                     {usage[panel.id]?.used > 0 && <ContextMeter usage={usage[panel.id]} />}
+                    {/* The merge lives on the chat, not the rail: it merges the
+                        branch this chat works on. Only on the chat that defines
+                        `here`, because that is the branch the command merges,
+                        and never on the main worktree, which has no base. Runs
+                        the same command as its chord, so no mouse-only path. */}
+                    {kind === 'chat' &&
+                      panel.session?.worktreePath === here &&
+                      worktrees.rows.some((r) => r.worktree.path === here && !r.worktree.isMain) && (
+                        <button
+                          className="panel-act"
+                          title={`Merge into base${
+                            chordLabels['worktree.merge'] ? ` (${chordLabels['worktree.merge']})` : ''
+                          }`}
+                          onClick={() => runCommand(REGISTRY, ctxRef.current, 'worktree.merge')}
+                        >
+                          <IconGitMerge size={14} stroke={1.8} />
+                        </button>
+                      )}
                     {'action' in spec && spec.action && (
                       <button
                         className="panel-act"
@@ -3587,4 +3678,3 @@ function commandItems(
   })
   return { items, rows }
 }
-

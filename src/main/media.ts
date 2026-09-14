@@ -26,7 +26,15 @@ const MIME: Record<string, string> = {
   mp4: 'video/mp4',
   m4v: 'video/mp4',
   mov: 'video/quicktime',
-  webm: 'video/webm'
+  webm: 'video/webm',
+  // Transcript screenshots, decoded into the image cache (claudeSessions.ts)
+  // and served from there instead of riding IPC as base64. The player never
+  // sees these: it only asks about the paths findVideoRefs picked out.
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp'
 }
 
 /**
@@ -119,7 +127,7 @@ export function mediaResponse(url: string, range: string | null): Response {
   if (!path) return new Response('bad media url', { status: 400 })
 
   const mediaType = MIME[extOf(path)]
-  if (!mediaType) return new Response('not a video', { status: 415 })
+  if (!mediaType) return new Response('not a media file', { status: 415 })
 
   let size = 0
   try {

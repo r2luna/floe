@@ -52,7 +52,9 @@ const runs = new Map<string, Run>()
 const watchers = new Map<string, () => void>() // key → close-all-watchers fn
 const sizes = new Map<string, { cols: number; rows: number }>()
 const MAX_BUFFER = 256 * 1024
-const MEM_INTERVAL = 2000 // how often to re-sample a running command's memory
+// How often to re-sample a running command's memory. Overridable so the test
+// that proves the timer stops does not have to wait out a real interval.
+const MEM_INTERVAL = Number(process.env.FLOE_MEM_INTERVAL_MS) || 2000
 
 let cachedShell: string | undefined
 // The user's login shell, exported so other spawners (e.g. the provisioner) can
