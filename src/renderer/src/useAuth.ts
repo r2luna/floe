@@ -6,6 +6,7 @@ import type {
   HarnessUsage,
   UsageStats
 } from '../../shared/types'
+import { parseResetHint } from '../../shared/resets'
 
 export interface Auth {
   status: AuthStatus | null // null until the first read comes back
@@ -75,10 +76,9 @@ export function useAuth(): Auth {
     )
     const showClaude = (u: UsageStats | null): boolean => {
       if (!u) return false
-      const windows = [
-        u.session && { label: '5h', usedPercent: u.session.pct },
-        u.week && { label: 'week', usedPercent: u.week.pct }
-      ].filter((w): w is { label: string; usedPercent: number } => !!w)
+      const windows: HarnessUsage['windows'] = []
+      if (u.session) windows.push({ label: '5h', usedPercent: u.session.pct, resetsAt: parseResetHint(u.session.resetsAt) })
+      if (u.week) windows.push({ label: 'week', usedPercent: u.week.pct, resetsAt: parseResetHint(u.week.resetsAt) })
       if (!windows.length) return false
       setUsage((prev) => ({ ...prev, claude: { windows } }))
       return true

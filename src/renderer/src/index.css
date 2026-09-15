@@ -6836,8 +6836,9 @@ kbd {
 .account-usage {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
   color: var(--dim);
   font-size: 11px;
 }
@@ -6858,6 +6859,11 @@ kbd {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Secondary to the percentage, so it stays faint even when the window warms. */
+.account-reset {
+  color: var(--faint);
 }
 
 /* The same warm-as-it-fills bands as the context gauge. */

@@ -81,6 +81,7 @@ import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
 import { splitSkills } from '../../shared/skills'
+import { resetsIn } from '../../shared/resets'
 import { renderMarkdown, type MdLine } from './markdown'
 import { bashGist, bashProgram, highlightShell } from './shell'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
@@ -5816,6 +5817,9 @@ function AccountRow({
                 />
               </span>
               {Math.round(w.usedPercent)}%<span className="stat-unit">{w.label}</span>
+              {w.resetsAt !== undefined && (
+                <span className="account-reset">resets in {resetsIn(w.resetsAt)}</span>
+              )}
             </span>
           ))}
         </span>
