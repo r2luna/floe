@@ -1010,7 +1010,9 @@ export function PanelBody({
         <TerminalPanel termId={termIdOf('terminal', sub) as string} cwd={sub ?? HOME} branch="" />
       </Suspense>
     )
-  if (kind === 'browser') return <BrowserPanel onCommand={onCommand} />
+  // Keyed on the session so switching chats swaps the page, not just the state.
+  if (kind === 'browser')
+    return <BrowserPanel key={openSession ?? ''} sessionKey={openSession ?? ''} onCommand={onCommand} />
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />

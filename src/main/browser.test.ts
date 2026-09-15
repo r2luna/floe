@@ -4,7 +4,8 @@ import { installHook } from './config/hook.test-helper.ts'
 
 installHook()
 
-const { browserShortcut, captureFullPage, handOffScreenshot, normalizeBrowserUrl, screenshotFileName } = await import('./browser.ts')
+const { browserKeyFor, browserShortcut, captureFullPage, handOffScreenshot, normalizeBrowserUrl, screenshotFileName, selectBrowserSession } =
+  await import('./browser.ts')
 
 test('normalizeBrowserUrl accepts local dev servers without forcing HTTPS', () => {
   assert.equal(normalizeBrowserUrl('localhost:5173'), 'http://localhost:5173')
@@ -121,4 +122,22 @@ test('captureFullPage leaves an existing debugger attached', async () => {
 test('captureFullPage falls back to the viewport when the debugger is taken', async () => {
   const { contents } = fakeContents({ attachThrows: true })
   assert.equal((await captureFullPage(contents)).toString(), 'viewport')
+})
+
+let nextWindowId = 1
+const fakeWindow = () =>
+  ({ webContents: { id: nextWindowId++ }, on: () => {}, isDestroyed: () => false }) as unknown as Electron.BrowserWindow
+
+test('browserKeyFor gives each agent its own session page', () => {
+  const win = fakeWindow()
+  selectBrowserSession(win, 'chat-a')
+  assert.equal(browserKeyFor(win, ['chat-a', 'claude-a']), 'chat-a')
+  assert.equal(browserKeyFor(win, ['chat-b', 'claude-b']), 'chat-b')
+  assert.equal(browserKeyFor(win, []), undefined)
+})
+
+test('browserKeyFor prefers the on-screen name when the lane keys the chat by another id', () => {
+  const win = fakeWindow()
+  selectBrowserSession(win, 'claude-a')
+  assert.equal(browserKeyFor(win, ['chat-a', 'claude-a']), 'claude-a')
 })

@@ -30,7 +30,14 @@ function boundsOf(el: HTMLElement): { x: number; y: number; width: number; heigh
   }
 }
 
-export function BrowserPanel({ onCommand }: { onCommand?: (id: string) => void }): React.JSX.Element {
+/** `sessionKey` picks the page: each Floe session keeps its own. */
+export function BrowserPanel({
+  sessionKey,
+  onCommand
+}: {
+  sessionKey: string
+  onCommand?: (id: string) => void
+}): React.JSX.Element {
   const viewport = useRef<HTMLDivElement>(null)
   const address = useRef<HTMLInputElement>(null)
   const editingAddress = useRef(false)
@@ -57,7 +64,7 @@ export function BrowserPanel({ onCommand }: { onCommand?: (id: string) => void }
     const lane = el.closest('.lane')
     lane?.addEventListener('scroll', place, { passive: true })
     window.addEventListener('resize', place)
-    void window.floe.browser.mount(boundsOf(el)).then((next) => {
+    void window.floe.browser.mount(boundsOf(el), sessionKey).then((next) => {
       if (next) {
         setState(next)
         setUrl(next.url)
@@ -68,9 +75,9 @@ export function BrowserPanel({ onCommand }: { onCommand?: (id: string) => void }
       observer.disconnect()
       lane?.removeEventListener('scroll', place)
       window.removeEventListener('resize', place)
-      void window.floe.browser.unmount()
+      void window.floe.browser.unmount(sessionKey)
     }
-  }, [])
+  }, [sessionKey])
 
   const navigate = (event: FormEvent): void => {
     event.preventDefault()

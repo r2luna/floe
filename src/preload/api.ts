@@ -154,12 +154,17 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     capture: (): Promise<void> => ipcRenderer.invoke('window:capture'),
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke('open:external', url),
     browser: {
-      mount: (bounds: { x: number; y: number; width: number; height: number }): Promise<BrowserState | null> =>
-        ipcRenderer.invoke('browser:mount', bounds),
+      /** Show `key`'s page — one page per Floe session. */
+      mount: (
+        bounds: { x: number; y: number; width: number; height: number },
+        key: string
+      ): Promise<BrowserState | null> => ipcRenderer.invoke('browser:mount', bounds, key),
+      /** The session the renderer's browser calls act on, before any panel mounts. */
+      session: (key: string): Promise<void> => ipcRenderer.invoke('browser:session', key),
       bounds: (bounds: { x: number; y: number; width: number; height: number }): Promise<void> =>
         ipcRenderer.invoke('browser:bounds', bounds),
       visible: (visible: boolean): Promise<void> => ipcRenderer.invoke('browser:visible', visible),
-      unmount: (): Promise<void> => ipcRenderer.invoke('browser:unmount'),
+      unmount: (key: string): Promise<void> => ipcRenderer.invoke('browser:unmount', key),
       state: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:state'),
       navigate: (url: string): Promise<BrowserState | null> => ipcRenderer.invoke('browser:navigate', url),
       back: (): Promise<BrowserState | null> => ipcRenderer.invoke('browser:back'),

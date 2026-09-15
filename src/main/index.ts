@@ -191,6 +191,7 @@ import {
   browserReload,
   browserState,
   browserStop,
+  selectBrowserSession,
   focusBrowser,
   mountBrowser,
   navigateBrowser,
@@ -937,14 +938,19 @@ function withBrowserWindow<T>(event: IpcMainInvokeEvent, run: (win: BrowserWindo
   return win ? run(win) : null
 }
 
-const browserMountIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): ReturnType<typeof mountBrowser> | null =>
-  withBrowserWindow(event, (win) => mountBrowser(win, bounds))
+const browserMountIpc = (
+  event: IpcMainInvokeEvent,
+  bounds: Electron.Rectangle,
+  key?: string
+): ReturnType<typeof mountBrowser> | null => withBrowserWindow(event, (win) => mountBrowser(win, bounds, key))
+const browserSessionIpc = (event: IpcMainInvokeEvent, key: string): void | null =>
+  withBrowserWindow(event, (win) => selectBrowserSession(win, key))
 const browserBoundsIpc = (event: IpcMainInvokeEvent, bounds: Electron.Rectangle): void | null =>
   withBrowserWindow(event, (win) => setBrowserBounds(win, bounds))
 const browserVisibleIpc = (event: IpcMainInvokeEvent, visible: boolean): void | null =>
   withBrowserWindow(event, (win) => setBrowserVisible(win, visible))
-const browserUnmountIpc = (event: IpcMainInvokeEvent): void | null =>
-  withBrowserWindow(event, unmountBrowser)
+const browserUnmountIpc = (event: IpcMainInvokeEvent, key?: string): void | null =>
+  withBrowserWindow(event, (win) => unmountBrowser(win, key))
 const browserStateIpc = (event: IpcMainInvokeEvent): ReturnType<typeof browserState> | null =>
   withBrowserWindow(event, browserState)
 const browserNavigateIpc = (event: IpcMainInvokeEvent, url: string): ReturnType<typeof navigateBrowser> | null =>
@@ -966,6 +972,7 @@ const browserScreenshotIpc = (event: IpcMainInvokeEvent): ReturnType<typeof scre
 
 export function registerBrowserIpc(): void {
   handle('browser:mount', browserMountIpc)
+  handle('browser:session', browserSessionIpc)
   handle('browser:bounds', browserBoundsIpc)
   handle('browser:visible', browserVisibleIpc)
   handle('browser:unmount', browserUnmountIpc)

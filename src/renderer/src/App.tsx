@@ -701,6 +701,10 @@ export default function App() {
   // the saved state. The current session's panels are filed on the way out too,
   // or the set you are looking at right now would be the one never saved.
   const sessionKey = sessionKeyOf(lane)
+  // The browser's toolbar, keymap and preview calls act on this session's page.
+  useEffect(() => {
+    void window.floe.browser.session(sessionKey ?? '')
+  }, [sessionKey])
   // How the lane is laid out: one entry per column, docked panels folded in.
   const columns = columnsOf(lane)
   useEffect(() => {

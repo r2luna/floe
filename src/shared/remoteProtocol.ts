@@ -64,6 +64,7 @@ export const PINNED_CHANNELS = new Set([
   'app:setLoginItem',
   'open:external',
   'browser:mount',
+  'browser:session',
   'browser:bounds',
   'browser:visible',
   'browser:unmount',

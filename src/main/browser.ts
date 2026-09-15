@@ -6,6 +6,7 @@ import type { BrowserSnapshot, BrowserState } from '../shared/types'
 
 type Session = {
   win: BrowserWindow
+  key: string
   view: WebContentsView
   mounted: boolean
   visible: boolean
@@ -13,7 +14,14 @@ type Session = {
   state: BrowserState
 }
 
-const sessions = new Map<number, Session>()
+/**
+ * One page per Floe session, not per window: a new chat must not open on the
+ * page another chat left behind. The window remembers which session's page it
+ * is showing, so the renderer's calls land there without naming it.
+ */
+type Host = { active: string; sessions: Map<string, Session> }
+
+const hosts = new Map<number, Host>()
 const START_URL = 'about:blank'
 const AUTOMATION_TIMEOUT_MS = 10_000
 
@@ -47,7 +55,9 @@ function stateOf(session: Session): BrowserState {
 
 function publish(session: Session, patch: Partial<BrowserState> = {}): BrowserState {
   session.state = { ...stateOf(session), ...patch }
-  if (!session.win.isDestroyed()) session.win.webContents.send('browser:state', session.state)
+  // Only the page on screen talks to the panel. A background session's page is
+  // read fresh when its panel mounts again.
+  if (!session.win.isDestroyed() && isActive(session)) session.win.webContents.send('browser:state', session.state)
   return session.state
 }
 
@@ -72,6 +82,45 @@ export function browserShortcut(input: Electron.Input): string | undefined {
   )
 }
 
+function hostFor(win: BrowserWindow): Host {
+  const id = win.webContents.id
+  let host = hosts.get(id)
+  if (!host) {
+    host = { active: '', sessions: new Map() }
+    hosts.set(id, host)
+    win.on('closed', () => destroyBrowser(win))
+  }
+  return host
+}
+
+function isActive(session: Session): boolean {
+  return hosts.get(session.win.webContents.id)?.active === session.key
+}
+
+/** Point the window's browser calls at this session's page, hiding any other. */
+export function selectBrowserSession(win: BrowserWindow, key: string): void {
+  const host = hostFor(win)
+  if (host.active === key) return
+  const previous = host.sessions.get(host.active)
+  if (previous?.mounted && !win.isDestroyed()) {
+    win.contentView.removeChildView(previous.view)
+    previous.mounted = false
+  }
+  host.active = key
+}
+
+/**
+ * The page an agent known by `names` works on: the one on screen when it is
+ * theirs, else one they already have, else a new one under their first name.
+ * No names (an unknown caller) means the page on screen.
+ */
+export function browserKeyFor(win: BrowserWindow, names: string[]): string | undefined {
+  if (!names.length) return undefined
+  const host = hostFor(win)
+  if (names.includes(host.active)) return host.active
+  return names.find((name) => host.sessions.has(name)) ?? names[0]
+}
+
 function shortcut(session: Session, event: Electron.Event, input: Electron.Input): void {
   const command = browserShortcut(input)
   if (!command) return
@@ -84,7 +133,7 @@ function shortcut(session: Session, event: Electron.Event, input: Electron.Input
   session.win.webContents.send('browser:shortcut', command)
 }
 
-function createSession(win: BrowserWindow): Session {
+function createSession(win: BrowserWindow, key: string): Session {
   const view = new WebContentsView({
     webPreferences: {
       sandbox: true,
@@ -98,13 +147,14 @@ function createSession(win: BrowserWindow): Session {
   view.setBackgroundColor('#ffffff')
   const session: Session = {
     win,
+    key,
     view,
     mounted: false,
     visible: true,
     navigationId: 0,
     state: { url: START_URL, title: '', loading: false, canGoBack: false, canGoForward: false }
   }
-  sessions.set(win.webContents.id, session)
+  hostFor(win).sessions.set(key, session)
 
   const changed = (): BrowserState => publish(session, { error: undefined })
   view.webContents.on('did-start-loading', () => publish(session, { loading: true, error: undefined }))
@@ -121,16 +171,23 @@ function createSession(win: BrowserWindow): Session {
   view.webContents.on('unresponsive', () => publish(session, { loading: false, error: 'Page is unresponsive.' }))
   view.webContents.on('before-input-event', (event, input) => shortcut(session, event, input))
   view.webContents.setWindowOpenHandler(({ url }) => {
-    void navigateBrowser(win, url)
+    void navigateBrowser(win, url, key)
     return { action: 'deny' }
   })
-  win.on('closed', () => destroyBrowser(win))
   void view.webContents.loadURL(START_URL).catch(() => undefined)
   return session
 }
 
-function sessionFor(win: BrowserWindow): Session {
-  return sessions.get(win.webContents.id) ?? createSession(win)
+/** The page for `key`, or for the session the window is showing when omitted. */
+function sessionFor(win: BrowserWindow, key?: string): Session {
+  const host = hostFor(win)
+  const name = key ?? host.active
+  return host.sessions.get(name) ?? createSession(win, name)
+}
+
+function activeSession(win: BrowserWindow): Session | undefined {
+  const host = hosts.get(win.webContents.id)
+  return host?.sessions.get(host.active)
 }
 
 function scaledBounds(win: BrowserWindow, bounds: Rectangle): Rectangle {
@@ -143,7 +200,8 @@ function scaledBounds(win: BrowserWindow, bounds: Rectangle): Rectangle {
   }
 }
 
-export function mountBrowser(win: BrowserWindow, bounds: Rectangle): BrowserState {
+export function mountBrowser(win: BrowserWindow, bounds: Rectangle, key?: string): BrowserState {
+  if (key !== undefined) selectBrowserSession(win, key)
   const session = sessionFor(win)
   if (!session.mounted) {
     win.contentView.addChildView(session.view)
@@ -156,38 +214,41 @@ export function mountBrowser(win: BrowserWindow, bounds: Rectangle): BrowserStat
 }
 
 export function setBrowserBounds(win: BrowserWindow, bounds: Rectangle): void {
-  const session = sessions.get(win.webContents.id)
+  const session = activeSession(win)
   if (session?.mounted) session.view.setBounds(scaledBounds(win, bounds))
 }
 
 export function setBrowserVisible(win: BrowserWindow, visible: boolean): void {
-  const session = sessions.get(win.webContents.id)
+  const session = activeSession(win)
   if (!session?.mounted) return
   session.visible = visible
   session.view.setVisible(visible)
 }
 
-export function unmountBrowser(win: BrowserWindow): void {
-  const session = sessions.get(win.webContents.id)
-  if (!session?.mounted) return
+export function unmountBrowser(win: BrowserWindow, key?: string): void {
+  const host = hosts.get(win.webContents.id)
+  const session = host?.sessions.get(key ?? host.active)
+  if (!session?.mounted || win.isDestroyed()) return
   win.contentView.removeChildView(session.view)
   session.mounted = false
 }
 
 export function destroyBrowser(win: BrowserWindow): void {
-  const session = sessions.get(win.webContents.id)
-  if (!session) return
-  if (session.mounted && !win.isDestroyed()) win.contentView.removeChildView(session.view)
-  session.view.webContents.close()
-  sessions.delete(win.webContents.id)
+  const host = hosts.get(win.webContents.id)
+  if (!host) return
+  for (const session of host.sessions.values()) {
+    if (session.mounted && !win.isDestroyed()) win.contentView.removeChildView(session.view)
+    session.view.webContents.close()
+  }
+  hosts.delete(win.webContents.id)
 }
 
-export function browserState(win: BrowserWindow): BrowserState {
-  return stateOf(sessionFor(win))
+export function browserState(win: BrowserWindow, key?: string): BrowserState {
+  return stateOf(sessionFor(win, key))
 }
 
-export async function navigateBrowser(win: BrowserWindow, raw: string): Promise<BrowserState> {
-  const session = sessionFor(win)
+export async function navigateBrowser(win: BrowserWindow, raw: string, key?: string): Promise<BrowserState> {
+  const session = sessionFor(win, key)
   const url = normalizeBrowserUrl(raw)
   const navigationId = ++session.navigationId
   try {
@@ -199,40 +260,40 @@ export async function navigateBrowser(win: BrowserWindow, raw: string): Promise<
   }
 }
 
-export function browserBack(win: BrowserWindow): BrowserState {
-  const session = sessionFor(win)
+export function browserBack(win: BrowserWindow, key?: string): BrowserState {
+  const session = sessionFor(win, key)
   session.navigationId++
   if (session.view.webContents.navigationHistory.canGoBack()) session.view.webContents.navigationHistory.goBack()
   return publish(session, { error: undefined })
 }
 
-export function browserForward(win: BrowserWindow): BrowserState {
-  const session = sessionFor(win)
+export function browserForward(win: BrowserWindow, key?: string): BrowserState {
+  const session = sessionFor(win, key)
   session.navigationId++
   if (session.view.webContents.navigationHistory.canGoForward()) session.view.webContents.navigationHistory.goForward()
   return publish(session, { error: undefined })
 }
 
-export function browserReload(win: BrowserWindow): BrowserState {
-  const session = sessionFor(win)
+export function browserReload(win: BrowserWindow, key?: string): BrowserState {
+  const session = sessionFor(win, key)
   session.navigationId++
   session.view.webContents.reload()
   return publish(session, { error: undefined })
 }
 
-export function browserStop(win: BrowserWindow): BrowserState {
-  const session = sessionFor(win)
+export function browserStop(win: BrowserWindow, key?: string): BrowserState {
+  const session = sessionFor(win, key)
   session.navigationId++
   session.view.webContents.stop()
   return publish(session, { loading: false, error: undefined })
 }
 
-export function focusBrowser(win: BrowserWindow): void {
-  sessionFor(win).view.webContents.focus()
+export function focusBrowser(win: BrowserWindow, key?: string): void {
+  sessionFor(win, key).view.webContents.focus()
 }
 
-export function openBrowserDevTools(win: BrowserWindow): void {
-  sessionFor(win).view.webContents.openDevTools({ mode: 'detach', activate: true })
+export function openBrowserDevTools(win: BrowserWindow, key?: string): void {
+  sessionFor(win, key).view.webContents.openDevTools({ mode: 'detach', activate: true })
 }
 
 const SNAPSHOT_SCRIPT = `(() => {
@@ -254,8 +315,8 @@ const SNAPSHOT_SCRIPT = `(() => {
   return { url: location.href, title: document.title, text: (document.body?.innerText || '').replace(/\\n{3,}/g, '\\n\\n').slice(0, 30000), elements }
 })()`
 
-export async function snapshotBrowser(win: BrowserWindow): Promise<BrowserSnapshot> {
-  const task = sessionFor(win).view.webContents.executeJavaScript(SNAPSHOT_SCRIPT, true) as Promise<BrowserSnapshot>
+export async function snapshotBrowser(win: BrowserWindow, key?: string): Promise<BrowserSnapshot> {
+  const task = sessionFor(win, key).view.webContents.executeJavaScript(SNAPSHOT_SCRIPT, true) as Promise<BrowserSnapshot>
   return withBrowserTimeout('Browser snapshot', task)
 }
 
@@ -268,8 +329,8 @@ function targetScript(target: string): string {
   })()`
 }
 
-export async function clickBrowser(win: BrowserWindow, target: string): Promise<{ clicked: boolean }> {
-  const task = sessionFor(win).view.webContents.executeJavaScript(
+export async function clickBrowser(win: BrowserWindow, target: string, key?: string): Promise<{ clicked: boolean }> {
+  const task = sessionFor(win, key).view.webContents.executeJavaScript(
     `(() => { const el = ${targetScript(target)}; if (!el) return false; el.scrollIntoView({block:'center'}); el.click(); return true })()`,
     true
   )
@@ -281,9 +342,10 @@ export async function typeInBrowser(
   win: BrowserWindow,
   target: string,
   text: string,
-  submit = false
+  submit = false,
+  key?: string
 ): Promise<{ typed: boolean }> {
-  const task = sessionFor(win).view.webContents.executeJavaScript(
+  const task = sessionFor(win, key).view.webContents.executeJavaScript(
     `(() => {
       const el = ${targetScript(target)}
       if (!el) return false
@@ -314,8 +376,8 @@ export async function typeInBrowser(
   return { typed: typed === true }
 }
 
-export async function evaluateBrowser(win: BrowserWindow, expression: string): Promise<unknown> {
-  const task = sessionFor(win).view.webContents.executeJavaScript(expression, true)
+export async function evaluateBrowser(win: BrowserWindow, expression: string, key?: string): Promise<unknown> {
+  const task = sessionFor(win, key).view.webContents.executeJavaScript(expression, true)
   const value = await withBrowserTimeout('Browser evaluation', task)
   try {
     return JSON.parse(JSON.stringify(value))
@@ -324,15 +386,18 @@ export async function evaluateBrowser(win: BrowserWindow, expression: string): P
   }
 }
 
-export function pressInBrowser(win: BrowserWindow, key: string): void {
-  const contents = sessionFor(win).view.webContents
-  contents.sendInputEvent({ type: 'keyDown', keyCode: key })
-  if (key.length === 1) contents.sendInputEvent({ type: 'char', keyCode: key })
-  contents.sendInputEvent({ type: 'keyUp', keyCode: key })
+export function pressInBrowser(win: BrowserWindow, keyCode: string, key?: string): void {
+  const contents = sessionFor(win, key).view.webContents
+  contents.sendInputEvent({ type: 'keyDown', keyCode })
+  if (keyCode.length === 1) contents.sendInputEvent({ type: 'char', keyCode })
+  contents.sendInputEvent({ type: 'keyUp', keyCode })
 }
 
-export async function screenshotBrowser(win: BrowserWindow): Promise<{ data: string; mimeType: 'image/png' }> {
-  const image = await withBrowserTimeout('Browser screenshot', sessionFor(win).view.webContents.capturePage())
+export async function screenshotBrowser(
+  win: BrowserWindow,
+  key?: string
+): Promise<{ data: string; mimeType: 'image/png' }> {
+  const image = await withBrowserTimeout('Browser screenshot', sessionFor(win, key).view.webContents.capturePage())
   return { data: image.toPNG().toString('base64'), mimeType: 'image/png' }
 }
 
@@ -417,9 +482,10 @@ const electronDesk: ScreenshotDesk = {
 /** Capture the full page to a temp PNG and hand it to the desk (CleanShot or Preview). */
 export async function screenshotPageToDesk(
   win: BrowserWindow,
-  desk: ScreenshotDesk = electronDesk
+  desk: ScreenshotDesk = electronDesk,
+  key?: string
 ): Promise<ScreenshotHandoff> {
-  const contents = sessionFor(win).view.webContents
+  const contents = sessionFor(win, key).view.webContents
   const png = await withBrowserTimeout('Browser screenshot', captureFullPage(contents))
   const dir = join(app.getPath('temp'), 'floe-screenshots')
   await mkdir(dir, { recursive: true })

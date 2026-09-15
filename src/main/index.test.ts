@@ -279,6 +279,7 @@ const CHANNELS = [
   'editor:open',
   'editor:launch',
   'browser:mount',
+  'browser:session',
   'browser:bounds',
   'browser:visible',
   'browser:unmount',
