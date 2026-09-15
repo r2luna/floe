@@ -88,7 +88,8 @@ const {
   stopAgent,
   hasActiveTurn,
   readSessionBuffer,
-  permissionResponse
+  permissionResponse,
+  applyLiveMode
 } = await import('./agent.ts')
 const { setSharedDataDir } = await import('./dataDir.ts')
 const { addCreatedSession, setCreatedSessionSpawnedBy, linkCreatedSession } = await import(
@@ -1493,4 +1494,19 @@ test('runReplaySweep: a strand beside a working alias is closed quietly', () => 
   assert.ok(activeTurnKeys().includes('twin-cid'), 'and the live turn is untouched')
   assert.ok(!events.some((e) => e.kind === 'done'), 'nothing that would clear the live spinner was sent')
   endSession(live.win, 'twin-cid', live.spawn.child)
+})
+
+test('applyLiveMode: switches the running claude in place and keeps the conn', () => {
+  const written: string[] = []
+  const conn = fakeConn({
+    optionsKey: 'default|opus|high',
+    child: { stdin: { write: (s: string) => written.push(s) } }
+  } as unknown as Partial<Conn>)
+  applyLiveMode(conn, 'skip')
+  const req = JSON.parse(written[0])
+  assert.equal(req.type, 'control_request')
+  assert.deepEqual(req.request, { subtype: 'set_permission_mode', mode: 'bypassPermissions' })
+  assert.equal(conn.optionsKey, 'skip|opus|high', 'the next send does not respawn for a mode it already has')
+  applyLiveMode(conn, 'acceptEdits')
+  assert.equal(JSON.parse(written[1]).request.mode, 'acceptEdits')
 })

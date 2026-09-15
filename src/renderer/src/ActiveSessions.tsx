@@ -14,6 +14,9 @@ import type { ActiveSession } from '../../shared/types'
 /** How many rows the panel asks each machine for, and keeps after the merge. */
 export const ACTIVE_LIMIT = 10
 
+/** A stopped session touched within this window is still one you are working on. */
+export const RECENT_MS = 15 * 60_000
+
 /**
  * Status first, recency inside it.
  *
@@ -21,14 +24,23 @@ export const ACTIVE_LIMIT = 10
  * question — a session that has been blocked on you for twenty minutes belongs
  * above one that printed a line five seconds ago. The rows arrive newest-first,
  * so partitioning keeps that order inside each band for free.
+ *
+ * Stopped sessions split at RECENT_MS: the ones from the last few minutes are
+ * the ones you are bouncing between, and they drown in a single IDLE band.
  */
-export function bandsOf(rows: ActiveSession[]): Array<{ label: string; rows: ActiveSession[]; ask?: boolean }> {
+export function bandsOf(
+  rows: ActiveSession[],
+  now = Date.now()
+): Array<{ label: string; rows: ActiveSession[]; ask?: boolean }> {
   const ask = rows.filter((s) => s.needsYou)
   const work = rows.filter((s) => !s.needsYou && s.running)
-  const idle = rows.filter((s) => !s.needsYou && !s.running)
+  const stopped = rows.filter((s) => !s.needsYou && !s.running)
+  const recent = stopped.filter((s) => now - s.lastActivityAt < RECENT_MS)
+  const idle = stopped.filter((s) => now - s.lastActivityAt >= RECENT_MS)
   return [
     { label: 'NEEDS YOU', rows: ask, ask: true },
     { label: 'WORKING', rows: work },
+    { label: 'RECENT', rows: recent },
     { label: 'IDLE', rows: idle }
   ].filter((b) => b.rows.length > 0)
 }

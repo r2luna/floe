@@ -63,7 +63,7 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { agentIdentityNames, resolveAgentIdentity } from './identity'
-import { readSessionBuffer, sessionRuntime, stopAgent, waitForTurn } from './agent'
+import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
 import { dispatchTurn, optionsForRoute, routeOf } from './turn'
@@ -2433,7 +2433,7 @@ function registerSessionStateTools(server: McpServer, token: string): void {
 function registerSessionPickerTools(server: McpServer): void {
   server.tool(
     'update_session',
-    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. Takes effect on its next turn.",
+    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. A mode change reaches a running turn immediately; the rest takes effect on its next turn.",
     {
       session_id: z.string().describe('The Floe session id.'),
       harness: z.enum(HARNESSES as [string, ...string[]]).optional().describe('Who answers from now on.'),
@@ -2464,6 +2464,7 @@ function registerSessionPickerTools(server: McpServer): void {
             effort,
             mode: mode ? nearestMode(mode, provider) : undefined
           })
+          if (mode) setAgentPermissionMode(connKeyFor(target), nearestMode(mode, provider))
         }
         pushEvent('sessions:changed')
         return textResult(sessionSummary(findSessionAny(session_id) ?? target))
