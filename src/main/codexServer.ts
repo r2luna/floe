@@ -7,6 +7,7 @@ import { codexPosture, resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
 import { forgetThreads, rememberThread, threadFor } from './threads'
 import { forgetHouseRules } from './houseRules'
+import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
 
 // Codex chat over `codex app-server` (JSON-RPC on stdio) instead of one-shot
 // `codex exec`: a live session is the only channel that can answer the model's
@@ -198,6 +199,12 @@ function onQuestion(reqId: number | string, params: Record<string, unknown>): vo
   }
   const raw = Array.isArray(params.questions) ? (params.questions as Array<Record<string, unknown>>) : []
   const ids = raw.map((q, i) => (typeof q.id === 'string' ? q.id : String(i)))
+  // A lane on an autonomous colony task: nobody is there to answer, so every
+  // question gets the same instruction back instead of a card (see agent.ts).
+  if (laneAnswersItself(ctx.key)) {
+    write({ jsonrpc: '2.0', id: reqId, result: { answers: Object.fromEntries(ids.map((id) => [id, { answers: [LANE_ANSWERS_ITSELF] }])) } })
+    return
+  }
   const questions: AgentQuestion[] = raw.map((q) => ({
     question: typeof q.question === 'string' ? q.question : '',
     header: typeof q.header === 'string' ? q.header : undefined,

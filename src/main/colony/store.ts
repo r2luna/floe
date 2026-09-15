@@ -91,6 +91,28 @@ export interface ColonyTask {
    */
   mergedAt?: number
   /**
+   * The branch this task is cut from and merges back into. Unset means the
+   * project's main branch. Set from the brief's author before release, and
+   * overwritten with the resolved branch when the tree is cut, so the answer
+   * survives the worktree (and its `.gw-base`) being cleaned up.
+   */
+  base?: string
+  /**
+   * Nobody answers this card's questions. Unset takes the board's `autonomous`.
+   * The lane prompt says so, and a question asked anyway is answered for it.
+   */
+  autonomous?: boolean
+  /** Remove the worktree and branch once merged. Unset takes the board's `cleanup`. */
+  cleanup?: boolean
+  /** Merged and cleaned up: off the board, but still a satisfied dependency and a row in the log. */
+  archivedAt?: number
+  /**
+   * Tracked files provisioning left modified, with the content hash it left
+   * them at. A file still at that hash when the task merges was never touched
+   * by a lane, so it is put back instead of refusing the merge on it.
+   */
+  provisionDirt?: Record<string, string>
+  /**
    * A lane ended without a hand-off line the board could parse. LANE-CONTRACT
    * promises that is treated as `pass` with a warning on the card, so the card
    * has to be able to carry one.
@@ -209,7 +231,7 @@ export function colonySessionIds(): Set<string> {
  * pointing at one worktree — which is the one thing "one task = one worktree"
  * cannot survive.
  */
-export function freeName(project: string, wanted: string): string {
+export function freeName(project: string, wanted: string, exceptId?: string): string {
   const base =
     wanted
       .normalize('NFKD')
@@ -218,7 +240,7 @@ export function freeName(project: string, wanted: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 48) || 'task'
-  const taken = new Set(listTasks(project).map((t) => t.name))
+  const taken = new Set(listTasks(project).filter((t) => t.id !== exceptId).map((t) => t.name))
   if (!taken.has(base)) return base
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
 }
@@ -230,6 +252,18 @@ export interface NewTask {
   brief: string
   /** Ids of tasks that must be merged before this one is released. */
   dependsOn?: string[]
+  base?: string
+  autonomous?: boolean
+  cleanup?: boolean
+}
+
+/** The optional per-task settings, only when stated — an unset one inherits the board's. */
+function taskSettings(task: Pick<NewTask, 'base' | 'autonomous' | 'cleanup'>): Partial<ColonyTask> {
+  return {
+    ...(task.base?.trim() ? { base: task.base.trim() } : {}),
+    ...(task.autonomous !== undefined ? { autonomous: task.autonomous } : {}),
+    ...(task.cleanup !== undefined ? { cleanup: task.cleanup } : {})
+  }
 }
 
 /** Add a task to the backlog. It gets no worktree until it is released. */
@@ -245,6 +279,7 @@ export function addTask(task: NewTask): ColonyTask {
     // Only when there is one: an empty array on every card would read like a
     // declared "depends on nothing", which is not a thing anybody stated.
     ...(task.dependsOn?.length ? { dependsOn: [...task.dependsOn] } : {}),
+    ...taskSettings(task),
     stage: INBOX,
     status: 'holding',
     passes: 0,
@@ -265,6 +300,73 @@ export function patchTask(id: string, patch: Partial<ColonyTask>): ColonyTask | 
   tasks[at] = next
   write({ ...store, tasks })
   return next
+}
+
+/** What a backlog card's author may still change. */
+export interface TaskEdit {
+  name?: string
+  kind?: TaskKind
+  brief?: string
+  /** Replaces the list. An empty one clears it. */
+  dependsOn?: string[]
+  /** An empty string clears it back to the main branch. */
+  base?: string
+  autonomous?: boolean
+  cleanup?: boolean
+}
+
+/**
+ * Why `dependsOn` cannot be what `id` waits for, or null when it can.
+ *
+ * Unknown ids and cycles, both: a typo'd id silently becomes a dependency on
+ * nothing, and a cycle parks every card in it forever with nothing on the board
+ * to say why. `id` is undefined for a card that does not exist yet, which
+ * cannot be in a cycle — nothing can depend on it.
+ */
+export function dependencyProblem(project: string, id: string | undefined, dependsOn: string[]): string | null {
+  const tasks = new Map(listTasks(project).map((t) => [t.id, t]))
+  const unknown = dependsOn.filter((d) => !tasks.has(d))
+  if (unknown.length) return `No task on this board has these ids: ${unknown.join(', ')}`
+  if (!id) return null
+  const seen = new Set<string>()
+  const stack = [...dependsOn]
+  while (stack.length) {
+    const next = stack.pop() as string
+    if (next === id) return 'That would make the task wait on itself'
+    if (seen.has(next)) continue
+    seen.add(next)
+    stack.push(...(tasks.get(next)?.dependsOn ?? []))
+  }
+  return null
+}
+
+/**
+ * Change a card that is still in the backlog, keeping its id.
+ *
+ * Only there: a released card's brief is already on disk as `task.md` and its
+ * branch is already named, so an edit after that would change a record nobody
+ * reads again. Throws, because every refusal is a reason the caller shows.
+ */
+export function updateTask(id: string, edit: TaskEdit): ColonyTask {
+  const task = getTask(id)
+  if (!task) throw new Error(`Unknown task: ${id}`)
+  if (task.stage !== INBOX || task.worktreePath) {
+    throw new Error(`"${task.name}" has left the backlog — only a card that has not been released can be edited`)
+  }
+  if (edit.dependsOn) {
+    const problem = dependencyProblem(task.project, id, edit.dependsOn)
+    if (problem) throw new Error(problem)
+  }
+  const patch: Partial<ColonyTask> = {
+    ...(edit.brief !== undefined ? { brief: edit.brief } : {}),
+    ...(edit.kind ? { kind: edit.kind } : {}),
+    ...(edit.name ? { name: freeName(task.project, edit.name, id) } : {}),
+    ...(edit.dependsOn ? { dependsOn: edit.dependsOn.length ? [...edit.dependsOn] : undefined } : {}),
+    ...(edit.base !== undefined ? { base: edit.base.trim() || undefined } : {}),
+    ...(edit.autonomous !== undefined ? { autonomous: edit.autonomous } : {}),
+    ...(edit.cleanup !== undefined ? { cleanup: edit.cleanup } : {})
+  }
+  return patchTask(id, patch) ?? task
 }
 
 /** Record a lane's verdict and move the card in one write, so the two can never disagree. */

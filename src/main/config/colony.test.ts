@@ -80,3 +80,16 @@ test('a stage config forgot keeps its column, capped at 0, until it drains', () 
   // The two ends are the board's, never conjured as a stage.
   assert.equal(columns.some((c) => c.name === 'inbox'), false)
 })
+
+test('autonomous and cleanup are off by default, inherit, and a task’s own value wins', async () => {
+  const { resolveFlag } = await import('./colony.ts')
+  assert.equal(DEFAULT_COLONY.autonomous, false)
+  assert.equal(DEFAULT_COLONY.cleanup, false)
+  const global = parseGlobalColony('[colony]\nautonomous = true\n', 'floe.toml').layer
+  const project = parseProjectColony('cleanup = true\n', 'colony.toml').layer
+  const config = mergeColony([global, project])
+  assert.equal(config.autonomous, true)
+  assert.equal(config.cleanup, true)
+  assert.equal(resolveFlag({}, config, 'cleanup'), true)
+  assert.equal(resolveFlag({ cleanup: false }, config, 'cleanup'), false)
+})

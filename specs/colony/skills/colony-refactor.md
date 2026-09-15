@@ -14,7 +14,7 @@ is the right answer most of the time.
 
 Read the task dir's `spec.md`, `plan.md` and `tasks.md`, then the actual change
 on this branch: its commits and the full diff against the merge-base with the
-default branch, plus anything uncommitted. **Scope your review to those files.**
+task's base branch, plus anything uncommitted. **Scope your review to those files.**
 Complexity that predates this task is not yours.
 
 ## 2. Look for the specific shapes

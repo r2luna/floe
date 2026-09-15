@@ -14,7 +14,7 @@ send work back cheaply — after you it costs a review turn from another model.
 Read the conventions doc first (`AGENTS.md`, `CLAUDE.md`, `CONVENTIONS.md`,
 `.ds/memory/constitution.md`) and treat it as the standard you are measuring
 against. Then read the change: the commits and the full diff against the
-merge-base with the default branch.
+merge-base with the task's base branch.
 
 Then read enough of the surrounding system to answer whether the change belongs
 there — the modules it touches, their neighbours, and the seams it crossed.

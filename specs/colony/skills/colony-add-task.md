@@ -24,6 +24,9 @@ Facts are your job, never the user's. Before the first round:
   already on it, and which live task this one would collide with.
 - Read the code the request points at: the file, the symbol, the failing test,
   the conventions doc.
+- Find out which branch the change belongs on. When it is part of a feature
+  being built on its own branch, that branch is the task's `base`, not the
+  project's main branch.
 
 A question the repo can answer is a question you do not ask. When a fact is slow
 to find, dispatch a sub-agent for it and ask the rest of the round while it runs
@@ -123,9 +126,21 @@ recommendation, or it is a question with nobody left to answer it.
 3. **dependsOn** — if a live task on the board is changing the same code, pass
    its id. That decision has to be made now; it cannot be made once both
    worktrees exist.
-4. Call `colony_add_task` with `start: true` unless the user said to park it. An
+4. **base** — the branch to cut it from and merge it back into, when that is not
+   the project's main branch. It must exist; it may be checked out in another
+   worktree, and the merge lands there.
+5. **autonomous** — `true` when nobody will be around to answer a lane's
+   question. Every lane then takes the recommended option instead of asking, so
+   every open question needs its default in `## Decisions` or `## Still open`.
+6. **cleanup** — `true` to remove the worktree and delete the branch once the
+   task merges, and take the card off the board.
+7. Call `colony_add_task` with `start: true` unless the user said to park it. An
    unmet dependency still starts: the card waits in the backlog and releases
    itself when the dependency merges.
+
+A mistake in a card that is still in the backlog is fixed with
+`colony_update_task`, never by removing and re-adding it: the id stays, so
+nothing that depends on it has to be re-pointed.
 
 Two changes means two tasks. Split them, brief them separately, and say why you
 split them.

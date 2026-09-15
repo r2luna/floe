@@ -44,6 +44,11 @@ conventions doc names them. Do not declare the work done on a red suite. If a
 check was already failing before you started, say so explicitly rather than
 letting it read as damage you caused.
 
+Run every test command under a timeout (`timeout 600 <cmd>`). A launcher that
+hangs with no CPU use is a launcher problem, not a red suite: call the runner it
+wraps directly instead — `vendor/bin/pest` rather than `php artisan test`, the
+package's own binary rather than a script that shells out to it.
+
 Commit the work with a message that says what changed and why. One commit per
 coherent unit, not one commit per file.
 

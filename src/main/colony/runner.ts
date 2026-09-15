@@ -12,12 +12,28 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
-import { capOf, colonyConfig, columnsFor, DONE, INBOX, type ColonyStage } from '../config/colony'
+import { capOf, colonyConfig, columnsFor, DONE, INBOX, resolveFlag, type ColonyStage } from '../config/colony'
 import { addCreatedSession, closeSession, getAllCreatedSessions } from '../sessionStore'
 import { sessionRuntime, onceTurnDone, hasActiveTurn } from '../agent'
 import { startTurn } from '../turn'
-import { changedFiles, createWorktree, mergeWorktree, undoMerge, type MergeResult } from '../git'
+import {
+  changedFiles,
+  commitPaths,
+  createWorktree,
+  defaultBranch,
+  deleteBranch,
+  dirtySnapshot,
+  isMergedInto,
+  mergeWorktree,
+  readBase,
+  restoreBranch,
+  restoreSnapshot,
+  uncommittedWork,
+  undoMerge,
+  type MergeResult
+} from '../git'
 import { provisionWorktree } from '../provision'
+import { teardownWorktree } from '../worktreeTeardown'
 import { listSkills } from '../config/skills'
 import { parseHandoff, type Board, type BoardColumn } from '../../shared/colony'
 import { getEvent, patchEvent, recordEvent } from './events'
@@ -57,7 +73,10 @@ export const taskDirFor = (branch: string): string => join('specs', branch.repla
 /** Assemble one project's board: the config's stages, plus the two fixed ends. */
 export function boardFor(project: string): Board {
   const config = colonyConfig(project)
-  const tasks = listTasks(project)
+  // Merged and cleaned up: its worktree and branch are gone, so there is nothing
+  // left on the board to act on. The store keeps it — a dependency it satisfied
+  // and a merge the log can still undo both point at it.
+  const tasks = listTasks(project).filter((t) => !t.archivedAt)
   const stages = columnsFor(config, tasks.map((t) => t.stage))
 
   const column = (name: string, stage?: ColonyStage): BoardColumn => {
@@ -90,6 +109,68 @@ export function boardFor(project: string): Board {
     automerge: config.automerge,
     configPath: config.path,
     errors: config.errors.map((e) => ({ file: e.file, line: e.line, reason: e.reason }))
+  }
+}
+
+/** One card as `colony_board({ compact: true })` returns it. */
+export interface CompactTask {
+  id: string
+  name: string
+  kind: string
+  stage: string
+  status: TaskStatus
+  line?: string
+  warn?: string
+  branch?: string
+  base?: string
+  dependsOn?: string[]
+  mergedAt?: number
+  /** The last three lanes' verdicts, oldest first. A `none` is a lane that never said. */
+  lastVerdicts: { stage: string; verdict: string }[]
+}
+
+/**
+ * The board without the briefs and transcripts.
+ *
+ * What a manager polling the board needs is where each card is and what the
+ * last lanes said about it. The full board carries every brief, which is tens
+ * of thousands of characters per read on a board of feature-sized tasks.
+ */
+export function compactBoard(project: string): {
+  project: string
+  automerge: boolean
+  columns: { name: string; cap?: number; tasks: CompactTask[] }[]
+  errors: Board['errors']
+} {
+  const board = boardFor(project)
+  const card = (t: ColonyTask, status: TaskStatus): CompactTask => ({
+    id: t.id,
+    name: t.name,
+    kind: t.kind,
+    stage: t.stage,
+    status,
+    line: t.line,
+    warn: t.warn,
+    branch: t.branch,
+    base: t.base,
+    dependsOn: t.dependsOn,
+    mergedAt: t.mergedAt,
+    lastVerdicts: t.visits.slice(-3).map((v) => ({ stage: v.stage, verdict: v.verdict }))
+  })
+  return {
+    project,
+    automerge: board.automerge,
+    columns: board.columns.map((c) => ({
+      name: c.name,
+      cap: c.cap,
+      tasks: [
+        ...c.blocked.map((t) => card(t, 'blocked')),
+        ...c.working.map((t) => card(t, 'working')),
+        ...c.holding.map((t) => card(t, 'holding')),
+        ...c.settled.map((t) => card(t, 'settled'))
+      ]
+    })),
+    errors: board.errors
   }
 }
 
@@ -155,7 +236,8 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
   if (!worktreePath) {
     // `<kind>/<name>` — the branch says what the change IS before you read it.
     const worktrees = await createWorktree(task.project, `${task.kind}/${task.name}`, {
-      note: task.brief.slice(0, 80)
+      note: task.brief.slice(0, 80),
+      base: task.base
     })
     const created = worktrees[worktrees.length - 1]
     worktreePath = created.path
@@ -163,7 +245,10 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
     // The same per-stack setup the in-app create flow runs — otherwise the lane
     // opens in a tree with no dependencies. Fire-and-forget: progress streams to
     // the setup checklist, and the first lane reads files, not node_modules.
-    void provisionWorktree(win, task.project, created.path, created.branch)
+    const tree = created.path
+    void provisionWorktree(win, task.project, tree, created.branch)
+      .then(() => recordProvisionDirt(id, tree))
+      .catch(() => undefined)
   }
 
   // LANE-CONTRACT points every lane at `specs/<dir>/`. The request has to be
@@ -178,6 +263,9 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
   const moved = patchTask(id, {
     branch,
     worktreePath,
+    // The branch it was really cut from, written down while `.gw-base` still
+    // exists: cleanup removes the tree, and the merge check outlives it.
+    base: task.base ?? readBase(worktreePath),
     queued: undefined,
     stage: nextStage(task.project, INBOX) ?? DONE,
     status: 'holding',
@@ -185,6 +273,37 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
   })
   tick(win, task.project)
   return moved ?? task
+}
+
+/**
+ * What provisioning left changed in tracked files, once it is done.
+ *
+ * An install that regenerates a tooling file makes every tree it provisions
+ * dirty, and a dirty tree refuses to merge. Recorded so `mergeTask` can put those
+ * files back — the ones nobody has touched since — instead of refusing.
+ */
+async function recordProvisionDirt(id: string, worktreePath: string): Promise<void> {
+  const snapshot = await dirtySnapshot(worktreePath)
+  if (Object.keys(snapshot).length) patchTask(id, { provisionDirt: snapshot })
+}
+
+/** The branch a task merges into: its own, the tree's `.gw-base`, or the project's main branch. */
+async function baseOf(task: ColonyTask): Promise<string> {
+  return task.base ?? (task.worktreePath ? readBase(task.worktreePath) : undefined) ?? (await defaultBranch(task.project))
+}
+
+/**
+ * Commit the task's `specs/<dir>/` in its worktree.
+ *
+ * Lanes write their documents and do not all commit them — a QA lane's
+ * `verify.md` especially. Left untracked they make the tree dirty, which refuses
+ * the merge, and they are lost when the tree is cleaned up. So the board files
+ * them itself, after every lane and once more before the merge.
+ */
+async function fileArtifacts(task: ColonyTask, after: string): Promise<void> {
+  if (!task.worktreePath) return
+  const dir = taskDirFor(task.branch ?? task.name)
+  await commitPaths(task.worktreePath, [dir], `docs(colony): ${after} artifacts for ${task.name}`).catch(() => false)
 }
 
 // ---------------------------------------------------------------------------
@@ -218,11 +337,33 @@ export function unmetDeps(task: ColonyTask): ColonyTask[] {
  * half-merged branch. That is what makes it safe to call without asking.
  */
 export async function mergeTask(win: BrowserWindow | undefined, id: string): Promise<MergeResult> {
+  if (merging.has(id)) return { ok: false, message: 'That task is already being merged' }
+  merging.add(id)
+  try {
+    return await landTask(win, id)
+  } finally {
+    merging.delete(id)
+  }
+}
+
+/**
+ * Tasks a merge is running for right now. `reconcileMerged` leaves them alone:
+ * base has already moved before `mergedAt` is written, and noticing that halfway
+ * would record the same merge twice and release its dependents twice.
+ */
+const merging = new Set<string>()
+
+async function landTask(win: BrowserWindow | undefined, id: string): Promise<MergeResult> {
   const task = getTask(id)
   if (!task) return { ok: false, message: `Unknown task: ${id}` }
   if (task.mergedAt) return { ok: true, message: `"${task.name}" is already merged` }
   if (task.stage !== DONE) return { ok: false, message: `"${task.name}" is still in ${task.stage}` }
   if (!task.worktreePath) return { ok: false, message: `"${task.name}" has no worktree to merge` }
+
+  // The two kinds of dirt that are not work: documents a lane left untracked,
+  // and files provisioning regenerated that no lane touched since.
+  await fileArtifacts(task, 'merge')
+  if (task.provisionDirt) await restoreSnapshot(task.worktreePath, task.provisionDirt).catch(() => [])
 
   const result = await mergeWorktree(task.project, task.worktreePath)
   if (!result.ok) {
@@ -258,11 +399,112 @@ export async function mergeTask(win: BrowserWindow | undefined, id: string): Pro
     baseAfter: result.baseAfter,
     text: `${task.branch ?? task.name} → ${result.base ?? 'base'}`
   })
+  // Before the sweep, not after: both are `git worktree` in the same repo, and
+  // two of them at once is a lock fight.
+  if (resolveFlag(task, colonyConfig(task.project), 'cleanup')) await cleanupTask(win, id)
   // A merge is the ONLY thing that satisfies a dependency, so it is the only
   // place the queue behind one can move.
   await sweepReleases(win, task.project)
   pushBoard(win, task.project)
   return result
+}
+
+/**
+ * Take a merged task's worktree and branch away, and the card off the board.
+ *
+ * Refuses — with the reason on the card — rather than deleting anything that is
+ * not already on base: a branch with commits base lacks, uncommitted work in
+ * the tree, or a session still mid-turn in it. The store keeps the card
+ * (`archivedAt`), because dependents and the log still point at it.
+ */
+export async function cleanupTask(win: BrowserWindow | undefined, id: string): Promise<boolean> {
+  const task = getTask(id)
+  if (!task?.mergedAt || !task.worktreePath || !task.branch) return false
+  const base = await baseOf(task)
+  const refusal = await cleanupRefusal(task, task.worktreePath, task.branch, base)
+  if (refusal) {
+    patchTask(id, { warn: `not cleaned up: ${refusal}` })
+    pushBoard(win, task.project)
+    return false
+  }
+
+  await teardownWorktree(task.project, task.worktreePath)
+  const deleted = await deleteBranch(task.project, task.branch, true)
+  patchTask(id, {
+    archivedAt: Date.now(),
+    worktreePath: undefined,
+    line: 'merged and cleaned up',
+    warn: deleted.ok ? undefined : `branch not deleted: ${deleted.message ?? 'no reason given'}`
+  })
+  recordEvent({
+    project: task.project,
+    kind: 'cleaned',
+    task: id,
+    taskName: task.name,
+    branch: task.branch,
+    base,
+    text: `removed its worktree${deleted.ok ? ` and deleted ${task.branch}` : ''}`
+  })
+  pushBoard(win, task.project)
+  return true
+}
+
+/** Why a merged task's tree may not be removed yet, or null. */
+async function cleanupRefusal(
+  task: ColonyTask,
+  worktreePath: string,
+  branch: string,
+  base: string
+): Promise<string | null> {
+  if (task.sessionId && hasActiveTurn(connKeyFor(task.sessionId))) return 'a session is still working in its worktree'
+  // A lane that committed after the merge: deleting the branch would lose it.
+  if (!(await isMergedInto(task.project, branch, base))) return `${branch} has commits that are not on ${base}`
+  const dirt = await uncommittedWork(worktreePath)
+  if (dirt.length) return `uncommitted changes in its worktree (${dirt.slice(0, 3).join(', ')})`
+  return null
+}
+
+/**
+ * Notice the finished tasks somebody merged by hand.
+ *
+ * A dependency is only satisfied by `mergedAt`, which only the board's own merge
+ * used to set — so a task merged from a terminal released nothing behind it.
+ * Only cards in `done`: a branch with no commits of its own is an ancestor of
+ * base too, and a card still in a lane has not finished just because its branch
+ * has not moved yet.
+ *
+ * Runs git once per finished, unmerged card, so it is called where the board is
+ * read on request — never from `boardFor`, which runs on every card move.
+ */
+export async function reconcileMerged(win: BrowserWindow | undefined, project: string): Promise<ColonyTask[]> {
+  const merged: ColonyTask[] = []
+  const candidates = listTasks(project).filter((t) => t.stage === DONE && !t.mergedAt && t.branch && !merging.has(t.id))
+  for (const task of candidates) {
+    const base = await baseOf(task)
+    if (!(await isMergedInto(project, task.branch as string, base))) continue
+    const marked = patchTask(task.id, { mergedAt: Date.now(), warn: undefined, line: 'merged outside the board' })
+    // No commits to undo with: the board did not make this merge, and an undo
+    // that guessed at where base used to be would be the second accident.
+    recordEvent({
+      project,
+      kind: 'merged',
+      task: task.id,
+      taskName: task.name,
+      branch: task.branch,
+      worktreePath: task.worktreePath,
+      base,
+      text: `${task.branch} → ${base}, merged outside the board`
+    })
+    if (marked) merged.push(marked)
+  }
+  for (const task of merged) {
+    if (resolveFlag(task, colonyConfig(project), 'cleanup')) await cleanupTask(win, task.id)
+  }
+  if (merged.length) {
+    await sweepReleases(win, project)
+    pushBoard(win, project)
+  }
+  return merged
 }
 
 /**
@@ -288,9 +530,19 @@ export async function undoTaskMerge(win: BrowserWindow | undefined, eventId: str
   if (!result.ok) return result
 
   patchEvent(eventId, { undoneAt: Date.now() })
+  // A cleaned-up task's branch is gone, and after the reset its commits are
+  // reachable from nothing. `baseAfter` is a fast-forward of that branch, so
+  // pointing the branch back at it un-loses the work.
+  const restored = event.branch ? await restoreBranch(event.project, event.branch, event.baseAfter) : true
+  const card = getTask(event.task)
   // Back to unmerged, not back to a stage: the lanes all passed it, and undoing
   // where the work SITS is a different decision from undoing where it landed.
-  patchTask(event.task, { mergedAt: undefined, line: 'merge undone', warn: undefined })
+  patchTask(event.task, {
+    mergedAt: undefined,
+    archivedAt: undefined,
+    line: card?.archivedAt ? 'merge undone — branch restored, its worktree was removed' : 'merge undone',
+    warn: restored ? undefined : `could not restore ${event.branch} at ${event.baseAfter.slice(0, 8)}`
+  })
   pushBoard(win, event.project)
   nudgeNanny(win, event.project, `the merge of "${event.taskName}" was undone — ${event.base} is back where it was.`)
   return result
@@ -515,7 +767,7 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
   // `/skill` and not the skill's text: startTurn expands the token before
   // dispatch, so one Floe skill reaches opus, haiku and codex as the same
   // instructions — which is the whole reason a lane can pick its own model.
-  const prompt = `/${stage.skill}\n\nTask: ${task.name} (${task.kind})\nArtifacts: ${taskDirFor(task.branch ?? task.name)}/\n\n${task.brief.trim()}`
+  const prompt = lanePrompt(task, stage)
 
   try {
     // The session id itself is the key: one minted a moment ago has no claudeId
@@ -551,19 +803,90 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
 }
 
 /**
+ * The standing instruction an autonomous task's lanes open with.
+ *
+ * In the prompt and not only in the contract, because it is a fact about this
+ * task, and the contract is the same text for every task on every board.
+ */
+export const AUTONOMOUS_BOARD =
+  'AUTONOMOUS BOARD: nobody will answer a question on this task — not the user, not the nanny. ' +
+  'Do not call AskUserQuestion and do not end a turn with a question. When a decision is open, take the ' +
+  'recommended option (the brief\'s Decisions and Still open sections first), record it as (assumed) in your ' +
+  'artifact, and keep going.'
+
+/** What a lane is dispatched with: the skill, where the task is, and the brief. */
+function lanePrompt(task: ColonyTask, stage: ColonyStage): string {
+  const autonomous = resolveFlag(task, colonyConfig(task.project), 'autonomous')
+  return [
+    `/${stage.skill}`,
+    '',
+    `Task: ${task.name} (${task.kind})`,
+    `Artifacts: ${taskDirFor(task.branch ?? task.name)}/`,
+    // LANE-CONTRACT diffs against this. Without it a lane on a feature's parent
+    // branch reviews the whole feature as if this task wrote it.
+    `Base: ${task.base ?? 'the default branch'}`,
+    ...(autonomous ? ['', AUTONOMOUS_BOARD] : []),
+    '',
+    task.brief.trim()
+  ].join('\n')
+}
+
+/** The one follow-up a lane gets when its turn ended without a hand-off line. */
+export const VERDICT_NUDGE = [
+  'Your last message did not end with the hand-off line, so the board cannot tell how this lane ended.',
+  'Do no more work. Reply with exactly one line, alone:',
+  '',
+  'COLONY: pass',
+  'COLONY: return <lane> — <one line: what is wrong>',
+  'COLONY: stop — <one line: why this task should not continue>'
+].join('\n')
+
+/**
+ * Ask a lane that ended without a verdict for one, once.
+ *
+ * On the next tick rather than inside the turn-done callback: the turn is still
+ * being closed when its listeners run, and a second prompt into a session that
+ * has not finished its first is two turns in one conversation.
+ */
+function askForVerdict(win: BrowserWindow, task: ColonyTask, stageName: string): void {
+  const giveUp = (): void => finishLane(win, task.id, stageName, '', true)
+  const sessionId = task.sessionId
+  const worktreePath = task.worktreePath
+  if (!sessionId || !worktreePath) return giveUp()
+  const stage = colonyConfig(task.project).stages.find((s) => s.name === stageName)
+  patchTask(task.id, { line: `${stageName}: asking for its verdict` })
+  pushBoard(win, task.project)
+  setTimeout(() => {
+    try {
+      startTurn(win, sessionId, worktreePath, VERDICT_NUDGE, {
+        permissionMode: 'skip',
+        model: stage?.model,
+        provider: stage?.harness
+      })
+    } catch {
+      return giveUp()
+    }
+    onceTurnDone(sessionId, (text) => finishLane(win, task.id, stageName, text, true))
+  }, 0)
+}
+
+/**
  * A lane's turn ended. Read its verdict and move the card.
  *
  * No line, or one the board cannot parse, is `pass` with a warning — that is
  * what LANE-CONTRACT promises the agent, so the board has to keep the promise
  * rather than quietly failing closed on it.
  */
-function finishLane(win: BrowserWindow, id: string, stage: string, text: string): void {
+function finishLane(win: BrowserWindow, id: string, stage: string, text: string, asked = false): void {
   const task = getTask(id)
   // Moved out from under the lane (answered, archived, dragged) while it ran —
   // the board's later state wins over a verdict about where it used to be.
   if (!task || task.stage !== stage || task.status !== 'working') return
 
   const handoff = parseHandoff(text)
+  // Most missing lines are a lane that forgot to write one. Asking costs one
+  // short turn; guessing `pass` sends unverified work on to the next lane.
+  if (!handoff && !asked) return askForVerdict(win, task, stage)
   const at = Date.now()
 
   // The step's own session goes on the visit: with one session per step, that
@@ -638,12 +961,18 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
         worktreePath: task.worktreePath,
         text: `passed ${stage} — the last stage, so it reached done`
       })
-      void settleDone(win, id)
     }
   }
 
-  tick(win, task.project)
   pushBoard(win, task.project)
+  // The next lane and the merge both start from the tree as it is on disk, so
+  // they wait for this lane's documents to be committed.
+  const reachedDone = getTask(id)?.stage === DONE
+  void fileArtifacts(task, stage).finally(() => {
+    if (reachedDone) void settleDone(win, id)
+    tick(win, task.project)
+    pushBoard(win, task.project)
+  })
 }
 
 /**
@@ -658,6 +987,18 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string)
 async function settleDone(win: BrowserWindow, id: string): Promise<void> {
   const task = getTask(id)
   if (!task || task.stage !== DONE || task.mergedAt) return
+
+  // The last lane never said how it ended. Everything before it may have passed,
+  // but "the lane that verifies it went quiet" is not a pass anybody should
+  // merge on without reading it first.
+  const last = task.visits[task.visits.length - 1]
+  if (last?.verdict === 'none') {
+    patchTask(id, { warn: `${last.stage} never gave a verdict — not merged automatically` })
+    await sweepReleases(win, task.project)
+    nudgeNanny(win, task.project, `"${task.name}" reached done, but ${last.stage} ended without a verdict — it was not merged. Read that lane's transcript before merging it.`)
+    pushBoard(win, task.project)
+    return
+  }
 
   if (!colonyConfig(task.project).automerge) {
     // Still sweep: `automerge = false` is about who runs the merge, not about
@@ -841,6 +1182,12 @@ export function reconcileColony(win: BrowserWindow): void {
   // terminal while the app was closed, and nothing else would ever look again.
   // After the ticks and floating, because releasing cuts worktrees — boot is not
   // waiting on git, and `releaseTask` ticks and repaints for itself.
-  const queued = new Set(allTasks().filter((t) => t.queued).map((t) => t.project))
-  for (const project of queued) void sweepReleases(win, project)
+  //
+  // The finished cards somebody merged by hand while the app was closed go
+  // first, in the same chain: noticing one releases what waits on it, and two
+  // sweeps of one board at once would release the same card twice.
+  const pending = allTasks().filter((t) => t.queued || (t.stage === DONE && !t.mergedAt))
+  for (const project of new Set(pending.map((t) => t.project))) {
+    void reconcileMerged(win, project).then(() => sweepReleases(win, project))
+  }
 }

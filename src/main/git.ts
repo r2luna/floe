@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
   ChangedFile,
@@ -13,6 +13,7 @@ import type {
 } from '../shared/types'
 import { slugifyBranch } from '../shared/slug'
 import { forgetWorktree, getReviewCheckpoint, setReviewCheckpoint } from './sessionStore'
+import { cancelProvision } from './provisionRuns'
 
 const exec = promisify(execFile)
 
@@ -93,6 +94,61 @@ async function mainBranch(root: string): Promise<string> {
     /* detached */
   }
   return 'HEAD'
+}
+
+/** The branch a worktree forks from when nobody named one. */
+export async function defaultBranch(root: string): Promise<string> {
+  return mainBranch(root)
+}
+
+/**
+ * The worktree that has `branch` checked out, main or linked, or undefined.
+ *
+ * A branch checked out somewhere can only be moved from inside that tree: `git
+ * checkout` of it anywhere else is refused, and so is `branch -f`.
+ */
+async function holderOf(root: string, branch: string): Promise<string | undefined> {
+  const out = await git(root, ['worktree', 'list', '--porcelain']).catch(() => '')
+  return parseWorktreePorcelain(out).find((e) => e.branch === branch)?.path
+}
+
+/**
+ * Has `branch` landed on `base`? True when its tip is an ancestor of base.
+ *
+ * A branch with no commits of its own is trivially an ancestor too, so this
+ * cannot tell "merged" from "never started" — the caller has to know the work
+ * was finished before it asks.
+ */
+export async function isMergedInto(root: string, branch: string, base: string): Promise<boolean> {
+  try {
+    await git(root, ['merge-base', '--is-ancestor', branch, base])
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Uncommitted work in a tree, not counting Floe's own `.gw-*` markers — those
+ * are written by Floe into every tree it cuts, and are not anybody's work.
+ */
+export async function uncommittedWork(path: string): Promise<string[]> {
+  const out = await git(path, ['status', '--porcelain']).catch(() => '')
+  return out
+    .split('\n')
+    .map((l) => l.slice(3).trim())
+    .filter((f) => f && !f.startsWith('.gw-'))
+}
+
+/** Point `branch` at `sha` again, if it no longer exists. True when the branch exists afterwards. */
+export async function restoreBranch(root: string, branch: string, sha: string): Promise<boolean> {
+  if (await branchExists(root, branch)) return true
+  try {
+    await git(root, ['branch', branch, sha])
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function isDirty(path: string): Promise<boolean> {
@@ -368,13 +424,35 @@ export async function createWorktree(
 // don't block it, then prunes.
 export async function removeWorktree(root: string, target: string): Promise<Worktree[]> {
   if (target === root) throw new Error('Refusing to remove the main worktree')
+  // Stop the install first: one still writing into the tree is what makes the
+  // remove fail halfway and leave a folder behind.
+  await cancelProvision(target)
+  const known = await isWorktreeOf(root, target)
   try {
     await git(root, ['worktree', 'remove', '--force', target])
   } catch {
-    await git(root, ['worktree', 'prune']).catch(() => undefined)
+    /* the leftover is dealt with below */
   }
+  dropLeftover(known, target)
+  await git(root, ['worktree', 'prune']).catch(() => undefined)
   forgetWorktree(target)
   return listWorktrees(root)
+}
+
+/** Is `target` one of `root`'s worktrees? Checked before removal, while git still knows. */
+async function isWorktreeOf(root: string, target: string): Promise<boolean> {
+  const out = await git(root, ['worktree', 'list', '--porcelain']).catch(() => '')
+  return parseWorktreePorcelain(out).some((e) => e.path === target && e.path !== root)
+}
+
+/**
+ * Delete what `git worktree remove` left of a tree — but only a tree git listed
+ * as this repo's worktree a moment ago. A path that was never one is somebody's
+ * directory, and a remove that failed on it is not licence to delete it.
+ */
+function dropLeftover(known: boolean, target: string): void {
+  if (!known || !existsSync(target)) return
+  rmSync(target, { recursive: true, force: true })
 }
 
 // --- Granular remove steps (drive the guided remove panel) -----------------
@@ -443,6 +521,8 @@ export async function removePreflight(root: string, target: string): Promise<Rem
 // half-removed entry doesn't linger, then surface the original error.
 export async function removeWorktreeGuided(root: string, target: string, force: boolean): Promise<Worktree[]> {
   if (target === root) throw new Error('Refusing to remove the main worktree')
+  await cancelProvision(target)
+  const known = await isWorktreeOf(root, target)
   const args = force ? ['worktree', 'remove', '--force', target] : ['worktree', 'remove', target]
   try {
     await git(root, args)
@@ -450,6 +530,9 @@ export async function removeWorktreeGuided(root: string, target: string, force: 
     await git(root, ['worktree', 'prune']).catch(() => undefined)
     throw new Error(firstLine(e))
   }
+  // Removed as far as git is concerned; ignored files an install was still
+  // writing can outlive it.
+  dropLeftover(known, target)
   forgetWorktree(target)
   return listWorktrees(root)
 }
@@ -463,6 +546,71 @@ export async function deleteBranch(root: string, branch: string, force: boolean)
   } catch (e) {
     return { ok: false, message: firstLine(e) }
   }
+}
+
+/**
+ * Commit `paths` in a worktree, and nothing else. False when there was nothing
+ * to commit — including a path that does not exist or is ignored.
+ *
+ * Hooks off: this is the board filing a lane's documents, and a project's
+ * pre-commit (a full test suite, a formatter over the codebase) is for code a
+ * person wrote, not for a markdown file the next lane is waiting on.
+ */
+export async function commitPaths(worktree: string, paths: string[], message: string): Promise<boolean> {
+  try {
+    await git(worktree, ['add', '-A', '--', ...paths])
+  } catch {
+    return false
+  }
+  const staged = (await git(worktree, ['diff', '--cached', '--name-only', '--', ...paths])).trim()
+  if (!staged) return false
+  // The pathspec again on the commit, so whatever else a lane left staged stays
+  // staged and out of this commit.
+  await gitNoHooks(worktree, ['commit', '-q', '-m', message, '--', ...paths])
+  return true
+}
+
+/** A tracked file's content hash, or `deleted`. What `dirtySnapshot` records. */
+async function contentHashes(worktree: string, paths: string[]): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  const present = paths.filter((p) => existsSync(join(worktree, p)))
+  for (const p of paths) if (!present.includes(p)) out[p] = 'deleted'
+  if (!present.length) return out
+  const hashes = (await git(worktree, ['hash-object', '--', ...present])).trim().split('\n')
+  present.forEach((p, i) => (out[p] = hashes[i] ?? ''))
+  return out
+}
+
+/** Tracked files that differ from HEAD. */
+async function trackedChanges(worktree: string): Promise<string[]> {
+  const out = await git(worktree, ['diff', '--name-only', 'HEAD']).catch(() => '')
+  return out.split('\n').map((s) => s.trim()).filter(Boolean)
+}
+
+/**
+ * The tracked files that differ from HEAD right now, with their content hash.
+ *
+ * Taken when provisioning finishes: whatever it regenerated (a tooling file an
+ * install rewrites) is recorded, so a merge later can tell that dirt from a
+ * change a lane made.
+ */
+export async function dirtySnapshot(worktree: string): Promise<Record<string, string>> {
+  return contentHashes(worktree, await trackedChanges(worktree))
+}
+
+/**
+ * Put back every file from `snapshot` that is still exactly as provisioning left
+ * it. A file anybody changed since is left alone — it is work, not dirt. Returns
+ * the paths it restored.
+ */
+export async function restoreSnapshot(worktree: string, snapshot: Record<string, string>): Promise<string[]> {
+  const changed = new Set(await trackedChanges(worktree))
+  const candidates = Object.keys(snapshot).filter((p) => changed.has(p))
+  if (!candidates.length) return []
+  const now = await contentHashes(worktree, candidates)
+  const untouched = candidates.filter((p) => now[p] === snapshot[p])
+  if (untouched.length) await git(worktree, ['checkout', 'HEAD', '--', ...untouched])
+  return untouched
 }
 
 export interface MergeResult {
@@ -520,15 +668,14 @@ export async function undoMerge(
   if (!(await shaOf(root, to))) {
     return { ok: false, message: `the commit "${base}" pointed at before the merge is gone` }
   }
-  if (await isDirty(root)) {
-    return { ok: false, message: 'The main worktree has uncommitted changes — commit or stash first' }
-  }
+  // Whichever tree has base checked out — the main one, or a feature's own.
+  const holder = await holderOf(root, base)
+  if (holder && (await isDirty(holder))) return { ok: false, message: dirtyHolderMessage(root, holder, base) }
 
-  const current = (await git(root, ['branch', '--show-current']).catch(() => '')).trim()
   try {
-    // Checked out: `reset --hard` is the only thing that moves it. Not checked
-    // out: `branch -f` moves it without touching whatever IS checked out.
-    if (current === base) await git(root, ['reset', '--hard', to])
+    // Checked out: `reset --hard` in that tree is the only thing that moves it.
+    // Not checked out: `branch -f` moves it without touching any tree.
+    if (holder) await git(holder, ['reset', '--hard', to])
     else await git(root, ['branch', '-f', base, to])
   } catch (e) {
     return { ok: false, message: firstLine(e) }
@@ -553,7 +700,10 @@ export async function mergeWorktree(root: string, target: string): Promise<Merge
 
   const base = readBase(target) || (await mainBranch(root))
   if (base === branch) return { ok: false, message: `Base and branch are both "${branch}"` }
-  if (await isDirty(root)) return { ok: false, message: 'The main worktree has uncommitted changes — commit or stash first' }
+  // Base is moved from inside whichever tree has it checked out, so that tree is
+  // the one that has to be clean. Checked out nowhere, no tree is touched.
+  const holder = await holderOf(root, base)
+  if (holder && (await isDirty(holder))) return { ok: false, message: dirtyHolderMessage(root, holder, base) }
 
   // Read BEFORE the fast-forward moves it. After the merge this commit is only
   // reachable through the reflog, and an undo that had to mine the reflog for
@@ -568,23 +718,28 @@ export async function mergeWorktree(root: string, target: string): Promise<Merge
     return { ok: false, message: `Conflicts merging "${base}" into "${branch}". Resolve them in the worktree, then commit.` }
   }
 
-  // Fast-forward base to the (now up-to-date) worktree branch.
-  try {
-    const rootBranch = (await git(root, ['branch', '--show-current'])).trim()
-    if (rootBranch !== base) await git(root, ['checkout', base])
-    await git(root, ['merge', '--ff-only', branch])
-  } catch (e) {
-    const detail = e instanceof Error ? e.message.split('\n')[0] : ''
-    return { ok: false, message: `Merged "${base}" into "${branch}", but couldn't fast-forward "${base}". ${detail}` }
+  // Fast-forward base to the (now up-to-date) worktree branch — in the tree that
+  // holds base, never by checking base out somewhere it may already be in use.
+  const ff = await mergeFastForward(root, base, branch)
+  if (!ff.ok) {
+    return { ok: false, message: `Merged "${base}" into "${branch}", but couldn't fast-forward "${base}". ${ff.message ?? ''}`.trim() }
   }
 
+  const baseAfter = await shaOf(root, base)
   return {
     ok: true,
     message: `Merged "${branch}" → "${base}"`,
     base,
     ...(baseBefore ? { baseBefore } : {}),
-    ...((await shaOf(root, base)) ? { baseAfter: (await shaOf(root, base)) as string } : {})
+    ...(baseAfter ? { baseAfter } : {})
   }
+}
+
+/** The refusal for a dirty tree holding base, in the words the main-tree case always used. */
+function dirtyHolderMessage(root: string, holder: string, base: string): string {
+  return holder === root
+    ? 'The main worktree has uncommitted changes — commit or stash first'
+    : `The worktree holding "${base}" (${holder}) has uncommitted changes — commit or stash first`
 }
 
 // --- Granular merge steps (drive the guided merge panel) -------------------

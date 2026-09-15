@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
@@ -33,7 +33,12 @@ installHook()
 
 const {
   changedFiles,
+  commitPaths,
   createWorktree,
+  dirtySnapshot,
+  isMergedInto,
+  removeWorktree,
+  restoreSnapshot,
   fileDiff,
   listRemoteBranches,
   mergeFastForward,
@@ -427,25 +432,176 @@ test('mergeWorktree aborts on conflict and leaves the worktree clean', async () 
   }
 })
 
-// The merge into the branch can succeed while the fast-forward cannot run:
-// checking base out in root is refused when another worktree already holds it.
-test('mergeWorktree reports a merge that landed but could not fast-forward', async () => {
-  const fx = seededRepo('floe-git-noff-')
+// A feature's parent branch lives in its own worktree, and task branches merge
+// into it. Checking the parent out in root is refused by git, so the merge has
+// to land inside the tree that holds it — and leave root's branch alone.
+function parentHeldElsewhere(fx: GitFixture): { parent: string; feat: string } {
+  fx.git('branch', 'trunk')
+  const parent = join(fx.dir, '.worktrees', 'trunk')
+  fx.git('worktree', 'add', '-q', parent, 'trunk')
+  const feat = addWorktree(fx, 'feat')
+  writeFileSync(join(feat, '.gw-base'), 'trunk\n')
+  writeFileSync(join(feat, 'c.txt'), 'c\n')
+  fx.git('-C', feat, 'add', 'c.txt')
+  fx.git('-C', feat, 'commit', '-q', '-m', 'work')
+  return { parent, feat }
+}
+
+test('mergeWorktree lands in the worktree that holds base, and leaves root alone', async () => {
+  const fx = seededRepo('floe-git-holder-')
+  try {
+    const { parent, feat } = parentHeldElsewhere(fx)
+    const mainBefore = fx.git('rev-parse', 'main')
+    const res = await mergeWorktree(fx.dir, feat)
+    assert.equal(res.ok, true, res.message)
+    assert.equal(fx.git('rev-parse', 'trunk'), fx.git('rev-parse', 'feat'), 'trunk was fast-forwarded')
+    assert.equal(readFileSync(join(parent, 'c.txt'), 'utf8'), 'c\n', 'the holder tree has the work')
+    assert.equal(fx.git('branch', '--show-current'), 'main', 'root never switched branch')
+    assert.equal(fx.git('rev-parse', 'main'), mainBefore)
+
+    // And the undo resets inside the same holder.
+    const undone = await undoMerge(fx.dir, 'trunk', res.baseAfter as string, res.baseBefore as string)
+    assert.equal(undone.ok, true, undone.message)
+    assert.equal(existsSync(join(parent, 'c.txt')), false)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('mergeWorktree refuses when the tree holding base is dirty, whatever root looks like', async () => {
+  const fx = seededRepo('floe-git-holder-dirty-')
+  try {
+    const { parent, feat } = parentHeldElsewhere(fx)
+    writeFileSync(join(parent, 'a.txt'), 'uncommitted\n')
+    const res = await mergeWorktree(fx.dir, feat)
+    assert.equal(res.ok, false)
+    assert.match(res.message ?? '', /holding "trunk".*uncommitted changes/)
+    assert.equal(fx.git('rev-parse', 'trunk'), fx.git('rev-parse', 'main'), 'trunk did not move')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('mergeWorktree moves a base nobody has checked out without checking it out', async () => {
+  const fx = seededRepo('floe-git-noholder-')
   try {
     fx.git('branch', 'trunk')
-    fx.git('worktree', 'add', '-q', join(fx.dir, '.worktrees', 'trunk'), 'trunk')
     const feat = addWorktree(fx, 'feat')
     writeFileSync(join(feat, '.gw-base'), 'trunk\n')
     writeFileSync(join(feat, 'c.txt'), 'c\n')
     fx.git('-C', feat, 'add', 'c.txt')
     fx.git('-C', feat, 'commit', '-q', '-m', 'work')
+    // Dirt in root is irrelevant: root does not hold trunk and is not touched.
+    writeFileSync(join(fx.dir, 'a.txt'), 'root dirt\n')
 
     const res = await mergeWorktree(fx.dir, feat)
-    assert.equal(res.ok, false)
-    assert.match(res.message ?? '', /^Merged "trunk" into "feat", but couldn't fast-forward "trunk"\./)
-    assert.equal(fx.git('rev-parse', 'trunk'), fx.git('rev-parse', 'main'), 'trunk did not move')
+    assert.equal(res.ok, true, res.message)
+    assert.equal(fx.git('rev-parse', 'trunk'), fx.git('rev-parse', 'feat'))
+    assert.equal(fx.git('branch', '--show-current'), 'main')
+    assert.equal(readFileSync(join(fx.dir, 'a.txt'), 'utf8'), 'root dirt\n')
   } finally {
     fx.cleanup()
+  }
+})
+
+test('isMergedInto is true once the branch tip is on base', async () => {
+  const fx = seededRepo('floe-git-merged-')
+  try {
+    const { feat } = parentHeldElsewhere(fx)
+    assert.equal(await isMergedInto(fx.dir, 'feat', 'trunk'), false)
+    await mergeWorktree(fx.dir, feat)
+    assert.equal(await isMergedInto(fx.dir, 'feat', 'trunk'), true)
+    assert.equal(await isMergedInto(fx.dir, 'no-such-branch', 'trunk'), false)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('commitPaths commits only its paths, skips hooks, and says when there was nothing', async () => {
+  const fx = seededRepo('floe-git-commitpaths-')
+  try {
+    const feat = addWorktree(fx, 'feat')
+    // A hook that would fail every commit: the board's document commit must not run it.
+    fx.git('config', 'core.hooksPath', '.hooks')
+    mkdirSync(join(feat, '.hooks'), { recursive: true })
+    writeFileSync(join(feat, '.hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 })
+    mkdirSync(join(feat, 'specs', 'feat'), { recursive: true })
+    writeFileSync(join(feat, 'specs', 'feat', 'verify.md'), '# verify\n')
+    writeFileSync(join(feat, 'a.txt'), 'lane edit, not a document\n')
+    fx.git('-C', feat, 'add', 'a.txt')
+
+    assert.equal(await commitPaths(feat, ['specs/feat'], 'docs: artifacts'), true)
+    assert.equal(fx.git('-C', feat, 'log', '-1', '--format=%s'), 'docs: artifacts')
+    assert.equal(fx.git('-C', feat, 'show', '--name-only', '--format=', 'HEAD'), 'specs/feat/verify.md')
+    assert.match(fx.git('-C', feat, 'status', '--porcelain'), /^M {2}a\.txt/m, 'the staged edit stayed staged')
+
+    assert.equal(await commitPaths(feat, ['specs/feat'], 'again'), false, 'nothing new to commit')
+    assert.equal(await commitPaths(feat, ['specs/missing'], 'nope'), false, 'a path that does not exist')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('restoreSnapshot puts back what provisioning dirtied, and keeps what a lane changed after', async () => {
+  const fx = seededRepo('floe-git-snapshot-')
+  try {
+    const feat = addWorktree(fx, 'feat')
+    // Provisioning regenerates two tracked files.
+    writeFileSync(join(feat, 'a.txt'), 'generated\n')
+    writeFileSync(join(feat, 'b.txt'), 'generated\n')
+    const snap = await dirtySnapshot(feat)
+    assert.deepEqual(Object.keys(snap).sort(), ['a.txt', 'b.txt'])
+
+    // A lane then edits one of them.
+    writeFileSync(join(feat, 'b.txt'), 'real work\n')
+    const restored = await restoreSnapshot(feat, snap)
+    assert.deepEqual(restored, ['a.txt'])
+    assert.equal(readFileSync(join(feat, 'a.txt'), 'utf8'), 'a1\n')
+    assert.equal(readFileSync(join(feat, 'b.txt'), 'utf8'), 'real work\n')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('removeWorktree stops a running provision first, deletes the whole folder, and frees the path', async () => {
+  const { beginProvision } = await import('./provisionRuns.ts')
+  const fx = seededRepo('floe-git-remove-')
+  try {
+    const feat = addWorktree(fx, 'feat')
+    // A provision that is still writing when the remove starts, and only winds
+    // down once told to.
+    const run = beginProvision(feat)
+    let cancelled = false
+    run.signal.addEventListener('abort', () => {
+      cancelled = true
+      setTimeout(() => {
+        mkdirSync(join(feat, 'node_modules', 'late'), { recursive: true })
+        writeFileSync(join(feat, 'node_modules', 'late', 'x.js'), '1')
+        run.end()
+      }, 20)
+    })
+
+    await removeWorktree(fx.dir, feat)
+    assert.equal(cancelled, true, 'the provision was cancelled')
+    assert.equal(existsSync(feat), false, 'no leftover folder')
+
+    await createWorktree(fx.dir, 'feat')
+    assert.equal(existsSync(join(fx.dir, '.worktrees', 'feat')), true, 'the same path can be cut again')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('removeWorktree never deletes a directory that was not one of the repo’s worktrees', async () => {
+  const fx = seededRepo('floe-git-remove-stranger-')
+  const stranger = bareDir('floe-git-stranger-')
+  try {
+    writeFileSync(join(stranger, 'keep.txt'), 'mine\n')
+    await removeWorktree(fx.dir, stranger)
+    assert.equal(readFileSync(join(stranger, 'keep.txt'), 'utf8'), 'mine\n')
+  } finally {
+    fx.cleanup()
+    rmSync(stranger, { recursive: true, force: true })
   }
 })
 

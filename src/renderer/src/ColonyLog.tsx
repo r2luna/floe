@@ -39,7 +39,8 @@ const VERB: Record<BoardEvent['kind'], string> = {
   refused: 'refused',
   released: 'released',
   stopped: 'stopped',
-  lost: 'lost'
+  lost: 'lost',
+  cleaned: 'cleaned up'
 }
 
 const clock = (at: number): string =>

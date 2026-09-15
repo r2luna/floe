@@ -13,8 +13,8 @@ optional — a review that never obtained one is not this lane's job done.
 ## 1. Read what landed
 
 The task dir's `spec.md` and `plan.md` for what it was supposed to do, then the
-change itself: commits and the full diff against the merge-base with the default
-branch, plus anything uncommitted. Read the surrounding code too — a diff alone
+change itself: commits and the full diff against the merge-base with the task's
+base branch, plus anything uncommitted. Read the surrounding code too — a diff alone
 hides the caller that now passes the wrong thing.
 
 ## 2. Review as a senior engineer

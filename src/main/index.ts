@@ -144,6 +144,7 @@ export type { CloseSessionOptions }
 import { localAgents, localStats, localUsage } from './localAgents'
 import { sessionTranscript } from './handoff'
 import { detectDevCommand, startDev, stopDev } from './devServer'
+import { stopWorktreeProcesses } from './worktreeTeardown'
 import {
   listCommands,
   addCommand,
@@ -180,7 +181,6 @@ import {
   resizeTerminal,
   killTerminal,
   killAllTerminals,
-  killTerminalsForWorktree,
   listLiveTerminals,
   notifyTerminalsTheme
 } from './terminal'
@@ -206,7 +206,6 @@ import {
   attachCommand,
   resizeCommand,
   killAllCommands,
-  killCommandsForWorktree,
   commandRuns,
   reapOrphanCommands,
   runShellCapture
@@ -226,6 +225,7 @@ import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeMedia, re
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
   boardFor,
+  reconcileMerged,
   mergeTask,
   nannyFor,
   nannyOpener,
@@ -522,13 +522,7 @@ export async function worktreeStatuses(paths: string[]): Promise<Record<string, 
   return Object.fromEntries(entries.filter(([, status]) => status))
 }
 
-// Everything spawned inside a worktree, stopped — before it is removed. Agent
-// sessions are stopped by the renderer beforehand.
-export function stopWorktreeProcesses(target: string): void {
-  stopDev(target)
-  killCommandsForWorktree(target)
-  killTerminalsForWorktree(target)
-}
+export { stopWorktreeProcesses }
 
 // Undo the `herd link` the Laravel recipe made. Runs while the directory is
 // still there — `herd unlink` reads the site from the cwd it is called in.
@@ -1110,7 +1104,12 @@ export function registerNotesIpc(): void {
 export function registerColonyIpc(): void {
   // `colony:board` is the only read — the panel repaints from one shape, so a
   // card and the column counting it can never disagree.
-  handle('colony:board', (_event, project: string) => boardFor(project))
+  handle('colony:board', async (event, project: string) => {
+    // A finished card merged outside the board is noticed on the read, so the
+    // panel never shows as waiting what has already landed.
+    await reconcileMerged(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return boardFor(project)
+  })
   handle('colony:add', (event, task: NewTask) => {
     const created = addTask(task)
     pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, task.project)

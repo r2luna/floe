@@ -404,6 +404,29 @@ test('requestUserInput becomes the same question event Claude uses, and the answ
   assert.deepEqual(kinds(events), ['question', 'done'])
 })
 
+test('a codex lane on an autonomous colony task is answered for, with no card', async () => {
+  const { addTask, patchTask } = await import('./colony/store.ts')
+  addCreatedSession({ id: 'k-lane', worktreePath: '/work/lane', title: 'lane · specifier' })
+  const task = addTask({ project: '/work/board', name: 'codex-lane', brief: '', autonomous: true })
+  patchTask(task.id, { sessionId: 'k-lane', stage: 'specifier', status: 'working' })
+
+  resetReplies('th-lane')
+  const { win, events } = fakeWin()
+  await chatWithCodexServer(win, 'k-lane', '/work/lane', 'go', 'gpt-5.5', 'low')
+  push({
+    method: 'item/tool/requestUserInput',
+    id: 'req-lane',
+    params: { threadId: 'th-lane', questions: [{ id: 'q0', question: 'Which?', options: [{ label: 'A' }] }] }
+  })
+
+  assert.deepEqual(kinds(events), [], 'no question card')
+  const reply = server().sent.at(-1) as { id: string; result: { answers: Record<string, { answers: string[] }> } }
+  assert.equal(reply.id, 'req-lane')
+  assert.match(reply.result.answers.q0.answers[0], /autonomous colony board/)
+  assert.deepEqual(codexWaitingKeys(), [])
+  push({ method: 'turn/completed', params: { threadId: 'th-lane', turn: {} } })
+})
+
 test('a session with no codex question hands the answer back to the Claude path', () => {
   assert.equal(answerCodexQuestion('k-ask', [['A']]), false)
   assert.equal(answerCodexQuestion('never-heard-of-it', [['A']]), false)

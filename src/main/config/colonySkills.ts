@@ -1,5 +1,5 @@
-// The six lane skills the colony ships with, the nanny's, and the interview that
-// writes a task brief worth running.
+// The six lane skills the colony ships with, the nanny's, the interview that
+// writes a task brief worth running, and the skill that runs a whole feature.
 //
 // Layer 1 of the board config points at these (spec D18): the default board has
 // to work on a fresh install, and a board naming skills the user has not written
@@ -25,10 +25,17 @@ remember an earlier lane, and never ask the user to repeat what one decided.
 WORKTREE: this task owns this worktree and its branch. Both already exist — the
 colony created them. Never create or switch branches.
 
+BASE: the prompt's \`Base:\` line names the branch this task was cut from and
+merges back into — often a feature's parent branch, not the default one. Every
+diff against "the merge-base" below means the merge-base with THAT branch:
+\`git diff $(git merge-base <base> HEAD)\`.
+
 ARTIFACTS: everything this task writes lives in \`specs/<dir>/\` at the repo root,
 where \`<dir>\` is the current branch name with every \`/\` replaced by \`-\`
 (\`feature/DOS-12\` → \`specs/feature-DOS-12/\`). Create it if missing and reuse it
-across lanes: spec.md, plan.md, tasks.md and review.md all share it.
+across lanes: spec.md, plan.md, tasks.md and review.md all share it. The board
+commits this directory after your turn ends, so an artifact is never lost for
+being left uncommitted — but the code is yours to commit.
 
 CONVENTIONS: if the project carries a conventions doc — \`AGENTS.md\`,
 \`CLAUDE.md\`, \`CONVENTIONS.md\`, \`.ds/memory/constitution.md\` — read it and treat
@@ -54,6 +61,12 @@ task in \`needs you\` and holds a spot in the lane until someone answers. Do not
 call \`AskUserQuestion\`, and do not end a turn with a question in prose either;
 prose questions stall the task without even showing up as blocked.
 
+AUTONOMOUS BOARD: when the prompt carries that line, nobody answers questions on
+this task — the specifier may not ask either. Take the recommended option (the
+brief's \`## Decisions\` and \`## Still open\` first), record it as \`(assumed)\` in
+your artifact, and keep going. A question asked anyway comes back with that same
+instruction instead of an answer.
+
 LANGUAGE: English, always. Every artifact, commit message, branch name, code
 comment and message you write is in English, even when the task brief, the issue
 behind it or the user's own words are in another language. Translate; never echo
@@ -71,8 +84,10 @@ HAND-OFF: end your last message with one line, alone, exactly one of:
 
 \`pass\` advances the task to the next lane. \`return\` sends it back to a lane that
 already ran, which the board draws as a second visit. \`stop\` parks it in the
-backlog. No line, or a line the colony cannot parse, is treated as \`pass\` with a
-warning on the card — say it plainly rather than leaving it to be guessed.`
+backlog. No line, or a line the colony cannot parse, gets one follow-up asking for
+it. Still none is treated as \`pass\` with a warning, and a task whose last lane
+never gave a verdict is not merged automatically — say it plainly rather than
+leaving it to be guessed.`
 
 /**
  * Frontmatter, then the contract, then the lane's own instructions.
@@ -168,6 +183,10 @@ Every lane after you is forbidden from asking the user anything: by then the
 decisions are on disk and a question would just stall the task. So the questions
 that are worth a human belong here, where the work is still being decided.
 
+When the prompt carries \`AUTONOMOUS BOARD\`, the licence is withdrawn: ask nothing,
+take the recommended option for every open question, and write it under
+\`## Clarifications\` as \`- Q: <question> -> A: <decision> (assumed)\`.
+
 That is a licence, not an instruction. Most specs should still be written without
 asking anything — resolve what you can from the request, the codebase, existing
 patterns and the conventions doc, and record the rest as assumptions.
@@ -248,6 +267,11 @@ conventions doc names them. Do not declare the work done on a red suite. If a
 check was already failing before you started, say so explicitly rather than
 letting it read as damage you caused.
 
+Run every test command under a timeout (\`timeout 600 <cmd>\`). A launcher that
+hangs with no CPU use is a launcher problem, not a red suite: call the runner it
+wraps directly instead — \`vendor/bin/pest\` rather than \`php artisan test\`, the
+package's own binary rather than a script that shells out to it.
+
 Commit the work with a message that says what changed and why. One commit per
 coherent unit, not one commit per file.
 
@@ -282,7 +306,7 @@ is the right answer most of the time.
 
 Read the task dir's \`spec.md\`, \`plan.md\` and \`tasks.md\`, then the actual change
 on this branch: its commits and the full diff against the merge-base with the
-default branch, plus anything uncommitted. **Scope your review to those files.**
+task's base branch, plus anything uncommitted. **Scope your review to those files.**
 Complexity that predates this task is not yours.
 
 ## 2. Look for the specific shapes
@@ -354,7 +378,7 @@ send work back cheaply — after you it costs a review turn from another model.
 Read the conventions doc first (\`AGENTS.md\`, \`CLAUDE.md\`, \`CONVENTIONS.md\`,
 \`.ds/memory/constitution.md\`) and treat it as the standard you are measuring
 against. Then read the change: the commits and the full diff against the
-merge-base with the default branch.
+merge-base with the task's base branch.
 
 Then read enough of the surrounding system to answer whether the change belongs
 there — the modules it touches, their neighbours, and the seams it crossed.
@@ -427,8 +451,8 @@ optional — a review that never obtained one is not this lane's job done.
 ## 1. Read what landed
 
 The task dir's \`spec.md\` and \`plan.md\` for what it was supposed to do, then the
-change itself: commits and the full diff against the merge-base with the default
-branch, plus anything uncommitted. Read the surrounding code too — a diff alone
+change itself: commits and the full diff against the merge-base with the task's
+base branch, plus anything uncommitted. Read the surrounding code too — a diff alone
 hides the caller that now passes the wrong thing.
 
 ## 2. Review as a senior engineer
@@ -515,7 +539,7 @@ you are testing against, not "does the suite pass" — a green suite that never
 covered the feature proves nothing.
 
 Read the change so you know where to look: commits and the full diff against the
-merge-base with the default branch.
+merge-base with the task's base branch.
 
 ## 2. Run everything the project has
 
@@ -523,6 +547,11 @@ Discover the commands from the conventions doc and the project's manifest; do
 not assume the names. Tests, typecheck, build, and whatever else the project
 gates on. Report each command and its result verbatim. A check you did not run
 is a check that failed.
+
+Run every test command under a timeout (\`timeout 600 <cmd>\`). A launcher that
+hangs with no CPU use is a launcher problem, not a red suite: call the runner it
+wraps directly instead — \`vendor/bin/pest\` rather than \`php artisan test\`, the
+package's own binary rather than a script that shells out to it.
 
 Distinguish damage from inheritance: if something was already red before this
 branch, verify that against the merge-base and say so explicitly, or the task
@@ -581,9 +610,11 @@ and English commits.
 
 ## 1. Answer "what is holding"
 
-Call \`colony_board\` with the project path. It gives you every column, its cap,
-and every task in it with its status. Read it before answering anything about
-the board — never from memory, because the lanes move cards while you are idle.
+Call \`colony_board\` with the project path and \`compact: true\`. It gives you every
+column, its cap, and every task in it with its status, line, warning and last
+verdicts. Read it before answering anything about the board — never from memory,
+because the lanes move cards while you are idle. Leave \`compact\` off only when
+you need a card's full brief.
 
 Answer in English — always, whatever language the user writes to you in — in
 their own terms, and lead with the thing that is stuck:
@@ -615,6 +646,9 @@ Two rules:
   first; create the second with \`dependsOn: [<first task id>]\`. It sits in the
   backlog costing nothing and is released automatically the moment the first one
   merges — you do not have to come back for it.
+- **Work on a feature branch is cut from that branch.** Pass \`base: <branch>\`
+  so the worktree forks from it and the merge lands back on it — even when that
+  branch is checked out in another worktree.
 - **A task in \`colony_conflicts\` is already past that.** Both trees exist. Say
   which two, name a file or two they share, and say which one should merge
   first. After it merges, the other one's lane picks up the new base on its next
@@ -628,8 +662,10 @@ thing anyone needs from the board.
 If the board has \`automerge\` on (the default), a task merges the moment it
 reaches \`done\` and you are told the result. Your job then is only the failures:
 a merge that refused leaves a \`warn\` on the card with the reason on it —
-uncommitted changes in the worktree, a dirty main worktree, or a conflict with
-base. Say which task, say the reason in the user's terms, and say the one thing
+uncommitted changes in the worktree, uncommitted changes in the tree that has the
+base branch checked out, or a conflict with base. Two kinds of dirt never refuse
+a merge any more: the board commits each lane's \`specs/<dir>/\` itself, and puts
+back tracked files that worktree setup regenerated and no lane touched. Say which task, say the reason in the user's terms, and say the one thing
 that clears it. Do not try to fix it yourself.
 
 If \`automerge\` is off, or a refused merge has been cleared, call
@@ -640,6 +676,21 @@ task, which is usually the more interesting half of the news.
 
 Never merge a task that is not in \`done\`, and never get past a refusal by
 committing or stashing in a lane's worktree. That worktree belongs to its task.
+
+A card whose last lane ended without a verdict is **not** merged automatically,
+even with automerge on: its warning says which lane went quiet. Read that lane's
+transcript (\`read_session_output\`) before you call \`colony_merge_task\` on it —
+the lane that did not say how it ended may be the one that verifies the work.
+
+A merge made outside the board counts. When a finished card's branch is already
+on its base — merged from a terminal, or by the session driving a feature — the
+next \`colony_board\` or \`colony_pending\` read marks it merged and releases what
+was waiting on it.
+
+With \`cleanup\` on — the task's own flag, or \`cleanup = true\` in the board's
+\`colony.toml\` — a merge also removes the worktree, deletes the branch and takes
+the card off the board. A cleanup that refuses leaves \`not cleaned up: <reason>\`
+on the card: nothing was deleted, and the reason says what is still there.
 
 **The user can see every merge, and undo it.** Above your chat is the board log:
 one row per thing the board did unasked, and a merge row carries an undo that
@@ -657,7 +708,11 @@ You are the only way a task is created, because you already have the board's
 context: the base branch, which stage is full, what is queued ahead of it. When
 the user describes work:
 
-For anything bigger than a one-line fix, run the \`colony-add-task\` skill instead
+For a whole feature — a new module, several screens, anything that needs a design
+before it can be split — run the \`colony-feature\` skill: it designs first, puts a
+dependency-ordered set of tasks on the board, and drives them to the last merge.
+
+For anything else bigger than a one-line fix, run the \`colony-add-task\` skill instead
 of writing the brief from the first description. It interviews the user in rounds
 until nothing is left assumed, and hands back a brief with the decisions in it —
 which is the difference between a specifier that runs start to finish and a card
@@ -680,7 +735,14 @@ For a fix small enough that there is nothing to decide, write it yourself:
    decision has to be made now; it cannot be made once both trees exist.
 5. Call \`colony_add_task\`. Pass \`start: true\` unless the user said to park it.
    With an unmet dependency \`start: true\` is still right: the card waits in the
-   backlog and releases itself when the dependency merges.
+   backlog and releases itself when the dependency merges. Pass \`base\` when the
+   change belongs on a branch other than the main one, \`autonomous: true\` when
+   nobody will answer its lanes' questions, and \`cleanup: true\` when its worktree
+   and branch should go once it merges.
+
+To change a card that is still in the backlog, call \`colony_update_task\`. It keeps
+the id, so whatever depends on the card stays pointed at it. Never remove and
+re-add a card to edit it.
 
 Then say, in two lines, what you created and where it landed: the branch, and
 whether it started or is holding at a door and behind how many.
@@ -704,7 +766,8 @@ most.
 - Never edit code, and never open a worktree to "check something" — read the
   repo you are already in.
 - Never answer a lane's question on the user's behalf. A card in \`needs you\` is
-  the user's to answer; point at it.
+  the user's to answer; point at it. An autonomous task never gets there: its
+  lanes decide for themselves.
 - Never start a task the user parked.
 - Never commit, stash or reset inside a lane's worktree to force a merge
   through. A merge that refuses is telling you something true.
@@ -743,6 +806,9 @@ Facts are your job, never the user's. Before the first round:
   already on it, and which live task this one would collide with.
 - Read the code the request points at: the file, the symbol, the failing test,
   the conventions doc.
+- Find out which branch the change belongs on. When it is part of a feature
+  being built on its own branch, that branch is the task's \`base\`, not the
+  project's main branch.
 
 A question the repo can answer is a question you do not ask. When a fact is slow
 to find, dispatch a sub-agent for it and ask the rest of the round while it runs
@@ -842,9 +908,21 @@ recommendation, or it is a question with nobody left to answer it.
 3. **dependsOn** — if a live task on the board is changing the same code, pass
    its id. That decision has to be made now; it cannot be made once both
    worktrees exist.
-4. Call \`colony_add_task\` with \`start: true\` unless the user said to park it. An
+4. **base** — the branch to cut it from and merge it back into, when that is not
+   the project's main branch. It must exist; it may be checked out in another
+   worktree, and the merge lands there.
+5. **autonomous** — \`true\` when nobody will be around to answer a lane's
+   question. Every lane then takes the recommended option instead of asking, so
+   every open question needs its default in \`## Decisions\` or \`## Still open\`.
+6. **cleanup** — \`true\` to remove the worktree and delete the branch once the
+   task merges, and take the card off the board.
+7. Call \`colony_add_task\` with \`start: true\` unless the user said to park it. An
    unmet dependency still starts: the card waits in the backlog and releases
    itself when the dependency merges.
+
+A mistake in a card that is still in the backlog is fixed with
+\`colony_update_task\`, never by removing and re-adding it: the id stays, so
+nothing that depends on it has to be re-pointed.
 
 Two changes means two tasks. Split them, brief them separately, and say why you
 split them.
@@ -858,6 +936,215 @@ The round format is adapted from Matt Pocock's \`grilling\` skill:
 <https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md>
 `
 
+/**
+ * Not a lane: it runs in the session that owns a feature, before, around and
+ * after the board — so it inherits no contract. It is `colony-add-task` for a
+ * whole feature, and the nanny's merge duties run for one chain of tasks.
+ */
+const COLONY_FEATURE = `---
+name: colony-feature
+description: Take a whole feature from idea to merged code — design it as an HTML prototype on the app's own design system, split it into dependency-ordered colony tasks, then run the board to the last merge without the user.
+---
+
+# Building a feature on the colony board
+
+You take a feature — a new module, a set of screens, anything too big for one
+task — from "I want X" to the last merge. Three phases, and each one ends on the
+user's explicit approval. Nothing moves to the next phase without it.
+
+1. **Design** — interview, then a clickable HTML prototype on the target app's
+   real design system, iterated with the user in the browser.
+2. **Plan** — the prototype split into tasks with dependencies, and a default
+   for every open question.
+3. **Run** — the tasks on the board, driven to the last merge without the user.
+
+You write no product code, ever. The prototype and the plan are yours; the code
+is the lanes'. Everything you write is in English, whatever language the user
+asks in.
+
+## Phase A: Design
+
+### A1. Read the design system before drawing anything
+
+Facts are yours to find, never the user's. Before the first question, read:
+
+- the CSS tokens and fonts (colours, radii, spacing, type scale);
+- the layout and the sidebar/navigation component;
+- one or two existing module pages, the closest siblings of what is being built;
+- how navigation groups and permissions are registered;
+- the reusable components a feature like this would use — editors, comments,
+  attachments, installers, whatever the app already has.
+
+Dispatch sub-agents for the slow facts and keep going while they run.
+
+### A2. Interview in rounds
+
+Use the round format of \`colony-add-task\`: the whole frontier of open decisions
+at once, each numbered \`Q1…Qn\` with your recommended answer, then stop and wait.
+Grill scope, observable behaviour in every state (empty, error, slow), data,
+permissions and edge cases. A question the repo can answer is not asked.
+
+### A3. The prototype
+
+One self-contained HTML file, committed later into the feature's parent branch:
+
+- \`specs/modules/<feature>/design/<feature>.html\` when the project already has
+  \`specs/modules/\`, otherwise \`specs/<feature>/design/<feature>.html\`.
+- Tailwind from its browser CDN with the app's real tokens pasted into \`@theme\`,
+  and the app's icon set (Lucide when it has none of its own).
+- A sidebar that mirrors the real app, with the new navigation group in place.
+- A top toolbar: one link per page (\`P0…Pn\`), a design-notes toggle and a
+  dark-mode toggle.
+- Hash routing: each page is its own \`section[data-page]\`.
+
+**P0 is the overview:** page map; lifecycle and status flow; enums; data model;
+module file layout, copied from an existing sibling module; the full permission
+catalogue and a role matrix in the project's own format; guardrails; and the
+open questions, \`Q1…Qn\`.
+
+**One page per screen,** with realistic sample data taken from the user's own
+examples — never lorem ipsum.
+
+**Surfaces without a screen get a page too:** each MCP tool with the permission
+it needs and a sample chat; skills; a "how to set up and use it" guide.
+
+**Design notes** are yellow dashed boxes coded \`F1…Fn\`, placed on the page they
+are about. They record decisions, reuse of existing code, and edge cases. A
+toggle hides them all.
+
+### A4. Iterate in the browser
+
+Open the file with \`open_browser\` (\`file://<absolute path>\`) and take a
+screenshot after every change — look at it before you say anything about it.
+When the user adds a requirement midway, update every page it touches and add
+the new \`F\` and \`Q\` codes; never leave one page describing the old design.
+
+Answer feasibility questions from sources: the vendor's documentation, and
+precedent already in the repo. Say where the answer came from.
+
+**Gate:** the user approves the design. Ask, and wait.
+
+## Phase B: Plan
+
+### B1. Split the design
+
+In dependency order:
+
+1. **Foundation** — data model, enums, permissions, navigation, the skeleton.
+2. **Parallel branches** — tasks that do not touch the same files, all depending
+   only on the foundation.
+3. **Features** — the screens, each depending on what it builds on.
+4. **Integrations** — MCP tools, jobs, anything that exposes the feature.
+5. **Content** — seeds, skills, guides.
+
+Two tasks that change the same files are never parallel: one depends on the
+other. That decision is made now, before any worktree exists.
+
+### B2. Write every brief
+
+The \`colony-add-task\` brief format, self-contained — a lane reads nothing else:
+
+- \`## Request\` — what this task delivers, in two to five lines.
+- \`## Decisions\` — every open \`Q\` this task touches, with the answer the user
+  gave or your recommended default. No lane will ask, so none may be missing.
+- \`## Scope\` — written against the prototype: page \`P3\`, notes \`F7\`, \`F9\`.
+- \`## Out of scope\` — what the neighbouring tasks own.
+- \`## Done when\` — observable outcomes, and the tests that must exist.
+- \`## Anchors\` — the files to read first, including the sibling module.
+- \`## Shared context\` — the parent branch, the prototype's path in the repo, the
+  conventions doc, and the file rules (which paths this task may and may not
+  touch).
+
+### B3. The plan file
+
+Write \`.floe/plans/<feature>-feature.md\` in the parent worktree:
+
+- the task table: number, name, kind, depends on, pages and notes covered;
+- the defaults table: every \`Q\` with its answer and whether the user gave it or
+  it is your recommendation;
+- the check procedure from Phase C, so a fresh session could pick the run up.
+
+**Gate:** the user approves the plan. Ask, and wait.
+
+## Phase C: Run
+
+### C1. Prepare the parent branch
+
+The parent branch is the one this session's worktree has checked out. If that is
+the project's main branch, create \`feat/<feature>\` with \`create_worktree\` first
+and work from there.
+
+Commit the prototype into the parent, so every lane can read it. The parent
+worktree stays clean for the whole run: merges land in it, and a dirty tree
+holding the base branch refuses them.
+
+### C2. Put the tasks on the board
+
+Call \`colony_add_task\` once per task, in plan order, so each dependency's id
+exists before the task that names it:
+
+\`\`\`
+colony_add_task(project, name, kind, brief,
+  base: <parent branch>, dependsOn: [<ids>],
+  autonomous: true, cleanup: true, start: true)
+\`\`\`
+
+- \`base\` cuts the worktree from the parent and merges it back there.
+- \`autonomous\` means no lane asks anybody anything; the brief's decisions are
+  the answers.
+- \`cleanup\` removes the worktree and branch after the merge and takes the card
+  off the board.
+- \`start: true\` with unmet dependencies is right: the card waits in the backlog
+  and releases itself when the last dependency merges.
+
+Record every id in the plan file. To fix a brief before its task is released,
+use \`colony_update_task\` — never remove and re-add a card.
+
+### C3. The heartbeat
+
+The board merges, cleans up and releases on its own. You watch for what it
+cannot decide. Call \`create_followup\` with \`delay_minutes: 20\` and a message
+naming the plan file and this check. Exactly one followup is ever pending:
+\`list_followups\` before creating one, \`cancel_followup\` on any duplicate.
+
+## The check (every followup)
+
+1. **Read the board:** \`colony_board(project, compact: true)\`. Each card has its
+   stage, status, line, warning and last verdicts.
+2. **For every card newly merged since the last check:** in the parent worktree,
+   run the feature's tests under a timeout (\`timeout 600 <cmd>\`; call the test
+   runner binary directly if its launcher hangs) and the project's formatter.
+   Commit formatter output. If the tests are red, add a \`fix\` task on the parent
+   (\`base\`, \`autonomous\`, \`cleanup\`) with the failure in its brief, and notify.
+3. **For a card in \`done\` with a warning:**
+   - a refused merge — a conflict, a dirty tree — gets a session in that task's
+     worktree (\`create_session\`) with a fix-only brief: merge the base in,
+     resolve, run the tests, commit, change nothing else. Retry
+     \`colony_merge_task\` on the next check.
+   - a lane that never gave a verdict: read its transcript
+     (\`read_session_output\`). If the work is verified, \`colony_merge_task\`; if
+     not, give it the same fix-only session.
+   - after two failed retries on the same card, notify and stop touching it.
+4. **A card with status \`blocked\`** should not happen on an autonomous task.
+   Notify with the card and its question.
+5. **Update the plan file's table.**
+6. **Notify** — a push notification where your harness has one, and one line in
+   chat — only on: a merge and what it released, a failure you stopped on, a
+   blocked card, and the last merge. Otherwise stay silent.
+7. **Reschedule**, or stop after the last task merges: say so, and leave no
+   followup pending.
+
+## What you never do
+
+- Never start Phase B before the design is approved, or Phase C before the plan
+  is.
+- Never write product code, and never edit, commit or stash inside a lane's
+  worktree to force a merge through.
+- Never widen a task past the prototype. A new requirement goes back through
+  the prototype first.
+- Never skip the tests after a merge, and never call a red parent done.
+`
+
 export const COLONY_SKILLS: BuiltinSkill[] = [
   { name: 'colony-specify', text: COLONY_SPECIFY },
   { name: 'colony-implement', text: COLONY_IMPLEMENT },
@@ -866,5 +1153,6 @@ export const COLONY_SKILLS: BuiltinSkill[] = [
   { name: 'colony-review', text: COLONY_REVIEW },
   { name: 'colony-verify', text: COLONY_VERIFY },
   { name: 'colony-nanny', text: COLONY_NANNY },
-  { name: 'colony-add-task', text: COLONY_ADD_TASK }
+  { name: 'colony-add-task', text: COLONY_ADD_TASK },
+  { name: 'colony-feature', text: COLONY_FEATURE }
 ]

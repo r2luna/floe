@@ -117,6 +117,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'start_merge',
       'colony_board',
       'colony_add_task',
+      'colony_update_task',
       'colony_start_task',
       'colony_remove_task',
       'list_skills',
@@ -622,6 +623,47 @@ test('copy_plan refuses to write over a plan of the same name', async () => {
   assert.deepEqual(await callTool('plan_phases', { worktree: wt }), [] as unknown as Record<string, unknown>)
   rmSync(wt, { recursive: true, force: true })
   rmSync(dest, { recursive: true, force: true })
+})
+
+test('the colony tools add, edit and read cards, and refuse what would park a card forever', async () => {
+  const board = mkdtempSync(join(realpathSync(tmpdir()), 'floe-mcp-colony-'))
+  try {
+    // Not a repo, so it has no branches: a named base cannot exist.
+    const noBase = await callTool('colony_add_task', { project: board, name: 'x', brief: 'x', base: 'feat/parent' })
+    assert.match(String(noBase.error), /No local branch called "feat\/parent"/)
+    const noDep = await callTool('colony_add_task', { project: board, name: 'x', brief: 'x', dependsOn: ['task_nope'] })
+    assert.match(String(noDep.error), /task_nope/)
+
+    const first = await callTool('colony_add_task', { project: board, name: 'first', brief: 'the long brief', autonomous: true })
+    const second = await callTool('colony_add_task', { project: board, name: 'second', brief: 'b', dependsOn: [first.id] })
+    assert.equal(first.autonomous, true)
+    assert.deepEqual(second.dependsOn, [first.id])
+
+    const edited = await callTool('colony_update_task', { task: first.id, brief: 'shorter', cleanup: true })
+    assert.equal(edited.id, first.id)
+    assert.equal(edited.brief, 'shorter')
+    assert.equal(edited.cleanup, true)
+    const cycle = await callTool('colony_update_task', { task: first.id, dependsOn: [second.id] })
+    assert.match(String(cycle.error), /wait on itself/)
+    const unknown = await callTool('colony_update_task', { task: 'task_nope', brief: 'x' })
+    assert.match(String(unknown.error), /Unknown task/)
+    const badBase = await callTool('colony_update_task', { task: first.id, base: 'nope' })
+    assert.match(String(badBase.error), /No local branch/)
+
+    const compact = (await callTool('colony_board', { project: board, compact: true })) as {
+      columns: { name: string; tasks: Record<string, unknown>[] }[]
+    }
+    const inbox = compact.columns.find((c) => c.name === 'inbox')
+    assert.deepEqual(inbox?.tasks.map((t) => t.name), ['first', 'second'])
+    assert.equal(inbox?.tasks.some((t) => 'brief' in t), false)
+    const full = (await callTool('colony_board', { project: board })) as { columns: { holding: { brief: string }[] }[] }
+    assert.equal(full.columns[0].holding[0].brief, 'shorter')
+
+    const pending = await callTool('colony_pending', { project: board })
+    assert.deepEqual(pending.mergeable, [])
+  } finally {
+    rmSync(board, { recursive: true, force: true })
+  }
 })
 
 test('every registered tool name is unique across the domain registrars', async () => {

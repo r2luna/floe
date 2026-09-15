@@ -21,13 +21,24 @@ import { parseArtifactSpec } from '../shared/artifact'
 import { listProjects } from './projects'
 import {
   boardFor,
+  compactBoard,
   mergeTask,
   overlappingTasks,
   pushBoard,
+  reconcileMerged,
   releaseTask,
   unmetDeps
 } from './colony/runner'
-import { addTask, getTask, listTasks, removeTask, TASK_KINDS, type TaskKind } from './colony/store'
+import {
+  addTask,
+  dependencyProblem,
+  getTask,
+  listTasks,
+  removeTask,
+  TASK_KINDS,
+  updateTask,
+  type TaskKind
+} from './colony/store'
 import { DONE } from './config/colony'
 import {
   changedFiles,
@@ -1661,6 +1672,86 @@ function registerDecisionTools(server: McpServer): void {
   )
 }
 
+/** The per-task settings `colony_add_task` and `colony_update_task` share. */
+const TASK_SETTINGS = {
+  base: z
+    .string()
+    .optional()
+    .describe(
+      "The branch to cut this task from and merge it back into — a feature's parent branch, say. Must exist. Defaults to the project's main branch. It may be checked out in another worktree: the merge lands there."
+    ),
+  autonomous: z
+    .boolean()
+    .optional()
+    .describe(
+      "Nobody answers this task's questions: every lane, the specifier included, takes the recommended option and records it as an assumption, and a question asked anyway is answered for it. Defaults to the board's `autonomous` (off)."
+    ),
+  cleanup: z
+    .boolean()
+    .optional()
+    .describe(
+      "Once merged, remove the worktree and branch and take the card off the board. Skipped, with a warning on the card, when the tree still has uncommitted work or the branch has commits base does not. Defaults to the board's `cleanup` (off)."
+    )
+}
+
+/** Why `base` cannot be a task's base, or null when it can. */
+async function baseProblem(root: string, base: string | undefined): Promise<string | null> {
+  if (!base?.trim()) return null
+  const branches = await listBranches(root)
+  return branches.includes(base.trim()) ? null : `No local branch called "${base.trim()}" in ${root}`
+}
+
+interface TaskSettingsArgs {
+  base?: string
+  autonomous?: boolean
+  cleanup?: boolean
+}
+
+async function colonyAddTaskTool(a: TaskSettingsArgs & {
+  project: string
+  name: string
+  brief: string
+  kind?: string
+  dependsOn?: string[]
+  start?: boolean
+}): Promise<ToolResult> {
+  try {
+    const root = projectRoot(a.project)
+    // Checked before the card exists: a typo'd id would silently become a
+    // dependency on nothing, which reads on the board as "released, so it
+    // must have been fine" — the one failure this whole field exists to stop.
+    const problem = dependencyProblem(root, undefined, a.dependsOn ?? []) ?? (await baseProblem(root, a.base))
+    if (problem) return textResult({ error: problem })
+    const task = addTask({ ...a, project: root, kind: a.kind as TaskKind | undefined })
+    const win = getWindow()
+    const out = a.start && win ? await releaseTask(win, task.id) : task
+    pushBoard(win, root)
+    return textResult(out)
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+async function colonyUpdateTaskTool(a: TaskSettingsArgs & {
+  task: string
+  name?: string
+  brief?: string
+  kind?: string
+  dependsOn?: string[]
+}): Promise<ToolResult> {
+  try {
+    const found = getTask(a.task)
+    if (!found) return textResult({ error: `Unknown task: ${a.task}` })
+    const problem = await baseProblem(found.project, a.base)
+    if (problem) return textResult({ error: problem })
+    const updated = updateTask(a.task, { ...a, kind: a.kind as TaskKind | undefined })
+    pushBoard(getWindow(), found.project)
+    return textResult(updated)
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
 // The board and the cards on it: read it, put work on it, take work off it.
 // Split from the landing tools below because they are two jobs — what is ON the
 // board, and what comes OFF it — and one function registering seven tools is a
@@ -1671,10 +1762,22 @@ function registerColonyTools(server: McpServer): void {
   server.tool(
     'colony_board',
     "The project's colony board: every column with its skill, model and cap, and every task in it. Read this before answering anything about the board — the lanes move cards while you are idle, so a remembered board is a wrong one.",
-    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
-    async ({ project }) => {
+    {
+      project: z.string().describe('The repo root path of the project (a worktree path works too).'),
+      compact: z
+        .boolean()
+        .optional()
+        .describe(
+          'Leave out briefs and transcripts: each card is id, name, kind, stage, status, line, warn, branch, base, dependsOn, mergedAt and its last three verdicts. Use it for every routine read — the full board carries every brief.'
+        )
+    },
+    async ({ project, compact }) => {
       try {
-        return textResult(boardFor(projectRoot(project)))
+        const root = projectRoot(project)
+        // A finished card merged by hand is merged: noticed here, where the board
+        // is read on request, so its dependents are already released in this answer.
+        await reconcileMerged(getWindow(), root)
+        return textResult(compact ? compactBoard(root) : boardFor(root))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -1697,32 +1800,27 @@ function registerColonyTools(server: McpServer): void {
         .describe(
           'Task ids (from colony_board) that must be MERGED before this one gets a worktree. Use it whenever this change builds on another one that is still in flight — it is the only thing that stops two dependent branches existing at the same time. With start=true and an unmet dependency the task stays in the backlog and is released automatically the moment the last one merges.'
         ),
-      start: z.boolean().optional().describe('Release it now — this is what cuts the worktree. Default false.')
+      start: z.boolean().optional().describe('Release it now — this is what cuts the worktree. Default false.'),
+      ...TASK_SETTINGS
     },
-    async ({ project, name, brief, kind, dependsOn, start }) => {
-      try {
-        const root = projectRoot(project)
-        // Checked here and not in the store: a typo'd id would silently become a
-        // dependency on nothing, which reads on the board as "released, so it
-        // must have been fine" — the one failure this whole field exists to stop.
-        const known = new Set(listTasks(root).map((t) => t.id))
-        const unknown = (dependsOn ?? []).filter((id) => !known.has(id))
-        if (unknown.length) {
-          return textResult({ error: `No task on this board has these ids: ${unknown.join(', ')}` })
-        }
-        const task = addTask({ project: root, name, brief, kind: kind as TaskKind | undefined, dependsOn })
-        const win = getWindow()
-        if (start && win) {
-          const released = await releaseTask(win, task.id)
-          pushBoard(win, root)
-          return textResult(released)
-        }
-        pushBoard(win, root)
-        return textResult(task)
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
+    colonyAddTaskTool
+  )
+
+  server.tool(
+    'colony_update_task',
+    "Change a task that is still in the backlog — its brief, name, kind, dependencies, base, autonomous or cleanup — keeping its id, so nothing that depends on it has to be re-pointed. Refuses once the task is released: its brief is already on disk and its branch already named.",
+    {
+      task: z.string().describe('The task id, from colony_board.'),
+      name: z.string().optional().describe('A new kebab-case name.'),
+      brief: z.string().optional().describe('The whole new brief. Replaces the old one.'),
+      kind: z.enum(TASK_KINDS as [string, ...string[]]).optional().describe('feat, fix or chore.'),
+      dependsOn: z
+        .array(z.string())
+        .optional()
+        .describe('The whole new dependency list, replacing the old one. An empty list clears it.'),
+      ...TASK_SETTINGS
+    },
+    colonyUpdateTaskTool
   )
 
   server.tool(
@@ -1766,7 +1864,7 @@ function registerColonyTools(server: McpServer): void {
 function registerColonyLandingTools(server: McpServer): void {
   server.tool(
     'colony_merge_task',
-    "Merge a finished task's branch into its base. Only works from `done`, and only once. It is the SAFE merge — it refuses on a dirty worktree, a dirty main worktree or a conflict, and leaves the branch exactly as it was, so the answer is either a clean landing or a reason. Merging is also what unblocks anything queued behind this task: whatever was waiting on it is released automatically here.",
+    "Merge a finished task's branch into its base. Only works from `done`, and only once. It is the SAFE merge — it refuses on a dirty worktree, a dirty tree holding the base branch, or a conflict, and leaves the branch exactly as it was, so the answer is either a clean landing or a reason. Merging is also what unblocks anything queued behind this task: whatever was waiting on it is released automatically here.",
     { task: z.string().describe('The task id, from colony_board.') },
     async ({ task }) => {
       try {
@@ -1805,6 +1903,7 @@ function registerColonyLandingTools(server: McpServer): void {
     async ({ project }) => {
       try {
         const root = projectRoot(project)
+        await reconcileMerged(getWindow(), root)
         const tasks = listTasks(root)
         return textResult({
           mergeable: tasks

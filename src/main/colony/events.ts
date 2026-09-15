@@ -32,6 +32,8 @@ export type BoardEventKind =
   | 'stopped'
   /** A lane handed the card back to a stage nobody has. */
   | 'lost'
+  /** Merged, then its worktree removed and its branch deleted (a board or task with `cleanup`). */
+  | 'cleaned'
 
 export interface BoardEvent {
   id: string

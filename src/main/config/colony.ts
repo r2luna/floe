@@ -61,6 +61,17 @@ export interface ColonyConfig {
    * the board where you want to read the diff yourself before it lands.
    */
   automerge: boolean
+  /**
+   * Nobody answers lane questions on this board: every lane is told to take the
+   * recommended option, and a question asked anyway is answered for it. A task's
+   * own `autonomous` wins over this.
+   */
+  autonomous: boolean
+  /**
+   * Once a task merges, remove its worktree and branch and take the card off the
+   * board. A task's own `cleanup` wins over this.
+   */
+  cleanup: boolean
   stages: ColonyStage[]
 }
 
@@ -75,6 +86,8 @@ export const DONE = 'done'
 export const DEFAULT_COLONY: ColonyConfig = {
   cap: 5,
   automerge: true,
+  autonomous: false,
+  cleanup: false,
   stages: [
     { name: 'specifier', skill: 'colony-specify', model: 'opus' },
     { name: 'coder', skill: 'colony-implement', model: 'opus' },
@@ -91,6 +104,8 @@ export const colonyPath = (dir: string): string => join(dir, 'colony.toml')
 interface Layer {
   cap?: number
   automerge?: boolean
+  autonomous?: boolean
+  cleanup?: boolean
   stages?: ColonyStage[]
 }
 
@@ -159,6 +174,8 @@ export function parseGlobalColony(raw: string, file: string): { layer: Layer; er
     layer: {
       cap: colony.has('cap') ? colony.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
       automerge: colony.has('automerge') ? colony.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
+      autonomous: colony.has('autonomous') ? colony.bool('autonomous', DEFAULT_COLONY.autonomous) : undefined,
+      cleanup: colony.has('cleanup') ? colony.bool('cleanup', DEFAULT_COLONY.cleanup) : undefined,
       stages: readStages(sink, raw, colony.raw_('stage'), 'colony.stage')
     },
     errors: sink.errors
@@ -179,6 +196,8 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
     layer: {
       cap: t.has('cap') ? t.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
       automerge: t.has('automerge') ? t.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
+      autonomous: t.has('autonomous') ? t.bool('autonomous', DEFAULT_COLONY.autonomous) : undefined,
+      cleanup: t.has('cleanup') ? t.bool('cleanup', DEFAULT_COLONY.cleanup) : undefined,
       stages: readStages(sink, raw, root.stage, 'stage')
     },
     errors: sink.errors
@@ -189,15 +208,28 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
 export function mergeColony(layers: Layer[]): ColonyConfig {
   let cap = DEFAULT_COLONY.cap
   let automerge = DEFAULT_COLONY.automerge
+  let autonomous = DEFAULT_COLONY.autonomous
+  let cleanup = DEFAULT_COLONY.cleanup
   let stages = DEFAULT_COLONY.stages
   for (const layer of layers) {
     if (layer.cap !== undefined) cap = layer.cap
     if (layer.automerge !== undefined) automerge = layer.automerge
+    if (layer.autonomous !== undefined) autonomous = layer.autonomous
+    if (layer.cleanup !== undefined) cleanup = layer.cleanup
     // Length matters, not presence: a file with `[[stage]]` entries that were all
     // rejected has declared nothing usable, and inheriting beats an empty board.
     if (layer.stages && layer.stages.length) stages = layer.stages
   }
-  return { cap, automerge, stages }
+  return { cap, automerge, autonomous, cleanup, stages }
+}
+
+/** A task's own `autonomous` / `cleanup`, or the board's when the task left it unset. */
+export function resolveFlag(
+  task: { autonomous?: boolean; cleanup?: boolean },
+  config: Pick<ColonyConfig, 'autonomous' | 'cleanup'>,
+  key: 'autonomous' | 'cleanup'
+): boolean {
+  return task[key] ?? config[key]
 }
 
 export interface ColonyResult extends ColonyConfig {

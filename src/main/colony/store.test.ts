@@ -81,3 +81,40 @@ test('the colony owns every step a card ran, not just the one running now', () =
   // A session nobody put on a board is the user's own.
   assert.equal(ids.has('mine'), false)
 })
+
+test('a backlog card can be edited in place, and keeps its id', async () => {
+  const { updateTask } = await import('./store.ts')
+  const dep = addTask({ project: '/edit', name: 'first', brief: '' })
+  const t = addTask({ project: '/edit', name: 'second', brief: 'old', autonomous: false })
+  const edited = updateTask(t.id, { brief: 'new', dependsOn: [dep.id], base: 'feat/parent', autonomous: true, cleanup: true })
+  assert.equal(edited.id, t.id)
+  assert.equal(edited.brief, 'new')
+  assert.deepEqual(edited.dependsOn, [dep.id])
+  assert.equal(edited.base, 'feat/parent')
+  assert.equal(edited.autonomous, true)
+  assert.equal(edited.cleanup, true)
+  // Renaming to its own name is not a collision with itself.
+  assert.equal(updateTask(t.id, { name: 'second' }).name, 'second')
+  // Empty clears back to "inherit".
+  const cleared = updateTask(t.id, { dependsOn: [], base: '' })
+  assert.equal(cleared.dependsOn, undefined)
+  assert.equal(cleared.base, undefined)
+})
+
+test('a released card cannot be edited — its brief is already on disk', async () => {
+  const { updateTask } = await import('./store.ts')
+  const t = addTask({ project: '/edit', name: 'released', brief: '' })
+  patchTask(t.id, { stage: 'coder', worktreePath: '/tree' })
+  assert.throws(() => updateTask(t.id, { brief: 'too late' }), /left the backlog/)
+})
+
+test('a dependency list may not name unknown ids or wait on itself', async () => {
+  const { dependencyProblem, updateTask } = await import('./store.ts')
+  const a = addTask({ project: '/deps', name: 'a', brief: '' })
+  const b = addTask({ project: '/deps', name: 'b', brief: '', dependsOn: [a.id] })
+  assert.match(String(dependencyProblem('/deps', undefined, ['task_nope'])), /task_nope/)
+  assert.equal(dependencyProblem('/deps', undefined, [a.id]), null)
+  // a → b → a is a cycle nobody would ever be released from.
+  assert.throws(() => updateTask(a.id, { dependsOn: [b.id] }), /wait on itself/)
+  assert.throws(() => updateTask(a.id, { dependsOn: [a.id] }), /wait on itself/)
+})

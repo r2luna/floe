@@ -80,6 +80,10 @@ Every lane after you is forbidden from asking the user anything: by then the
 decisions are on disk and a question would just stall the task. So the questions
 that are worth a human belong here, where the work is still being decided.
 
+When the prompt carries `AUTONOMOUS BOARD`, the licence is withdrawn: ask nothing,
+take the recommended option for every open question, and write it under
+`## Clarifications` as `- Q: <question> -> A: <decision> (assumed)`.
+
 That is a licence, not an instruction. Most specs should still be written without
 asking anything — resolve what you can from the request, the codebase, existing
 patterns and the conventions doc, and record the rest as assumptions.

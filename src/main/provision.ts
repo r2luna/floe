@@ -16,6 +16,7 @@ import {
   type PremiseAnswer
 } from './premise'
 import { bwrapPresent, sandboxDisabled, sandboxedSpawn } from './sandbox'
+import { beginProvision, trackChild } from './provisionRuns'
 import { isLaravel, listCommands } from './commands'
 import { startCommand, userShell } from './commandRunner'
 import { getProjectEnv } from './projects'
@@ -171,11 +172,14 @@ function runShell(
     }
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(spawnCmd, spawnArgs, { cwd, env })
+      // Its own process group off Windows, so removing the worktree can stop the
+      // install the shell started and not just the shell (see provisionRuns).
+      child = spawn(spawnCmd, spawnArgs, { cwd, env, detached: !win32 })
     } catch (e) {
       reject(e instanceof Error ? e : new Error(String(e)))
       return
     }
+    trackChild(cwd, child)
     log(`$ ${cmd} ${args.join(' ')}\n`)
     child.stdout?.on('data', (d: Buffer) => log(d.toString()))
     child.stderr?.on('data', (d: Buffer) => log(d.toString()))
@@ -959,6 +963,24 @@ export async function provisionWorktree(
   const emit = (e: WithoutWorktree<ProvisionEvent>): void => {
     if (!win.isDestroyed()) win.webContents.send('provision:event', { worktreePath, ...e })
   }
+  // Registered for the whole run, so removing the tree can stop it and wait.
+  const run = beginProvision(worktreePath)
+  try {
+    await runProvision(win, root, worktreePath, branch, opts, emit, run.signal)
+  } finally {
+    run.end()
+  }
+}
+
+async function runProvision(
+  win: BrowserWindow,
+  root: string,
+  worktreePath: string,
+  branch: string,
+  opts: ProvisionOpts,
+  emit: Emit,
+  signal: AbortSignal
+): Promise<void> {
 
   // A re-run replaces whatever the last one was still asking.
   cancelAsks(worktreePath)
@@ -1016,6 +1038,12 @@ export async function provisionWorktree(
   let started = !opts.from
   let ok = true
   for (const def of recipe) {
+    // The tree is being removed: the steps left would only write into a folder
+    // that is about to be deleted.
+    if (signal.aborted) {
+      ok = false
+      break
+    }
     // Steps before `from` already ran in a previous pass — report them done.
     if (!started && def.id !== opts.from) {
       if (!skip.has(def.id)) emit({ kind: 'step', id: def.id, status: 'done', detail: 'already done' })

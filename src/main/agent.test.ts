@@ -572,6 +572,42 @@ test('handleLine: an agent-spawned session answers its own question, never the u
   assert.match(reply.response.response.message, /decide it yourself/i)
 })
 
+test('handleLine: a lane on an autonomous colony task answers its own question; an ordinary lane still asks', async () => {
+  const { addTask, patchTask } = await import('./colony/store.ts')
+  const ask = (key: string, requestId: string): { events: AgentEvent[]; written: string[] } => {
+    const written: string[] = []
+    const conn = fakeConn({ child: { stdin: { write: (s: string) => written.push(s) } } } as unknown as Partial<Conn>)
+    const { win, events } = fakeWin()
+    handleLine(
+      win,
+      key,
+      conn,
+      JSON.stringify({
+        type: 'control_request',
+        request_id: requestId,
+        request: {
+          subtype: 'can_use_tool',
+          tool_name: 'AskUserQuestion',
+          input: { questions: [{ question: 'Q?', options: [{ label: 'A' }] }] }
+        }
+      })
+    )
+    return { events, written }
+  }
+
+  addCreatedSession({ id: 'lane-auto', worktreePath: '/tmp/wt-auto', title: 'auto · specifier' })
+  const auto = addTask({ project: '/tmp/board', name: 'auto', brief: '', autonomous: true })
+  patchTask(auto.id, { sessionId: 'lane-auto', stage: 'specifier', status: 'working' })
+  const answered = ask('lane-auto', 'r-auto')
+  assert.deepEqual(kinds(answered.events), [], 'no card for a question nobody will answer')
+  assert.match(JSON.parse(answered.written[0]).response.response.message, /autonomous colony board/)
+
+  addCreatedSession({ id: 'lane-asks', worktreePath: '/tmp/wt-asks', title: 'asks · specifier' })
+  const asks = addTask({ project: '/tmp/board', name: 'asks', brief: '', autonomous: false })
+  patchTask(asks.id, { sessionId: 'lane-asks', stage: 'specifier', status: 'working' })
+  assert.deepEqual(kinds(ask('lane-asks', 'r-asks').events), ['question'])
+})
+
 test('handleLine: a normal tool control_request surfaces a permission prompt', () => {
   const conn = fakeConn()
   const { events } = run(

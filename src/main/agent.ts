@@ -7,6 +7,7 @@ import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession } from './sessionStore'
+import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
 // Who this key IS — session or query. Every alias lookup in this file goes
 // through it, so a conversation the session table does not hold still resolves
 // instead of silently answering `undefined`. See identity.ts.
@@ -1416,11 +1417,15 @@ function handleAskUserQuestion(
   // talks to the user. Answer the child's question here (same deny+message
   // channel the user's answer uses) so it decides for itself and escalates
   // through its parent — never a question card the user has to clear.
-  if (getCreatedSession(key)?.spawnedBy) {
+  //
+  // A lane on an autonomous colony task is the same case with a different
+  // reason: the board has nobody to put the question to.
+  const answer = getCreatedSession(key)?.spawnedBy ? CHILD_ANSWERS_ITSELF : laneAnswersItself(key) ? LANE_ANSWERS_ITSELF : null
+  if (answer) {
     log('child-question-answered', { key, requestId })
     write(conn, {
       type: 'control_response',
-      response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: CHILD_ANSWERS_ITSELF } }
+      response: { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: answer } }
     })
     return true
   }
