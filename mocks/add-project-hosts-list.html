@@ -1,0 +1,150 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Add project — hosts from floe.toml</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. The dialogs use the app's own palette classes. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:22px 26px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:96ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:96ch; }
+.opt{ margin:0 0 40px; }
+button.theme{ position:fixed; top:12px; right:16px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+.win{ position:relative; width:1440px; max-width:100%; height:340px; overflow:hidden;
+  border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); }
+.win .palette-scrim{ position:absolute; padding-top:24px; }
+pre.toml{ width:560px; margin:0; padding:10px 12px; border:1px solid var(--line); border-radius:var(--radius);
+  background:var(--panel); color:var(--text); font:inherit; }
+pre.toml .c{ color:var(--dim); }
+pre.toml .new{ color:var(--live); }
+.row-detail{ margin-left:auto; color:var(--dim); font-size:11.5px; }
+.row-detail[data-tone='ok']{ color:var(--live); }
+.palette-row{ display:flex; align-items:center; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Add project — hosts listed in floe.toml</h1>
+<p class="lede">Hosts live in <code>[projects] hosts</code> in floe.toml. The modal lists them under MACHINE.
+Picking a row rewrites the <code>host@</code> prefix in the head. Typing a new <code>host@path</code> still works, and a successful pair appends that host to the file.
+A listed host that is not paired yet pairs over ssh on its first add.</p>
+
+<!-- C1 -->
+<div class="opt">
+<h2>C1 · the config</h2>
+<p class="note">Hand-edited or written by Floe. Tokens stay in the server plugin's config, not here.</p>
+<pre class="toml">[projects]
+groups = ["Projects", "DevSquad"]
+<span class="c"># Machines running Floe with serving on. Add project lists them;
+# a new host@path that pairs is appended here.</span>
+hosts = ["gtt", "tahoe"<span class="new">, "nas"</span>]</pre>
+</div>
+
+<!-- M1 -->
+<div class="opt">
+<h2>M1 · local path, machines listed</h2>
+<p class="note">MACHINE comes first. The mark follows the head: no prefix marks this machine.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="~/code/01.r2luna/01.projects/floe" />
+    <span class="palette-count">path</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">MACHINE</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">this machine</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">gtt</span><span class="row-detail" data-tone="ok">connected</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">tahoe</span><span class="row-detail">pairs on first add</span></button>
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">DevSquad</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">~/code/01.r2luna/01.projects/floe</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span>this machine</span></div>
+        <div class="palette-fact"><b>git</b><span data-tone="ok">repo</span></div>
+        <div class="palette-fact"><b>branch</b><span>master</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ add · ↓ machine &amp; group · ⌘O browse · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- M2 -->
+<div class="opt">
+<h2>M2 · picked gtt with ↓ ⏎</h2>
+<p class="note">The head becomes <code>gtt@</code> + the path you had typed. The caret goes back to the head.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="gtt@~/code/app" />
+    <span class="palette-count">gtt</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">MACHINE</div>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">this machine</span></button>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">gtt</span><span class="row-detail" data-tone="ok">connected</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">tahoe</span><span class="row-detail">pairs on first add</span></button>
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">DevSquad</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">gtt@~/code/app</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span data-tone="ok">gtt · connected</span></div>
+        <div class="palette-fact"><b>git</b><span data-tone="ok">repo</span></div>
+        <div class="palette-fact"><b>branch</b><span>main</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ add · ↓ machine &amp; group · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- M3 -->
+<div class="opt">
+<h2>M3 · a host not in the list</h2>
+<p class="note">Typed by hand. It shows as a row marked new, and after pairing it is written to floe.toml, so it is listed next time.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="nas@/srv/backup-tools" />
+    <span class="palette-count">nas</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">MACHINE</div>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">this machine</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">gtt</span><span class="row-detail" data-tone="ok">connected</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">tahoe</span><span class="row-detail">pairs on first add</span></button>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">nas</span><span class="row-detail">new · saved after pairing</span></button>
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">nas@/srv/backup-tools</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span data-tone="warn">nas · not paired yet</span></div>
+        <div class="palette-fact"><b>pairs by</b><span>ssh nas → daemon token</span></div>
+        <div class="palette-fact"><b>saves to</b><span>floe.toml [projects] hosts</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ pair nas and add · ↓ machine &amp; group · esc cancel</div>
+</div></div></div>
+</div>
+
+</body>
+</html>

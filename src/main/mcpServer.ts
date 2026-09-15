@@ -82,7 +82,9 @@ import { getClaudeInfo } from './claudeInfo'
 import { startMcpAuth } from './mcpAuth'
 import { existsSync, realpathSync, rmSync } from 'node:fs'
 import {
+  addHost,
   addProjectByPath,
+  listHosts,
   removeProject,
   renameProject,
   setProjectGroup,
@@ -2149,6 +2151,26 @@ function registerProjectTools(server: McpServer): void {
         if (added.error) return textResult({ error: added.error })
         pushRefresh('project.reload')
         return textResult(added)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'list_hosts',
+    'The machines "Add project" lists — `[projects] hosts` in floe.toml. A project goes on one by adding it as `host@path` in the dialog; pair a host with `server_pair_host`.',
+    {},
+    async () => textResult({ hosts: listHosts() })
+  )
+
+  server.tool(
+    'add_host',
+    'Remember a machine for "Add project" by appending it to `[projects] hosts` in floe.toml. Idempotent. This does not pair it — `server_pair_host` does.',
+    { host: z.string().describe('Hostname or ssh alias, e.g. "gtt".') },
+    async ({ host }) => {
+      try {
+        return textResult({ hosts: addHost(host) })
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

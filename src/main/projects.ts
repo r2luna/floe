@@ -13,6 +13,7 @@ import { isGitRepo, listWorktrees, repoRoot } from './git'
 import { floeConfig, setFloeValue } from './config/floe'
 import {
   createProject,
+  expandHome,
   projectScan,
   removeProject as removeProjectDir,
   setProjectEnvValue,
@@ -120,6 +121,20 @@ function writeGroups(groups: string[]): string[] {
   return value
 }
 
+export function listHosts(): string[] {
+  return floeConfig().projects.hosts
+}
+
+/** Append a machine to `[projects] hosts`. A host already listed is a no-op. */
+export function addHost(typed: string): string[] {
+  const host = typed.trim()
+  if (!host || /[\s/@]/.test(host)) throw new Error(`Not a hostname: "${typed}"`)
+  const hosts = listHosts()
+  if (hosts.includes(host)) return hosts
+  setFloeValue('projects', 'hosts', [...hosts, host])
+  return listHosts()
+}
+
 export function listGroups(): string[] {
   return currentGroups()
 }
@@ -166,9 +181,12 @@ export async function addProject(
 // flow must fire for a project Floe has never seen and for no other, so the
 // distinction has to be stated here rather than guessed at upstream.
 export async function addProjectByPath(
-  picked: string,
+  typed: string,
   group?: string
 ): Promise<{ project?: Project; created?: boolean; error?: string }> {
+  // `~` is this machine's home: an add from another machine types it without
+  // knowing where that is.
+  const picked = expandHome(typed.trim())
   if (!existsSync(picked)) return { error: `Path does not exist: ${picked}` }
   if (!(await isGitRepo(picked))) {
     return { error: `"${basename(picked)}" is not a git repository.` }
@@ -193,11 +211,14 @@ export async function addProjectByPath(
  * the caller is asking about half-typed text.
  */
 export async function probePath(picked: string): Promise<PathProbe> {
+  // `path` answers with what was typed, which is how the dialog matches the
+  // answer to its head. The disk is asked about the expanded one.
   const path = picked.trim()
-  if (!path || !existsSync(path)) return { path, exists: false, isRepo: false }
-  if (!(await isGitRepo(path))) return { path, exists: true, isRepo: false }
+  const onDisk = expandHome(path)
+  if (!path || !existsSync(onDisk)) return { path, exists: false, isRepo: false }
+  if (!(await isGitRepo(onDisk))) return { path, exists: true, isRepo: false }
 
-  const root = (await repoRoot(path)) ?? path
+  const root = (await repoRoot(onDisk)) ?? onDisk
   const existing = stored(root)
   // One call for both facts: the main worktree carries the branch, and the list
   // length is how many worktrees come along with the project.

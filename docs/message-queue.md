@@ -74,5 +74,5 @@ talk to somebody else.
 
 ## Not part of this
 
-The interrupt path (⌘.) is separate — that aborts the current turn. Steering
+The interrupt path (⌘. or ⌃C with no selection) is separate — that aborts the current turn. Steering
 and queueing only ever add context; they never cancel work in flight.

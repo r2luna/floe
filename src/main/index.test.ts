@@ -189,6 +189,8 @@ const CHANNELS = [
   'projects:add',
   'projects:addByPath',
   'projects:probe',
+  'projects:hosts',
+  'projects:addHost',
   'projects:setEnv',
   'projects:setGroup',
   'projects:remove',

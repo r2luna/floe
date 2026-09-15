@@ -2,7 +2,7 @@ import { after, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { makeGitRepo, type GitFixture } from './gitFixture.test-helper.ts'
 import { installHook } from './config/hook.test-helper.ts'
 
@@ -80,6 +80,37 @@ test('a subdirectory of a repo is added as the repo root, once', async () => {
   assert.equal(first.created, true)
   assert.equal(second.created, false, 'the root was already stored')
   assert.equal(second.project?.path, first.project?.path)
+})
+
+// `gtt@~/code/app` reaches the machine as `~/code/app`: the home it means is
+// that machine's, which only that machine can expand.
+test('a path under ~ is probed and added from this machine’s home', async () => {
+  reset()
+  const dir = repo()
+  const home = process.env.HOME
+  process.env.HOME = dirname(dir)
+  try {
+    const typed = `~/${basename(dir)}`
+    const probe = await projects.probePath(typed)
+    assert.equal(probe.path, typed, 'answers with what was typed, so the dialog can match it')
+    assert.equal(probe.isRepo, true)
+    const res = await projects.addProjectByPath(typed)
+    assert.equal(res.project?.path, dir)
+  } finally {
+    process.env.HOME = home
+  }
+})
+
+test('addHost appends a machine to floe.toml once, and refuses what is not a hostname', async () => {
+  reset()
+  const floe = await import('./config/floe.ts')
+  floe.invalidateFloeConfig()
+  assert.deepEqual(projects.listHosts(), [])
+  assert.deepEqual(projects.addHost(' gtt '), ['gtt'])
+  assert.deepEqual(projects.addHost('gtt'), ['gtt'])
+  assert.deepEqual(projects.addHost('tahoe'), ['gtt', 'tahoe'])
+  assert.throws(() => projects.addHost('gtt@~/x'), /Not a hostname/)
+  assert.throws(() => projects.addHost(''), /Not a hostname/)
 })
 
 test('a path that is not a repository is refused, and says nothing about created', async () => {

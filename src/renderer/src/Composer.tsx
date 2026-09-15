@@ -738,6 +738,16 @@ export function Composer({
       return onStop()
     }
 
+    // ⌃C interrupts too, the terminal habit. With a selection it stays copy,
+    // which is what ⌃C means on Linux.
+    if (e.key.toLowerCase() === 'c' && e.ctrlKey && !e.metaKey && !e.altKey && onStop) {
+      const el = e.currentTarget
+      if (el.selectionStart === el.selectionEnd) {
+        e.preventDefault()
+        return onStop()
+      }
+    }
+
     // ⌘L links this message to the one above it in the queue. It has to work
     // from inside the composer, which is where you are when you decide that the
     // next line belongs with the last one.
@@ -1103,7 +1113,7 @@ export function Composer({
           <button
             className="composer-send"
             data-stop
-            title="Interrupt (⌘.)"
+            title="Interrupt (⌘. or ⌃C)"
             onPointerDown={(e) => e.preventDefault()}
             onClick={onStop}
           >

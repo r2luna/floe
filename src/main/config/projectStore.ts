@@ -98,7 +98,7 @@ export function directoryNameFor(path: string, taken: Set<string>): string {
 // ---------------------------------------------------------------------------
 
 /** Expand a leading `~` so the file can stay portable across machines. */
-function expandHome(path: string): string {
+export function expandHome(path: string): string {
   if (path === '~') return process.env.HOME ?? path
   if (path.startsWith('~/')) return join(process.env.HOME ?? '~', path.slice(2))
   return path

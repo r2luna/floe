@@ -1,0 +1,171 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Add project — host@path</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Mockup chrome only. The dialogs use the app's own palette classes. */
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 12.5px/1.55 var(--mono); padding:22px 26px 80px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+.lede{ color:var(--dim); font-size:12px; margin:0 0 26px; max-width:96ch; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 12px; max-width:96ch; }
+.opt{ margin:0 0 40px; }
+button.theme{ position:fixed; top:12px; right:16px; background:transparent; color:var(--dim);
+  border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:12px;
+  padding:3px 10px; cursor:pointer; z-index:200; }
+.win{ position:relative; width:1440px; max-width:100%; height:290px; overflow:hidden;
+  border:1px solid var(--line); border-radius:var(--radius); background:var(--bg); }
+.win .palette-scrim{ position:absolute; padding-top:24px; }
+.host{ color:var(--accent); }
+.panelmock{ width:420px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel-focused); }
+.panelmock .palette-head{ justify-content:space-between; }
+.panelmock .body{ padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.chip{ border:1px solid var(--edge); border-radius:var(--radius); padding:2px 9px; color:var(--text); background:transparent; font:inherit; width:max-content; }
+.chip[data-on]{ border-color:var(--live); color:var(--live); }
+.dimtxt{ color:var(--dim); }
+</style>
+</head>
+<body>
+<button class="theme" onclick="const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Add project — one field, <span class="host">host</span>@path</h1>
+<p class="lede">The MACHINE section is gone. The head reads <code>[host@]path</code>. No host means this machine.
+A host Floe has not met yet is paired on ⏎: <code>ssh host</code> reads its daemon token, Floe saves it, then adds the project.
+Rows are only GROUP (and Browse… when the path is local).</p>
+
+<!-- S1 -->
+<div class="opt">
+<h2>S1 · local path</h2>
+<p class="note">Same as today minus the machine rows. ⌘O and Browse… stay because the path is local.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="~/code/01.r2luna/01.projects/floe" />
+    <span class="palette-count">path</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">Work</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+      <div class="palette-group">PATH</div>
+      <button class="palette-row"><span class="palette-title">Browse…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">~/code/01.r2luna/01.projects/floe</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span>this mac</span></div>
+        <div class="palette-fact"><b>git</b><span data-tone="ok">repo</span></div>
+        <div class="palette-fact"><b>branch</b><span>master</span></div>
+        <div class="palette-fact"><b>added</b><span data-tone="warn">not yet — it will be new</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+      <div class="palette-pane-note">Prefix a host to add on another machine: gtt@~/code/app</div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ add · ↓ group · ⌘O browse · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- S2 -->
+<div class="opt">
+<h2>S2 · known host</h2>
+<p class="note">gtt is already paired. The pane probes the path on gtt like today's remote probe.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="gtt@~/code/app" />
+    <span class="palette-count">gtt</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">Work</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">gtt@~/code/app</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span data-tone="ok">gtt · connected</span></div>
+        <div class="palette-fact"><b>git</b><span data-tone="ok">repo</span></div>
+        <div class="palette-fact"><b>branch</b><span>main</span></div>
+        <div class="palette-fact"><b>added</b><span data-tone="warn">not yet — it will be new</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ add · ↓ group · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- S3 -->
+<div class="opt">
+<h2>S3 · new host</h2>
+<p class="note">No probe yet: there is no token to ask with. ⏎ pairs over ssh, then adds. The foot says so.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="gtt@~/code/app" />
+    <span class="palette-count">gtt</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">Work</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">gtt@~/code/app</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span data-tone="warn">gtt · not paired yet</span></div>
+        <div class="palette-fact"><b>pairs by</b><span>ssh gtt → daemon token → ws://gtt:41680</span></div>
+        <div class="palette-fact"><b>path</b><span>checked after pairing</span></div>
+        <div class="palette-fact"><b>goes to</b><span>Projects</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ pair gtt and add · ↓ group · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- S4 -->
+<div class="opt">
+<h2>S4 · pairing failed</h2>
+<p class="note">The dialog stays open with the reason. Nothing is saved.</p>
+<div class="win"><div class="palette-scrim"><div class="palette" data-wide>
+  <div class="palette-head"><span class="palette-sigil">＋</span>
+    <input class="palette-input" value="gtt@~/code/app" />
+    <span class="palette-count">gtt</span></div>
+  <div class="palette-split">
+    <div class="palette-list">
+      <div class="palette-group">GROUP</div>
+      <button class="palette-row"><i class="palette-mark" data-on></i><span class="palette-title">Projects</span></button>
+      <button class="palette-row"><i class="palette-mark"></i><span class="palette-title">New group…</span></button>
+    </div>
+    <div class="palette-side">
+      <div class="palette-pane-title">gtt@~/code/app</div>
+      <div class="palette-facts">
+        <div class="palette-fact"><b>machine</b><span data-tone="warn">gtt · pairing failed</span></div>
+        <div class="palette-fact"><b>ssh</b><span data-tone="warn">no serve token on gtt — is Floe serving there?</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="palette-foot">⏎ retry · esc cancel</div>
+</div></div></div>
+</div>
+
+<!-- P1 -->
+<div class="opt">
+<h2>P1 · server panel</h2>
+<p class="note">Only whether this machine serves. Pair string, Add machine… and the machine list are gone. Forgetting a host stays in ⌘K and MCP.</p>
+<div class="panelmock">
+  <div class="palette-head"><span>Server</span><span class="dimtxt">daemon: running</span></div>
+  <div class="body">
+    <button class="chip" data-on>● Serve this machine</button>
+    <span class="dimtxt">Other machines add projects here as mac@path.</span>
+  </div>
+</div>
+</div>
+
+</body>
+</html>

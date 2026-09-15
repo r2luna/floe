@@ -22,10 +22,12 @@ import {
   addGroup,
   deleteGroup,
   addProject,
+  addHost,
   addProjectByPath,
   homeWorktree,
   isHomePath,
   listGroups,
+  listHosts,
   listProjects,
   probePath,
   removeProject,
@@ -604,6 +606,9 @@ export function registerProjectsIpc(): void {
   // What the add dialog shows about the path while you type it — the same
   // checks the add itself runs, so the pane never promises what Add refuses.
   handle('projects:probe', (_event, path: string) => probePath(path))
+  // The machines Add project lists, from `[projects] hosts` in floe.toml.
+  handle('projects:hosts', () => listHosts())
+  handle('projects:addHost', (_event, host: string) => addHost(host))
   // Per-project containerized env (mode 'container' → Docker); null turns it off
   // (back to host-native provisioning). See provision.ts / compose.ts.
   handle('projects:setEnv', (_event, path: string, env: ProjectEnvConfig | null) =>
