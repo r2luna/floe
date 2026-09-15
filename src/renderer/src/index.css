@@ -3119,6 +3119,12 @@ button {
   width: 6px;
   height: 6px;
   color: var(--faint);
+  /* Same sizing as .spin: at the body line-height the glyph's line box
+     overhangs the 6px cell and lands well below the text. The lift centres the
+     diamond on the x-height — it inks down on the baseline. */
+  font-size: 12px;
+  line-height: 1;
+  transform: translateY(-2px);
 }
 
 /* The tool it is on right now, in the same blue the app already uses for "a
