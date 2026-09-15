@@ -4197,6 +4197,14 @@ button {
   cursor: auto;
 }
 
+/* ⌘ (ctrl on Linux) held: a name in a code view is a link to its definition.
+   Highlight tokens are the hover target, which in a highlighted file is one
+   name — plain text underlines the run the pointer is in. */
+:root[data-jump-key] .diff[data-path] .diff-code span:hover {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* One number column, not the diff's two — a file has no old and new side. */
 .file-line {
   grid-template-columns: 44px minmax(0, 1fr);

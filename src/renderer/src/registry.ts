@@ -33,6 +33,7 @@ import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { downloadAndOpen } from './download.ts'
+import { identifiersOf } from './definition.ts'
 import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
@@ -876,6 +877,37 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Go to the previous change',
         group: 'Diff',
         run: (c) => stepChange(c, -1)
+      },
+      {
+        // The name comes from, in order: an explicit arg (an agent over
+        // run_command), the text selected in the row, or every name on the
+        // cursor's line — the first one with a definition wins.
+        id: 'code.definition',
+        title: 'Go to definition',
+        group: 'Code',
+        enabled: (c) => ['file', 'diff'].includes(c.lane.panels[c.lane.focus]?.kind ?? ''),
+        unavailable: () => 'open a file or a diff first',
+        run: (c, arg) => {
+          const panel = c.lane.panels[c.lane.focus]
+          const row = c.rowsOf(c.panelEl(c.lane.focus))[panel?.cursor ?? 0]
+          const picked = window.getSelection()?.toString().trim() ?? ''
+          const names = arg
+            ? [arg]
+            : /^[A-Za-z_$][\w$]*$/.test(picked)
+              ? [picked]
+              : identifiersOf(row?.querySelector('.diff-code')?.textContent ?? '')
+          if (!names.length) return c.say('no name on this line')
+          const line = Number(row?.dataset.newLine)
+          c.goToDefinition(names, line > 0 ? line : undefined)
+        }
+      },
+      {
+        id: 'code.back',
+        title: 'Back to where go-to-definition left from',
+        group: 'Code',
+        enabled: (c) => !!c.jumpBack,
+        unavailable: () => 'no definition jump to go back from',
+        run: (c) => c.jumpBack?.()
       },
       {
         id: 'selection.cancel',

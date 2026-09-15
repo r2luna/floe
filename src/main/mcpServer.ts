@@ -42,6 +42,7 @@ import {
   worktreeDiffStat
 } from './git'
 import { worktreeStatus } from './gitStatus'
+import { findDefinitions } from './definitions'
 import { provisionWorktree } from './provision'
 import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
@@ -731,6 +732,17 @@ function registerWorktreeTools(server: McpServer, token: string): void {
         return textResult({ error: (e as Error).message })
       }
     }
+  )
+
+  server.tool(
+    'find_definition',
+    'Where a class, function or other symbol is defined in a worktree, best guess first — the file and diff viewers\' go-to-definition. A grep for definition-shaped lines, not a language server.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      name: z.string().describe('The identifier to look up, e.g. FileDiff.'),
+      from: z.string().optional().describe('The file being read, relative to the worktree; its own definitions rank first.')
+    },
+    async ({ worktree, name, from }) => textResult(await findDefinitions(worktree, name, from))
   )
 }
 

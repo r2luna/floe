@@ -485,6 +485,21 @@ rather than a rewritten sentence shown as one red line and one green one.`,
     ]
   },
   {
+    title: 'Go to Definition',
+    doc: `In a file or a diff, \`⌘\`-click a name (ctrl-click on Linux) to open the file
+that defines it, on the defining line. \`d\` does the same for the line under the
+cursor: the first name on it that is defined somewhere, or the text you selected.
+\`-\` goes back to where you jumped from, one jump per press.
+
+Definitions are found by grepping the worktree for definition-shaped lines
+(\`class Foo\`, \`function foo\`, \`const foo =\`), not by a language server, so a
+name defined in the file you are reading wins over one defined elsewhere.`,
+    binds: [
+      { key: 'd', command: 'code.definition', when: 'panel in ["diff", "file"]' },
+      { key: '-', command: 'code.back', when: 'panel in ["diff", "file"]' }
+    ]
+  },
+  {
     title: 'Line Selection',
     doc: `Visual-line selection, only in the panels where lines exist to select — a
 diff and a file (which includes a rendered .md, one row per source line). \`c\`

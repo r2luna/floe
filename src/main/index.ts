@@ -41,6 +41,7 @@ import {
 import { setSharedDataDir } from './dataDir'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
+import { findDefinitions } from './definitions'
 import {
   changedFiles,
   lastCommit,
@@ -991,6 +992,10 @@ export function registerFileIpc(): void {
   )
   handle('files:read', (_event, worktreePath: string, relPath: string) =>
     readFileContent(worktreePath, relPath)
+  )
+  // Go-to-definition in the file and diff viewers — see definitions.ts.
+  handle('files:definition', (_event, worktreePath: string, name: string, fromPath?: string) =>
+    isHomePath(worktreePath) ? [] : findDefinitions(worktreePath, name, fromPath)
   )
   // The slow half of an Office preview: LibreOffice drawing the real slides.
   // Asked for after the text is already on screen, and null whenever this

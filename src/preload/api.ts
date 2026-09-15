@@ -37,6 +37,7 @@ import type {
   FileChunk,
   FileContent,
   FileNode,
+  SymbolDefinition,
   ImageAttachment,
   ImplementPhase,
   JumpSession,
@@ -876,6 +877,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       all: (worktreePath: string): Promise<string[]> => ipcRenderer.invoke('files:all', worktreePath),
       read: (worktreePath: string, relPath: string): Promise<FileContent> =>
         ipcRenderer.invoke('files:read', worktreePath, relPath),
+      /**
+       * Where `name` is defined in the worktree, best guess first — the reader's
+       * go-to-definition. `fromPath` is the file being read; its own
+       * definitions rank first.
+       */
+      definition: (worktreePath: string, name: string, fromPath?: string): Promise<SymbolDefinition[]> =>
+        ipcRenderer.invoke('files:definition', worktreePath, name, fromPath),
       /** A document as LibreOffice draws it (a PDF), or null when it can't. */
       renderDoc: (worktreePath: string, relPath: string): Promise<FileContent | null> =>
         ipcRenderer.invoke('files:renderDoc', worktreePath, relPath),

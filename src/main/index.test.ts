@@ -294,6 +294,7 @@ const CHANNELS = [
   'files:list',
   'files:all',
   'files:read',
+  'files:definition',
   'files:renderDoc',
   'media:probe',
   'media:read',

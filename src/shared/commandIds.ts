@@ -64,6 +64,8 @@ export const COMMAND_IDS: string[] = [
   'selection.toggle',
   'selection.cancel',
   'selection.comment',
+  'code.definition',
+  'code.back',
   // App
   'palette.chord',
   'palette.open',
