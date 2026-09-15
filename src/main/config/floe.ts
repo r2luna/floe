@@ -115,7 +115,8 @@ export interface FloeConfig {
   sandbox: { enabled: boolean }
   notifications: { sound: (typeof NOTIFY_SOUNDS)[number] }
   update: { checkIntervalHours: number }
-  projects: { groups: string[] }
+  /** `hosts`: machines Add project offers, typed as `host@path` (docs in the template). */
+  projects: { groups: string[]; hosts: string[] }
   integrations: { jira: { site?: string; email?: string }; bitbucket: { email?: string } }
 }
 
@@ -157,7 +158,7 @@ export const DEFAULTS: FloeConfig = {
   sandbox: { enabled: true },
   notifications: { sound: 'chime' },
   update: { checkIntervalHours: 6 },
-  projects: { groups: [DEFAULT_GROUP] },
+  projects: { groups: [DEFAULT_GROUP], hosts: [] },
   // The optional keys are spelled out rather than omitted so this object has the
   // same shape a parse produces — which is what lets a test assert that an empty
   // file and the defaults are the same thing.
@@ -324,7 +325,10 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
           update?.num('check-interval-hours', d.update.checkIntervalHours, { min: 0.25, max: 168 }) ??
           d.update.checkIntervalHours
       },
-      projects: { groups: withDefaultGroup(projects?.strArray('groups')) },
+      projects: {
+        groups: withDefaultGroup(projects?.strArray('groups')),
+        hosts: [...new Set((projects?.strArray('hosts') ?? []).map((h) => h.trim()).filter(Boolean))]
+      },
       integrations: {
         jira: { site: jira?.optStr('site'), email: jira?.optStr('email') },
         bitbucket: { email: bitbucket?.optStr('email') }

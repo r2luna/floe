@@ -5732,6 +5732,11 @@ button {
   font-size: 11px;
 }
 
+/* A machine row whose host answers right now (AddProject). */
+.palette-detail[data-tone='ok'] {
+  color: var(--live);
+}
+
 .palette-empty {
   padding: 14px 10px;
   color: var(--dim);

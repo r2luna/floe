@@ -58,7 +58,17 @@ import { listCommands } from './commands'
 import { KeysHelp } from './KeysHelp'
 import { AddProject } from './AddProject'
 import { reason } from './ipcError'
-import { attach, backendLabel, backendOf, currentBackend, dropLanding, handOff, LOCAL, peekLanding } from './backends'
+import {
+  attach,
+  backendLabel,
+  backendOf,
+  currentBackend,
+  dropLanding,
+  handOff,
+  LOCAL,
+  pairHost,
+  peekLanding
+} from './backends'
 import type { NewWorktreeProps } from './NewWorktree'
 import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
@@ -3328,6 +3338,7 @@ export default function App() {
                   void projects.add(group).then(afterAdd)
                 }
           }
+          onPair={pairHost}
           onAdd={(backend, path, group) => {
             setAdding(false)
             restoreFocus()

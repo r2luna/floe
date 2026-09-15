@@ -304,10 +304,15 @@ check-interval-hours = 6
 # | \`Projects\` is always first and always present — it is where a project whose
 # | group is deleted lands.
 # |
+# | \`hosts\` are the other machines Add project lists, by hostname or ssh alias.
+# | Each needs Floe serving there. A host is paired over ssh on its first add,
+# | and a new \`host@path\` that pairs is appended here for next time.
+# |
 # ------------------------------------------------------------------------------
 
 [projects]
 groups = ["Projects"]
+hosts  = []
 
 # ------------------------------------------------------------------------------
 # | The Colony Board

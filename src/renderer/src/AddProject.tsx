@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BackendInfo } from '../../preload/api'
+import { parseHostPath } from '../../shared/hostPath'
 import { DEFAULT_GROUP, type PathProbe } from '../../shared/types'
-import { Fact, Facts, PaneNote, PaneTitle, tilde } from './palettePreview'
+import { backendForHost, backendState, LOCAL } from './backends'
+import { Fact, Facts, PaneTitle, tilde } from './palettePreview'
 
 /**
  * One dialog for the whole "add a project" question: which machine, which
- * group, which repo. Asking all three at once beats a chain of prompts that
- * each reveal only the next thing they want.
+ * group, which repo.
+ *
+ * The machine is part of what you type: `[host@]path`, where no host means this
+ * machine. The MACHINE rows are `[projects] hosts` from floe.toml, and picking
+ * one only rewrites that prefix. A host that is not paired yet gets paired on ⏎
+ * — the server plugin reads its daemon token over ssh — and the add follows. A
+ * host typed by hand is written to the list, so it is a row next time.
  *
  * It is the palette's box, not a dialog of its own: the head is where you type
- * the path, the answers it still needs are rows under it, and the right pane
- * checks the path while you type — is it a repo, on which branch, is it already
- * added. Switching a project and adding one are then the same surface in two
- * states, which matters because ⌘K is how you get here.
+ * the path, the machines and groups are rows under it, and the right pane checks the path
+ * while you type — is it a repo, on which branch, is it already added.
  *
  * Keyboard-first throughout: the path takes focus on open, ↓ walks into the
- * answers and ⏎ picks one (landing you back on the path), ⏎ on the path adds,
+ * rows and ⏎ picks one (landing you back on the path), ⏎ on the path adds,
  * ⌘O browses, Esc backs out one level at a time.
  */
 export function AddProject({
@@ -24,32 +29,38 @@ export function AddProject({
   groups,
   group,
   onBrowse,
+  onPair,
   onAdd,
   onClose
 }: {
   backends: BackendInfo[]
-  /** The machine the window is attached to — where the dialog starts. */
+  /** The machine the window is attached to — the head starts with its host. */
   current: string
   groups: string[]
   /** The group to preselect — the one you were looking at. */
   group?: string
   /** Native folder picker. Absent in the web build, which has no local disk. */
   onBrowse: ((group: string) => void) | null
+  /** Pair a host Floe has not met; resolves with its backend id. */
+  onPair: (host: string) => Promise<string>
   onAdd: (backend: string, path: string, group: string) => void
   onClose: () => void
 }) {
-  // Where you already are, not the first row: attached to another machine,
-  // "Add project" means one there far more often than one back home.
-  const [backend, setBackend] = useState(
-    backends.some((b) => b.id === current) ? current : (backends[0]?.id ?? 'local')
-  )
-  const [path, setPath] = useState('')
+  // Attached to another machine, "Add project" means one there far more often
+  // than one back home, so the head starts with that host already typed.
+  const [text, setText] = useState(() => {
+    const at = backends.find((b) => b.id === current && b.remote)
+    return at ? `${at.label}@` : ''
+  })
   const [picked, setPicked] = useState(group || groups[0] || DEFAULT_GROUP)
   // Naming a new group borrows the head rather than opening a second field:
   // there is one place you type in this box, and it is the line at the top.
   const [naming, setNaming] = useState(false)
   const [newGroup, setNewGroup] = useState('')
-  // -1 is the path itself. The cursor only enters the answers when you ask it
+  const [pairing, setPairing] = useState(false)
+  const [pairError, setPairError] = useState<string | null>(null)
+  const [hosts, setHosts] = useState<string[]>([])
+  // -1 is the path itself. The cursor only enters the groups when you ask it
   // to with ↓, which is what keeps ⏎ meaning "add" for the common case.
   const [at, setAt] = useState(-1)
   const input = useRef<HTMLInputElement>(null)
@@ -57,34 +68,45 @@ export function AddProject({
 
   useEffect(() => {
     requestAnimationFrame(() => input.current?.focus())
+    void window.floe.projects
+      .hosts()
+      .then(setHosts)
+      .catch(() => {})
   }, [])
 
   useEffect(() => {
     listRef.current?.querySelector('[data-at]')?.scrollIntoView({ block: 'nearest' })
   }, [at])
 
-  const machine = backends.find((b) => b.id === backend)
-  const local = machine ? !machine.remote : true
-  const probe = useProbe(naming ? '' : path, backend)
+  const { host, path } = parseHostPath(text)
+  // Undefined only for a host that is not paired yet: there is nothing to ask
+  // about the path until there is a socket to ask over.
+  const backend = host ? backendForHost(host) : LOCAL
+  const local = !host
+  const probe = useProbe(naming || !backend ? '' : path, backend ?? LOCAL)
 
   // A group typed but never confirmed still counts — nobody expects to lose
   // what they just wrote because they hit Add instead of Enter.
   const chosenGroup = (naming && newGroup.trim()) || picked
+  const browsable = local && !!onBrowse
+
+  // Listed hosts, then anything paired or typed that is not listed yet — so the
+  // mark always has a row to sit on.
+  const paired = backends.filter((b) => b.remote).map((b) => b.label)
+  const machines = [...new Set([...hosts, ...paired, ...(host ? [host] : [])])]
 
   const rows: Answer[] = [
-    // One machine is not a choice — the section would be noise.
-    ...(backends.length > 1
-      ? backends.map((b) => ({
-          kind: 'backend' as const,
-          id: b.id,
-          label: b.label,
-          section: 'machine',
-          on: b.id === backend
-        }))
-      : []),
+    { kind: 'machine' as const, id: LOCAL, label: 'this machine', section: 'machine', on: !host },
+    ...machines.map((m) => ({
+      kind: 'machine' as const,
+      id: m,
+      label: m,
+      section: 'machine',
+      on: m === host,
+      detail: machineDetail(m, hosts)
+    })),
     // A group you just named belongs in the list: it does not exist on disk
-    // yet, and without a row of its own the mark has nowhere to sit — the
-    // section would read as "no group chosen" right after you chose one.
+    // yet, and without a row of its own the mark has nowhere to sit.
     ...[...groups, ...(groups.includes(picked) ? [] : [picked])].map((g) => ({
       kind: 'group' as const,
       id: g,
@@ -96,18 +118,41 @@ export function AddProject({
     // A row rather than a button beside the field: everything you can do in
     // this box is a row, and a picker hidden behind ⌘O alone would be a mouse
     // action with no home.
-    ...(local && onBrowse
-      ? [{ kind: 'browse' as const, id: 'browse', label: 'Browse…', section: 'path', on: false }]
-      : [])
+    ...(browsable ? [{ kind: 'browse' as const, id: 'browse', label: 'Browse…', section: 'path', on: false }] : [])
   ]
 
+  // A host that took an add belongs in the list, whichever way it was typed.
+  const remember = (): void => {
+    if (host && !hosts.includes(host)) void window.floe.projects.addHost(host).catch(() => {})
+  }
+
   const commit = () => {
-    const p = path.trim()
-    if (p) onAdd(backend, p, chosenGroup)
+    if (!path || pairing) return
+    if (backend) {
+      remember()
+      return onAdd(backend, path, chosenGroup)
+    }
+    if (!host) return
+    setPairing(true)
+    setPairError(null)
+    onPair(host)
+      .then((id) => {
+        remember()
+        onAdd(id, path, chosenGroup)
+      })
+      .catch((e: unknown) => {
+        setPairing(false)
+        setPairError(e instanceof Error ? e.message : String(e))
+      })
   }
 
   const pick = (row: Answer) => {
-    if (row.kind === 'backend') setBackend(row.id)
+    // Only the prefix changes: the path you typed is the same path on the next
+    // machine more often than not.
+    if (row.kind === 'machine') {
+      setText(row.id === LOCAL ? path : `${row.id}@${path}`)
+      setPairError(null)
+    }
     if (row.kind === 'group') {
       setPicked(row.id)
       setNaming(false)
@@ -133,7 +178,7 @@ export function AddProject({
     }
     if (e.key === 'Escape') {
       claim()
-      // One level at a time: out of the group name, then out of the answers,
+      // One level at a time: out of the group name, then out of the groups,
       // then out of the dialog.
       if (naming) {
         setNaming(false)
@@ -156,7 +201,7 @@ export function AddProject({
       return commit()
     }
     // ⌘O is the picker, from anywhere in the box.
-    if (e.key.toLowerCase() === 'o' && e.metaKey && local && onBrowse) {
+    if (e.key.toLowerCase() === 'o' && e.metaKey && browsable) {
       claim()
       return onBrowse(chosenGroup)
     }
@@ -171,11 +216,12 @@ export function AddProject({
     setAt((i) => Math.min(rows.length - 1, Math.max(-1, i + (down ? 1 : -1))))
   }
 
+  const verb = pairing ? 'pairing…' : pairError ? '⏎ retry' : host && !backend ? `⏎ pair ${host} and add` : '⏎ add'
   const foot = naming
     ? '⏎ name the group · esc back'
     : at >= 0
       ? '⏎ pick · ↑↓ move · esc back to the path'
-      : `⏎ add · ↓ machine & group${local && onBrowse ? ' · ⌘O browse' : ''} · esc cancel`
+      : `${verb} · ↓ machine & group${browsable ? ' · ⌘O browse' : ''} · esc cancel`
 
   let section = ''
   return (
@@ -186,19 +232,19 @@ export function AddProject({
           <input
             ref={input}
             className="palette-input"
-            placeholder={
-              naming
-                ? 'Group name…'
-                : `Path to a git repo on ${machine?.label ?? 'this machine'}…`
-            }
-            value={naming ? newGroup : path}
+            placeholder={naming ? 'Group name…' : 'Path to a git repo, or host@path on another machine…'}
+            value={naming ? newGroup : text}
             spellCheck={false}
-            onChange={(e) => (naming ? setNewGroup(e.target.value) : setPath(e.target.value))}
+            onChange={(e) => {
+              if (naming) return setNewGroup(e.target.value)
+              setText(e.target.value)
+              setPairError(null)
+            }}
             onKeyDown={onKeyDown}
           />
           {/* What the head is holding right now — it answers two questions in
               this box, and which one is not something to guess at. */}
-          <span className="palette-count">{naming ? 'group' : 'path'}</span>
+          <span className="palette-count">{naming ? 'group' : (host ?? 'path')}</span>
         </div>
 
         <div className="palette-split">
@@ -219,10 +265,13 @@ export function AddProject({
                     }}
                     onPointerEnter={() => setAt(i)}
                   >
-                    {row.kind !== 'browse' && (
-                      <i className="palette-mark" data-on={row.on || undefined} />
-                    )}
+                    {row.kind !== 'browse' && <i className="palette-mark" data-on={row.on || undefined} />}
                     <span className="palette-title">{row.label}</span>
+                    {row.detail && (
+                      <span className="palette-detail" data-tone={row.detail.tone}>
+                        {row.detail.text}
+                      </span>
+                    )}
                   </button>
                 </div>
               )
@@ -231,11 +280,14 @@ export function AddProject({
 
           <div className="palette-side">
             <PathFacts
+              text={text}
+              host={host}
               path={path}
+              backend={backend}
               probe={probe}
-              machine={machine?.label ?? 'this machine'}
+              pairing={pairing}
+              pairError={pairError}
               group={chosenGroup}
-              browsable={!!(local && onBrowse)}
             />
           </div>
         </div>
@@ -248,14 +300,26 @@ export function AddProject({
 
 // The sentinel the "New group…" row uses. A value no group can have, since a
 // blank name is rejected upstream.
-const NEW = ' new'
+const NEW = ' new'
 
 interface Answer {
-  kind: 'backend' | 'group' | 'newGroup' | 'browse'
+  kind: 'machine' | 'group' | 'newGroup' | 'browse'
   id: string
   label: string
   section: string
   on: boolean
+  detail?: { text: string; tone?: 'ok' }
+}
+
+/** What a machine row says about its host: reachable now, or what ⏎ will do. */
+function machineDetail(host: string, listed: string[]): { text: string; tone?: 'ok' } {
+  const id = backendForHost(host)
+  if (id) {
+    const state = backendState(id)
+    if (!listed.includes(host)) return { text: 'saved on add' }
+    return state === 'open' ? { text: 'connected', tone: 'ok' } : { text: state }
+  }
+  return listed.includes(host) ? { text: 'pairs on first add' } : { text: 'new · saved after pairing' }
 }
 
 /**
@@ -264,54 +328,107 @@ interface Answer {
  * never promises what Add is about to refuse.
  */
 function PathFacts({
+  text,
+  host,
   path,
+  backend,
   probe,
-  machine,
-  group,
-  browsable
+  pairing,
+  pairError,
+  group
 }: {
+  text: string
+  host: string | null
   path: string
+  backend: string | undefined
   probe: PathProbe | null
-  machine: string
+  pairing: boolean
+  pairError: string | null
   group: string
-  browsable: boolean
 }) {
-  const typed = path.trim()
+  const title = host ? `${host}@${path}` : tilde(probe?.root ?? path)
   return (
     <>
-      <PaneTitle>{typed ? tilde(probe?.root ?? typed) : 'Add a project'}</PaneTitle>
+      <PaneTitle>{text.trim() ? title : 'Add a project'}</PaneTitle>
       <Facts>
-        {!typed ? (
-          <Fact label="path">nothing typed yet</Fact>
-        ) : !probe ? (
-          <Fact label="path">checking…</Fact>
-        ) : !probe.exists ? (
-          <Fact label="path" tone="warn">
-            nothing at that path
+        <MachineFact host={host} backend={backend} pairing={pairing} pairError={pairError} />
+        {pairError ? (
+          <Fact label="ssh" tone="warn">
+            {pairError}
           </Fact>
-        ) : !probe.isRepo ? (
-          <Fact label="git" tone="warn">
-            not a git repository
-          </Fact>
-        ) : (
+        ) : host && !backend ? (
           <>
-            <Fact label="git" tone="ok">
-              repo
-            </Fact>
-            {probe.branch && <Fact label="branch">{probe.branch}</Fact>}
-            {probe.worktrees !== undefined && probe.worktrees > 1 && (
-              <Fact label="worktrees">{probe.worktrees} · they come with it</Fact>
-            )}
-            <Fact label="added" tone={probe.added ? undefined : 'warn'}>
-              {probe.added ? `already in ${probe.group}` : 'not yet — it will be new'}
-            </Fact>
+            <Fact label="pairs by">ssh {host} → daemon token</Fact>
+            <Fact label="path">{path ? 'checked after pairing' : 'nothing typed yet'}</Fact>
           </>
+        ) : (
+          <ProbeFacts path={path} probe={probe} />
         )}
-        <Fact label="goes to">
-          {group}, on {machine}
-        </Fact>
+        {!pairError && <Fact label="goes to">{group}</Fact>}
       </Facts>
-      {browsable && <PaneNote>⌘O opens the folder picker on {machine}.</PaneNote>}
+    </>
+  )
+}
+
+function MachineFact({
+  host,
+  backend,
+  pairing,
+  pairError
+}: {
+  host: string | null
+  backend: string | undefined
+  pairing: boolean
+  pairError: string | null
+}) {
+  if (!host) return <Fact label="machine">this machine</Fact>
+  if (pairError)
+    return (
+      <Fact label="machine" tone="warn">
+        {host} · pairing failed
+      </Fact>
+    )
+  if (!backend)
+    return (
+      <Fact label="machine" tone="warn">
+        {host} · {pairing ? 'pairing…' : 'not paired yet'}
+      </Fact>
+    )
+  const state = backendState(backend)
+  return (
+    <Fact label="machine" tone={state === 'open' ? 'ok' : 'warn'}>
+      {host} · {state === 'open' ? 'connected' : state}
+    </Fact>
+  )
+}
+
+function ProbeFacts({ path, probe }: { path: string; probe: PathProbe | null }) {
+  if (!path) return <Fact label="path">nothing typed yet</Fact>
+  if (!probe) return <Fact label="path">checking…</Fact>
+  if (!probe.exists)
+    return (
+      <Fact label="path" tone="warn">
+        nothing at that path
+      </Fact>
+    )
+  if (!probe.isRepo)
+    return (
+      <Fact label="git" tone="warn">
+        not a git repository
+      </Fact>
+    )
+  return (
+    <>
+      <Fact label="git" tone="ok">
+        repo
+      </Fact>
+      {probe.branch && <Fact label="branch">{probe.branch}</Fact>}
+      {probe.worktrees !== undefined && probe.worktrees > 1 && (
+        <Fact label="worktrees">{probe.worktrees} · they come with it</Fact>
+      )}
+      <Fact label="added" tone={probe.added ? undefined : 'warn'}>
+        {probe.added ? `already in ${probe.group}` : 'not yet — it will be new'}
+      </Fact>
     </>
   )
 }
@@ -327,10 +444,8 @@ function useProbe(path: string, backend: string): PathProbe | null {
   const [probe, setProbe] = useState<PathProbe | null>(null)
   useEffect(() => {
     const typed = path.trim()
-    if (!typed) {
-      setProbe(null)
-      return
-    }
+    setProbe(null)
+    if (!typed) return
     let live = true
     const timer = setTimeout(() => {
       void window.floe.projects

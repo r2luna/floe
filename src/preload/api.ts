@@ -361,6 +361,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // What the path IS, without adding it — the dialog's preview pane. Reads
       // on the same machine the add would, so a remote path is checked over
       // there rather than against this disk.
+      // The machines Add project lists — `[projects] hosts` in this window's
+      // floe.toml. Pinned channels, so they never follow the backend pointer.
+      hosts: (): Promise<string[]> => ipcRenderer.invoke('projects:hosts'),
+      addHost: (host: string): Promise<string[]> => ipcRenderer.invoke('projects:addHost', host),
       probe: (path: string, backend?: string): Promise<PathProbe> =>
         backend && host.backendsCtl
           ? (host.backendsCtl.invokeOn(backend, 'projects:probe', path) as Promise<PathProbe>)

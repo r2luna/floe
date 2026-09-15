@@ -24,6 +24,31 @@ export const isRemote = (id: string): boolean =>
 export const backendState = (id: string): 'connecting' | 'open' | 'closed' =>
   window.floe.backends.state(id)
 
+/** The paired machine a `host@path` names, by its label. Undefined when it is not paired yet. */
+export const backendForHost = (host: string): string | undefined =>
+  window.floe.backends.list().find((b) => b.remote && b.label === host)?.id
+
+/**
+ * Pair a machine from its hostname: the server plugin reads its daemon token
+ * over ssh and saves it. Resolves with the new backend's id once the window's
+ * backend list has picked it up — main pushes the change, the preload syncs it
+ * a tick later, and the add that follows needs the id.
+ */
+export async function pairHost(host: string): Promise<string> {
+  const res = await window.floe.plugins.run('plugin:server:pair-host', host)
+  if (!res.ok) {
+    throw new Error(
+      res.error.startsWith('unknown plugin command') ? 'Adding on another machine needs the server plugin.' : res.error
+    )
+  }
+  for (let waited = 0; waited < 5000; waited += 100) {
+    const id = backendForHost(host)
+    if (id) return id
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`Paired ${host}, but the window never saw it.`)
+}
+
 /**
  * Point the window at a machine and rebuild the app on it.
  *

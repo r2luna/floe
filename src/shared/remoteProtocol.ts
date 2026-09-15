@@ -89,6 +89,9 @@ export const PINNED_CHANNELS = new Set([
   'keybindings:reveal',
   'keybindings:rebind',
   'keybindings:reset',
+  // The hosts Add project lists are this window's config, like the rest of it.
+  'projects:hosts',
+  'projects:addHost',
   'config:get',
   'config:set',
   'config:errors',
