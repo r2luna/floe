@@ -84,6 +84,7 @@ import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
+import { useBrowserCovered } from './browserCover'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import {
   DEFAULT_GROUP,
@@ -670,9 +671,11 @@ export default function App() {
   // A native WebContentsView sits above renderer HTML. Hide it while one of
   // Floe's overlays is open, or it would cover the palette instead of yielding
   // to it like every DOM-backed panel does.
+  const browserCovered = useBrowserCovered()
   useEffect(() => {
     if (window.floe.version === 'web' || !lane.panels.some((panel) => panel.kind === 'browser')) return
     const overlay =
+      browserCovered ||
       paletteOpen ||
       commandsOpen ||
       keysOpen ||
@@ -683,7 +686,7 @@ export default function App() {
       picker !== null ||
       (narrow && railMenu)
     void window.floe.browser.visible(!overlay)
-  }, [lane.panels, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+  }, [lane.panels, browserCovered, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
 
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
@@ -1867,7 +1870,13 @@ export default function App() {
     canOpen,
     whyCannotOpen,
     browser: {
-      address: () => document.querySelector<HTMLInputElement>('.browser-address input')?.focus(),
+      address: () => {
+        const input = document.querySelector<HTMLInputElement>('.browser-address input')
+        // select() too: pressing it again while the field already has focus
+        // must still select the whole URL, and onFocus will not fire twice.
+        input?.focus()
+        input?.select()
+      },
       back: () => void window.floe.browser.back(),
       forward: () => void window.floe.browser.forward(),
       reload: () => void window.floe.browser.reload(),

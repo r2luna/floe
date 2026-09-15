@@ -76,7 +76,12 @@ function shortcut(session: Session, event: Electron.Event, input: Electron.Input
   const command = browserShortcut(input)
   if (!command) return
   event.preventDefault()
-  if (!session.win.isDestroyed()) session.win.webContents.send('browser:shortcut', command)
+  if (session.win.isDestroyed()) return
+  // The address field lives in Floe's own page. Focusing it from the renderer
+  // alone leaves the OS keyboard focus inside this view, so typing would still
+  // go to the site. Hand focus to the host first.
+  if (command === 'browser.address') session.win.webContents.focus()
+  session.win.webContents.send('browser:shortcut', command)
 }
 
 function createSession(win: BrowserWindow): Session {

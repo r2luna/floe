@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useBrowserCover } from './browserCover'
 
 export type GalleryImage = { src: string; alt?: string }
 
@@ -29,6 +30,7 @@ export function Lightbox({
   const box = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState(start)
   const [copied, setCopied] = useState(false)
+  useBrowserCover()
 
   useEffect(() => {
     const from = document.activeElement as HTMLElement | null
