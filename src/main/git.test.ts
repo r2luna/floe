@@ -42,7 +42,9 @@ const {
   mergeWorktree,
   removePreflight,
   undoMerge,
-  reviewCommits
+  reviewCommits,
+  snapshotTree,
+  treeDiff
 } = await import('./git.ts')
 
 // A fixture with its first commit in place. `.gitignore` hides `.worktrees/`
@@ -666,6 +668,50 @@ test('reviewCommits returns [] on a repo with no commits', async () => {
   const fx = makeGitRepo('floe-git-commits0-')
   try {
     assert.deepEqual(await reviewCommits(fx.dir), [])
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('snapshotTree captures loose, staged and committed work without touching the index', async () => {
+  const fx: GitFixture = makeGitRepo()
+  try {
+    fx.write('a.txt', 'one\n')
+    fx.commit('init')
+    const before = await snapshotTree(fx.dir)
+    writeFileSync(join(fx.dir, 'a.txt'), 'one\ntwo\n')
+    writeFileSync(join(fx.dir, 'new.txt'), 'fresh\n')
+    writeFileSync(join(fx.dir, '.gitignore'), 'ignored.log\n')
+    writeFileSync(join(fx.dir, 'ignored.log'), 'noise\n')
+    const after = await snapshotTree(fx.dir)
+    // The lane's own staging area is exactly as it was: nothing staged.
+    assert.equal(fx.git('diff', '--cached', '--name-only'), '')
+
+    const files = await treeDiff(fx.dir, before, after)
+    assert.deepEqual(
+      files.map((f) => [f.path, f.added, f.deleted]),
+      [['.gitignore', 1, 0], ['a.txt', 1, 0], ['new.txt', 1, 0]]
+    )
+    assert.match(files.find((f) => f.path === 'a.txt')?.patch ?? '', /^\+two$/m)
+    assert.deepEqual(await treeDiff(fx.dir, after, after), [])
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('treeDiff cuts patches at the budget but keeps every count', async () => {
+  const fx: GitFixture = makeGitRepo()
+  try {
+    fx.write('a.txt', 'x\n')
+    fx.commit('init')
+    const before = await snapshotTree(fx.dir)
+    writeFileSync(join(fx.dir, 'a.txt'), 'y\n'.repeat(50))
+    writeFileSync(join(fx.dir, 'b.txt'), 'z\n'.repeat(50))
+    const files = await treeDiff(fx.dir, before, await snapshotTree(fx.dir), 120)
+    assert.equal(files.length, 2)
+    assert.equal(files[1].added, 50)
+    assert.equal(files[0].truncated, true)
+    assert.equal(files[1].patch, '')
   } finally {
     fx.cleanup()
   }

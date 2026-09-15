@@ -232,10 +232,11 @@ import {
   holdTask,
   releaseTask,
   tick,
-  undoTaskMerge
+  undoTaskMerge,
+  writeTaskReport
 } from './colony/runner'
 import { listEvents } from './colony/events'
-import { setProjectAutomerge } from './config/colony'
+import { setProjectAutomerge, setProjectReport } from './config/colony'
 import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
@@ -1138,6 +1139,21 @@ export function registerColonyIpc(): void {
   handle('colony:setAutomerge', (event, project: string, on: boolean) => {
     const file = setProjectAutomerge(project, on)
     pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return file
+  })
+  // The step report's switch. Same writer and the same reason as automerge: it is
+  // flipped at the moment you decide to measure a run, not hunted for in a file.
+  handle('colony:setReport', (event, project: string, on: boolean) => {
+    const file = setProjectReport(project, on)
+    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return file
+  })
+  // Written fresh every time, then opened: a card still running is exactly the
+  // one whose steps so far you want to read.
+  handle('colony:openReport', async (event, id: string) => {
+    const { file } = await writeTaskReport(BrowserWindow.fromWebContents(event.sender) ?? undefined, id)
+    const failed = await shell.openPath(file)
+    if (failed) throw new Error(failed)
     return file
   })
   handle('colony:hold', (event, id: string) =>

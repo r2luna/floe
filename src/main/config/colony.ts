@@ -61,6 +61,13 @@ export interface ColonyConfig {
    * the board where you want to read the diff yourself before it lands.
    */
   automerge: boolean
+  /**
+   * Record every step a card takes from here on — its tokens, its findings and
+   * its own diff — and write an HTML report when the card reaches done. Off by
+   * default: it asks each lane for a findings block and snapshots the worktree
+   * around every step, which is overhead nobody should pay without asking.
+   */
+  report: boolean
   stages: ColonyStage[]
 }
 
@@ -75,6 +82,7 @@ export const DONE = 'done'
 export const DEFAULT_COLONY: ColonyConfig = {
   cap: 5,
   automerge: true,
+  report: false,
   stages: [
     { name: 'specifier', skill: 'colony-specify', model: 'opus' },
     { name: 'coder', skill: 'colony-implement', model: 'opus' },
@@ -91,6 +99,7 @@ export const colonyPath = (dir: string): string => join(dir, 'colony.toml')
 interface Layer {
   cap?: number
   automerge?: boolean
+  report?: boolean
   stages?: ColonyStage[]
 }
 
@@ -159,6 +168,7 @@ export function parseGlobalColony(raw: string, file: string): { layer: Layer; er
     layer: {
       cap: colony.has('cap') ? colony.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
       automerge: colony.has('automerge') ? colony.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
+      report: colony.has('report') ? colony.bool('report', DEFAULT_COLONY.report) : undefined,
       stages: readStages(sink, raw, colony.raw_('stage'), 'colony.stage')
     },
     errors: sink.errors
@@ -179,6 +189,7 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
     layer: {
       cap: t.has('cap') ? t.num('cap', DEFAULT_COLONY.cap, { min: 1, max: 50 }) : undefined,
       automerge: t.has('automerge') ? t.bool('automerge', DEFAULT_COLONY.automerge) : undefined,
+      report: t.has('report') ? t.bool('report', DEFAULT_COLONY.report) : undefined,
       stages: readStages(sink, raw, root.stage, 'stage')
     },
     errors: sink.errors
@@ -189,15 +200,17 @@ export function parseProjectColony(raw: string, file: string): { layer: Layer; e
 export function mergeColony(layers: Layer[]): ColonyConfig {
   let cap = DEFAULT_COLONY.cap
   let automerge = DEFAULT_COLONY.automerge
+  let report = DEFAULT_COLONY.report
   let stages = DEFAULT_COLONY.stages
   for (const layer of layers) {
     if (layer.cap !== undefined) cap = layer.cap
     if (layer.automerge !== undefined) automerge = layer.automerge
+    if (layer.report !== undefined) report = layer.report
     // Length matters, not presence: a file with `[[stage]]` entries that were all
     // rejected has declared nothing usable, and inheriting beats an empty board.
     if (layer.stages && layer.stages.length) stages = layer.stages
   }
-  return { cap, automerge, stages }
+  return { cap, automerge, report, stages }
 }
 
 export interface ColonyResult extends ColonyConfig {
@@ -260,18 +273,32 @@ export function colonyConfig(projectPath: string): ColonyResult {
  * there is nowhere to put it.
  */
 export function setProjectAutomerge(projectPath: string, on: boolean): string {
+  return setProjectSwitch(projectPath, 'automerge', on)
+}
+
+/**
+ * Turn the step report on or off in a project's own `colony.toml`. From the UI
+ * for the same reason as automerge: it is a switch you flip at the moment you
+ * want to measure a run, not a value you go looking for in a file.
+ */
+export function setProjectReport(projectPath: string, on: boolean): string {
+  return setProjectSwitch(projectPath, 'report', on)
+}
+
+/** One root-level boolean in a project's `colony.toml`, written above any table. */
+function setProjectSwitch(projectPath: string, key: 'automerge' | 'report', on: boolean): string {
   const dir = projectScan().byPath.get(projectPath)
   if (!dir) throw new Error('This project is not tracked by Floe, so it has no colony.toml to write')
   const file = colonyPath(dir)
   const raw = existsSync(file) ? readFileSync(file, 'utf8') : ''
-  const line = `automerge = ${on}`
+  const line = `${key} = ${on}`
 
   const lines = raw.split(/\r?\n/)
   // Only above the first table header: an `automerge` inside `[[stage]]` is a
   // different key, and rewriting it would move a stage's setting to the root.
   const firstTable = lines.findIndex((l) => /^\s*\[/.test(l))
   const limit = firstTable === -1 ? lines.length : firstTable
-  const at = lines.findIndex((l, i) => i < limit && /^\s*automerge\s*=/.test(l))
+  const at = lines.findIndex((l, i) => i < limit && new RegExp(`^\\s*${key}\\s*=`).test(l))
 
   let next: string
   if (at !== -1) {

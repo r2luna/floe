@@ -25,10 +25,12 @@ import {
   overlappingTasks,
   pushBoard,
   releaseTask,
-  unmetDeps
+  unmetDeps,
+  writeTaskReport
 } from './colony/runner'
+import { reportSummary } from './colony/report'
 import { addTask, getTask, listTasks, removeTask, TASK_KINDS, type TaskKind } from './colony/store'
-import { DONE } from './config/colony'
+import { DONE, setProjectReport } from './config/colony'
 import {
   changedFiles,
   createWorktree,
@@ -479,6 +481,7 @@ function registerTools(server: McpServer, token: string): void {
   registerDecisionTools(server)
   registerColonyTools(server)
   registerColonyLandingTools(server)
+  registerColonyReportTools(server)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
   registerProjectTools(server)
@@ -1822,7 +1825,42 @@ function registerColonyLandingTools(server: McpServer): void {
       }
     }
   )
+}
 
+// The step report: whether each stage earns its tokens. A switch, and a reader.
+function registerColonyReportTools(server: McpServer): void {
+  server.tool(
+    'colony_set_report',
+    "Turn the board's step report on or off. On, every card that ENTERS THE FIRST STAGE from then on has each step measured — tokens, the lane's FINDINGS block, and the step's own diff — and gets an HTML report in <project>/.floe/colony/reports/ when it reaches done. Cards already past the first stage are not measured. Writes the project's colony.toml.",
+    {
+      project: z.string().describe('The repo root path of the project (a worktree path works too).'),
+      on: z.boolean().describe('true to measure new cards, false to stop measuring new ones.')
+    },
+    async ({ project, on }) => {
+      try {
+        const root = projectRoot(project)
+        const file = setProjectReport(root, on)
+        pushBoard(getWindow(), root)
+        return textResult({ ok: true, report: on, file })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_report',
+    "Write a measured task's step report now and return it: the HTML file's path, plus one row per step — tokens, cost, how many findings and how many were NEW, files and lines changed, verdict. Use it to judge which stages add signal and which only spend tokens. Works mid-run; errors for a task the report is not tracking.",
+    { task: z.string().describe('The task id, from colony_board.') },
+    async ({ task }) => {
+      try {
+        const { file, data } = await writeTaskReport(getWindow(), task)
+        return textResult({ file, steps: reportSummary(data) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
 }
 
 function registerSkillTools(server: McpServer): void {

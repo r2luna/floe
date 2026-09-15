@@ -24,6 +24,7 @@ import { getSystemPrompt } from './appSettings'
 // sides only call the other's functions at runtime, never at module top level.
 import { emptyMcpConfigFor, mcpConfigFor } from './mcpServer'
 import { log } from './log'
+import { addCumulative, claudeRunningUsage } from './usageLedger'
 
 export interface Conn {
   child: ChildProcessWithoutNullStreams
@@ -1627,6 +1628,10 @@ function handleUserLine(win: BrowserWindow, key: string, conn: Conn, msg: Record
 }
 
 function handleResultLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  // What the process has spent so far, for the colony's step report. Before the
+  // subagent hold below: a held result still spent what it says it spent.
+  const running = claudeRunningUsage(msg)
+  if (running) addCumulative(key, 'claude', running)
   // NB: the result's `usage` is cumulative across the whole session (it sums
   // every API call), so it's NOT the context-window fill — feeding it to the
   // gauge makes it climb past 100%. The latest `assistant` message above

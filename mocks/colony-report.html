@@ -1,0 +1,357 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — colony step report (mock)</title>
+<style>
+  :root {
+    --bg: #0d0e11; --panel: rgb(20 21 25); --line: #23252b; --line-soft: #1c1e23;
+    --text: #c9ccd2; --text-strong: #e8eaee; --dim: #6d7280; --faint: #575d6a; --dimmer: #7f8797;
+    --edge: #343a45; --well: rgb(27 29 35); --wash-1: #ffffff08; --wash-3: #ffffff0d; --wash-4: #ffffff12;
+    --accent: #d3956d; --live: #6ea86e; --working: #6d93c9; --warn: #d0a95a; --bad: #d07a7a;
+    --mono: ui-monospace, "JetBrains Mono", Menlo, monospace;
+  }
+  html[data-theme="light"] {
+    --bg: #ffffff; --panel: rgb(248 249 251); --line: #d7dae1; --line-soft: #e4e7ec;
+    --text: #3d434e; --text-strong: #1b1e25; --dim: #767c88; --faint: #939aa6; --dimmer: #868d99;
+    --edge: #c3c8d1; --well: #f1f3f6; --wash-1: #00000005; --wash-3: #0000000a; --wash-4: #0000000f;
+    --accent: #b8703f; --live: #3f8a3f; --working: #3f6fae; --warn: #9c7420; --bad: #b24a4a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 12px/1.55 var(--mono); }
+  button { font: inherit; }
+  :focus-visible { outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px; }
+  .act { border: 1px solid var(--edge); background: var(--wash-1); color: var(--text); padding: 2px 9px; cursor: pointer; font-size: 11px; }
+  .act:hover { background: var(--wash-3); }
+  .act[data-on] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  h2 { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--dimmer); font-weight: 400; margin: 0 0 8px; }
+  .note { color: var(--faint); font-size: 11px; margin: 4px 0 18px; }
+
+  /* ---- part 1: where the toggle sits ------------------------------------ */
+  .part { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .panel { border: 1px solid var(--line); background: var(--panel); max-width: 900px; }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: 34px; padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); flex: 1; }
+  .hbtn { border: 1px solid transparent; background: none; color: var(--dim); padding: 1px 6px; cursor: pointer; font-size: 11px; }
+  .hbtn:hover { color: var(--text); border-color: var(--edge); }
+  .hbtn[data-on] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+  .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 5px; vertical-align: 1px; }
+  .panel-body { padding: 8px 11px; color: var(--faint); }
+  .fpolicy { display: flex; gap: 10px; align-items: center; }
+  .card-mini { margin-top: 8px; border: 1px solid var(--line); padding: 6px 8px; width: 220px; }
+  .card-mini .rep { color: var(--accent); font-size: 10px; }
+
+  /* ---- part 2: the report ----------------------------------------------- */
+  .report { max-width: 1180px; margin: 0 auto; padding: 22px 20px 60px; }
+  .rhead { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .rtitle { color: var(--text-strong); font-size: 16px; }
+  .rsub { color: var(--dim); }
+  .rhead .spacer { flex: 1; }
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 16px 0 22px; }
+  .kpi { background: var(--panel); padding: 10px 12px; }
+  .kpi b { display: block; color: var(--text-strong); font-size: 20px; font-weight: 400; }
+  .kpi span { color: var(--dim); font-size: 11px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 22px; }
+  .box { border: 1px solid var(--line); background: var(--panel); padding: 12px; }
+
+  /* bars: one series (tokens), one hue */
+  .bars { display: grid; grid-template-columns: 96px 1fr 64px; gap: 6px 10px; align-items: center; }
+  .bar-l { color: var(--text); text-align: right; white-space: nowrap; }
+  .bar-l small { color: var(--faint); }
+  .bar-t { position: relative; height: 14px; cursor: pointer; }
+  .bar-f { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 0 4px 4px 0; opacity: .85; }
+  .bar-t:hover .bar-f, .bar-t[data-sel] .bar-f { opacity: 1; }
+  .bar-t[data-waste] .bar-f { background: repeating-linear-gradient(45deg, var(--accent) 0 3px, transparent 3px 6px); border: 1px solid var(--accent); }
+  .bar-v { color: var(--dimmer); text-align: right; }
+  .legend { color: var(--faint); font-size: 11px; margin-top: 10px; display: flex; gap: 14px; }
+  .sw { display: inline-block; width: 12px; height: 8px; background: var(--accent); margin-right: 5px; vertical-align: 0; }
+  .sw[data-waste] { background: repeating-linear-gradient(45deg, var(--accent) 0 2px, transparent 2px 4px); border: 1px solid var(--accent); }
+  .tip { position: fixed; pointer-events: none; background: var(--well); border: 1px solid var(--edge); padding: 6px 9px; font-size: 11px; color: var(--text); display: none; z-index: 9; min-width: 180px; }
+  .tip b { color: var(--text-strong); font-weight: 400; }
+
+  /* signal table */
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; color: var(--dimmer); font-weight: 400; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  td { padding: 5px 6px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; }
+  td.num, th.num { text-align: right; }
+  tr[data-step] { cursor: pointer; }
+  tr[data-step]:hover, tr[data-sel] { background: var(--wash-3); }
+  .add { color: var(--live); } .del { color: var(--bad); }
+  .tag { border: 1px solid var(--edge); padding: 0 5px; font-size: 10px; color: var(--dim); }
+  .tag[data-tone="pass"] { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+  .tag[data-tone="return"] { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .tag[data-tone="none"] { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+  .signal { display: inline-flex; gap: 2px; vertical-align: -1px; }
+  .signal i { width: 5px; height: 10px; background: var(--edge); }
+  .signal i[data-on] { background: var(--text-strong); }
+
+  /* timeline of steps */
+  .flow { display: flex; align-items: center; gap: 0; overflow-x: auto; padding: 4px 0 10px; margin-bottom: 18px; }
+  .node { border: 1px solid var(--line); background: var(--panel); padding: 5px 10px; cursor: pointer; white-space: nowrap; }
+  .node small { display: block; color: var(--faint); font-size: 10px; }
+  .node[data-sel] { border-color: var(--accent); }
+  .node[data-verdict="return"] { border-style: dashed; }
+  .edge { width: 22px; height: 1px; background: var(--edge); flex: none; position: relative; }
+  .edge[data-back]::after { content: "↩"; position: absolute; top: -14px; left: 5px; color: var(--warn); font-size: 11px; }
+
+  /* step detail */
+  .detail { border: 1px solid var(--line); background: var(--panel); }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tab { background: none; border: 0; border-right: 1px solid var(--line-soft); color: var(--dim); padding: 7px 14px; cursor: pointer; }
+  .tab[aria-selected="true"] { color: var(--text-strong); background: var(--wash-3); }
+  .tabs .right { margin-left: auto; display: flex; align-items: center; gap: 6px; padding-right: 10px; color: var(--faint); }
+  select { background: var(--well); color: var(--text); border: 1px solid var(--edge); font: inherit; font-size: 11px; padding: 1px 4px; }
+  .pane { padding: 12px 14px; display: none; }
+  .pane[data-show] { display: block; }
+  .dhead { display: flex; gap: 16px; color: var(--dim); margin-bottom: 12px; flex-wrap: wrap; }
+  .dhead b { color: var(--text-strong); font-weight: 400; }
+  .finding { display: grid; grid-template-columns: 34px 80px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+  .finding .code { color: var(--dimmer); }
+  .finding[data-dup] .txt { color: var(--faint); text-decoration: line-through; text-decoration-color: var(--edge); }
+  .sev { font-size: 10px; }
+  .sev[data-s="high"] { color: var(--bad); } .sev[data-s="med"] { color: var(--warn); } .sev[data-s="low"] { color: var(--dim); }
+  .dupof { color: var(--faint); font-size: 11px; }
+  .files { display: grid; grid-template-columns: 240px 1fr; min-height: 280px; }
+  .flist { border-right: 1px solid var(--line); }
+  .fitem { display: flex; gap: 6px; padding: 4px 8px; cursor: pointer; border-bottom: 1px solid var(--line-soft); }
+  .fitem span:first-child { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .fitem[data-sel] { background: var(--wash-4); color: var(--text-strong); }
+  .diff { font-size: 11.5px; overflow: auto; }
+  .dl { white-space: pre; padding: 0 10px; }
+  .dl[data-k="+"] { background: color-mix(in srgb, var(--live) 12%, transparent); color: var(--text-strong); }
+  .dl[data-k="-"] { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  .dl[data-k="@"] { color: var(--working); padding-top: 6px; }
+  .msg { white-space: pre-wrap; color: var(--text); background: var(--well); border: 1px solid var(--line); padding: 10px; }
+  .verdict-box { margin: 18px 0; border: 1px solid var(--line); padding: 10px 12px; }
+  .verdict-box b { color: var(--text-strong); font-weight: 400; }
+  kbd { border: 1px solid var(--edge); padding: 0 4px; color: var(--dim); font-size: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ======================= PART 1 — the toggle =========================== -->
+<div class="part">
+  <h2>1 · colony panel header — toggle off by default</h2>
+  <div class="panel">
+    <div class="panel-head">
+      <span class="panel-name">colony</span>
+      <span class="panel-sub">floe</span>
+      <button class="hbtn" id="toggle" title="Step report — tracks tokens, findings and diff per step (super+shift+r)"><span class="dot"></span>report: off</button>
+      <button class="hbtn" title="Edit the stages…">⚙</button>
+    </div>
+    <div class="panel-body">
+      <div class="fpolicy"><span>a card that reaches done merges itself into base</span><button class="act" data-on>automerge: on</button></div>
+      <div class="card-mini" id="mini" hidden>
+        <div>feat · ✓6 · ↩1</div>
+        <div style="color:var(--text-strong)">usage-reset-hint</div>
+        <div class="rep">report ready · 412k tok · ⏎r open</div>
+      </div>
+    </div>
+  </div>
+  <p class="note">Click the toggle. When on, cards released after that point record every step; a card that reaches done shows "report ready".</p>
+</div>
+
+<!-- ======================= PART 2 — the report =========================== -->
+<div class="report">
+  <div class="rhead">
+    <span class="rtitle">usage-reset-hint</span>
+    <span class="rsub">feat/usage-reset-hint → master · 7 steps · 41m 12s</span>
+    <span class="spacer"></span>
+    <button class="act" id="theme">light / dark</button>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi"><b>412k</b><span>tokens, all steps</span></div>
+    <div class="kpi"><b>$6.84</b><span>est. cost</span></div>
+    <div class="kpi"><b>13</b><span>findings · 10 unique</span></div>
+    <div class="kpi"><b>+407 −59</b><span>lines, summed across steps</span></div>
+    <div class="kpi"><b>1</b><span>step with no unique signal</span></div>
+  </div>
+
+  <div class="verdict-box">
+    <b>Cheapest signal:</b> hardener — 3 unique findings for 38k tok (12.7k tok / finding).
+    <b>Weakest:</b> qa — 0 changes, 0 unique findings, 22k tok. cleaner — 1 finding already raised by coder.
+  </div>
+
+  <h2>step flow</h2>
+  <div class="flow" id="flow"></div>
+
+  <div class="grid2">
+    <div class="box">
+      <h2>tokens per step</h2>
+      <div class="bars" id="bars"></div>
+      <div class="legend"><span><i class="sw"></i>step produced a unique finding or change</span><span><i class="sw" data-waste></i>no unique signal</span></div>
+    </div>
+    <div class="box">
+      <h2>signal per step</h2>
+      <table>
+        <thead><tr><th>step</th><th class="num">tok</th><th class="num">files</th><th class="num">lines</th><th class="num">find.</th><th class="num">uniq</th><th class="num">tok/uniq</th><th>verdict</th></tr></thead>
+        <tbody id="tbl"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="detail">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-pane="findings">findings</button>
+      <button class="tab" role="tab" aria-selected="false" data-pane="changes">code changes</button>
+      <button class="tab" role="tab" aria-selected="false" data-pane="message">final message</button>
+      <span class="right" id="cmpwrap">diff against <select id="cmp"></select></span>
+    </div>
+    <div class="pane" data-pane="findings" data-show>
+      <div class="dhead" id="dhead"></div>
+      <div id="findings"></div>
+    </div>
+    <div class="pane" data-pane="changes">
+      <div class="files"><div class="flist" id="flist"></div><div class="diff" id="diff"></div></div>
+    </div>
+    <div class="pane" data-pane="message"><div class="msg" id="msg"></div></div>
+  </div>
+  <p class="note"><kbd>j</kbd>/<kbd>k</kbd> step · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> tab · <kbd>c</kbd> cycle diff base</p>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script>
+const steps = [
+  { id: 's1', stage: 'specifier', model: 'opus', tok: 74000, cost: 1.31, dur: '6m 40s', verdict: 'pass',
+    files: [{ p: 'specs/feat-usage-reset-hint/spec.md', a: 62, d: 0 }],
+    findings: [
+      { s: 'high', t: 'Codex gives a unix timestamp, Claude a wall-clock hint in a named zone — two parsers needed.' },
+      { s: 'med', t: 'Reset time must render relative ("in 2h 10m") and absolute on hover.' },
+      { s: 'low', t: 'Monthly window only exists on some plans; hide the row when absent.' } ],
+    msg: 'Spec written to specs/feat-usage-reset-hint/spec.md.\n3 decisions, 2 open questions resolved from resets.ts.\n\nCOLONY: pass' },
+  { id: 's2', stage: 'coder', model: 'opus', tok: 131000, cost: 2.20, dur: '14m 02s', verdict: 'pass',
+    files: [{ p: 'src/shared/resets.ts', a: 88, d: 4 }, { p: 'src/shared/resets.test.ts', a: 112, d: 0 }, { p: 'src/renderer/src/Account.tsx', a: 41, d: 9 }],
+    findings: [
+      { s: 'med', t: 'Named zones like "America/Sao_Paulo" need Intl, not a fixed offset table.' },
+      { s: 'low', t: 'Duplicate formatting helper in Account.tsx and Topbar.tsx.' } ],
+    msg: 'Implemented resets.ts with both parsers, 14 tests.\n\nCOLONY: pass' },
+  { id: 's3', stage: 'cleaner', model: 'opus', tok: 48000, cost: 0.82, dur: '4m 51s', verdict: 'pass',
+    files: [{ p: 'src/renderer/src/Account.tsx', a: 6, d: 22 }, { p: 'src/renderer/src/format.ts', a: 18, d: 0 }],
+    findings: [ { s: 'low', t: 'Duplicate formatting helper in Account.tsx and Topbar.tsx.', dup: 's2' } ],
+    msg: 'Extracted formatReset into format.ts.\n\nCOLONY: pass' },
+  { id: 's4', stage: 'architect', model: 'sonnet', tok: 29000, cost: 0.21, dur: '3m 10s', verdict: 'return', why: 'parsing lives in renderer, must be in shared',
+    files: [],
+    findings: [
+      { s: 'high', t: 'Account.tsx parses the Claude hint itself — renderer must receive a number, not text.' },
+      { s: 'med', t: 'Named zones like "America/Sao_Paulo" need Intl, not a fixed offset table.', dup: 's2' } ],
+    msg: 'Boundary issue: parsing in renderer.\n\nCOLONY: return coder — parsing lives in renderer, must be in shared' },
+  { id: 's5', stage: 'coder', model: 'opus', tok: 51000, cost: 0.93, dur: '5m 33s', verdict: 'pass',
+    files: [{ p: 'src/shared/resets.ts', a: 21, d: 3 }, { p: 'src/renderer/src/Account.tsx', a: 4, d: 17 }, { p: 'src/main/usageMonitor.ts', a: 12, d: 2 }],
+    findings: [ { s: 'med', t: 'usageMonitor now resolves resetsAt before IPC.' } ],
+    msg: 'Moved parsing to main.\n\nCOLONY: pass' },
+  { id: 's6', stage: 'hardener', model: 'opus', tok: 38000, cost: 0.71, dur: '4m 20s', verdict: 'pass',
+    files: [{ p: 'src/shared/resets.ts', a: 9, d: 2 }, { p: 'src/shared/resets.test.ts', a: 34, d: 0 }],
+    findings: [
+      { s: 'high', t: 'A hint for "Jan 1" read in December resolves to last year.' },
+      { s: 'high', t: 'DST gap: 2:30am does not exist on the spring-forward day, Date returns NaN.' },
+      { s: 'med', t: 'Negative remaining time shows "in -3m" after the window has reset.' } ],
+    msg: 'Fixed year rollover, DST gap, negative remaining. +6 tests.\n\nCOLONY: pass' },
+  { id: 's7', stage: 'qa', model: 'haiku', tok: 41000, cost: 0.66, dur: '2m 36s', verdict: 'none',
+    files: [],
+    findings: [ { s: 'low', t: 'A hint for "Jan 1" read in December resolves to last year.', dup: 's6' } ],
+    msg: 'All 1204 tests pass. Typecheck clean.' }
+]
+const byId = Object.fromEntries(steps.map((s) => [s.id, s]))
+const label = (s) => `${s.stage}${steps.filter((x) => x.stage === s.stage).length > 1 ? ' #' + (steps.filter((x) => x.stage === s.stage).indexOf(s) + 1) : ''}`
+const uniq = (s) => s.findings.filter((f) => !f.dup).length
+const lines = (s) => s.files.reduce((n, f) => [n[0] + f.a, n[1] + f.d], [0, 0])
+const waste = (s) => uniq(s) === 0 && s.files.length === 0 || (uniq(s) === 0 && s.stage === 'cleaner' && false)
+const k = (n) => (n / 1000).toFixed(0) + 'k'
+let sel = 's4'
+
+function render() {
+  const max = Math.max(...steps.map((s) => s.tok))
+  document.getElementById('flow').innerHTML = steps.map((s, i) =>
+    (i ? `<span class="edge" ${steps[i - 1].verdict === 'return' ? 'data-back' : ''}></span>` : '') +
+    `<div class="node" tabindex="0" data-id="${s.id}" data-verdict="${s.verdict}" ${s.id === sel ? 'data-sel' : ''}>${label(s)}<small>${k(s.tok)} · ${uniq(s)} uniq</small></div>`).join('')
+  document.getElementById('bars').innerHTML = steps.map((s) =>
+    `<span class="bar-l">${label(s)} <small>${s.model}</small></span>
+     <span class="bar-t" data-id="${s.id}" ${waste(s) ? 'data-waste' : ''} ${s.id === sel ? 'data-sel' : ''}><span class="bar-f" style="width:${(s.tok / max) * 100}%"></span></span>
+     <span class="bar-v">${k(s.tok)}</span>`).join('')
+  document.getElementById('tbl').innerHTML = steps.map((s) => {
+    const [a, d] = lines(s), u = uniq(s)
+    return `<tr data-step data-id="${s.id}" ${s.id === sel ? 'data-sel' : ''}>
+      <td>${label(s)}</td><td class="num">${k(s.tok)}</td><td class="num">${s.files.length}</td>
+      <td class="num"><span class="add">+${a}</span> <span class="del">−${d}</span></td>
+      <td class="num">${s.findings.length}</td><td class="num">${u}</td>
+      <td class="num">${u ? k(s.tok / u) : '—'}</td>
+      <td><span class="tag" data-tone="${s.verdict}">${s.verdict}</span></td></tr>`
+  }).join('')
+  const s = byId[sel], [a, d] = lines(s)
+  document.getElementById('dhead').innerHTML = `<span><b>${label(s)}</b> · ${s.model}</span><span>${s.tok.toLocaleString()} tok</span><span>$${s.cost.toFixed(2)}</span><span>${s.dur}</span><span><span class="add">+${a}</span> <span class="del">−${d}</span></span>${s.why ? `<span>↩ ${s.why}</span>` : ''}`
+  document.getElementById('findings').innerHTML = s.findings.length ? s.findings.map((f, i) =>
+    `<div class="finding" ${f.dup ? 'data-dup' : ''}><span class="code">F${i + 1}</span><span class="sev" data-s="${f.s}">${f.s}${f.dup ? '' : ' · new'}</span>
+     <span class="txt">${f.t}${f.dup ? `<div class="dupof">already raised by ${label(byId[f.dup])}</div>` : ''}</span></div>`).join('') : '<p class="note">No findings.</p>'
+  document.getElementById('msg').textContent = s.msg
+  const idx = steps.indexOf(s)
+  const cmp = document.getElementById('cmp')
+  cmp.innerHTML = `<option value="prev">previous step</option><option value="base">task start (base)</option>` +
+    steps.slice(0, idx).map((x) => `<option value="${x.id}">${label(x)} end</option>`).join('')
+  renderFiles(s)
+}
+
+function renderFiles(s) {
+  const fl = document.getElementById('flist'), df = document.getElementById('diff')
+  if (!s.files.length) { fl.innerHTML = '<p class="note" style="padding:8px">No code changed in this step.</p>'; df.innerHTML = ''; return }
+  fl.innerHTML = s.files.map((f, i) => `<div class="fitem" data-i="${i}" ${i === 0 ? 'data-sel' : ''}><span>${f.p}</span><span class="add">+${f.a}</span><span class="del">−${f.d}</span></div>`).join('')
+  showDiff(s.files[0])
+  fl.querySelectorAll('.fitem').forEach((el) => el.onclick = () => {
+    fl.querySelectorAll('.fitem').forEach((x) => x.removeAttribute('data-sel')); el.setAttribute('data-sel', '')
+    showDiff(s.files[+el.dataset.i])
+  })
+}
+function showDiff(f) {
+  const body = [
+    ['@', `@@ ${f.p} @@`], [' ', 'export function parseReset(raw: string, now = Date.now()): number | undefined {'],
+    ['-', '  const m = /(\\w+) (\\d+) at (\\d+):(\\d+)(am|pm)/.exec(raw)'],
+    ['+', '  const m = /(\\w+) (\\d+) at (\\d+)(?::(\\d+))?(am|pm) \\(([^)]+)\\)/.exec(raw)'],
+    ['+', '  if (!m) return undefined'], [' ', '  const year = new Date(now).getFullYear()'],
+    ['+', '  // "Jan 1" read in December is next year, not this one.'],
+    ['+', '  const at = resolve(m, year) < now ? resolve(m, year + 1) : resolve(m, year)'],
+    ['-', '  return resolve(m, year)'], ['+', '  return Number.isNaN(at) ? undefined : at'], [' ', '}']
+  ]
+  document.getElementById('diff').innerHTML = body.map(([kk, t]) => `<div class="dl" data-k="${kk}">${kk === '@' ? '' : kk} ${t.replace(/</g, '&lt;')}</div>`).join('')
+}
+
+const tip = document.getElementById('tip')
+document.addEventListener('mousemove', (e) => {
+  const bar = e.target.closest('.bar-t')
+  if (!bar) { tip.style.display = 'none'; return }
+  const s = byId[bar.dataset.id], [a, d] = lines(s)
+  tip.innerHTML = `<b>${label(s)}</b> · ${s.model}<br>${s.tok.toLocaleString()} tok · $${s.cost.toFixed(2)}<br>${uniq(s)} unique / ${s.findings.length} findings<br><span class="add">+${a}</span> <span class="del">−${d}</span> in ${s.files.length} files`
+  tip.style.display = 'block'; tip.style.left = e.clientX + 14 + 'px'; tip.style.top = e.clientY + 10 + 'px'
+})
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('[data-id]')
+  if (t && byId[t.dataset.id]) { sel = t.dataset.id; render() }
+  const tab = e.target.closest('.tab')
+  if (tab) setTab(tab.dataset.pane)
+})
+function setTab(name) {
+  document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', t.dataset.pane === name))
+  document.querySelectorAll('.pane').forEach((p) => p.toggleAttribute('data-show', p.dataset.pane === name))
+}
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return
+  const i = steps.findIndex((s) => s.id === sel)
+  if (e.key === 'j' && i < steps.length - 1) { sel = steps[i + 1].id; render() }
+  if (e.key === 'k' && i > 0) { sel = steps[i - 1].id; render() }
+  if (['1', '2', '3'].includes(e.key)) setTab(['findings', 'changes', 'message'][+e.key - 1])
+  if (e.key === 'c') { const c = document.getElementById('cmp'); c.selectedIndex = (c.selectedIndex + 1) % c.options.length }
+})
+document.getElementById('toggle').onclick = (e) => {
+  const b = e.currentTarget, on = !b.hasAttribute('data-on')
+  b.toggleAttribute('data-on', on); b.innerHTML = `<span class="dot"></span>report: ${on ? 'on' : 'off'}`
+  document.getElementById('mini').hidden = !on
+}
+document.getElementById('theme').onclick = () => {
+  const h = document.documentElement; h.dataset.theme = h.dataset.theme === 'dark' ? 'light' : 'dark'
+}
+render()
+</script>
+</body>
+</html>

@@ -80,3 +80,11 @@ test('a stage config forgot keeps its column, capped at 0, until it drains', () 
   // The two ends are the board's, never conjured as a stage.
   assert.equal(columns.some((c) => c.name === 'inbox'), false)
 })
+
+test('the step report is off by default and inherits like any scalar', () => {
+  assert.equal(DEFAULT_COLONY.report, false)
+  const global = parseGlobalColony('[colony]\nreport = true\n', 'floe.toml').layer
+  assert.equal(mergeColony([global]).report, true)
+  const project = parseProjectColony('report = false\n', 'colony.toml').layer
+  assert.equal(mergeColony([global, project]).report, false)
+})

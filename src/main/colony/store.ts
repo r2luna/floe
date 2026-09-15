@@ -18,6 +18,8 @@ import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'n
 import { join } from 'node:path'
 import { dataDir } from '../dataDir'
 import { INBOX } from '../config/colony'
+import type { Usage } from '../usageLedger'
+import type { Finding } from '../../shared/colony'
 
 /** What a task is doing IN the column it currently sits in. */
 export type TaskStatus =
@@ -42,6 +44,40 @@ export interface TaskVisit {
   /** What the lane's hand-off line said. `none` is a turn that ended without one. */
   verdict: 'pass' | 'return' | 'stop' | 'none'
   why?: string
+  /** What the step cost and produced. Only on a card the report is tracking. */
+  step?: StepRecord
+}
+
+/**
+ * One step, measured — the row the colony report draws.
+ *
+ * The diff is NOT stored, only the two trees it is between: patches are large,
+ * `colony.json` is rewritten on every card move, and the report computes them
+ * once, when it is written.
+ */
+export interface StepRecord {
+  startedAt: number
+  endedAt: number
+  harness?: string
+  model?: string
+  usage: Usage
+  /** The worktree's content when the step started and ended (git's `snapshotTree`). */
+  treeBefore?: string
+  treeAfter?: string
+  /** False when the lane wrote no `FINDINGS:` block at all. */
+  findingsDeclared: boolean
+  findings: Finding[]
+  /** The lane's last message, capped — its own account of what it did. */
+  message: string
+}
+
+/** A card the step report is tracking. Set when it enters the first stage with the report on. */
+export interface TaskReport {
+  since: number
+  /** The step running now: when it started, and the tree it started from. */
+  current?: { at: number; tree?: string }
+  /** The last report written for this card, in the project's `.floe/colony/reports/`. */
+  file?: string
 }
 
 export interface ColonyTask {
@@ -96,6 +132,8 @@ export interface ColonyTask {
    * has to be able to carry one.
    */
   warn?: string
+  /** Present while the step report is tracking this card. */
+  report?: TaskReport
   createdAt: number
   updatedAt: number
   visits: TaskVisit[]

@@ -986,6 +986,11 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // whether the board changes your base branch unasked.
       setAutomerge: (project: string, on: boolean): Promise<string> =>
         ipcRenderer.invoke('colony:setAutomerge', project, on),
+      // The step report: measure every card that enters the first stage from now on.
+      setReport: (project: string, on: boolean): Promise<string> =>
+        ipcRenderer.invoke('colony:setReport', project, on),
+      // Write a tracked card's report now and open it. Resolves to the file.
+      openReport: (id: string): Promise<string> => ipcRenderer.invoke('colony:openReport', id),
       // Park a card back in the backlog, worktree intact — the way out of an
       // automatic release.
       hold: (id: string): Promise<ColonyTask | undefined> => ipcRenderer.invoke('colony:hold', id),

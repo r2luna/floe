@@ -100,6 +100,22 @@ export function ColonyBoard({
         >
           automerge: {board.automerge ? 'on' : 'off'}
         </button>
+        {/* The step report: measures every card that enters the first stage from
+            here on. Beside automerge because both are the board's own policy,
+            and the one place on screen that says what the board is doing. */}
+        <button
+          className="fpolicy-act"
+          data-on={board.report || undefined}
+          disabled={!board.configPath}
+          title={
+            board.configPath
+              ? `step report is ${board.report ? 'on' : 'off'} — tokens, findings and diff per step (m) · r opens a card's report`
+              : 'this project has no colony.toml to write'
+          }
+          onClick={() => onCommand?.('colony.report')}
+        >
+          report: {board.report ? 'on' : 'off'}
+        </button>
       </div>
 
       {/* The one thing on this board that costs you something: tasks that
@@ -201,6 +217,16 @@ function Column({
   )
 }
 
+/** What a measured card's finished steps have spent, as the card prints it. */
+function tokensSoFar(task: ColonyTask): string {
+  let n = 0
+  for (const v of task.visits) {
+    const u = v.step?.usage
+    if (u) n += u.input + u.output + u.cacheRead + u.cacheWrite
+  }
+  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M tok` : `${Math.round(n / 1000)}k tok`
+}
+
 /** Elapsed, at the resolution the card prints it. */
 function since(at: number): string {
   const t = Math.max(0, Math.floor((Date.now() - at) / 1000))
@@ -269,6 +295,12 @@ function Card({
       {task.warn && <div className="fcard-warn">{task.warn}</div>}
       <div className="fcard-foot">
         <span>{since(task.updatedAt)}</span>
+        {/* Measured by the step report: what its steps have spent so far. */}
+        {task.report && (
+          <span className="fcard-report" title="step report — r writes and opens it">
+            report · {tokensSoFar(task)}
+          </span>
+        )}
       </div>
     </button>
   )
@@ -303,6 +335,12 @@ function Held({
     >
       <span className="fkind">{task.kind}</span>
       <span className="fq-name">{task.name}</span>
+      {/* A finished card's report is the thing you came to `done` for. */}
+      {task.report?.file && (
+        <span className="fq-report" title="step report — r opens it">
+          report
+        </span>
+      )}
       <span className="fq-pos">#{at + 1}</span>
     </button>
   )

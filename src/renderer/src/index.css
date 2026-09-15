@@ -8573,6 +8573,19 @@ kbd {
   font-size: 10px;
 }
 
+/* A card the step report is measuring. Dim, like the elapsed beside it: it is a
+   fact about the card, not something asking for attention. */
+.fcard-report {
+  margin-left: auto;
+  color: var(--dimmer);
+}
+
+.fq-report {
+  flex: none;
+  color: var(--dimmer);
+  font-size: 10px;
+}
+
 /* Needs you, as a badge — never as a border. The border belongs to the cursor,
    and a card can be selected AND asking at the same time; a mark that borrowed
    the border would simply vanish in that case. */
@@ -9250,6 +9263,11 @@ kbd {
 .fpolicy-act[data-on] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Two switches share the strip: the first one takes the free space, the rest sit beside it. */
+.fpolicy-act + .fpolicy-act {
+  margin-left: 0;
 }
 
 .fpolicy-act:disabled {

@@ -13,6 +13,7 @@ import { lmStudioServerModels } from './localAgents'
 import { harnessMcp } from './mcpHarness'
 import { forgetHouseRules, houseRulesFor } from './houseRules'
 import { forgetThreads, rememberThread, threadFor } from './threads'
+import { addUsage, cliRunUsage } from './usageLedger'
 
 // Running a turn on something other than Claude.
 //
@@ -207,7 +208,7 @@ export async function openAiChat(
   base: string,
   model: string,
   messages: { role: string; content: string }[]
-): Promise<{ text: string; tokens: number }> {
+): Promise<{ text: string; tokens: number; input: number; output: number }> {
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -229,7 +230,7 @@ export async function openAiChat(
   }
   const body = (await res.json()) as {
     choices?: { message?: { content?: string; reasoning_content?: string } }[]
-    usage?: { total_tokens?: number }
+    usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
     error?: string
   }
   if (body.error) throw new Error(body.error)
@@ -239,7 +240,9 @@ export async function openAiChat(
     // everything it managed to say in `reasoning_content` — showing that beats
     // showing an empty bubble.
     text: message?.content || message?.reasoning_content || '',
-    tokens: body.usage?.total_tokens ?? 0
+    tokens: body.usage?.total_tokens ?? 0,
+    input: body.usage?.prompt_tokens ?? 0,
+    output: body.usage?.completion_tokens ?? 0
   }
 }
 
@@ -255,15 +258,15 @@ export async function askLocalModel(
   runtime: string,
   model: string | undefined,
   messages: { role: 'user' | 'assistant'; content: string }[]
-): Promise<{ text: string; tokens: number; model: string }> {
+): Promise<{ text: string; tokens: number; input: number; output: number; model: string }> {
   const base = runtime === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434/v1'
   let id = model ?? ''
   if (runtime === 'lmstudio') {
     await ensureLmStudio()
     id = await resolveLmStudioModel(id)
   }
-  const { text, tokens } = await openAiChat(base, id, messages)
-  return { text, tokens, model: id }
+  const { text, tokens, input, output } = await openAiChat(base, id, messages)
+  return { text, tokens, input, output, model: id }
 }
 
 /**
@@ -364,7 +367,8 @@ export async function runRuntime(
     if (runtime === 'lmstudio' || runtime === 'ollama') {
       // We keep the conversation, so these are genuinely multi-turn.
       thread.messages = [...(thread.messages ?? []), { role: 'user', content: prompt }]
-      const { text, tokens, model: id } = await askLocalModel(runtime, model, thread.messages)
+      const { text, tokens, input, output, model: id } = await askLocalModel(runtime, model, thread.messages)
+      addUsage(key, { input, output })
       thread.messages.push({ role: 'assistant', content: text })
       if (text) say(win, key, text, { model: id, effort, provider: runtime })
       // A reasoning model that spent its whole budget thinking answers with
@@ -399,9 +403,10 @@ export async function runRuntime(
       // Floe's own tools plus its MCP registry, in opencode's dialect: a JSON
       // blob in the environment, merged over the user's own config rather than
       // replacing it (mcpHarness.ts).
-      const { text, sessionId } = textFromJson(
-        await run('opencode', args, worktreePath, 3 * 60 * 1000, harnessMcp('opencode', key, worktreePath))
-      )
+      const raw = await run('opencode', args, worktreePath, 3 * 60 * 1000, harnessMcp('opencode', key, worktreePath))
+      const spent = cliRunUsage(raw)
+      if (spent) addUsage(key, spent)
+      const { text, sessionId } = textFromJson(raw)
       if (sessionId) {
         thread.sessionId = sessionId
         rememberThread(key, 'opencode', sessionId)
@@ -422,9 +427,10 @@ export async function runRuntime(
       // rather than an id we chose, so there is no way to name OUR session
       // among several open at once. Sending the transcript as context would be
       // the upgrade, once these panels can hand one over.
-      const { text } = textFromJson(
-        await run('gemini', args, worktreePath, 3 * 60 * 1000, harnessMcp('gemini', key, worktreePath))
-      )
+      const raw = await run('gemini', args, worktreePath, 3 * 60 * 1000, harnessMcp('gemini', key, worktreePath))
+      const spent = cliRunUsage(raw)
+      if (spent) addUsage(key, spent)
+      const { text } = textFromJson(raw)
       if (text) say(win, key, text, { model, effort, provider: runtime })
       emit(win, key, { kind: 'done', ok: true })
       return

@@ -106,6 +106,8 @@ export const COMMAND_IDS: string[] = [
   'colony.new',
   'colony.stages',
   'colony.automerge',
+  'colony.report',
+  'colony.openReport',
   'mcp.install',
   'mcp.open',
   'mcp.new',

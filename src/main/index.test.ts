@@ -333,6 +333,8 @@ const CHANNELS = [
   'colony:events',
   'colony:undoMerge',
   'colony:setAutomerge',
+  'colony:setReport',
+  'colony:openReport',
   'colony:hold',
   'colony:mergeTask',
   'colony:nanny',

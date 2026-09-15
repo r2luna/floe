@@ -1452,6 +1452,48 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The step report's switch — a command, so the palette, `m` and the
+        // board's strip all reach the one writer.
+        id: 'colony.report',
+        title: 'Step report — measure each card\u2019s steps, on or off',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'the step report belongs to a project board — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          void window.floe.colony
+            .board(project)
+            .then((b) =>
+              window.floe.colony
+                .setReport(project, !b.report)
+                .then(() =>
+                  c.say(
+                    b.report
+                      ? 'step report off — cards already measured keep going until done'
+                      : 'step report on — cards entering the first stage from now are measured'
+                  )
+                )
+            )
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'colony.openReport',
+        title: 'Open this task\u2019s step report',
+        group: 'Colony',
+        enabled: (c) => !!taskRow(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const id = taskRow(c)?.dataset.task
+          if (!id) return
+          void window.floe.colony
+            .openReport(id)
+            .then((file) => c.say(`report written — ${file}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         // There is deliberately no "new task" dialog (D8). `n` is the keyboard
         // path to the same place the header button goes: the nanny, with the
         // composer ready — she already knows the base branch, which stage is
