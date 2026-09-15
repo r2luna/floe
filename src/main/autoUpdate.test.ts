@@ -264,23 +264,26 @@ test('the restart command hands the swap to the updater', async () => {
   assert.equal(updater.installs, before + 1)
 })
 
-// macOS: unsigned builds cannot be swapped in by Squirrel, so the updater only
-// finds the release and points at its page.
-test('on macOS an update is announced, not downloaded', async () => {
+// macOS: unsigned builds cannot be swapped in by Squirrel, so Floe fetches and
+// swaps the bundle itself (macUpdate.ts). Under `node --test` there is no .app
+// to swap, which is also the fallback path: the release page, as before.
+test('on macOS an update is announced, then installed by Floe itself', async () => {
   g.__floeApp = { isPackaged: true, version: '1.2.3' }
   const win = fakeWindow(true)
   init(win, false)
 
   assert.equal(updater.autoDownload, false)
   updater.reply = () => Promise.resolve({ isUpdateAvailable: true, updateInfo: { version: '9.9.9' } })
-  assert.equal(await check(), 'Floe 9.9.9 is out — run "Install update" to download it.')
+  assert.equal(await check(), 'Floe 9.9.9 is out — run "Install update" to download and apply it.')
   updater.reply = () => Promise.resolve({ isUpdateAvailable: false, updateInfo: { version: '1.2.3' } })
 
   captureLogs(() => updater.emit('update-available', { version: '9.9.9' }))
   assert.deepEqual(win.sent, [['update:downloaded', { version: '9.9.9', download: true }]])
 
   const before = updater.installs
-  await invokeHandler('update:install', undefined)
+  const said = await invokeHandler('update:install', undefined)
   assert.equal(updater.installs, before, 'never hands an unsigned bundle to Squirrel')
+  // No bundle to swap here, so it says why and falls back to the page.
+  assert.match(String(said), /Could not install it here .*not running from an .app bundle/)
   assert.deepEqual(g.__floeOpened, ['https://github.com/r2luna/floe/releases/tag/v9.9.9'])
 })

@@ -3721,7 +3721,7 @@ export default function App() {
             className="update-restart"
             onClick={() => runCommand(REGISTRY, ctxRef.current, 'update.install')}
           >
-            {pendingUpdate.download ? 'Download' : 'Restart'}
+            {pendingUpdate.download ? 'Install' : 'Restart'}
           </button>
         </div>
       )}
