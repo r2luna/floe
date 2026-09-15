@@ -1,30 +1,16 @@
 <svg width="1024" height="1024" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <linearGradient id="g56_bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"/><stop offset="1" stop-color="#0d0e11"/></linearGradient>
-      <radialGradient id="g56_glow" cx="0.3" cy="0.15" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
-      <linearGradient id="g56_sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1c2230"/><stop offset="1" stop-color="#0d0e11"/></linearGradient>
-      <linearGradient id="g56_top" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f6f8"/><stop offset="1" stop-color="#c9ccd2"/></linearGradient>
-      <linearGradient id="g56_topb" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f9fc"/><stop offset="1" stop-color="#b9c8dc"/></linearGradient>
-      <linearGradient id="g56_side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8f96a4"/><stop offset="1" stop-color="#575d6a"/></linearGradient>
-      <linearGradient id="g56_side2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a7b0be"/><stop offset="1" stop-color="#3f4552"/></linearGradient>
-      <linearGradient id="g56_refl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c9ccd2"/><stop offset="1" stop-color="#c9ccd2" stop-opacity="0"/></linearGradient>
-    </defs>
-    <rect width="64" height="64" rx="14" fill="url(#g56_bg)"/>
-    <rect width="64" height="64" rx="14" fill="url(#g56_glow)"/>
-    <rect x="0" y="33" width="64" height="31" fill="url(#g56_sea)" opacity="0.9"/>
-    <rect x="0" y="33" width="64" height="0.8" fill="#8f96a4" opacity="0.35"/>
-    
-    
-    <polygon points="12,49.85 20,55.35 40,57.55 54,54.25 57,50.4 48,47.1 22,46" fill="url(#g56_refl)" opacity="0.22"/>
-    <polygon points="57,31 48,37 22,39 12,32 12,38 22,45 48,43 57,37" fill="url(#g56_side)"/>
-    <clipPath id="g56_c1232"><polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39"/></clipPath>
-    <polygon points="12,32 20,22 40,18 54,24 57,31 48,37 22,39" fill="url(#g56_top)"/>
-    <polygon clip-path="url(#g56_c1232)" points="24.2,25 37.2,21 46.3,27" fill="#ffffff" opacity="0.5"/>
-    <polyline points="12,32 20,22 40,18 54,24" fill="none" stroke="#d3956d" stroke-width="0.9" opacity="0.9" stroke-linejoin="round"/>
-    <polygon points="44,58.3 52,59.4 60,57.75 58,55 46,55" fill="url(#g56_refl)" opacity="0.14"/>
-    <polygon points="60,45 58,50 46,50 44,44 44,48 46,54 58,54 60,49" fill="url(#g56_side)"/>
-    <clipPath id="g56_c4444"><polygon points="44,44 52,42 60,45 58,50 46,50"/></clipPath>
-    <polygon points="44,44 52,42 60,45 58,50 46,50" fill="url(#g56_top)"/>
-    <polygon clip-path="url(#g56_c4444)" points="45,45 50.2,48 48.9,53" fill="#ffffff" opacity="0.5"/>
-    
-    </svg>
+      <linearGradient id="g28_bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"></stop><stop offset="1" stop-color="#0d0e11"></stop></linearGradient>
+      <radialGradient id="g28_glow" cx="0.3" cy="0.15" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="0.18"></stop><stop offset="1" stop-color="#ffffff" stop-opacity="0"></stop></radialGradient>
+      <linearGradient id="g28_ice" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="745" y2="714"><stop offset="0" stop-color="#f4f6f8"></stop><stop offset="1" stop-color="#c9ccd2"></stop></linearGradient>
+      <linearGradient id="g28_acc" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="745" y2="714"><stop offset="0" stop-color="#e8b088"></stop><stop offset="1" stop-color="#b8764f"></stop></linearGradient>
+      <linearGradient id="g28_side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8f96a4"></stop><stop offset="1" stop-color="#575d6a"></stop></linearGradient>
+      <linearGradient id="g28_inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f6f8"></stop><stop offset="1" stop-color="#c9ccd2"></stop></linearGradient>
+      <mask id="g28_beak" maskUnits="userSpaceOnUse" x="-100" y="-100" width="1000" height="1000"><rect x="-100" y="-100" width="1000" height="1000" fill="#fff"></rect><circle cx="377.5" cy="358" r="368" fill="#000"></circle></mask>
+    </defs><rect width="64" height="64" rx="14" fill="url(#g28_bg)"></rect><rect width="64" height="64" rx="14" fill="url(#g28_glow)"></rect>
+    <g transform="translate(9.096 11.723) scale(0.06027)">
+      
+      <path fill-rule="evenodd" d="M735.075 408.15 C738.826 386.087 748.092 110.305 745.224 107.437 C744.341 106.555 713.454 104.79 676.609 103.466 L609.539 101.039 L594.978 88.2429 C550.632 48.9715 494.152 20.0697 434.363 6.17028 C419.14 2.64027 405.681 1.3165 373.029 0.875252 C350.084 0.434001 328.242 0.654674 324.491 1.09592 A361 361 0 1 0 735.075 408.15 Z M429.73 121.999C485.327 136.119 530.335 168.33 561.443 215.764C616.158 299.161 614.172 416.092 556.369 498.165C525.922 541.848 482.238 572.074 429.509 585.974C411.197 590.827 403.475 591.71 373.029 591.931C351.408 591.931 332.654 591.048 324.491 589.283C252.347 573.619 199.397 532.803 167.627 468.601C146.667 425.8 138.725 388.073 140.931 338.432C145.564 225.913 221.68 136.78 329.566 117.586C355.82 112.953 403.034 114.939 429.73 121.999Z" fill="url(#g28_ice)"></path>
+      <path d="M735.075 408.15 C738.826 386.087 748.092 110.305 745.224 107.437 C744.341 106.555 713.454 104.79 676.609 103.466 L609.539 101.039 L594.978 88.2429 C550.632 48.9715 494.152 20.0697 434.363 6.17028 C419.14 2.64027 405.681 1.3165 373.029 0.875252 C350.084 0.434001 328.242 0.654674 324.491 1.09592 A361 361 0 1 0 735.075 408.15 Z" fill="url(#g28_acc)" mask="url(#g28_beak)"></path>
+      <circle cx="431" cy="279" r="56" fill="url(#g28_ice)"></circle>
+    </g></svg>

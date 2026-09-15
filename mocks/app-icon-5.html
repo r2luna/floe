@@ -1,0 +1,110 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe app icon — the Pinguim face</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge); font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.sizes{ display:flex; align-items:flex-end; gap:26px; }
+.sz{ display:grid; justify-items:center; gap:8px; color:var(--faint); font-size:10px; }
+.sz svg, .sz img{ display:block; }
+.dock{ display:flex; align-items:center; gap:14px; padding:10px 14px; background:#2a2d33; border:1px solid var(--line); margin-top:12px; width:max-content; }
+.dock .app{ width:48px; height:48px; border-radius:11px; }
+:root[data-theme='light'] .dock{ background:#d9dde3; }
+.grid{ display:grid; grid-template-columns:max-content; gap:40px; }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">tema</button>
+
+<h1>Floe app icon — the Pinguim face</h1>
+<p class="lede">No floe. The mark is the app's own penguin head (the ring with the square beak corner and the eye, from <code>PenguinHead.tsx</code>) on the current icon's dark lit tile. Every variant changes one thing against H1.</p>
+
+<section style="margin-bottom:40px">
+  <h2>today</h2>
+  <div class="sizes"><div class="sz"><img src="../resources/icon.svg" width="128" height="128"><span>128</span></div><div class="sz"><img src="../resources/icon.svg" width="32" height="32"><span>32</span></div><div class="sz"><img src="../resources/icon.svg" width="16" height="16"><span>16</span></div></div>
+</section>
+
+<div class="grid" id="out"></div>
+
+<script>
+let uid = 0
+const BG = '#0d0e11', ICE0 = '#f4f6f8', ICE2 = '#c9ccd2', ICE3 = '#8f96a4', ICE4 = '#575d6a', ACC = '#d3956d'
+// The head from PenguinHead.tsx: outer contour with the beak corner, then the hole.
+const OUTER = 'M735.075 408.15 C738.826 386.087 748.092 110.305 745.224 107.437 C744.341 106.555 713.454 104.79 676.609 103.466 L609.539 101.039 L594.978 88.2429 C550.632 48.9715 494.152 20.0697 434.363 6.17028 C419.14 2.64027 405.681 1.3165 373.029 0.875252 C350.084 0.434001 328.242 0.654674 324.491 1.09592 A361 361 0 1 0 735.075 408.15 Z'
+const HOLE_THIN = 'M118.5 353.0a258.0 258.0 0 1 0 516.0 0a258.0 258.0 0 1 0 -516.0 0Z'
+// The original pa-head.svg hole: a smaller opening, a heavier ring.
+const HOLE_THICK = 'M429.73 121.999C485.327 136.119 530.335 168.33 561.443 215.764C616.158 299.161 614.172 416.092 556.369 498.165C525.922 541.848 482.238 572.074 429.509 585.974C411.197 590.827 403.475 591.71 373.029 591.931C351.408 591.931 332.654 591.048 324.491 589.283C252.347 573.619 199.397 532.803 167.627 468.601C146.667 425.8 138.725 388.073 140.931 338.432C145.564 225.913 221.68 136.78 329.566 117.586C355.82 112.953 403.034 114.939 429.73 121.999Z'
+const EYE = { cx: 431, cy: 279, r: 56 }
+
+const defs = (id, glow) => `
+    <defs>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e2129"/><stop offset="1" stop-color="${BG}"/></linearGradient>
+      <radialGradient id="${id}glow" cx="0.3" cy="0.15" r="0.6"><stop offset="0" stop-color="#ffffff" stop-opacity="${glow}"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="${id}ice" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="745" y2="714"><stop offset="0" stop-color="${ICE0}"/><stop offset="1" stop-color="${ICE2}"/></linearGradient>
+      <linearGradient id="${id}acc" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="745" y2="714"><stop offset="0" stop-color="#e8b088"/><stop offset="1" stop-color="#b8764f"/></linearGradient>
+      <linearGradient id="${id}side" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE3}"/><stop offset="1" stop-color="${ICE4}"/></linearGradient>
+      <linearGradient id="${id}inv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${ICE0}"/><stop offset="1" stop-color="${ICE2}"/></linearGradient>
+      <mask id="${id}beak" maskUnits="userSpaceOnUse" x="-100" y="-100" width="1000" height="1000"><rect x="-100" y="-100" width="1000" height="1000" fill="#fff"/><circle cx="377.5" cy="358" r="368" fill="#000"/></mask>
+    </defs>`
+
+// Place the head (≈ 730 × 722 units, centred on 380,353) in the 64 tile.
+const place = (size, cx = 32, cy = 33) => {
+  const s = size / 730
+  return `translate(${(cx - 380 * s).toFixed(3)} ${(cy - 353 * s).toFixed(3)}) scale(${s.toFixed(5)})`
+}
+
+function art(id, o) {
+  const { size = 44, cx = 32, cy = 33, hole = HOLE_THIN, ring = 'ice', eye = 'ice', solid = false, depth = 0, beak = false, tile = 'dark', glow = 0.18 } = o
+  const paint = (k) => k === 'acc' ? `url(#${id}acc)` : k === 'dark' ? '#0d0e11' : `url(#${id}ice)`
+  const head = solid ? OUTER : `${OUTER} ${hole}`
+  const bg = tile === 'ice'
+    ? `<rect width="64" height="64" rx="14" fill="url(#${id}inv)"/>`
+    : `<rect width="64" height="64" rx="14" fill="url(#${id}bg)"/><rect width="64" height="64" rx="14" fill="url(#${id}glow)"/>`
+  // Depth: the same head, lowered and shaded, drawn behind — the slab's side band.
+  const band = depth ? Array.from({ length: depth }, (_, i) => `<path fill-rule="evenodd" d="${head}" fill="url(#${id}side)" transform="translate(0 ${(depth - i) * 12})"/>`).join('') : ''
+  return defs(id, glow) + bg + `
+    <g transform="${place(size, cx, cy)}">
+      ${band}
+      <path fill-rule="evenodd" d="${head}" fill="${paint(ring)}"/>
+      ${beak ? `<path d="${OUTER}" fill="url(#${id}acc)" mask="url(#${id}beak)"/>` : ''}
+      <circle cx="${EYE.cx}" cy="${EYE.cy}" r="${o.eyeR ?? EYE.r}" fill="${paint(eye)}"/>
+    </g>`
+}
+
+const OPTIONS = [
+  { id:'H1', title:'the mark, in ice', why:'The in-app head at 44 of 64 on today’s dark lit tile. Ring and eye in the ice gradient. The base.', o:{} },
+  { id:'H2', title:'the mark, in accent', why:'Ring in the accent, eye in ice. The same colour the head wears in the app chrome by default.', o:{ ring:'acc' } },
+  { id:'H3', title:'heavier ring', why:'The original pa-head.svg opening: smaller hole, thicker ring. Holds its shape at 16px where the thin ring starts to go faint.', o:{ hole:HOLE_THICK } },
+  { id:'H4', title:'solid head, eye cut', why:'No ring. The whole head is one ice shape and the eye is the dark of the tile. The most legible at 16px.', o:{ solid:true, eye:'dark', eyeR:66 } },
+  { id:'H5', title:'accent beak', why:'H3 with the square beak corner in the accent. The one warm spot on the tile is the beak, which is what makes it a penguin.', o:{ hole:HOLE_THICK, beak:true } },
+  { id:'H6', title:'accent eye', why:'H3 with the eye in the accent. The face looks back at you from the dock.', o:{ hole:HOLE_THICK, eye:'acc' } },
+  { id:'H7', title:'with thickness', why:'H3 extruded a few units, shaded like the old slab’s side band. Keeps the depth of the current icon, no floe.', o:{ hole:HOLE_THICK, depth:3, size:42, cy:31 } },
+  { id:'H8', title:'bigger, bleeding', why:'H5 at 58 of 64, pushed down-left so the beak corner sits near the tile corner. Face first, reads large in a dock.', o:{ hole:HOLE_THICK, beak:true, size:58, cx:30, cy:35 } },
+  { id:'H9', title:'ice tile', why:'H5 inverted: light tile, dark head, accent beak. Stands out among dark dock icons.', o:{ hole:HOLE_THICK, beak:true, tile:'ice', ring:'dark', eye:'dark' } },
+]
+
+function svg(o, size, square){
+  const id = 'g' + (uid++) + '_'
+  let body = art(id, o)
+  if (square) body = body.replace(/rx="14"/g, 'rx="0"')
+  return `<svg width="${size}" height="${size}" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">${body}</svg>`
+}
+const out = document.getElementById('out')
+for (const o of OPTIONS) {
+  const sizes = [512, 128, 64, 32, 16]
+  out.insertAdjacentHTML('beforeend', `<section>
+    <h2>${o.id} — ${o.title}</h2><p class="why">${o.why}</p>
+    <div class="sizes">${sizes.map(s => `<div class="sz">${svg(o.o, s)}<span>${s}</span></div>`).join('')}<div class="sz">${svg(o.o, 96, true)}<span>square</span></div></div>
+    <div class="dock"><div class="app" style="background:linear-gradient(#f7f7f7,#d8d8d8)"></div>${svg(o.o, 48)}<div class="app" style="background:linear-gradient(#5b6470,#3a414b)"></div></div>
+  </section>`)
+}
+</script>
+</body>
+</html>
