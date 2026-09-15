@@ -69,7 +69,7 @@ import {
   mergeFastForward,
   type CreateWorktreeOptions
 } from './git'
-import { answerQuestion, respondPermission, stopAgent, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { answerQuestion, respondPermission, setAgentPermissionMode, stopAgent, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { dispatchTurn } from './turn'
@@ -772,7 +772,10 @@ export function registerSessionIpc(): void {
     sessionTranscript(worktreePath, sessionId)
   )
   handle('sessions:setTitle', (_event, claudeId: string, title: string) => setSessionTitle(claudeId, title))
-  handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
+  handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => {
+    setCreatedSessionMode(id, mode)
+    setAgentPermissionMode(id, mode)
+  })
   handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
   handle('sessions:setEffort', (_event, id: string, effort: Effort) => setCreatedSessionEffort(id, effort))
   // The whole picker at once. What the composer writes when you change it, and
@@ -780,7 +783,11 @@ export function registerSessionIpc(): void {
   handle(
     'sessions:setChoice',
     (_event, id: string, choice: { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode }) =>
+{
       setCreatedSessionChoice(id, choice)
+      // Mid-turn too: the mode reaches the running claude now, not on the next message.
+      if (choice.mode) setAgentPermissionMode(id, choice.mode)
+    }
   )
   handle('sessions:choice', (_event, id: string) => createdSessionChoice(id))
   handle('sessions:create', (_event, s: { id: string; worktreePath: string; title?: string }) =>

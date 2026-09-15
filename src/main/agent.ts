@@ -160,6 +160,33 @@ export function optionsKeyFor(options: AgentRunOptions): string {
   return `${options.permissionMode}|${options.model ?? ''}|${options.effort ?? ''}`
 }
 
+/**
+ * Switch a live conn's permission mode without respawning it.
+ *
+ * A respawn waits for the turn to end, so a mode picked mid-turn used to do
+ * nothing until the next message. The CLI takes `set_permission_mode` over the
+ * control channel instead, and the running turn honours it from the next tool
+ * call on. The optionsKey follows, so the next send does not kill the conn for
+ * a mode it already has. Bypass is only accepted from a child spawned with
+ * `--allow-dangerously-skip-permissions`, which spawnConn always passes.
+ */
+export function applyLiveMode(conn: Conn, mode: PermissionMode): void {
+  write(conn, {
+    type: 'control_request',
+    request_id: `mode-${Date.now()}`,
+    request: { subtype: 'set_permission_mode', mode: mode === 'skip' ? 'bypassPermissions' : mode }
+  })
+  conn.optionsKey = [mode, ...conn.optionsKey.split('|').slice(1)].join('|')
+}
+
+/** The picker changed a session's mode: push it into its running claude, if any. */
+export function setAgentPermissionMode(key: string, mode: PermissionMode): void {
+  const found = resolveConn(key)
+  if (!found || isChildDead(found[1].child)) return
+  log('mode-live', { key, connKey: found[0], mode })
+  applyLiveMode(found[1], mode)
+}
+
 // Every runtime (Claude here, codex.ts, runtimes.ts) emits through this one
 // function, so the seq counter and the replay snapshot can never miss a source.
 export function sendAgentEvent(win: BrowserWindow, key: string, event: AgentEvent): void {
@@ -499,6 +526,8 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     '--verbose'
   ]
   args.push(...permissionArgs(options.permissionMode))
+  // Without it the CLI refuses a live switch to bypass (applyLiveMode).
+  if (options.permissionMode !== 'skip') args.push('--allow-dangerously-skip-permissions')
   // Always route the control channel through stdio. For ordinary tools this only
   // bites outside skip mode (under --dangerously-skip-permissions the CLI
   // auto-allows them and never asks — verified: Bash runs with no prompt). But
@@ -1703,6 +1732,12 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
   if (parentToolUseId && routeSubagentLine(win, key, msg, type, parentToolUseId)) return
 
   if (type === 'control_request') return handleControlRequest(win, key, conn, msg)
+  // The CLI's answer to a request we made (applyLiveMode). Only a refusal is news.
+  if (type === 'control_response') {
+    const response = msg.response as { subtype?: string; error?: string } | undefined
+    if (response?.subtype === 'error') log('control-error', { key, error: response.error })
+    return
+  }
   if (type === 'system') return handleSystemLine(win, key, msg)
   if (type === 'stream_event') return handleStreamEvent(win, key, conn, msg)
   if (type === 'assistant') return handleAssistantLine(win, key, conn, msg)
