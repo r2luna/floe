@@ -64,6 +64,8 @@ export const COMMAND_IDS: string[] = [
   'selection.toggle',
   'selection.cancel',
   'selection.comment',
+  'code.definition',
+  'code.back',
   // App
   'palette.chord',
   'palette.open',
@@ -106,6 +108,8 @@ export const COMMAND_IDS: string[] = [
   'colony.new',
   'colony.stages',
   'colony.automerge',
+  'colony.report',
+  'colony.openReport',
   'mcp.install',
   'mcp.open',
   'mcp.new',

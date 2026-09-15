@@ -37,6 +37,7 @@ import type {
   FileChunk,
   FileContent,
   FileNode,
+  SymbolDefinition,
   ImageAttachment,
   ImplementPhase,
   JumpSession,
@@ -876,6 +877,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       all: (worktreePath: string): Promise<string[]> => ipcRenderer.invoke('files:all', worktreePath),
       read: (worktreePath: string, relPath: string): Promise<FileContent> =>
         ipcRenderer.invoke('files:read', worktreePath, relPath),
+      /**
+       * Where `name` is defined in the worktree, best guess first — the reader's
+       * go-to-definition. `fromPath` is the file being read; its own
+       * definitions rank first.
+       */
+      definition: (worktreePath: string, name: string, fromPath?: string): Promise<SymbolDefinition[]> =>
+        ipcRenderer.invoke('files:definition', worktreePath, name, fromPath),
       /** A document as LibreOffice draws it (a PDF), or null when it can't. */
       renderDoc: (worktreePath: string, relPath: string): Promise<FileContent | null> =>
         ipcRenderer.invoke('files:renderDoc', worktreePath, relPath),
@@ -990,6 +998,11 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // whether the board changes your base branch unasked.
       setAutomerge: (project: string, on: boolean): Promise<string> =>
         ipcRenderer.invoke('colony:setAutomerge', project, on),
+      // The step report: measure every card that enters the first stage from now on.
+      setReport: (project: string, on: boolean): Promise<string> =>
+        ipcRenderer.invoke('colony:setReport', project, on),
+      // Write a tracked card's report now and open it. Resolves to the file.
+      openReport: (id: string): Promise<string> => ipcRenderer.invoke('colony:openReport', id),
       // Park a card back in the backlog, worktree intact — the way out of an
       // automatic release.
       hold: (id: string): Promise<ColonyTask | undefined> => ipcRenderer.invoke('colony:hold', id),

@@ -67,6 +67,8 @@ interface Stubs {
   restoredBranches: { branch: string; sha: string }[]
   /** Every `readBase` answer, by worktree path. */
   bases: Map<string, string>
+  /** Every `snapshotTree` call, in order. The Nth returns `treeN`. */
+  snapshots: string[]
 }
 
 /**
@@ -101,7 +103,8 @@ const stubs: Stubs = {
   teardowns: [],
   deletedBranches: [],
   restoredBranches: [],
-  bases: new Map()
+  bases: new Map(),
+  snapshots: []
 }
 ;(globalThis as unknown as { __colonyStubs: Stubs }).__colonyStubs = stubs
 
@@ -141,6 +144,11 @@ const SOURCES = {
     'export async function changedFiles(worktreePath) {',
     '  const s = globalThis.__colonyStubs',
     '  return (s.changed.get(worktreePath) ?? []).map((relPath) => ({ relPath }))',
+    '}',
+    'export async function snapshotTree(worktreePath) {',
+    '  const s = globalThis.__colonyStubs',
+    '  s.snapshots.push(worktreePath)',
+    '  return "tree" + s.snapshots.length',
     '}',
     'export async function undoMerge(root, base, expected, to) {',
     '  const s = globalThis.__colonyStubs',
@@ -1445,4 +1453,66 @@ test('the compact board carries where each card is and its last verdicts, never 
     { stage: 'coder', verdict: 'none' }
   ])
   assert.equal(board.columns.flatMap((c) => c.tasks).some((t) => t.id === gone.id), false)
+})
+
+// The step report
+// ---------------------------------------------------------------------------
+
+/** Wait for something async (git, fs) the microtask `settle` cannot reach. */
+async function until(check: () => boolean, what: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    if (check()) return
+    await new Promise((r) => setTimeout(r, 10))
+  }
+  assert.fail(`timed out waiting for ${what}`)
+}
+
+test('with the report on, each step records its trees, findings and verdict, and done writes the report', async () => {
+  const root = project(['automerge = false', 'report = true', '', TWO_STAGES].join('\n'))
+  assert.equal(boardFor(root).report, true)
+  stubs.worktreeFor = (_root, branch) => [{ path: tree('measured'), branch }]
+  const task = addTask({ project: root, name: 'measured', brief: 'x' })
+  const turns = stubs.turns.length
+  await releaseTask(win, task.id)
+
+  // The card holds its spot at once, and the turn starts once the tree is taken.
+  assert.equal(getTask(task.id)?.status, 'working')
+  await until(() => stubs.turns.length === turns + 1, 'the coder turn')
+  assert.match(stubs.turns.at(-1)?.prompt ?? '', /STEP REPORT[\s\S]*\(none yet\)/)
+  const before = getTask(task.id)?.report?.current?.tree
+  assert.ok(before, 'the start snapshot is on the card')
+
+  lastListener()('Done.\n\nFINDINGS:\n- [high] new: parsing lives in the renderer\nCOLONY: pass')
+  await until(() => getTask(task.id)?.stage === 'qa' && stubs.turns.length === turns + 2, 'the qa turn')
+
+  const coder = getTask(task.id)?.visits.at(-1)
+  assert.equal(coder?.step?.treeBefore, before)
+  assert.ok(coder?.step?.treeAfter && coder.step.treeAfter !== before)
+  assert.equal(coder?.step?.findingsDeclared, true)
+  assert.deepEqual(coder?.step?.findings, [{ severity: 'high', fresh: true, text: 'parsing lives in the renderer' }])
+  // The next lane is told what was already raised, so it can mark its repeats.
+  assert.match(stubs.turns.at(-1)?.prompt ?? '', /- coder: \[high\] parsing lives in the renderer/)
+
+  lastListener()('All green.\nCOLONY: pass')
+  await until(() => !!getTask(task.id)?.report?.file, 'the report file')
+
+  const done = getTask(task.id)
+  assert.equal(done?.stage, 'done')
+  assert.equal(done?.visits.at(-1)?.step?.findingsDeclared, false, 'no block is "never said", not "none"')
+  const file = done?.report?.file ?? ''
+  assert.ok(file.startsWith(join(root, '.floe', 'colony', 'reports')), 'in the project root, not the worktree')
+  assert.match(readFileSync(file, 'utf8'), /parsing lives in the renderer/)
+  assert.equal(readFileSync(join(root, '.floe', 'colony', 'reports', '.gitignore'), 'utf8'), '*\n')
+})
+
+test('a card already past the first stage when the report went on is never measured', () => {
+  const root = project(['report = true', '', TWO_STAGES].join('\n'))
+  const id = holdingAt(root, 'qa', 'late')
+  const snapshots = stubs.snapshots.length
+  tick(win, root)
+
+  assert.equal(getTask(id)?.status, 'working')
+  assert.equal(getTask(id)?.report, undefined)
+  assert.equal(stubs.turns.at(-1)?.prompt.includes('STEP REPORT'), false)
+  assert.equal(stubs.snapshots.length, snapshots, 'no snapshot for an untracked step')
 })

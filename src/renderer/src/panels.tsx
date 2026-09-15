@@ -49,6 +49,7 @@ import {
   type ComponentType,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode
 } from 'react'
 import { QueryPanel } from './QueryPanel'
@@ -66,6 +67,7 @@ import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
+import { wordAt } from './definition'
 import { splitByHits } from './findHits.ts'
 import { markAll } from './findMark'
 import { usePlans } from './usePlans'
@@ -700,6 +702,7 @@ export function PanelBody({
   onEditSkill,
   commands,
   view,
+  onDefinition,
   onOpen
 }: {
   kind: PanelKind
@@ -792,6 +795,12 @@ export function PanelBody({
   firstChoice?: ModelChoice
   /** What was attached to that opening message. */
   firstAttached?: Attached
+  /**
+   * Go to where a name is defined — a ⌘-click in the file or diff viewer.
+   * `line` is the file line clicked on, so the definition you are standing on
+   * is not the answer. See goToDefinition in App.
+   */
+  onDefinition?: OnDefinition
   onOpen: OpenFn
 }): ReactNode {
   // Every panel with rows gets the query: the find bar is one feature, so it
@@ -942,7 +951,8 @@ export function PanelBody({
   // and a file is the panel where a match is hardest to spot unaided.
   // `root` overrides the worktree — that is how a skill opens in the same
   // reader as any other file.
-  if (kind === 'file') return <FileView root={root ?? cwd} path={sub ?? ''} find={find} />
+  if (kind === 'file')
+    return <FileView root={root ?? cwd} path={sub ?? ''} find={find} onDefinition={onDefinition} />
   // The editor panel is a terminal running your editor, one per worktree: every
   // file you open lands in the same session, the way it would in a real
   // terminal. `sub` carries the file and the line — see editSub.
@@ -968,7 +978,16 @@ export function PanelBody({
     )
   }
   if (kind === 'diff')
-    return <FileDiff path={sub ?? ''} changes={changes} onPatch={onPatch} find={find} view={view} />
+    return (
+      <FileDiff
+        path={sub ?? ''}
+        changes={changes}
+        onPatch={onPatch}
+        find={find}
+        view={view}
+        onDefinition={onDefinition}
+      />
+    )
   if (kind === 'commands')
     return commands ? (
       <CommandsPane commands={commands} worktreePath={cwd} onOpen={onOpen} onCommand={onCommand} />
@@ -3267,19 +3286,46 @@ const WHOLE_FILE = 100000
 
 const MARK: Record<string, string> = { add: '+', del: '−', mod: '~', ctx: ' ' }
 
+export type OnDefinition = (name: string, line?: number) => void
+
+/**
+ * ⌘-click (ctrl-click on Linux) on a name in a code view: go to its definition.
+ *
+ * A modifier, not a bare click: a plain click already puts the cursor on a line
+ * and drags a selection. The word is read off the row's whole text rather than
+ * the span under the pointer, because a highlight token or a find mark can cut
+ * a name in two.
+ */
+function definitionClick(e: ReactMouseEvent, onDefinition?: OnDefinition): void {
+  if (!onDefinition || !(e.metaKey || e.ctrlKey)) return
+  const code = (e.target as HTMLElement).closest<HTMLElement>('.diff-code')
+  const caret = document.caretRangeFromPoint(e.clientX, e.clientY)
+  if (!code || !caret || !code.contains(caret.startContainer)) return
+  const before = document.createRange()
+  before.setStart(code, 0)
+  before.setEnd(caret.startContainer, caret.startOffset)
+  const name = wordAt(code.textContent ?? '', before.toString().length)
+  if (!name) return
+  e.preventDefault()
+  const line = Number(code.closest<HTMLElement>('[data-new-line]')?.dataset.newLine)
+  onDefinition(name, line > 0 ? line : undefined)
+}
+
 /** One file's diff, fetched on demand and highlighted once Shiki is ready. */
 function FileDiff({
   path,
   changes,
   onPatch,
   find,
-  view
+  view,
+  onDefinition
 }: {
   path: string
   changes: Changes
   onPatch?: (patch: string) => void
   find?: string
   view?: 'prose' | 'code'
+  onDefinition?: OnDefinition
 }) {
   // Markdown opens as prose: that is the whole point of the view, and the
   // reader who wants the literal patch is one keystroke away (`p`).
@@ -3354,7 +3400,7 @@ function FileDiff({
 
   if (prose)
     return (
-      <div className="diff md-lines">
+      <div className="diff md-lines" data-path={path}>
         {document.map((row, i) => (
           <div
             className="diff-row md-row"
@@ -3382,7 +3428,7 @@ function FileDiff({
     )
 
   return (
-    <div className="diff">
+    <div className="diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
       {rows.map((r, i) => {
         if (r.kind === 'hunk') {
           return (
@@ -3399,7 +3445,9 @@ function FileDiff({
         return (
           // Every line is navigable: j/k moves between lines and v selects
           // them, so a line has to be something the cursor can land on.
-          <div className="diff-row" key={i} data-kind={r.kind} data-nav tabIndex={-1}>
+          // `data-new-line`, not `data-line`: a line there turns a selection's
+          // quote into a `path:12-30` reference (see lineOnRow in registry.ts).
+          <div className="diff-row" key={i} data-kind={r.kind} data-new-line={r.newNo} data-nav tabIndex={-1}>
             {/* Both gutters always render, even when empty, so the code column
                 never shifts between an added and a removed line. */}
             <span className="diff-no">{r.oldNo ?? ''}</span>
@@ -4006,7 +4054,17 @@ function SlidesView({
 }
 
 /** One file as it is on disk, highlighted once Shiki has the grammar. */
-function FileView({ root, path, find }: { root?: string; path: string; find?: string }) {
+function FileView({
+  root,
+  path,
+  find,
+  onDefinition
+}: {
+  root?: string
+  path: string
+  find?: string
+  onDefinition?: OnDefinition
+}) {
   const [content, setContent] = useState<FileContent | null>(null)
   const [error, setError] = useState<string>()
 
@@ -4063,11 +4121,11 @@ function FileView({ root, path, find }: { root?: string; path: string; find?: st
   if (kind === 'markdown') return <MarkdownLines text={content.text} />
 
   return (
-    <div className="diff">
+    <div className="diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
       {lines.map((line, i) => (
         // Rows the cursor can land on, like the diff's — j/k has to walk a file
         // the same way it walks a patch.
-        <div className="diff-row file-line" key={i} data-nav tabIndex={-1}>
+        <div className="diff-row file-line" key={i} data-new-line={i + 1} data-nav tabIndex={-1}>
           <span className="diff-no">{i + 1}</span>
           <span className="diff-code">{markCode(hl?.[i], line, find)}</span>
         </div>

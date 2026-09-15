@@ -1,4 +1,5 @@
 import {
+  IconArrowBackUp,
   IconGitCompare,
   IconGitMerge,
   IconMenu2,
@@ -26,6 +27,7 @@ import {
   toggleDock
 } from './lane'
 import { dragAnchor, selRange } from './diff'
+import { pickDefinition } from './definition'
 import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
@@ -84,6 +86,7 @@ import { useMenuItems } from './useMenuItems'
 import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
+import { useBrowserCovered } from './browserCover'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import {
   DEFAULT_GROUP,
@@ -670,9 +673,11 @@ export default function App() {
   // A native WebContentsView sits above renderer HTML. Hide it while one of
   // Floe's overlays is open, or it would cover the palette instead of yielding
   // to it like every DOM-backed panel does.
+  const browserCovered = useBrowserCovered()
   useEffect(() => {
     if (window.floe.version === 'web' || !lane.panels.some((panel) => panel.kind === 'browser')) return
     const overlay =
+      browserCovered ||
       paletteOpen ||
       commandsOpen ||
       keysOpen ||
@@ -683,7 +688,7 @@ export default function App() {
       picker !== null ||
       (narrow && railMenu)
     void window.floe.browser.visible(!overlay)
-  }, [lane.panels, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
+  }, [lane.panels, browserCovered, paletteOpen, commandsOpen, keysOpen, finderFiles, adding, newWt, finding, picker, narrow, railMenu])
 
   const laneRef = useRef<HTMLDivElement>(null)
   const tabsRef = useRef<HTMLElement>(null)
@@ -1606,6 +1611,105 @@ export default function App() {
   }
 
   /**
+   * Where each go-to-definition left from, newest last — what `-` walks back.
+   *
+   * The panel as it was, cursor included, so going back lands on the line you
+   * jumped from. State rather than a ref: the header's back button shows only
+   * while there is somewhere to go. Cleared on a worktree switch, where the
+   * paths it holds would name files in a tree you are no longer in.
+   */
+  const [jumps, setJumps] = useState<Panel[]>([])
+  useEffect(() => setJumps([]), [cwd])
+
+  // Mark the document while ⌘/ctrl is down, so names in a code view underline
+  // as links (index.css). Cleared on blur too: a ⌘-tab away never sends keyup.
+  useEffect(() => {
+    const mark = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey) document.documentElement.dataset.jumpKey = ''
+      else delete document.documentElement.dataset.jumpKey
+    }
+    const clear = (): void => void delete document.documentElement.dataset.jumpKey
+    window.addEventListener('keydown', mark)
+    window.addEventListener('keyup', mark)
+    window.addEventListener('blur', clear)
+    return () => {
+      window.removeEventListener('keydown', mark)
+      window.removeEventListener('keyup', mark)
+      window.removeEventListener('blur', clear)
+    }
+  }, [])
+
+  /**
+   * Focus and centre row `index` of the panel `id` once it shows `path`.
+   *
+   * A jump opens a file that is not read yet, and the row it aims at does not
+   * exist until the read lands — so this waits for the viewer to mark itself
+   * with the path (`data-path`), which also keeps it off the rows of the file
+   * that is still on screen for the frame before the swap.
+   */
+  const revealRow = (id: string, path: string, index: number): void => {
+    const until = Date.now() + 3000
+    const step = (): void => {
+      const el = refs.current.get(id)
+      const rows = el?.querySelector(`[data-path="${CSS.escape(path)}"]`) ? rowsOf(el) : []
+      const row = rows[Math.min(index, rows.length - 1)]
+      if (!row) {
+        if (Date.now() < until) requestAnimationFrame(step)
+        return
+      }
+      // Focusing the row is what moves the cursor (onFocusCapture).
+      row.focus({ preventScroll: true })
+      row.scrollIntoView({ block: 'center' })
+      // The cursor already says this row, so the focus changes no state and
+      // nothing re-renders to paint the mark on rows that arrived late.
+      setLane((l) => ({ ...l }))
+    }
+    requestAnimationFrame(step)
+  }
+
+  /**
+   * Open the file defining the first of `names` that has a definition, on its
+   * line, and remember where this left from. Always the file reader, even out
+   * of a diff: the definition is usually in code the branch did not touch.
+   */
+  const goToDefinition = async (from: Panel, names: string[], line?: number): Promise<void> => {
+    const root = from.root ?? cwd
+    const path = from.sub
+    if (!root || !path || (from.kind !== 'file' && from.kind !== 'diff')) return
+    for (const name of names) {
+      const defs = await window.floe.files.definition(root, name, path).catch(() => [])
+      const target = pickDefinition(defs, { path, line })
+      if (!target) continue
+      const panel = mkPanel('file', target.path, undefined, undefined, undefined, from.root)
+      const at = target.line - 1
+      setJumps((prev) => [...prev.slice(-49), from])
+      setLane((l) => {
+        const next = open(l, panel)
+        return patchPanel(next, next.focus, { cursor: at, selection: null })
+      })
+      revealRow(panel.id, target.path, at)
+      return
+    }
+    say(names.length === 1 ? `no definition found for ${names[0]}` : 'no definition found on this line')
+  }
+
+  /** Put back the panel the last jump left from, on the line it left from. */
+  const jumpBack = (): void => {
+    const spot = jumps[jumps.length - 1]
+    if (!spot) return
+    setJumps((prev) => prev.slice(0, -1))
+    // Rebuilt from what it showed, not reinserted as it was: its old width and
+    // dock belong to a box the lane may have rearranged since.
+    const panel = { ...mkPanel(spot.kind as PanelKind, spot.sub, undefined, undefined, undefined, spot.root), view: spot.view }
+    const at = spot.cursor ?? 0
+    setLane((l) => {
+      const next = open(l, panel)
+      return patchPanel(next, next.focus, { cursor: at, selection: null, view: spot.view })
+    })
+    revealRow(panel.id, spot.sub ?? '', at)
+  }
+
+  /**
    * Open a skill's Markdown in your editor.
    *
    * Rooted at the skill's own directory, exactly as Settings roots the config
@@ -1867,7 +1971,13 @@ export default function App() {
     canOpen,
     whyCannotOpen,
     browser: {
-      address: () => document.querySelector<HTMLInputElement>('.browser-address input')?.focus(),
+      address: () => {
+        const input = document.querySelector<HTMLInputElement>('.browser-address input')
+        // select() too: pressing it again while the field already has focus
+        // must still select the whole URL, and onFocus will not fire twice.
+        input?.focus()
+        input?.select()
+      },
       back: () => void window.floe.browser.back(),
       forward: () => void window.floe.browser.forward(),
       reload: () => void window.floe.browser.reload(),
@@ -2070,6 +2180,11 @@ export default function App() {
     // Undefined until there IS one, which is also how the command knows to dim
     // itself: on the first chat of a session there is nowhere to go back to.
     alternateSession: alternate.current?.session ? alternateSession : undefined,
+    goToDefinition: (names, line) => {
+      const from = lane.panels[lane.focus]
+      if (from) void goToDefinition(from, names, line)
+    },
+    jumpBack: jumps.length ? jumpBack : undefined,
     pendingUpdate: pendingUpdate?.version,
     newWorktree: () => {
       if (!projects.current) return
@@ -3051,6 +3166,15 @@ export default function App() {
                           <IconGitMerge size={14} stroke={1.8} />
                         </button>
                       )}
+                    {(kind === 'file' || kind === 'diff') && jumps.length > 0 && (
+                      <button
+                        className="panel-act"
+                        title="Back to where you jumped from (-)"
+                        onClick={() => runCommand(REGISTRY, ctxRef.current, 'code.back')}
+                      >
+                        <IconArrowBackUp size={14} stroke={1.8} />
+                      </button>
+                    )}
                     {'action' in spec && spec.action && (
                       <button
                         className="panel-act"
@@ -3143,6 +3267,13 @@ export default function App() {
                     // in PanelBody.
                     onCommand={(id) => runCommand(REGISTRY, ctxRef.current, id)}
                     onEditSkill={editSkill}
+                    // Read from the lane at click time, not from this render's
+                    // `panel`: the mousedown that precedes the click moved the
+                    // cursor, and the way back should land on that line.
+                    onDefinition={(name, line) => {
+                      const from = ctxRef.current.lane.panels.find((p) => p.id === panel.id) ?? panel
+                      void goToDefinition(from, [name], line)
+                    }}
                     session={panel.session}
                     openSession={sessionKey}
                     // Only the panel the bar is searching: a query tinting rows

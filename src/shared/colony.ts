@@ -96,6 +96,8 @@ export interface Board {
    * you cannot see is one you cannot have agreed to.
    */
   automerge: boolean
+  /** Whether cards entering the first stage are measured for the step report. */
+  report: boolean
   /** Where this project's `colony.toml` is, or would be. Null when untracked. */
   configPath: string | null
   /** Config problems, so a board that cannot run says why instead of doing nothing. */
@@ -116,4 +118,71 @@ export function rowsOf(column: BoardColumn): { task: ColonyTask; status: TaskSta
     ...column.settled.map((task) => ({ task, status: 'settled' as const })),
     ...column.holding.map((task) => ({ task, status: 'holding' as const }))
   ]
+}
+
+/** One line of a lane's `FINDINGS:` block. */
+export interface Finding {
+  severity: 'high' | 'med' | 'low'
+  /** `new` — this step is the first to raise it. False is `seen <stage>`. */
+  fresh: boolean
+  /** The stage that raised it first, when the lane said so. */
+  seenIn?: string
+  text: string
+}
+
+/**
+ * Read the `FINDINGS:` block a lane writes when the board's report is on.
+ *
+ *   FINDINGS:
+ *   - [high] new: <one line>
+ *   - [med] seen coder: <one line>
+ *   COLONY: pass
+ *
+ * or `FINDINGS: none`. The LAST block wins, for the same reason as the hand-off
+ * line: a lane quoting the format while explaining itself would otherwise hand
+ * the report the example. `declared` false means no block at all — the report
+ * has to tell "found nothing" from "never said", or a lane that ignored the
+ * instruction would read as a step with no signal.
+ *
+ * Tolerant of what a model reaches for: bold, backticks, a missing severity (read
+ * as `med`) or a missing new/seen mark (read as new — the lane did not claim it
+ * was a repeat, and inventing that claim for it would be worse).
+ */
+export function parseFindings(text: string): { declared: boolean; findings: Finding[] } {
+  const clean = (line: string): string => line.trim().replace(/[`*_]/g, '').trim()
+  const lines = text.split(/\r?\n/)
+  let start = -1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^FINDINGS:/i.test(clean(lines[i]).replace(/^[>\s]+/, ''))) {
+      start = i
+      break
+    }
+  }
+  if (start === -1) return { declared: false, findings: [] }
+
+  const findings: Finding[] = []
+  const inline = clean(lines[start]).replace(/^[>\s]*FINDINGS:\s*/i, '')
+  const rows = inline && !/^none\b/i.test(inline) ? [inline] : []
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = clean(lines[i])
+    if (!line) {
+      if (findings.length || rows.length) break
+      continue
+    }
+    if (!/^[-*•]|^\d+[.)]/.test(lines[i].trim())) break
+    rows.push(line.replace(/^([-*•]|\d+[.)])\s*/, ''))
+  }
+  for (const row of rows) {
+    const m = /^(?:\[(high|med|medium|low)\]\s*)?(?:(new|seen)(?:\s+([\w-]+))?\s*[:—–-]\s*)?(.+)$/i.exec(row)
+    if (!m || !m[4].trim()) continue
+    const sev = (m[1] ?? 'med').toLowerCase()
+    const seen = m[2]?.toLowerCase() === 'seen'
+    findings.push({
+      severity: sev === 'medium' ? 'med' : (sev as Finding['severity']),
+      fresh: !seen,
+      ...(seen && m[3] ? { seenIn: m[3] } : {}),
+      text: m[4].trim()
+    })
+  }
+  return { declared: true, findings }
 }

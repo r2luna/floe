@@ -5,6 +5,7 @@ import { dropSettled, sendAgentEvent } from './agent'
 import { codexThreadConfig } from './mcpHarness'
 import { codexPosture, resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
+import { addCumulative, codexRunningUsage } from './usageLedger'
 import { forgetThreads, rememberThread, threadFor } from './threads'
 import { forgetHouseRules } from './houseRules'
 import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
@@ -181,6 +182,9 @@ function handleMessage(msg: Record<string, unknown>): void {
     const n = (v: unknown): number => (typeof v === 'number' ? v : 0)
     const tokens = n(last?.inputTokens) + n(last?.outputTokens)
     if (tokens > 0) sendAgentEvent(ctx.win, ctx.key, { kind: 'tokens', tokens })
+    // `total` is the thread's running spend — what the colony's step report reads.
+    const running = codexRunningUsage(params.tokenUsage)
+    if (running) addCumulative(ctx.key, `codex:${params.threadId}`, running)
     return
   }
   if (msg.method === 'turn/completed') {

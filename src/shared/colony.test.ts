@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { busyOf, isFull, parseHandoff, rowsOf } from './colony.ts'
+import { busyOf, isFull, parseFindings, parseHandoff, rowsOf } from './colony.ts'
 import type { BoardColumn, ColonyTask } from './colony.ts'
 
 const task = (id: string): ColonyTask => ({
@@ -104,4 +104,31 @@ test('the bands are drawn in the order the column reads: asking, working, then t
       ['wait', 'holding']
     ]
   )
+})
+
+test('parseFindings reads severity, new and seen, and stops at the hand-off line', () => {
+  const out = parseFindings(
+    [
+      'Did the thing.',
+      '',
+      '**FINDINGS:**',
+      '- [high] new: parsing lives in the renderer',
+      '- [med] seen coder: named zones need Intl',
+      '- plain line with no marks',
+      'COLONY: return coder — parsing lives in the renderer'
+    ].join('\n')
+  )
+  assert.equal(out.declared, true)
+  assert.deepEqual(out.findings, [
+    { severity: 'high', fresh: true, text: 'parsing lives in the renderer' },
+    { severity: 'med', fresh: false, seenIn: 'coder', text: 'named zones need Intl' },
+    { severity: 'med', fresh: true, text: 'plain line with no marks' }
+  ])
+})
+
+test('parseFindings tells "none" from "never said", and the last block wins', () => {
+  assert.deepEqual(parseFindings('FINDINGS: none\nCOLONY: pass'), { declared: true, findings: [] })
+  assert.deepEqual(parseFindings('all good\nCOLONY: pass'), { declared: false, findings: [] })
+  const quoted = parseFindings('The format is:\nFINDINGS:\n- [low] new: example\n\nMine:\nFINDINGS:\n- [high] new: real one\nCOLONY: pass')
+  assert.deepEqual(quoted.findings.map((f) => f.text), ['real one'])
 })

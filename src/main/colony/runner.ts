@@ -28,6 +28,7 @@ import {
   readBase,
   restoreBranch,
   restoreSnapshot,
+  snapshotTree,
   uncommittedWork,
   undoMerge,
   type MergeResult
@@ -35,7 +36,9 @@ import {
 import { provisionWorktree } from '../provision'
 import { teardownWorktree } from '../worktreeTeardown'
 import { listSkills } from '../config/skills'
-import { parseHandoff, type Board, type BoardColumn } from '../../shared/colony'
+import { parseFindings, parseHandoff, type Board, type BoardColumn } from '../../shared/colony'
+import { usageOf } from '../usageLedger'
+import { writeReport } from './report'
 import { getEvent, patchEvent, recordEvent } from './events'
 import {
   allTasks,
@@ -46,7 +49,9 @@ import {
   patchTask,
   recordVisit,
   type ColonyTask,
-  type TaskStatus
+  type StepRecord,
+  type TaskStatus,
+  type TaskVisit
 } from './store'
 
 /**
@@ -76,7 +81,15 @@ export function boardFor(project: string): Board {
   // Merged and cleaned up: its worktree and branch are gone, so there is nothing
   // left on the board to act on. The store keeps it — a dependency it satisfied
   // and a merge the log can still undo both point at it.
-  const tasks = listTasks(project).filter((t) => !t.archivedAt)
+  //
+  // A measured step keeps the lane's whole last message for the report. The
+  // board is read on every card move and by the nanny on every question, so it
+  // goes out without them — `writeTaskReport` is where they are read.
+  const tasks = listTasks(project)
+    .filter((t) => !t.archivedAt)
+    .map((t) =>
+      t.report ? { ...t, visits: t.visits.map((v) => (v.step ? { ...v, step: { ...v.step, message: '' } } : v)) } : t
+    )
   const stages = columnsFor(config, tasks.map((t) => t.stage))
 
   const column = (name: string, stage?: ColonyStage): BoardColumn => {
@@ -107,6 +120,7 @@ export function boardFor(project: string): Board {
     project,
     columns: [column(INBOX), ...stages.map((s) => column(s.name, s)), column(DONE)],
     automerge: config.automerge,
+    report: config.report,
     configPath: config.path,
     errors: config.errors.map((e) => ({ file: e.file, line: e.line, reason: e.reason }))
   }
@@ -757,18 +771,77 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
   // band, the attention strip and the only use of the accent colour. Marked
   // spawned, that band could never fill and a card could never ask.
 
+  // THE STEP REPORT TRACKS A CARD FROM ITS FIRST STAGE ON. Entering the first
+  // stage with the report on is the moment it starts; a card already past it
+  // stays untracked, because a report missing its first steps would draw the
+  // steps that did run as the whole story. Once tracked, it stays tracked until
+  // done, even if the switch goes off midway — half a report is the same lie.
+  const config = colonyConfig(task.project)
+  const startsHere = config.stages[0]?.name === stage.name
+  const report = task.report ?? (startsHere && config.report ? { since: Date.now() } : undefined)
+  const startedAt = Date.now()
+
   patchTask(task.id, {
     sessionId,
     status: 'working',
     warn: undefined,
-    line: `${stage.name}: starting`
+    line: `${stage.name}: starting`,
+    ...(report ? { report: { ...report, current: { at: startedAt } } } : {})
   })
 
   // `/skill` and not the skill's text: startTurn expands the token before
   // dispatch, so one Floe skill reaches opus, haiku and codex as the same
   // instructions — which is the whole reason a lane can pick its own model.
-  const prompt = lanePrompt(task, stage)
+  const prompt = lanePrompt(task, stage) + (report ? `\n\n${findingsAsk(task)}` : '')
 
+  if (!report) return dispatchLane(win, task, stage, sessionId, prompt)
+  // Snapshot BEFORE the lane gets its prompt, so the step's diff is only what
+  // it wrote. Async, so the card already holds its spot (`working`, above) and
+  // the scheduler counts it; the turn starts when the tree is taken.
+  const worktreePath = task.worktreePath
+  void snapshotTree(worktreePath)
+    .catch(() => undefined)
+    .then((tree) => {
+      const now = getTask(task.id)
+      // Moved or archived while git ran: this step is not the card's any more.
+      if (!now || now.sessionId !== sessionId || now.status !== 'working') return
+      if (tree && now.report) patchTask(task.id, { report: { ...now.report, current: { at: startedAt, tree } } })
+      dispatchLane(win, task, stage, sessionId, prompt)
+    })
+  return true
+}
+
+/**
+ * What a tracked lane is asked for on top of its skill: a `FINDINGS:` block,
+ * and the findings earlier steps already raised, so it can mark its own repeats.
+ *
+ * Inlined rather than written to the artifacts directory: that directory lands
+ * on base with the merge, and the report's bookkeeping has no business in the
+ * project's history.
+ */
+export function findingsAsk(task: ColonyTask): string {
+  const earlier = task.visits.flatMap((v) =>
+    (v.step?.findings ?? []).filter((f) => f.fresh).map((f) => `- ${v.stage}: [${f.severity}] ${f.text}`)
+  )
+  return [
+    'STEP REPORT — this board is measuring what each step adds. End your last message with a findings block, directly above your COLONY: line:',
+    '',
+    'FINDINGS:',
+    '- [high|med|low] new: <one line>',
+    '- [high|med|low] seen <stage>: <one line>',
+    '',
+    'A finding is a problem, risk or decision you identified in this step — not a summary of what you changed.',
+    'Mark it `seen <stage>` when an earlier step already raised it (listed below), `new` otherwise.',
+    'Write `FINDINGS: none` when you found nothing.',
+    '',
+    'Raised by earlier steps on this task:',
+    ...(earlier.length ? earlier : ['(none yet)'])
+  ].join('\n')
+}
+
+/** Hand the lane its prompt, and listen for how the turn ends. False means it did not start. */
+function dispatchLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage, sessionId: string, prompt: string): boolean {
+  if (!task.worktreePath) return false
   try {
     // The session id itself is the key: one minted a moment ago has no claudeId
     // yet and no live connection sitting under another name.
@@ -789,7 +862,9 @@ function startLane(win: BrowserWindow, task: ColonyTask, stage: ColonyStage): bo
       sessionId: task.sessionId,
       status: 'holding',
       line: undefined,
-      warn: `${stage.name} could not start: ${(err as Error).message}`
+      warn: `${stage.name} could not start: ${(err as Error).message}`,
+      // The step never ran, so it has nothing to measure.
+      ...(getTask(task.id)?.report ? { report: { ...(getTask(task.id)?.report ?? { since: Date.now() }), current: undefined } } : {})
     })
     return false
   }
@@ -882,6 +957,54 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string,
   // Moved out from under the lane (answered, archived, dragged) while it ran —
   // the board's later state wins over a verdict about where it used to be.
   if (!task || task.stage !== stage || task.status !== 'working') return
+  const current = task.report?.current
+  if (!current || !task.worktreePath) return settleLane(win, id, stage, text, undefined, asked)
+
+  // Measured: take the end snapshot BEFORE the card moves. Moving it ticks the
+  // board, and the next lane starting in this worktree would write into the
+  // tree this step is about to be diffed on.
+  const sessionId = task.sessionId
+  const at = colonyConfig(task.project).stages.find((s) => s.name === stage)
+  void snapshotTree(task.worktreePath)
+    .catch(() => undefined)
+    .then((treeAfter) => {
+      const found = parseFindings(text)
+      settleLane(win, id, stage, text, {
+        startedAt: current.at,
+        endedAt: Date.now(),
+        harness: at?.harness ?? 'claude',
+        model: at?.model,
+        usage: usageOf(sessionId ? sessionKeys(sessionId) : []),
+        treeBefore: current.tree,
+        treeAfter,
+        findingsDeclared: found.declared,
+        findings: found.findings,
+        // The END of the message: that is where the findings and the verdict are.
+        message: text.length > MESSAGE_CAP ? `…${text.slice(-MESSAGE_CAP)}` : text
+      }, asked)
+    })
+}
+
+/** How much of a lane's last message a step record keeps. */
+const MESSAGE_CAP = 20_000
+
+/** Every key a session's spend can have been recorded under. */
+function sessionKeys(id: string): string[] {
+  const s = getAllCreatedSessions().find((x) => x.id === id)
+  return s ? [s.id, ...(s.claudeId ? [s.claudeId] : []), ...(s.pastClaudeIds ?? [])] : [id]
+}
+
+/** Record the verdict — and, when measured, the step — and move the card. */
+function settleLane(
+  win: BrowserWindow,
+  id: string,
+  stage: string,
+  text: string,
+  step?: StepRecord,
+  asked = false
+): void {
+  const task = getTask(id)
+  if (!task || task.stage !== stage || task.status !== 'working') return
 
   const handoff = parseHandoff(text)
   // Most missing lines are a lane that forgot to write one. Asking costs one
@@ -892,9 +1015,13 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string,
   // The step's own session goes on the visit: with one session per step, that
   // pointer is the only way back to the transcript that produced this verdict.
   const sessionId = task.sessionId
+  // The step rides on the visit, and the card stops pointing at a running step.
+  const visit = (v: TaskVisit): TaskVisit => (step ? { ...v, step } : v)
+  const measured = task.report ? { report: { ...task.report, current: undefined } } : {}
 
   if (handoff?.verdict === 'stop') {
-    recordVisit(id, { at, stage, sessionId, verdict: 'stop', why: handoff.why }, {
+    recordVisit(id, visit({ at, stage, sessionId, verdict: 'stop', why: handoff.why }), {
+      ...measured,
       stage: INBOX,
       status: 'holding',
       line: handoff.why || 'stopped'
@@ -917,7 +1044,8 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string,
     // what the card prints, and a task bouncing between two lanes is the signal
     // that something is wrong with the task rather than with the lane.
     const back = colonyConfig(task.project).stages.find((s) => s.name === handoff.lane)
-    recordVisit(id, { at, stage, sessionId, verdict: 'return', why: handoff.why }, {
+    recordVisit(id, visit({ at, stage, sessionId, verdict: 'return', why: handoff.why }), {
+      ...measured,
       // A lane that names a stage nobody has is not a reason to lose the task —
       // park it as a question instead.
       stage: back ? back.name : stage,
@@ -940,7 +1068,8 @@ function finishLane(win: BrowserWindow, id: string, stage: string, text: string,
     }
   } else {
     const next = nextStage(task.project, stage) ?? DONE
-    recordVisit(id, { at, stage, sessionId, verdict: handoff ? 'pass' : 'none' }, {
+    recordVisit(id, visit({ at, stage, sessionId, verdict: handoff ? 'pass' : 'none' }), {
+      ...measured,
       stage: next,
       status: next === DONE ? 'settled' : 'holding',
       passes: task.passes + 1,
@@ -1004,11 +1133,15 @@ async function settleDone(win: BrowserWindow, id: string): Promise<void> {
     // Still sweep: `automerge = false` is about who runs the merge, not about
     // whether a card that merged earlier releases what was waiting on it.
     await sweepReleases(win, task.project)
+    await reportDone(win, id)
     nudgeNanny(win, task.project, `"${task.name}" reached done and is waiting to be merged (automerge is off).`)
     return
   }
 
   const result = await mergeTask(win, id)
+  // AFTER the merge attempt, never before: the report goes into the main
+  // checkout, and the merge is the thing that looks at that checkout.
+  await reportDone(win, id)
   nudgeNanny(
     win,
     task.project,
@@ -1016,6 +1149,37 @@ async function settleDone(win: BrowserWindow, id: string): Promise<void> {
       ? `"${task.name}" reached done and merged cleanly into base.`
       : `"${task.name}" reached done but did not merge: ${result.message ?? 'no reason given'}`
   )
+}
+
+/** The report a tracked card gets on reaching done. A failure is a warning, never a stuck card. */
+async function reportDone(win: BrowserWindow, id: string): Promise<void> {
+  if (!getTask(id)?.report) return
+  try {
+    await writeTaskReport(win, id)
+  } catch (err) {
+    patchTask(id, { warn: `report not written: ${(err as Error).message}` })
+    pushBoard(win, getTask(id)?.project ?? '')
+  }
+}
+
+/**
+ * Write (or rewrite) a tracked card's report now, and return the file.
+ *
+ * Callable at any point, not only at done: a card that stopped or bounced is
+ * exactly the one whose steps you want to read, and it may never reach done.
+ */
+export async function writeTaskReport(
+  win: BrowserWindow | undefined,
+  id: string
+): Promise<Awaited<ReturnType<typeof writeReport>>> {
+  const task = getTask(id)
+  if (!task) throw new Error(`Unknown task: ${id}`)
+  if (!task.report) throw new Error(`"${task.name}" is not tracked — turn the report on before it enters the first stage`)
+  const written = await writeReport(task)
+  const now = getTask(id)
+  if (now?.report) patchTask(id, { report: { ...now.report, file: written.file } })
+  pushBoard(win, task.project)
+  return written
 }
 
 // ---------------------------------------------------------------------------

@@ -93,3 +93,11 @@ test('autonomous and cleanup are off by default, inherit, and a task’s own val
   assert.equal(resolveFlag({}, config, 'cleanup'), true)
   assert.equal(resolveFlag({ cleanup: false }, config, 'cleanup'), false)
 })
+
+test('the step report is off by default and inherits like any scalar', () => {
+  assert.equal(DEFAULT_COLONY.report, false)
+  const global = parseGlobalColony('[colony]\nreport = true\n', 'floe.toml').layer
+  assert.equal(mergeColony([global]).report, true)
+  const project = parseProjectColony('report = false\n', 'colony.toml').layer
+  assert.equal(mergeColony([global, project]).report, false)
+})

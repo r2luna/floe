@@ -33,6 +33,7 @@ import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { downloadAndOpen } from './download.ts'
+import { identifiersOf } from './definition.ts'
 import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
@@ -878,6 +879,37 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => stepChange(c, -1)
       },
       {
+        // The name comes from, in order: an explicit arg (an agent over
+        // run_command), the text selected in the row, or every name on the
+        // cursor's line — the first one with a definition wins.
+        id: 'code.definition',
+        title: 'Go to definition',
+        group: 'Code',
+        enabled: (c) => ['file', 'diff'].includes(c.lane.panels[c.lane.focus]?.kind ?? ''),
+        unavailable: () => 'open a file or a diff first',
+        run: (c, arg) => {
+          const panel = c.lane.panels[c.lane.focus]
+          const row = c.rowsOf(c.panelEl(c.lane.focus))[panel?.cursor ?? 0]
+          const picked = window.getSelection()?.toString().trim() ?? ''
+          const names = arg
+            ? [arg]
+            : /^[A-Za-z_$][\w$]*$/.test(picked)
+              ? [picked]
+              : identifiersOf(row?.querySelector('.diff-code')?.textContent ?? '')
+          if (!names.length) return c.say('no name on this line')
+          const line = Number(row?.dataset.newLine)
+          c.goToDefinition(names, line > 0 ? line : undefined)
+        }
+      },
+      {
+        id: 'code.back',
+        title: 'Back to where go-to-definition left from',
+        group: 'Code',
+        enabled: (c) => !!c.jumpBack,
+        unavailable: () => 'no definition jump to go back from',
+        run: (c) => c.jumpBack?.()
+      },
+      {
         id: 'selection.cancel',
         title: 'Cancel line selection',
         group: 'Selection',
@@ -1448,6 +1480,48 @@ export const REGISTRY: Map<string, Command> = new Map(
             .board(project)
             .then((b) => window.floe.colony.setAutomerge(project, !b.automerge))
             .then(() => c.say('automerge switched — the board says which way'))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // The step report's switch — a command, so the palette, `m` and the
+        // board's strip all reach the one writer.
+        id: 'colony.report',
+        title: 'Step report — measure each card\u2019s steps, on or off',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'the step report belongs to a project board — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          void window.floe.colony
+            .board(project)
+            .then((b) =>
+              window.floe.colony
+                .setReport(project, !b.report)
+                .then(() =>
+                  c.say(
+                    b.report
+                      ? 'step report off — cards already measured keep going until done'
+                      : 'step report on — cards entering the first stage from now are measured'
+                  )
+                )
+            )
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'colony.openReport',
+        title: 'Open this task\u2019s step report',
+        group: 'Colony',
+        enabled: (c) => !!taskRow(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const id = taskRow(c)?.dataset.task
+          if (!id) return
+          void window.floe.colony
+            .openReport(id)
+            .then((file) => c.say(`report written — ${file}`))
             .catch((err: unknown) => c.say(reason(err)))
         }
       },

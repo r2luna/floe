@@ -3119,6 +3119,12 @@ button {
   width: 6px;
   height: 6px;
   color: var(--faint);
+  /* Same sizing as .spin: at the body line-height the glyph's line box
+     overhangs the 6px cell and lands well below the text. The lift centres the
+     diamond on the x-height — it inks down on the baseline. */
+  font-size: 12px;
+  line-height: 1;
+  transform: translateY(-2px);
 }
 
 /* The tool it is on right now, in the same blue the app already uses for "a
@@ -4189,6 +4195,14 @@ button {
 .diff-code,
 .md-text {
   cursor: auto;
+}
+
+/* ⌘ (ctrl on Linux) held: a name in a code view is a link to its definition.
+   Highlight tokens are the hover target, which in a highlighted file is one
+   name — plain text underlines the run the pointer is in. */
+:root[data-jump-key] .diff[data-path] .diff-code span:hover {
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 /* One number column, not the diff's two — a file has no old and new side. */
@@ -8578,6 +8592,19 @@ kbd {
   font-size: 10px;
 }
 
+/* A card the step report is measuring. Dim, like the elapsed beside it: it is a
+   fact about the card, not something asking for attention. */
+.fcard-report {
+  margin-left: auto;
+  color: var(--dimmer);
+}
+
+.fq-report {
+  flex: none;
+  color: var(--dimmer);
+  font-size: 10px;
+}
+
 /* Needs you, as a badge — never as a border. The border belongs to the cursor,
    and a card can be selected AND asking at the same time; a mark that borrowed
    the border would simply vanish in that case. */
@@ -9255,6 +9282,11 @@ kbd {
 .fpolicy-act[data-on] {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Two switches share the strip: the first one takes the free space, the rest sit beside it. */
+.fpolicy-act + .fpolicy-act {
+  margin-left: 0;
 }
 
 .fpolicy-act:disabled {

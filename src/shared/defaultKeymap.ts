@@ -82,13 +82,20 @@ there too, with the composer ready, because there is no "new task" dialog: she
 already knows the base branch and which stage is full.
 
 \`s\` releases a task from the backlog, which is where its worktree gets cut, and
-\`x\` takes a card off the board without touching its branch.`,
+\`x\` takes a card off the board without touching its branch.
+
+\`m\` turns the step report (measure) on or off: from then on, every card that enters the
+first stage has each step's tokens, findings and diff recorded, and gets an HTML
+report in \`.floe/colony/reports/\` when it reaches done. \`r\` writes the report
+for the card under the cursor now and opens it.`,
     binds: [
       { key: 'h', command: 'colony.left', when: 'panel == "colony"' },
       { key: 'l', command: 'colony.right', when: 'panel == "colony"' },
       { key: 's', command: 'colony.start', when: 'panel == "colony"' },
       { key: 'x', command: 'colony.archive', when: 'panel == "colony"' },
       { key: 'n', command: 'colony.new', when: 'panel == "colony"' },
+      { key: 'm', command: 'colony.report', when: 'panel == "colony"' },
+      { key: 'r', command: 'colony.openReport', when: 'panel == "colony"' },
       { key: 'escape', command: 'colony.nanny', when: 'panel == "colony"' }
     ]
   },
@@ -475,6 +482,21 @@ rather than a rewritten sentence shown as one red line and one green one.`,
       { key: 'p', command: 'diff.view', when: 'panel == "diff"' },
       { key: ']', command: 'diff.nextChange', when: 'panel == "diff"' },
       { key: '[', command: 'diff.prevChange', when: 'panel == "diff"' }
+    ]
+  },
+  {
+    title: 'Go to Definition',
+    doc: `In a file or a diff, \`⌘\`-click a name (ctrl-click on Linux) to open the file
+that defines it, on the defining line. \`d\` does the same for the line under the
+cursor: the first name on it that is defined somewhere, or the text you selected.
+\`-\` goes back to where you jumped from, one jump per press.
+
+Definitions are found by grepping the worktree for definition-shaped lines
+(\`class Foo\`, \`function foo\`, \`const foo =\`), not by a language server, so a
+name defined in the file you are reading wins over one defined elsewhere.`,
+    binds: [
+      { key: 'd', command: 'code.definition', when: 'panel in ["diff", "file"]' },
+      { key: '-', command: 'code.back', when: 'panel in ["diff", "file"]' }
     ]
   },
   {

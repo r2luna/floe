@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   ChangedFile,
@@ -1223,4 +1224,92 @@ export async function commitFileDiff(worktreePath: string, hash: string, relPath
   } catch {
     return ''
   }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshots — what a worktree held at one moment, without committing it
+// ---------------------------------------------------------------------------
+
+/**
+ * The worktree's content right now, as a tree id — committed or not.
+ *
+ * The colony's step report diffs one step's end against its start, and a lane
+ * may commit, stage or leave everything loose; a tree of the files on disk is
+ * the one thing that means the same in all three. Built through a THROWAWAY
+ * index so the lane's own staging area is never touched, and from HEAD first so
+ * `add -A` only hashes what changed. Ignored files stay out, as they would in a
+ * commit.
+ *
+ * The objects land in the repository's store unreferenced. That is fine for
+ * what reads them: the report is written when the card reaches done, long
+ * before a prune could reach them.
+ */
+export async function snapshotTree(path: string): Promise<string> {
+  const index = join(tmpdir(), `floe-snapshot-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_INDEX_FILE: index }
+  // A git hook exports these, and either one would point the snapshot at a
+  // different repository or index than the worktree it was asked about.
+  delete env.GIT_DIR
+  delete env.GIT_WORK_TREE
+  const run = async (args: string[]): Promise<string> => (await exec('git', ['-C', path, ...args], { env })).stdout
+  try {
+    // An unborn HEAD has nothing to start from; `add -A` builds the whole tree.
+    await run(['read-tree', 'HEAD']).catch(() => undefined)
+    await run(['add', '-A'])
+    return (await run(['write-tree'])).trim()
+  } finally {
+    rmSync(index, { force: true })
+  }
+}
+
+export interface TreeDiffFile {
+  path: string
+  added: number
+  deleted: number
+  binary: boolean
+  /** The file's patch, cut at `maxPatch` characters across the whole diff. */
+  patch: string
+  truncated?: boolean
+}
+
+/**
+ * What changed between two snapshots, per file, with each file's patch.
+ *
+ * `maxPatch` caps the patch text across ALL files, not per file: the report
+ * embeds every step's diff, and one step that regenerated a lockfile should not
+ * make the page unopenable. Counts are always complete; only patches are cut.
+ */
+export async function treeDiff(path: string, from: string, to: string, maxPatch = 200_000): Promise<TreeDiffFile[]> {
+  if (from === to) return []
+  const files: TreeDiffFile[] = []
+  const numstat = await git(path, ['diff', '--numstat', '--no-renames', from, to])
+  for (const line of numstat.split('\n')) {
+    if (!line.trim()) continue
+    const [adds, dels, ...rest] = line.split('\t')
+    files.push({
+      path: rest.join('\t'),
+      added: adds === '-' ? 0 : Number(adds) || 0,
+      deleted: dels === '-' ? 0 : Number(dels) || 0,
+      binary: adds === '-',
+      patch: ''
+    })
+  }
+  if (!files.length) return files
+
+  const raw = (await exec('git', ['-C', path, 'diff', '--no-color', '--no-renames', from, to], { maxBuffer: 64 * 1024 * 1024 })).stdout
+  const byPath = new Map(files.map((f) => [f.path, f]))
+  let budget = maxPatch
+  for (const chunk of raw.split(/^(?=diff --git )/m)) {
+    const m = /^diff --git a\/(.+?) b\//.exec(chunk)
+    const file = m ? byPath.get(m[1]) : undefined
+    if (!file) continue
+    if (budget <= 0) {
+      file.truncated = true
+      continue
+    }
+    file.patch = chunk.slice(0, budget)
+    if (chunk.length > budget) file.truncated = true
+    budget -= chunk.length
+  }
+  return files
 }

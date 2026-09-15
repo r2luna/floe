@@ -74,7 +74,7 @@ as that session under a token it was lent (`peerMcp`).
    agent conns): `list_projects`, `list_worktrees`, `create_worktree` (runs
    provisioning like the in-app flow), `remove_worktree`, `merge_worktree`,
    `worktree_status`, `list_branches`, `changed_files`, `file_diff`,
-   `list_sessions`, `create_session` (`select` defaults to false — creating a
+   `find_definition`, `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with
    `wait=true` for synchronous session-to-session calls), `ask_peer` (ask
    another harness — any of them, from any of them: read-only unless asked

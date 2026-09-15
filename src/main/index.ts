@@ -41,6 +41,7 @@ import {
 import { setSharedDataDir } from './dataDir'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
+import { findDefinitions } from './definitions'
 import {
   changedFiles,
   lastCommit,
@@ -69,7 +70,7 @@ import {
   mergeFastForward,
   type CreateWorktreeOptions
 } from './git'
-import { answerQuestion, respondPermission, stopAgent, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
+import { answerQuestion, respondPermission, setAgentPermissionMode, stopAgent, anyActiveTurn, activeTurnKeys, waitingKeys, startAgentWatchdog, replaySnapshot } from './agent'
 import { codexModels, getCodexUsage } from './codex'
 import { answerCodexQuestion, codexWaitingKeys } from './codexServer'
 import { dispatchTurn } from './turn'
@@ -234,10 +235,11 @@ import {
   holdTask,
   releaseTask,
   tick,
-  undoTaskMerge
+  undoTaskMerge,
+  writeTaskReport
 } from './colony/runner'
 import { listEvents } from './colony/events'
-import { setProjectAutomerge } from './config/colony'
+import { setProjectAutomerge, setProjectReport } from './config/colony'
 import { addTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
@@ -765,7 +767,10 @@ export function registerSessionIpc(): void {
     sessionTranscript(worktreePath, sessionId)
   )
   handle('sessions:setTitle', (_event, claudeId: string, title: string) => setSessionTitle(claudeId, title))
-  handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => setCreatedSessionMode(id, mode))
+  handle('sessions:setMode', (_event, id: string, mode: PermissionMode) => {
+    setCreatedSessionMode(id, mode)
+    setAgentPermissionMode(id, mode)
+  })
   handle('sessions:setModel', (_event, id: string, model: string) => setCreatedSessionModel(id, model))
   handle('sessions:setEffort', (_event, id: string, effort: Effort) => setCreatedSessionEffort(id, effort))
   // The whole picker at once. What the composer writes when you change it, and
@@ -773,7 +778,11 @@ export function registerSessionIpc(): void {
   handle(
     'sessions:setChoice',
     (_event, id: string, choice: { provider?: string; model?: string; effort?: Effort; mode?: PermissionMode }) =>
+{
       setCreatedSessionChoice(id, choice)
+      // Mid-turn too: the mode reaches the running claude now, not on the next message.
+      if (choice.mode) setAgentPermissionMode(id, choice.mode)
+    }
   )
   handle('sessions:choice', (_event, id: string) => createdSessionChoice(id))
   handle('sessions:create', (_event, s: { id: string; worktreePath: string; title?: string }) =>
@@ -985,6 +994,10 @@ export function registerFileIpc(): void {
   handle('files:read', (_event, worktreePath: string, relPath: string) =>
     readFileContent(worktreePath, relPath)
   )
+  // Go-to-definition in the file and diff viewers — see definitions.ts.
+  handle('files:definition', (_event, worktreePath: string, name: string, fromPath?: string) =>
+    isHomePath(worktreePath) ? [] : findDefinitions(worktreePath, name, fromPath)
+  )
   // The slow half of an Office preview: LibreOffice drawing the real slides.
   // Asked for after the text is already on screen, and null whenever this
   // machine cannot do it.
@@ -1142,6 +1155,21 @@ export function registerColonyIpc(): void {
   handle('colony:setAutomerge', (event, project: string, on: boolean) => {
     const file = setProjectAutomerge(project, on)
     pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return file
+  })
+  // The step report's switch. Same writer and the same reason as automerge: it is
+  // flipped at the moment you decide to measure a run, not hunted for in a file.
+  handle('colony:setReport', (event, project: string, on: boolean) => {
+    const file = setProjectReport(project, on)
+    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    return file
+  })
+  // Written fresh every time, then opened: a card still running is exactly the
+  // one whose steps so far you want to read.
+  handle('colony:openReport', async (event, id: string) => {
+    const { file } = await writeTaskReport(BrowserWindow.fromWebContents(event.sender) ?? undefined, id)
+    const failed = await shell.openPath(file)
+    if (failed) throw new Error(failed)
     return file
   })
   handle('colony:hold', (event, id: string) =>

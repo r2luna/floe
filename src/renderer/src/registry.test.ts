@@ -68,6 +68,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     markSession: () => {},
     clearMarkedSessions: () => {},
     cycleSession: () => {},
+    goToDefinition: () => {},
     askText: () => {},
     say: () => {},
     commands: {

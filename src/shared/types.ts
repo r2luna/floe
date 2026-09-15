@@ -455,6 +455,14 @@ export interface FileNode {
   children?: FileNode[]
 }
 
+// Where a symbol is defined, as go-to-definition finds it (main/definitions.ts).
+// `line` is 1-based; `text` is the defining line, trimmed, for a picker to show.
+export interface SymbolDefinition {
+  path: string
+  line: number
+  text: string
+}
+
 // A staged filesystem mutation from the Files panel, applied as a batch when the
 // user synchronizes (mini.files `=`). Paths are POSIX, worktree-relative; a
 // `create` path ending in `/` makes a directory. `rename` covers both renaming

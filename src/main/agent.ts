@@ -25,6 +25,7 @@ import { getSystemPrompt } from './appSettings'
 // sides only call the other's functions at runtime, never at module top level.
 import { emptyMcpConfigFor, mcpConfigFor } from './mcpServer'
 import { log } from './log'
+import { addCumulative, claudeRunningUsage } from './usageLedger'
 
 export interface Conn {
   child: ChildProcessWithoutNullStreams
@@ -158,6 +159,33 @@ export function permissionArgs(mode: PermissionMode): string[] {
 // spawn-time key and the compare-time key can never silently drift apart.
 export function optionsKeyFor(options: AgentRunOptions): string {
   return `${options.permissionMode}|${options.model ?? ''}|${options.effort ?? ''}`
+}
+
+/**
+ * Switch a live conn's permission mode without respawning it.
+ *
+ * A respawn waits for the turn to end, so a mode picked mid-turn used to do
+ * nothing until the next message. The CLI takes `set_permission_mode` over the
+ * control channel instead, and the running turn honours it from the next tool
+ * call on. The optionsKey follows, so the next send does not kill the conn for
+ * a mode it already has. Bypass is only accepted from a child spawned with
+ * `--allow-dangerously-skip-permissions`, which spawnConn always passes.
+ */
+export function applyLiveMode(conn: Conn, mode: PermissionMode): void {
+  write(conn, {
+    type: 'control_request',
+    request_id: `mode-${Date.now()}`,
+    request: { subtype: 'set_permission_mode', mode: mode === 'skip' ? 'bypassPermissions' : mode }
+  })
+  conn.optionsKey = [mode, ...conn.optionsKey.split('|').slice(1)].join('|')
+}
+
+/** The picker changed a session's mode: push it into its running claude, if any. */
+export function setAgentPermissionMode(key: string, mode: PermissionMode): void {
+  const found = resolveConn(key)
+  if (!found || isChildDead(found[1].child)) return
+  log('mode-live', { key, connKey: found[0], mode })
+  applyLiveMode(found[1], mode)
 }
 
 // Every runtime (Claude here, codex.ts, runtimes.ts) emits through this one
@@ -499,6 +527,8 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     '--verbose'
   ]
   args.push(...permissionArgs(options.permissionMode))
+  // Without it the CLI refuses a live switch to bypass (applyLiveMode).
+  if (options.permissionMode !== 'skip') args.push('--allow-dangerously-skip-permissions')
   // Always route the control channel through stdio. For ordinary tools this only
   // bites outside skip mode (under --dangerously-skip-permissions the CLI
   // auto-allows them and never asks — verified: Bash runs with no prompt). But
@@ -1632,6 +1662,10 @@ function handleUserLine(win: BrowserWindow, key: string, conn: Conn, msg: Record
 }
 
 function handleResultLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  // What the process has spent so far, for the colony's step report. Before the
+  // subagent hold below: a held result still spent what it says it spent.
+  const running = claudeRunningUsage(msg)
+  if (running) addCumulative(key, 'claude', running)
   // NB: the result's `usage` is cumulative across the whole session (it sums
   // every API call), so it's NOT the context-window fill — feeding it to the
   // gauge makes it climb past 100%. The latest `assistant` message above
@@ -1703,6 +1737,12 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
   if (parentToolUseId && routeSubagentLine(win, key, msg, type, parentToolUseId)) return
 
   if (type === 'control_request') return handleControlRequest(win, key, conn, msg)
+  // The CLI's answer to a request we made (applyLiveMode). Only a refusal is news.
+  if (type === 'control_response') {
+    const response = msg.response as { subtype?: string; error?: string } | undefined
+    if (response?.subtype === 'error') log('control-error', { key, error: response.error })
+    return
+  }
   if (type === 'system') return handleSystemLine(win, key, msg)
   if (type === 'stream_event') return handleStreamEvent(win, key, conn, msg)
   if (type === 'assistant') return handleAssistantLine(win, key, conn, msg)

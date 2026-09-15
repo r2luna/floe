@@ -289,6 +289,18 @@ export interface CommandContext {
    */
   alternateSession?: () => void
   /**
+   * Go to where the first of `names` that has a definition is defined, from the
+   * focused file or diff panel. `line` is the file line the names were read
+   * from, so the definition you are standing on is skipped. Lives in App
+   * because it opens panels and keeps the way back.
+   */
+  goToDefinition: (names: string[], line?: number) => void
+  /**
+   * Back to where the last go-to-definition left from. Absent when nothing is
+   * left to go back to, which is how the command dims itself.
+   */
+  jumpBack?: () => void
+  /**
    * The version an auto-update has downloaded and is waiting to install, when
    * there is one. Absent the rest of the time, which is how the restart command
    * dims itself — there is nothing to restart into.

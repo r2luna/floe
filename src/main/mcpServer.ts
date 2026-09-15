@@ -27,8 +27,10 @@ import {
   pushBoard,
   reconcileMerged,
   releaseTask,
-  unmetDeps
+  unmetDeps,
+  writeTaskReport
 } from './colony/runner'
+import { reportSummary } from './colony/report'
 import {
   addTask,
   dependencyProblem,
@@ -39,7 +41,7 @@ import {
   updateTask,
   type TaskKind
 } from './colony/store'
-import { DONE } from './config/colony'
+import { DONE, setProjectReport } from './config/colony'
 import {
   changedFiles,
   createWorktree,
@@ -51,6 +53,7 @@ import {
   worktreeDiffStat
 } from './git'
 import { worktreeStatus } from './gitStatus'
+import { findDefinitions } from './definitions'
 import { provisionWorktree } from './provision'
 import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
@@ -71,7 +74,7 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { agentIdentityNames, resolveAgentIdentity } from './identity'
-import { readSessionBuffer, sessionRuntime, stopAgent, waitForTurn } from './agent'
+import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
 import { dispatchTurn, optionsForRoute, routeOf } from './turn'
@@ -492,6 +495,7 @@ function registerTools(server: McpServer, token: string): void {
   registerDecisionTools(server)
   registerColonyTools(server)
   registerColonyLandingTools(server)
+  registerColonyReportTools(server)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
   registerProjectTools(server)
@@ -739,6 +743,17 @@ function registerWorktreeTools(server: McpServer, token: string): void {
         return textResult({ error: (e as Error).message })
       }
     }
+  )
+
+  server.tool(
+    'find_definition',
+    'Where a class, function or other symbol is defined in a worktree, best guess first — the file and diff viewers\' go-to-definition. A grep for definition-shaped lines, not a language server.',
+    {
+      worktree: z.string().describe('The worktree path.'),
+      name: z.string().describe('The identifier to look up, e.g. FileDiff.'),
+      from: z.string().optional().describe('The file being read, relative to the worktree; its own definitions rank first.')
+    },
+    async ({ worktree, name, from }) => textResult(await findDefinitions(worktree, name, from))
   )
 }
 
@@ -1923,7 +1938,42 @@ function registerColonyLandingTools(server: McpServer): void {
       }
     }
   )
+}
 
+// The step report: whether each stage earns its tokens. A switch, and a reader.
+function registerColonyReportTools(server: McpServer): void {
+  server.tool(
+    'colony_set_report',
+    "Turn the board's step report on or off. On, every card that ENTERS THE FIRST STAGE from then on has each step measured — tokens, the lane's FINDINGS block, and the step's own diff — and gets an HTML report in <project>/.floe/colony/reports/ when it reaches done. Cards already past the first stage are not measured. Writes the project's colony.toml.",
+    {
+      project: z.string().describe('The repo root path of the project (a worktree path works too).'),
+      on: z.boolean().describe('true to measure new cards, false to stop measuring new ones.')
+    },
+    async ({ project, on }) => {
+      try {
+        const root = projectRoot(project)
+        const file = setProjectReport(root, on)
+        pushBoard(getWindow(), root)
+        return textResult({ ok: true, report: on, file })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_report',
+    "Write a measured task's step report now and return it: the HTML file's path, plus one row per step — tokens, cost, how many findings and how many were NEW, files and lines changed, verdict. Use it to judge which stages add signal and which only spend tokens. Works mid-run; errors for a task the report is not tracking.",
+    { task: z.string().describe('The task id, from colony_board.') },
+    async ({ task }) => {
+      try {
+        const { file, data } = await writeTaskReport(getWindow(), task)
+        return textResult({ file, steps: reportSummary(data) })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
 }
 
 function registerSkillTools(server: McpServer): void {
@@ -2482,7 +2532,7 @@ function registerSessionStateTools(server: McpServer, token: string): void {
 function registerSessionPickerTools(server: McpServer): void {
   server.tool(
     'update_session',
-    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. Takes effect on its next turn.",
+    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. A mode change reaches a running turn immediately; the rest takes effect on its next turn.",
     {
       session_id: z.string().describe('The Floe session id.'),
       harness: z.enum(HARNESSES as [string, ...string[]]).optional().describe('Who answers from now on.'),
@@ -2513,6 +2563,7 @@ function registerSessionPickerTools(server: McpServer): void {
             effort,
             mode: mode ? nearestMode(mode, provider) : undefined
           })
+          if (mode) setAgentPermissionMode(connKeyFor(target), nearestMode(mode, provider))
         }
         pushEvent('sessions:changed')
         return textResult(sessionSummary(findSessionAny(session_id) ?? target))
