@@ -77,6 +77,24 @@ test('swapScript replaces the installed bundle and launches the new one', async 
   assert.match(calls, new RegExp(`open -n ${bundle}`))
 })
 
+test('swapScript leaves the installed app alone when it is still running', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'floe-swap-live-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const bundle = join(dir, 'Floe.app')
+  mkdirSync(bundle)
+  writeFileSync(join(bundle, 'version'), 'old')
+  const staged = join(dir, 'new', 'Floe.app')
+  mkdirSync(staged, { recursive: true })
+  const script = join(dir, 'swap.sh')
+  // Our own pid never goes away while the test runs — the app that refused to
+  // quit, from the script's point of view.
+  writeFileSync(script, swapScript({ bundle, staged, pid: process.pid }).replace('seq 1 200', 'seq 1 2'), {
+    mode: 0o755
+  })
+  await assert.rejects(run('bash', [script]))
+  assert.equal(readFileSync(join(bundle, 'version'), 'utf8'), 'old')
+})
+
 function fakeTools(over: Partial<Tools> = {}): { tools: Tools; steps: string[] } {
   const steps: string[] = []
   const tools: Tools = {

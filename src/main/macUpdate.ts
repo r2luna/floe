@@ -41,6 +41,9 @@ export function bundleInside(entries: Dirent[]): string | null {
   return entries.find((e) => e.isDirectory() && e.name.endsWith('.app'))?.name ?? null
 }
 
+/** How long the script waits for the app to go away, in tenths of a second. */
+export const WAIT_TICKS = 200
+
 /**
  * The swap, as a script that outlives us.
  *
@@ -61,11 +64,14 @@ export function swapScript(opts: { bundle: string; staged: string; pid: number }
   return `#!/bin/bash
 set -u
 # The app is still quitting. Wait for it — replacing a bundle out from under a
-# live process is what leaves a half-swapped app behind.
-for _ in $(seq 1 200); do
+# live process is what leaves a half-swapped app behind. If it is still there
+# when the wait runs out, do nothing: the old app is running and working, and
+# swapping under it is the one outcome worse than not updating.
+for _ in $(seq 1 ${WAIT_TICKS}); do
   kill -0 ${opts.pid} 2>/dev/null || break
   sleep 0.1
 done
+kill -0 ${opts.pid} 2>/dev/null && exit 1
 rm -rf ${backup}
 mv ${bundle} ${backup} || exit 1
 if ! mv ${staged} ${bundle}; then
