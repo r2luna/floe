@@ -17,9 +17,9 @@ export interface NewWorktreeResult {
 export interface NewWorktreeProps {
   /** Local branches that have no worktree yet — checking one out is a valid answer. */
   branches: string[]
-  /** The project's main branch, the second choice to fork from. */
+  /** The project's main branch — the default base to fork from. */
   mainBase?: string
-  /** The worktree you are in — the default base to fork from. */
+  /** The worktree you are in — the second choice to fork from. */
   defaultBase?: string
   /** The branches Floe has a worktree for — the only other bases offered. */
   worktreeBases?: string[]
@@ -64,8 +64,8 @@ export function NewWorktreeForm({
 }: NewWorktreeProps) {
   const [name, setName] = useState('')
   // null until touched: the default tracks what you TYPE (keep for an existing
-  // branch, the worktree you are in for a new one), and a stored default would
-  // go stale the moment the name flips between the two.
+  // branch, main for a new one), and a stored default would go stale the moment
+  // the name flips between the two.
   const [base, setBase] = useState<string | null>(null)
   const [premise, setPremise] = useState('')
   const input = useRef<HTMLInputElement>(null)
@@ -88,12 +88,18 @@ export function NewWorktreeForm({
   const typed = name.trim()
   const exists = branches.includes(typed)
   const branch = exists ? typed : slugifyBranch(name)
-  // The worktree you are in first, then main, then Floe's other worktrees —
+  // Main first, then the worktree you are in, then Floe's other worktrees —
   // and nothing else. A branch with no worktree is not somewhere you were
   // working, so offering it as a base is noise in a list you scan by eye.
-  const bases = [...new Set([defaultBase, mainBase, ...worktreeBases].filter(Boolean) as string[])]
+  //
+  // Main is the default, not the tree you are in: the `active` panel moves
+  // that tree without showing the list, so a default that followed it forked
+  // branches from wherever you last jumped — and the merge later targeted that
+  // branch, not main. Forking from a sibling is the exception; it stays one
+  // click away with the "here" note.
+  const bases = [...new Set([mainBase, defaultBase, ...worktreeBases].filter(Boolean) as string[])]
 
-  const fallback = defaultBase ?? mainBase ?? bases[0] ?? ''
+  const fallback = mainBase ?? defaultBase ?? bases[0] ?? ''
   let picked = base ?? (exists ? KEEP : fallback)
   // The keep row only exists for a branch that exists — editing the name out
   // of an existing branch takes the option away, so the choice falls back.

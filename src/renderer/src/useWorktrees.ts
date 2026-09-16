@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ClaudeSessionMeta } from '../../main/claudeSessions'
 import type { Worktree, WorktreeStatus } from '../../shared/types'
 
@@ -6,6 +6,25 @@ import type { Worktree, WorktreeStatus } from '../../shared/types'
 export interface WorktreeRow {
   worktree: Worktree
   sessions: ClaudeSessionMeta[]
+}
+
+/**
+ * Which fetch is the one whose answer counts.
+ *
+ * Every project switch starts a list fetch, and nothing makes them finish in
+ * order: the list reads sessions per worktree, so a project with many
+ * transcripts answers after one with few. Without this, the slower answer
+ * lands last and the panel shows the project you LEFT under the name of the
+ * one you picked. Each fetch takes a ticket; only the newest ticket may write.
+ */
+export class Latest {
+  private n = 0
+  next(): number {
+    return ++this.n
+  }
+  is(ticket: number): boolean {
+    return ticket === this.n
+  }
 }
 
 export interface Worktrees {
@@ -45,10 +64,16 @@ export function useWorktrees(repoPath?: string): Worktrees {
   const [repo, setRepo] = useState<string>()
   const [status, setStatus] = useState<Record<string, WorktreeStatus>>({})
 
+  const latest = useRef(new Latest())
+
   const reload = useCallback(() => {
+    // Clearing takes a ticket too, or a fetch still in flight for the project
+    // just closed would fill the empty list back in.
+    const ticket = latest.current.next()
     if (!repoPath) {
       setRows([])
       setRepo(undefined)
+      setLoading(false)
       return
     }
     setLoading(true)
@@ -64,12 +89,18 @@ export function useWorktrees(repoPath?: string): Worktrees {
             return { worktree, sessions }
           })
         )
+        if (!latest.current.is(ticket)) return
         setRows(rows)
         setRepo(repoPath)
         setError(undefined)
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+      .catch((e: Error) => {
+        if (latest.current.is(ticket)) setError(e.message)
+      })
+      .finally(() => {
+        // Loading is about the fetch that counts, not the first one to finish.
+        if (latest.current.is(ticket)) setLoading(false)
+      })
   }, [repoPath])
 
   useEffect(reload, [reload])
