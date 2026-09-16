@@ -138,6 +138,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'mcp_server_status',
       'authenticate_mcp_server',
       'add_project',
+      'open_project',
       'list_hosts',
       'add_host',
       'remove_project',
@@ -527,6 +528,31 @@ test('the project tools refuse what is not a project, and report what they did',
   // indistinguishable from having worked.
   const gone = await callTool('remove_project', { path: '/tmp/nope' })
   assert.match(String(gone.error), /not a registered project/)
+})
+
+test('the floe command route answers with what the command prints', async () => {
+  const post = async (body: unknown): Promise<{ message?: string; error?: string }> => {
+    const res = await fetch(`http://127.0.0.1:${port()}/cli/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    assert.equal(res.status, 200, 'the CLI is answered, never redirected or refused')
+    return (await res.json()) as { message?: string; error?: string }
+  }
+
+  assert.match(String((await post({})).error), /No path given/)
+  assert.match(String((await post({ path: '/tmp/floe-mcp-not-a-repo' })).error), /Path does not exist/)
+  assert.match(String((await post({ path: tmpdir() })).error), /not a git repository/)
+
+  // A browser page reaching the same route is turned away by the CSRF guard the
+  // MCP transport gets — the route is inside it, not beside it.
+  const forged = await fetch(`http://127.0.0.1:${port()}/cli/open`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+    body: JSON.stringify({ path: '/tmp' })
+  })
+  assert.equal(forged.status, 403)
 })
 
 test('the command tools need a project that owns the worktree', async () => {

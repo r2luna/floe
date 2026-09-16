@@ -19,6 +19,7 @@ import type {
 import { COMMAND_IDS } from '../shared/commandIds'
 import { parseArtifactSpec } from '../shared/artifact'
 import { listProjects } from './projects'
+import { openProject } from './cli'
 import {
   boardFor,
   compactBoard,
@@ -499,7 +500,7 @@ function registerTools(server: McpServer, token: string): void {
   registerColonyReportTools(server)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
-  registerProjectTools(server)
+  registerProjectTools(server, token)
   registerCommandTools(server, token)
   registerCommandRunTools(server)
   registerSessionStateTools(server, token)
@@ -2249,7 +2250,7 @@ export function redactServer(s: McpServerEntry): McpServerEntry {
 // palette's `project.add` opens an input a person types into, so there was no
 // headless way in.
 
-function registerProjectTools(server: McpServer): void {
+function registerProjectTools(server: McpServer, token: string): void {
   server.tool(
     'add_project',
     'Register a git repository with Floe, the way "Add project…" does. The path must be a git repo, and it is resolved to the repo root first. Adding one Floe already has is not an error — it answers with the project it had, and `created: false`.',
@@ -2263,6 +2264,21 @@ function registerProjectTools(server: McpServer): void {
         if (added.error) return textResult({ error: added.error })
         pushRefresh('project.reload')
         return textResult(added)
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'open_project',
+    'What the `floe <path>` command does: register the repository if Floe does not have it yet, then select it in the sidebar and bring the window forward. Use this when the point is to put a project in front of the user; `add_project` only files it.',
+    { path: z.string().describe('Absolute path inside the repository. Resolved to its root.') },
+    async ({ path }) => {
+      try {
+        const answer = await openProject(path)
+        if (answer.project) showProject(answer.project.path, token)
+        return textResult(answer)
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -2935,6 +2951,36 @@ function tokenFromUrl(url: string | undefined): string {
   return m ? decodeURIComponent(m[1]) : ''
 }
 
+/**
+ * Put a project on screen: select it in the sidebar and bring the window up.
+ *
+ * Shared by the CLI route and `open_project`, because "open" means the same
+ * thing whoever asked — a project registered but left off screen is the bug
+ * this exists to avoid.
+ */
+export function showProject(projectPath: string, callerKey: string): void {
+  pushCommand({ kind: 'select_project', callerKey, projectPath })
+  const win = getWindow()
+  if (!win || win.isDestroyed()) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+  // macOS keeps the front app in front; a window asked for from a terminal has
+  // to say it means it.
+  if (process.platform === 'darwin') app.focus({ steal: true })
+}
+
+// `POST /cli/open {path}` — bin/floe.mjs asking a running Floe to take a
+// directory. Answers with the message the command prints, or the refusal.
+async function handleCliOpen(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const body = (req.method === 'POST' ? await readBody(req) : undefined) as { path?: string } | undefined
+  const answer = body?.path ? await openProject(body.path) : { error: 'No path given.' }
+  if ('project' in answer && answer.project) showProject(answer.project.path, 'cli')
+  res.statusCode = 200
+  res.setHeader('content-type', 'application/json')
+  res.end(JSON.stringify(answer))
+}
+
 // Read the full request body (the MCP JSON-RPC POST payload).
 function readBody(req: IncomingMessage): Promise<unknown> {
   return new Promise((resolve) => {
@@ -2965,6 +3011,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (req.headers.origin || (host !== '127.0.0.1' && host !== 'localhost')) {
     res.statusCode = 403
     res.end('Forbidden')
+    return
+  }
+
+  // The `floe` command's own route. Not MCP: the CLI is a 90-line script with
+  // no dependencies, and one JSON POST is the whole conversation.
+  if ((req.url ?? '').split('?')[0] === '/cli/open') {
+    await handleCliOpen(req, res)
     return
   }
 

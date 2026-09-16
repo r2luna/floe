@@ -315,6 +315,10 @@ export type McpCommand =
       worktreePath: string
       projectPath?: string
     }
+  // Enter a project — the sidebar selection a `floe <path>` (or `open_project`)
+  // asks for once the repo is registered. No worktree: the project's own
+  // restore picks up where the user left it.
+  | { kind: 'select_project'; callerKey: string; projectPath: string }
   // Open a plan file in the reader panel, rooted at its worktree.
   | { kind: 'open_plan'; callerKey: string; worktreePath: string; relPath: string }
   // Open an .excalidraw scene in the drawing panel, rooted at its worktree —

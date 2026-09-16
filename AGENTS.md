@@ -72,6 +72,7 @@ Buttons use the **outline-chip pattern** (never solid fills) and every tinted el
 
 ## More docs — read when the task touches them
 
+- [docs/cli.md](docs/cli.md) — the `floe <path>` command: install shim, `/cli/open`, `--open` at launch.
 - [docs/crap.md](docs/crap.md) — `pnpm gate`: lint, typecheck, tests and the CRAP limit of 30.
 - [docs/plugins.md](docs/plugins.md) — runtime plugins (`~/.config/floe/plugins`); new core `ipcMain.handle` calls must go through `plugins/handleMap.ts`'s `handle()`.
 - [docs/message-queue.md](docs/message-queue.md) — type-while-busy queue semantics.

@@ -224,6 +224,8 @@ const CHANNELS = [
   'query:reopen',
   'mcp:command-result',
   'mcp:installGlobal',
+  'cli:install',
+  'cli:pending',
   'mcp:servers:list',
   'mcp:servers:add',
   'mcp:servers:update',

@@ -702,6 +702,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('claude:auth:event', listener)
       }
     },
+    // The `floe <path>` command (bin/floe.mjs). Installing it is the one part
+    // that needs the app: only main knows where this build's binary is.
+    cli: {
+      install: (): Promise<{ ok: boolean; message: string; path?: string }> => ipcRenderer.invoke('cli:install'),
+      // The project a `floe <path>` launch asked for, claimed once at mount.
+      pending: (): Promise<string | null> => ipcRenderer.invoke('cli:pending')
+    },
     // Floe's own MCP control server (main/mcpServer.ts) — agents drive Floe.
     // UI-driving tools arrive here as an `mcp:command`; commands that carry a
     // requestId (run_command / list_commands) are answered back over

@@ -2307,6 +2307,14 @@ export default function App() {
   // below) always calls the render's current closure.
   const handleMcpCommandRef = useRef<(command: McpCommand) => void>(() => {})
   useEffect(() => window.floe.mcp.onCommand((c) => handleMcpCommandRef.current(c)), [])
+  // A `floe <path>` that had to start the app: main registered the project
+  // before this window existed and holds it until someone claims it. Asked for
+  // here rather than pushed from main, which would race this very subscription.
+  useEffect(() => {
+    void window.floe.cli.pending().then((path) => {
+      if (path) handleMcpCommandRef.current({ kind: 'select_project', callerKey: 'cli', projectPath: path })
+    })
+  }, [])
   handleMcpCommandRef.current = (command: McpCommand): void => {
     switch (command.kind) {
       case 'run_command': {
@@ -2345,6 +2353,15 @@ export default function App() {
           open(l, mkPanel('chat', command.title, { id: command.sessionId, worktreePath: command.worktreePath }))
         )
         worktrees.reload()
+        return
+      }
+      case 'select_project': {
+        // The list on screen is a beat behind whoever asked: `floe <path>` may
+        // have registered this repo a millisecond ago, and entering a project
+        // the renderer has never heard of lands on a rail with no row. Re-read
+        // first, then enter — the selection survives the list arriving.
+        projects.reload()
+        if (projects.current?.path !== command.projectPath) enterProject(command.projectPath)
         return
       }
       case 'open_browser': {

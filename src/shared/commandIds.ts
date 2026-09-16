@@ -111,6 +111,7 @@ export const COMMAND_IDS: string[] = [
   'colony.report',
   'colony.openReport',
   'mcp.install',
+  'cli.install',
   'mcp.open',
   'mcp.new',
   'mcp.edit',

@@ -997,6 +997,16 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The `floe <path>` command has to be put on PATH once — an app bundle
+        // cannot do it at install time without asking for the whole disk.
+        id: 'cli.install',
+        title: 'Install the floe command',
+        group: 'App',
+        run: (c) => {
+          void window.floe.cli.install().then((r) => c.say(r.message))
+        }
+      },
+      {
         // The file is the setting's home; this is the way to flip it without
         // leaving the keyboard — and the way an agent flips it too, since every
         // registry command is an MCP `run_command`.

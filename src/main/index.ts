@@ -17,7 +17,7 @@ import { readFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import { userInfo } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import {
   addGroup,
   deleteGroup,
@@ -38,7 +38,8 @@ import {
   setProjectPinned,
   setProjectReadOnly
 } from './projects'
-import { setSharedDataDir } from './dataDir'
+import { dataDir, setSharedDataDir } from './dataDir'
+import { installCli, openPathFromArgv, openProject, refreshCli, type CliPaths } from './cli'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
@@ -742,6 +743,12 @@ export function registerMcpIpc(): void {
   // "Install Floe MCP globally" command (also auto-run at boot when the server
   // holds its preferred port; see mcpServer.ts ensureGlobalRegistered).
   handle('mcp:installGlobal', () => installMcpGlobal())
+  // ⌘K "Install the floe command" — the shim in ~/.local/bin that makes
+  // `floe <path>` work from any terminal (cli.ts).
+  handle('cli:install', () => installCli(cliPaths()))
+  // The project a `floe <path>` launch asked for, claimed by the renderer as it
+  // mounts. Null on every other launch, and on every reload after the first.
+  handle('cli:pending', () => takeCliOpen())
   // Floe's own MCP registry (config/mcpServers.ts) — the panel's CRUD. The
   // worktree path resolves to its project for the project-scope file, same as
   // skills.
@@ -1579,6 +1586,54 @@ let localWindow: BrowserWindow | null = null
 // second window (the local IPC layer assumes a single renderer; see localWindow).
 // macOS packaged: `open -n` the .app bundle (LaunchServices would otherwise reuse
 // the running one). Everywhere else, relaunch the current argv detached.
+/**
+ * Where this build's `floe` command comes from.
+ *
+ * `APPIMAGE` first: inside an AppImage `getPath('exe')` points into a /tmp mount
+ * that is gone on the next launch, while the AppImage file itself stays put.
+ * The script is an extraResource (never inside the asar) so the shim can exec it.
+ */
+function cliPaths(): CliPaths {
+  const root = app.isPackaged ? process.resourcesPath : app.getAppPath()
+  return {
+    exePath: process.env.APPIMAGE || app.getPath('exe'),
+    scriptPath: join(root, 'bin', 'floe.mjs'),
+    version: app.getVersion(),
+    // os.homedir(), not app.getPath('home'): Electron reads the passwd entry and
+    // ignores $HOME, which a container or a test run sets on purpose.
+    homeDir: homedir(),
+    dataDir: dataDir(),
+    pathEnv: process.env.PATH
+  }
+}
+
+// A `floe <path>` launch with no Floe running: the command starts the app with
+// `--open <path>` and the directory is registered here instead of over the
+// control port.
+//
+// The renderer PULLS this one (`cli:pending`) rather than being pushed at, which
+// the running-app route can do. A push at did-finish-load races the renderer's
+// own subscription — it lost, and the app came up on whatever project it had
+// last — while a project asked for at mount cannot arrive too early.
+let pendingCliOpen = openPathFromArgv(process.argv)
+let openedByCli: string | null = null
+
+async function registerCliOpen(): Promise<void> {
+  const path = pendingCliOpen
+  if (!path) return
+  pendingCliOpen = null
+  const result = await openProject(path)
+  if (result.project) openedByCli = result.project.path
+  else log('cli:open:failed', { path, error: result.error })
+}
+
+/** The project this launch was asked to open, once. */
+function takeCliOpen(): string | null {
+  const path = openedByCli
+  openedByCli = null
+  return path
+}
+
 function openNewInstance(): void {
   if (process.platform === 'darwin' && app.isPackaged) {
     const bundle = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '')
@@ -1789,7 +1844,13 @@ void app.whenReady().then(async () => {
   // (backends:get runs at window load). A broken plugin logs and is skipped;
   // boot never dies for one.
   await loadPlugins(app.getVersion(), () => localWindow ?? BrowserWindow.getAllWindows()[0])
+  // Register a `floe <path>` launch's directory before the window exists — the
+  // renderer claims it as it mounts (cli:pending).
+  await registerCliOpen()
   createWindow()
+  // Keep an installed `floe` command pointing at this build — an update moves
+  // the binary the shim execs. No-op when the command was never installed.
+  refreshCli(cliPaths())
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
   // window getter so ordering vs. createWindow doesn't matter.
   startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])

@@ -9,6 +9,12 @@ files:
   - package.json
   # node-pty is a native dependency required at runtime (not bundled by Vite).
   - node_modules/node-pty/**/*
+# The `floe` command's script. An extraResource, not a `files` entry: the shim
+# in ~/.local/bin execs it with the app binary as node, and nothing can exec a
+# path inside the asar.
+extraResources:
+  - from: bin
+    to: bin
 # Native .node binaries can't be loaded from inside the asar archive.
 asarUnpack:
   - node_modules/node-pty/**/*
