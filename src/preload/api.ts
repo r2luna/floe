@@ -517,6 +517,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       permission: (key: string, requestId: string, allow: boolean, always = false): Promise<void> =>
         ipcRenderer.invoke('agent:permission', key, requestId, allow, always),
       stop: (key: string): Promise<void> => ipcRenderer.invoke('agent:stop', key),
+      // What happened while you were not looking at this session. Resolves to
+      // the line that was written, or null when there was nothing to say.
+      recap: (key: string, worktreePath: string, awayMs: number): Promise<string | null> =>
+        ipcRenderer.invoke('agent:recap', key, worktreePath, awayMs),
       // The turn in flight, for a panel that mounts mid-turn (see AgentReplay).
       replay: (key: string): Promise<AgentReplay> => ipcRenderer.invoke('agent:replay', key),
       // Every session working right now, for useSessionActivity to reconcile

@@ -91,6 +91,7 @@ import { sendToTerminal } from './terminalBus'
 import { CommandsPane } from './CommandsPane'
 import type { Commands } from './useCommands'
 import { useSessionActivity } from './useRunning'
+import { useRecap } from './useRecap'
 import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
 import type { Projects } from './useProjects'
 import { moveTargets } from './projectMove'
@@ -2621,6 +2622,21 @@ export const Log = memo(function Log({
     // it was written once and is the same in every chat on this branch.
     if (item.role === 'tool' && item.name === 'premise') {
       out.push(<PremiseFold item={item} key={base + i} />)
+      continue
+    }
+
+    // Nor is the recap. It is Floe saying what happened while you were not
+    // looking — one line about the conversation, in the same shape as every
+    // other line about it. Folded into a run of calls it would read as a tool
+    // the model ran, and it would close behind "1 tool call", which is the one
+    // thing a line you are meant to read on sight must never do.
+    if (item.role === 'tool' && item.name === 'recap') {
+      out.push(
+        <div className="irc-body irc-act irc-recap" key={base + i}>
+          <span className="irc-star">*</span> <span className="irc-by">recap </span>
+          <LinkText text={item.summary ?? ''} />
+        </div>
+      )
       continue
     }
 
@@ -5374,6 +5390,18 @@ function WorktreesList({
   // agent stream is global, so the marks move the moment a turn starts — or
   // ends — anywhere.
   const { busy, waiting, unread } = useSessionActivity(openKeys)
+
+  // Back at a chat you left running: one line about what happened while you
+  // were gone. Decided here because this is where the open session's every name
+  // is known — see useRecap.ts.
+  const openWorktree = useMemo(
+    () =>
+      worktrees.rows.find((r) =>
+        r.sessions.some((s) => s.id === openSession || s.claudeId === openSession)
+      )?.worktree.path,
+    [openSession, worktrees.rows]
+  )
+  useRecap(openKeys, openWorktree, busy)
 
   // Where the right-click menu is, and the row that opened it — closing hands
   // focus back so the list continues where it was rather than nowhere.

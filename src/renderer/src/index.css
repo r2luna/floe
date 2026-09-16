@@ -2863,6 +2863,14 @@ button {
   color: #4e5460;
 }
 
+/* The recap's star, in the app's accent. Every other act line is the speaker
+   working and stays grey; this one is Floe talking to you about the chat, and
+   it is the line you are meant to catch when you come back to a session you
+   left running. */
+.irc-recap .irc-star {
+  color: var(--accent);
+}
+
 .irc-sys {
   margin-top: 12px;
   color: var(--dimmer);

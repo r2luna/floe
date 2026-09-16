@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Floe — recap in chat</title>
+<style>
+@font-face { font-family:"CommitMonoPinguim"; font-weight:400; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2"); }
+@font-face { font-family:"CommitMonoPinguim"; font-weight:700; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2"); }
+
+:root{
+  --mono:"CommitMonoPinguim",ui-monospace,Menlo,monospace;
+  --bg:#0d0e11; --panel:#141519; --line:#23252b; --line-soft:#1c1e23;
+  --text:#c9ccd2; --text-strong:#e8eaee; --dim:#6d7280; --faint:#575d6a;
+  --edge:#343a45; --well:#1b1d23; --accent:#d3956d; --working:#6d93c9;
+  --live:#6ea86e; --time-dim:#4e5460; --wash-4:#ffffff0a; --radius:0px;
+  --prose-line:1.65;
+  --nick-you:#f494b2; --nick-claude:#ec9e79;
+}
+:root[data-theme="light"]{
+  --bg:#ffffff; --panel:#f6f6f4; --line:#dcdcd8; --line-soft:#e7e7e3;
+  --text:#3b3f46; --text-strong:#16181c; --dim:#767b85; --faint:#9aa1ad;
+  --edge:#c8c9c5; --well:#eeeeea; --time-dim:#9aa1ad; --wash-4:#0000000a;
+  --live:#2f7d32; --accent:#a85d2f;
+  --nick-you:#b9416f; --nick-claude:#ab5529;
+}
+
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--text); font-family:var(--mono); font-size:13px; line-height:1.55}
+.page{padding:28px 32px 90px; max-width:1180px}
+h1{font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px}
+.sub{color:var(--dim); font-size:12px; margin:0 0 26px; max-width:860px}
+.variant{margin-bottom:36px}
+.vtitle{display:flex; align-items:baseline; gap:10px; margin:0 0 4px; font-size:12px; font-weight:700; color:var(--text-strong)}
+.vtitle span{font-weight:400; color:var(--dim)}
+.vnote{color:var(--faint); font-size:11px; margin:0 0 10px; max-width:820px}
+.panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; width:860px}
+.toggle{position:fixed; top:18px; right:22px; background:transparent; color:var(--text); border:1px solid var(--edge); border-radius:var(--radius); font:inherit; font-size:11px; padding:4px 10px; cursor:pointer}
+
+/* transcript atoms — mirrors .irc-* in index.css */
+.row{padding:1px 0; line-height:var(--prose-line)}
+.t{color:var(--time-dim); font-size:11px; margin-right:8px}
+.n{font-weight:700; margin-right:8px}
+.you{color:var(--nick-you)} .cl{color:var(--nick-claude)}
+.tool{color:var(--dim)}
+.tool b{color:var(--text); font-weight:400}
+.cost{color:var(--time-dim); font-size:10.5px; float:right; padding-left:12px}
+code{padding:1px 5px; background:var(--wash-4); font:inherit; color:var(--text-strong)}
+
+/* ── V1: divider rule, the recap rides the line ────────────────────────── */
+.rule{display:flex; align-items:center; gap:10px; margin:12px 0 4px; color:var(--accent); font-size:11px}
+.rule::before{content:""; width:14px; height:1px; background:currentColor; opacity:.6}
+.rule::after{content:""; flex:1; height:1px; background:currentColor; opacity:.25}
+.rule .away{color:var(--time-dim)}
+.v1 .recap-text{color:var(--text); padding:2px 0 2px 24px}
+
+/* ── V2: action line, the quietest form ────────────────────────────────── */
+.act{color:var(--dim); margin-top:10px}
+.act .star{color:var(--accent); margin-right:6px}
+.act b{color:var(--text); font-weight:400}
+
+/* ── V3: outline card ──────────────────────────────────────────────────── */
+.card{border:1px solid var(--edge); border-left:2px solid var(--accent); border-radius:var(--radius); padding:8px 12px; margin:12px 0 6px; background:var(--wash-4)}
+.card .hd{display:flex; align-items:baseline; gap:8px; color:var(--accent); font-size:11px; margin-bottom:4px}
+.card .hd .away{color:var(--time-dim); margin-left:auto}
+.card .body{color:var(--text)}
+.card .meta{color:var(--faint); font-size:11px; margin-top:6px; display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.chip{border:1px solid var(--line); border-radius:var(--radius); padding:0 5px; font-size:10.5px; color:var(--dim)}
+.chip.ok{color:var(--live); border-color:color-mix(in oklab, var(--live) 45%, transparent)}
+.chip.need{color:var(--accent); border-color:color-mix(in oklab, var(--accent) 45%, transparent)}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme==='light' ? '' : 'light'">theme</button>
+<div class="page">
+
+<h1>Recap, in the chat</h1>
+<p class="sub">
+  You leave a session running, come back 18 minutes later, and the first thing you read is one line
+  telling you what happened. Three shapes for the same content. In all three the recap is
+  <em>about</em> the conversation, not a message in it — so it never carries claude's nick and never
+  gets a timestamp of its own.
+</p>
+
+<!-- V1 -->
+<div class="variant v1">
+  <div class="vtitle">V1 — divider rule <span>the recap is where you stopped reading</span></div>
+  <p class="vnote">The rule doubles as the unread marker: everything under it arrived while you were gone.</p>
+  <div class="panel">
+    <div class="row"><span class="t">14:02</span><span class="n you">rafael</span>ship the updater fix and cut a patch release</div>
+    <div class="row tool">&nbsp;&nbsp;<b>Read</b> src/main/updater.ts</div>
+    <div class="row tool">&nbsp;&nbsp;<b>Edit</b> src/main/updater.ts <span style="color:var(--live)">+18</span> <span style="color:#c9736f">−6</span></div>
+
+    <div class="rule">recap<span class="away">· 18m away</span></div>
+    <div class="row recap-text">Fixed the bundle swap so it never runs under a live app, cut v0.32.1, and the release workflow went green. Nothing waiting on you.</div>
+
+    <div class="row tool">&nbsp;&nbsp;<b>Bash</b> pnpm gate</div>
+    <div class="row"><span class="t">14:21</span><span class="n cl">claude</span>Released <code>v0.32.1</code>. The auto-updater now stages the bundle and swaps on quit.<span class="cost">18m 40s · ↓142k</span></div>
+  </div>
+</div>
+
+<!-- V2 -->
+<div class="variant v2">
+  <div class="vtitle">V2 — action line <span>the quietest form, same family as “claude is typing”</span></div>
+  <p class="vnote">No new furniture at all. It reuses <code>.irc-act</code>, so a recap costs the transcript one dim line.</p>
+  <div class="panel">
+    <div class="row"><span class="t">14:02</span><span class="n you">rafael</span>ship the updater fix and cut a patch release</div>
+    <div class="row tool">&nbsp;&nbsp;<b>Edit</b> src/main/updater.ts <span style="color:var(--live)">+18</span> <span style="color:#c9736f">−6</span></div>
+    <div class="row tool">&nbsp;&nbsp;<b>Bash</b> pnpm gate</div>
+
+    <div class="row act"><span class="star">*</span>recap (18m away) — <b>fixed the bundle swap, cut v0.32.1, release workflow green. Nothing waiting on you.</b></div>
+
+    <div class="row"><span class="t">14:21</span><span class="n cl">claude</span>Released <code>v0.32.1</code>. The auto-updater now stages the bundle and swaps on quit.<span class="cost">18m 40s · ↓142k</span></div>
+  </div>
+</div>
+
+<!-- V3 -->
+<div class="variant">
+  <div class="vtitle">V3 — outline card <span>recap + the status Claude already emits per turn</span></div>
+  <p class="vnote">
+    The only variant with room for the <code>post_turn_summary</code> state — done / needs you / blocked —
+    beside the sentence. Costs more vertical space, pays for it when the answer is “it is stuck”.
+  </p>
+  <div class="panel">
+    <div class="row"><span class="t">14:02</span><span class="n you">rafael</span>ship the updater fix and cut a patch release</div>
+    <div class="row tool">&nbsp;&nbsp;<b>Edit</b> src/main/updater.ts <span style="color:var(--live)">+18</span> <span style="color:#c9736f">−6</span></div>
+
+    <div class="card">
+      <div class="hd">recap<span class="away">18m away · 3 turns</span></div>
+      <div class="body">Fixed the bundle swap so it never runs under a live app, cut v0.32.1, and the release workflow went green.</div>
+      <div class="meta"><span class="chip ok">done</span><span class="chip">2 files</span><span class="chip">gate green</span></div>
+    </div>
+
+    <div class="row"><span class="t">14:21</span><span class="n cl">claude</span>Released <code>v0.32.1</code>.<span class="cost">18m 40s · ↓142k</span></div>
+  </div>
+
+  <div class="panel" style="margin-top:12px">
+    <div class="row"><span class="t">09:14</span><span class="n you">rafael</span>migrate the sessions table and backfill</div>
+    <div class="row tool">&nbsp;&nbsp;<b>Bash</b> pnpm migrate</div>
+
+    <div class="card">
+      <div class="hd">recap<span class="away">41m away · 6 turns</span></div>
+      <div class="body">Wrote the migration and backfilled 1.2k rows, then stopped: the down-migration drops a column and I want your call before running it.</div>
+      <div class="meta"><span class="chip need">needs you</span><span class="chip">approve the destructive down-migration</span></div>
+    </div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

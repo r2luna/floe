@@ -171,6 +171,7 @@ import {
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
 import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
+import { recapSession } from './recap'
 import { handle } from './plugins/handleMap'
 import { loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
 import { launchEditor } from './editors'
@@ -695,6 +696,13 @@ export function registerAgentIpc(): void {
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
+  })
+  // Coming back to a session you left running: one line saying what happened
+  // while you were gone. Asked for by the panel, because only the panel knows
+  // when you stopped watching — see shared/recap.ts for when it is owed.
+  handle('agent:recap', (event, key: string, worktreePath: string, awayMs: number) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    return win ? recapSession(win, key, worktreePath, awayMs) : null
   })
 }
 

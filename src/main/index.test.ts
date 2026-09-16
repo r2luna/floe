@@ -213,6 +213,7 @@ const CHANNELS = [
   'agent:active',
   'agent:waiting',
   'agent:stop',
+  'agent:recap',
   'query:list',
   'query:open',
   'query:peek',

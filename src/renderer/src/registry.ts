@@ -1883,6 +1883,25 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The same line Floe writes for you when you come back to a chat you
+        // left running (see shared/recap.ts), on demand. Worth a command of its
+        // own for the case the automatic one cannot cover: a conversation long
+        // enough that you have lost the thread without ever having left it.
+        id: 'session.recap',
+        title: 'Recap this chat',
+        group: 'Sessions',
+        enabled: (c) => !!chatOf(c)?.session,
+        unavailable: () => 'open a chat first',
+        run: async (c) => {
+          const session = chatOf(c)?.session
+          if (!session) return
+          // No gap: asked for by hand is not coming back from anywhere, and the
+          // line drops the `(18m away)` stamp when there is none to report.
+          const line = await window.floe.agent.recap(session.id, session.worktreePath, 0)
+          if (!line) c.say('nothing to recap')
+        }
+      },
+      {
         // "Delete" is Floe's record of the session, not the conversation:
         // the Claude transcript stays on disk and `claude --resume` still finds
         // it. Same call the sidebar's close uses — one way to forget a session.

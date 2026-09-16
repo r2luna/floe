@@ -3,6 +3,7 @@ import type { AgentEvent, AgentEventEnvelope, NotifySoundId } from '../../shared
 import { isQueryKey } from '../../shared/queries.ts'
 import { playDoneSound } from './sounds.ts'
 import { markUnread, readOpen, subscribeUnread, unreadMarks } from './unreadStore.ts'
+import { noteActivity, noteLeft } from './awayStore.ts'
 import { subscribeTurns } from './activeTurns.ts'
 
 // How long an event-driven `busy` entry is trusted over the server's answer. A
@@ -117,6 +118,10 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
         // mark set on one can never be read and hangs there for good.
         if (isQueryKey(key)) return
         lastEventAt.current.set(key, Date.now())
+        // The recap's half of the same stamp. Kept here rather than in a second
+        // global subscription: this listener already sees every session's every
+        // event, and two subscriptions to one stream is two answers.
+        noteActivity(key)
         const live = event.kind !== 'done' && event.kind !== 'error'
         // Any turn ending is the news the sound carries — including the session
         // you are watching, since the window may be behind another app.
@@ -158,7 +163,14 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
   // The one exception is a mark you put there yourself on this very chat, which
   // the store holds until you leave — see `held` in unreadStore.ts.
   const openKey = openKeys.join(' ')
-  useEffect(() => readOpen(openKey.split(' ').filter(Boolean)), [openKey])
+  useEffect(() => {
+    const keys = openKey.split(' ').filter(Boolean)
+    readOpen(keys)
+    // Leaving is what the recap measures from, and this cleanup is the only
+    // moment the app knows it happened — the mark is gone by the time you are
+    // back. See awayStore.ts.
+    return () => noteLeft(keys)
+  }, [openKey])
 
   // The correction. Both sets are built from events, and an event that never
   // arrives cannot be waited for: ask the main process who is actually working
