@@ -1,0 +1,43 @@
+# ==============================================================================
+#  Floe — project settings
+# ==============================================================================
+#  What Floe knows about this project, kept in the repository so every clone
+#  gets it. Machine-only config goes in .floe/local/, which is gitignored.
+# ==============================================================================
+
+
+# ------------------------------------------------------------------------------
+# | Containerized Environment
+# ------------------------------------------------------------------------------
+# |
+# | Optional. It only carries what can't be inferred reliably — the PHP version
+# | above all, which is the reason to containerize at all. `package-manager` and
+# | `db` have defaults inferred from the lockfile and the .env, but can be pinned
+# | here. `db-admin` surfaces DBGate from the shared support stack.
+# |
+# | Delete this whole block to run the project on the host instead.
+# |
+# ------------------------------------------------------------------------------
+
+# [env]
+# mode            = "container"
+# runtime         = "laravel"
+# php             = "8.4"
+# package-manager = "pnpm"
+# db              = "mysql"
+# db-admin        = true
+
+
+# ------------------------------------------------------------------------------
+# | Integrations
+# ------------------------------------------------------------------------------
+# |
+# | Per-project integration settings. `jira-project` is the board key this repo's
+# | issues belong to (e.g. "PROJ"); the credentials themselves are global and
+# | live in floe.toml.
+# |
+# ------------------------------------------------------------------------------
+
+# [integrations]
+# jira-project = "PROJ"
+seeded = true

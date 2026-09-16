@@ -1,0 +1,18 @@
+# ==============================================================================
+#  Floe — project commands
+# ==============================================================================
+#  Named processes Floe can run for this project.
+#
+#  `auto-start` launches the command when a worktree is provisioned,
+#  `auto-restart` brings it back when it dies, and `watch` lists globs that
+#  restart it on change. `cwd` overrides the working directory, which defaults to
+#  the worktree path. `notify` takes `all`, `important` or `none`.
+#
+#  Every command here is shared by all worktrees and committed with the repo.
+#  A command for one worktree only names it by absolute path, so it lives in
+#  .floe/local/commands.toml instead, which is gitignored.
+# ==============================================================================
+
+[[command]]
+name    = "pnpm run dev"
+command = "pnpm run dev"
