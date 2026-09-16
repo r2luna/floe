@@ -132,6 +132,7 @@ import { diagnoseWorktreeFailure } from '../shared/worktreeError'
 import {
   createSkill,
   deleteSkill,
+  importSkills,
   listSkills,
   readSkillFile,
   renameSkill,
@@ -2096,6 +2097,21 @@ function registerSkillTools(server: McpServer): void {
       }
     }
   )
+
+  server.tool(
+    'import_skills',
+    "Copy a project's harness skills (.claude/skills, .codex/skills, .agents/skills, .opencode/skills, .gemini/skills) into its <repo>/.floe/skills. A name Floe already has is skipped, never overwritten, so Floe's copy wins.",
+    {
+      project: z.string().describe('The repo root path (a worktree path works too).')
+    },
+    async ({ project }) => {
+      try {
+        return textResult(importSkills(projectRoot(project)))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
 }
 
 // --- The shared support stack (container-mode infrastructure) ---------------
@@ -2155,11 +2171,11 @@ function registerMcpRegistryTools(server: McpServer): void {
       env: z
         .record(z.string(), z.string())
         .optional()
-        .describe('stdio only: environment the server needs, e.g. { API_KEY: "…" }. Stored in plain text in mcp.toml.'),
+        .describe('stdio only: environment the server needs, e.g. { API_KEY: "…" }. Stored in plain text: in the global mcp.toml, or for a project in its gitignored .floe/local/mcp.toml.'),
       headers: z
         .record(z.string(), z.string())
         .optional()
-        .describe('http only: headers every request carries, e.g. { Authorization: "Bearer …" }. Stored in plain text in mcp.toml.'),
+        .describe('http only: headers every request carries, e.g. { Authorization: "Bearer …" }. Stored in plain text: in the global mcp.toml, or for a project in its gitignored .floe/local/mcp.toml.'),
       enabled: z.boolean().optional().describe('Defaults to true.'),
       project: z.string().optional().describe('The repo root path (or a worktree path). Required for scope=project.')
     },

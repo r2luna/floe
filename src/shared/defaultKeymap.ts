@@ -254,7 +254,9 @@ already does.`,
     title: 'Skills',
     doc: `The skills panel's own letters, and deliberately the same four the file
 tree uses: \`n\` writes a new one, \`r\` renames it, \`d\` deletes it and \`e\` opens
-it in your editor. Enter reads it in the file panel beside the list.
+it in your editor. Enter reads it in the file panel beside the list. \`c\` copies
+the project's harness skills (\`.claude/skills\`, \`.codex/skills\`, …) into its
+\`.floe/skills\`, skipping any name Floe already has.
 
 A skill is addressed by NAME, not by filename — renaming moves the file and
 rewrites its frontmatter together, so \`/old-name\` stops working exactly when
@@ -266,7 +268,8 @@ the menu focuses the row it was opened on and dispatches an id.`,
       { key: 'n', command: 'skill.new', when: 'panel == "skills"' },
       { key: 'r', command: 'skill.rename', when: 'panel == "skills"' },
       { key: 'd', command: 'skill.delete', when: 'panel == "skills"' },
-      { key: 'e', command: 'skill.edit', when: 'panel == "skills"' }
+      { key: 'e', command: 'skill.edit', when: 'panel == "skills"' },
+      { key: 'c', command: 'skill.import', when: 'panel == "skills"' }
     ]
   },
   {

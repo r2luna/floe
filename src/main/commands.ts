@@ -19,7 +19,7 @@ import {
   type NotifyLevel,
   type StoredCommand
 } from './config/commandStore'
-import { createProject, projectScan, setProjectValue } from './config/projectStore'
+import { createProject, projectScan, updateRepoProject } from './config/projectStore'
 
 export type CommandScope = 'project' | 'local'
 export type { NotifyLevel }
@@ -64,9 +64,10 @@ function laravelDefaults(projectPath: string): Array<{ name: string; command: st
 /**
  * Seed a project's stack defaults, once.
  *
- * `seeded` is recorded in the project's own `config.toml` rather than in a shared
- * list, so it travels with the project — and so a user who deletes a seeded
- * command does not get it back on the next launch.
+ * `seeded` is recorded in the repo's own `.floe/config.toml` rather than in a
+ * shared list, so it travels with the project — and so a user who deletes a
+ * seeded command does not get it back on the next launch. It is written only
+ * when defaults were actually added: a repo with nothing to seed gets no file.
  */
 function seedDefaults(projectPath: string): void {
   const project = projectScan().projects.find((p) => p.path === projectPath)
@@ -78,10 +79,10 @@ function seedDefaults(projectPath: string): void {
   // below reads the repo, and there is no repo.
   if (!existsSync(projectPath)) return
   if (!project) createProject(projectPath)
-  setProjectValue(projectPath, 'seeded', true)
   if (readCommands(projectPath).commands.length > 0) return
   if (!isLaravel(projectPath)) return
   for (const c of laravelDefaults(projectPath)) storeAdd(projectPath, c)
+  updateRepoProject(projectPath, [{ op: 'set', key: 'seeded', value: true }])
 }
 
 // Commands run on the host, but a containerized worktree has no PHP or JS runtime
@@ -202,11 +203,11 @@ export function setCommandScope(
 
 export type CommandDefinition = NewCommand
 /** A stored command as an agent sees it — no file index, `worktree` kept. */
-export type DefinedCommand = Omit<StoredCommand, 'index'>
+export type DefinedCommand = Omit<StoredCommand, 'index' | 'local'>
 
 export function projectCommands(projectPath: string): DefinedCommand[] {
   seedDefaults(projectPath)
-  return readCommands(projectPath).commands.map(({ index: _index, ...c }) => c)
+  return readCommands(projectPath).commands.map(({ index: _index, local: _local, ...c }) => c)
 }
 
 /**

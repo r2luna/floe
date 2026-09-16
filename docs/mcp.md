@@ -89,7 +89,7 @@ as that session under a token it was lent (`peerMcp`).
    `claudeSessions.ts` special-case the `mcp__floe__present_decision` tool_use
    block, injecting `type: 'decision'` before `parseArtifactSpec`), and the
    skills admin set `list_skills` / `read_skill` / `create_skill` /
-   `update_skill` / `rename_skill` / `delete_skill` (Floe-owned skills,
+   `update_skill` / `rename_skill` / `delete_skill` / `import_skills` (Floe-owned skills,
    `config/skills.ts` — to *use* one, put `/name` in a prompt; expansion
    happens on send). `list_project_commands` / `add_project_command` write a
    project's own processes — the dev server, queue worker or watcher Floe runs
@@ -143,7 +143,8 @@ as that session under a token it was lent (`peerMcp`).
 
 Floe also *administers* MCP servers, the way it owns skills: one entry, every
 harness. The registry lives in `~/.config/floe/mcp.toml` (global) and
-`projects/<dir>/mcp.toml` (per project, wins on a name clash) — see
+`<repo>/.floe/mcp.toml` (per project, wins on a name clash; its env and headers
+live in the gitignored `.floe/local/mcp.toml`) — see
 `config/mcpServers.ts` and the template in the file itself. `mcpConfigFor`
 merges the enabled entries into every per-session `--mcp-config`, so a server
 registered once reaches each spawned session; changes apply to sessions spawned

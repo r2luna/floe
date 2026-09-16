@@ -344,7 +344,8 @@ export type McpCommand =
   | { kind: 'list_commands'; callerKey: string; requestId: string }
 
 // One third-party MCP server in Floe's own registry (config/mcpServers.ts) —
-// `~/.config/floe/mcp.toml` (global) or `projects/<dir>/mcp.toml` (project).
+// `~/.config/floe/mcp.toml` (global) or `<repo>/.floe/mcp.toml` (project, with its
+// credentials merged in from the gitignored `.floe/local/mcp.toml`).
 // Floe owns the list and projects it into each spawned harness's config
 // (mcpConfigFor), the same way skills are owned once and expanded per turn.
 export interface McpServerEntry {

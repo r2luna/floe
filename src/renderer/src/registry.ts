@@ -28,6 +28,7 @@ import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
 import { previewTarget, previewUrl } from './previewTarget.ts'
 import { startSkillDraft } from './skillDraft.ts'
+import { skillsChanged } from './useSkills.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
@@ -1359,6 +1360,25 @@ export const REGISTRY: Map<string, Command> = new Map(
           const root = row?.dataset.skillRoot
           const file = row?.dataset.skillFile
           if (root && file) c.editSkill(root, file)
+        }
+      },
+      {
+        // Copy the project's harness skills into its `.floe/skills`. A name Floe
+        // already has is skipped, so Floe's copy keeps winning.
+        id: 'skill.import',
+        title: 'Copy harness skills into Floe',
+        group: 'Skills',
+        enabled: (c) => !!c.worktree,
+        run: (c) => {
+          void window.floe.skills
+            .import(c.worktree?.path)
+            .then(({ imported, skipped }) => {
+              skillsChanged()
+              const names = imported.map((s) => s.name).join(', ')
+              const copied = imported.length ? `Copied ${imported.length}: ${names}.` : 'No new skills to copy.'
+              c.say(skipped.length ? `${copied} Skipped ${skipped.length} already in Floe.` : copied)
+            })
+            .catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

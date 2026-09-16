@@ -10,15 +10,18 @@
 //
 //   ~/.config/floe/builtin-skills/<name>.md      built-in — shipped with Floe
 //   ~/.config/floe/skills/<name>.md              global — every project
-//   ~/.config/floe/projects/<dir>/skills/<name>.md   this project only
+//   <repo>/.floe/skills/<name>.md                this project only, committed
 //
 // A skill may also be a DIRECTORY holding `SKILL.md`, which is how you ship one
 // with reference files beside it. The narrower scope wins a name clash: a
 // project skill beats a global one, and either beats a built-in — which is how
 // you customize a built-in, since its own file is rewritten on every launch
-// (builtinSkills.ts).
+// (builtinSkills.ts). `importSkills` copies a project's harness skills into its
+// `.floe/skills`.
 
 import {
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -31,7 +34,7 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { configDir } from '../dataDir'
 import { BUILTIN_SKILLS } from './builtinSkills'
-import { projectScan } from './projectStore'
+import { repoFloeDir } from './repoConfig'
 
 /** Where a skill came from, narrowest last — the order they override in. */
 export type SkillScope = 'builtin' | 'global' | 'project'
@@ -55,10 +58,8 @@ export const globalSkillsDir = (): string => join(configDir(), 'skills')
 /** Floe's own skills, rewritten from BUILTIN_SKILLS on every boot. */
 export const builtinSkillsDir = (): string => join(configDir(), 'builtin-skills')
 
-export function projectSkillsDir(projectPath: string): string | null {
-  const dir = projectScan().byPath.get(projectPath)
-  return dir ? join(dir, 'skills') : null
-}
+/** The project's skills, committed in the repository itself. */
+export const projectSkillsDir = (projectPath: string): string => join(repoFloeDir(projectPath), 'skills')
 
 // Minimal frontmatter: the `key: value` pairs a skill actually uses. A full
 // YAML parser would be a dependency for two fields.
@@ -138,8 +139,7 @@ export function listSkills(projectPath?: string): Skill[] {
   const found = new Map<string, Skill>()
   collect(builtinSkillsDir(), 'builtin', found)
   collect(globalSkillsDir(), 'global', found)
-  const own = projectPath ? projectSkillsDir(projectPath) : null
-  if (own) collect(own, 'project', found)
+  if (projectPath) collect(projectSkillsDir(projectPath), 'project', found)
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name))
 }
 
@@ -217,7 +217,7 @@ any other CLI's directory: one copy, every harness.
 ## Where skills live
 
 - \`~/.config/floe/skills/<name>.md\` — global, offered in every project.
-- \`~/.config/floe/projects/<project>/skills/<name>.md\` — that project only.
+- \`<repo>/.floe/skills/<name>.md\` — that project only, committed with it.
 
 A project skill wins over a global one with the same name.
 
@@ -255,9 +255,8 @@ function checkName(name: string): string {
 /** Where a new skill of this scope goes, created if it isn't there yet. */
 function dirFor(scope: WritableScope, projectPath?: string): string {
   if (scope === 'global') return globalSkillsDir()
-  const dir = projectPath ? projectSkillsDir(projectPath) : null
-  if (!dir) throw new Error('no project here to keep a project skill in')
-  return dir
+  if (!projectPath) throw new Error('no project here to keep a project skill in')
+  return projectSkillsDir(projectPath)
 }
 
 /** Refuse a write to Floe's own copy — the next boot would undo it anyway. */
@@ -380,4 +379,62 @@ description: What this skill is for — shown beside it in the list.
 Everything below the frontmatter is the skill. Typing \`/${name}\` in the composer
 sends this whole text to whichever harness answers the turn.
 `
+}
+
+/* --- importing from a harness --------------------------------------------- */
+//
+// A project set up for Claude or Codex already has skills, in that harness's
+// own directory. Importing copies them into `<repo>/.floe/skills`, so every
+// harness gets them through Floe. Floe wins a clash: a name Floe already has is
+// skipped, never overwritten, and the first harness to offer a name keeps it.
+
+/** Each harness's project-level skills directory, relative to the repo root. */
+export const HARNESS_SKILL_DIRS = [
+  '.claude/skills',
+  '.codex/skills',
+  '.agents/skills',
+  '.opencode/skills',
+  '.opencode/skill',
+  '.gemini/skills'
+]
+
+export interface SkillImport {
+  imported: Array<{ name: string; from: string; file: string }>
+  skipped: Array<{ name: string; from: string; reason: string }>
+}
+
+export function importSkills(projectPath: string): SkillImport {
+  const result: SkillImport = { imported: [], skipped: [] }
+  const taken = new Set(listSkills(projectPath).map((s) => s.name))
+  const target = projectSkillsDir(projectPath)
+  for (const rel of HARNESS_SKILL_DIRS) {
+    const found = new Map<string, Skill>()
+    collect(join(projectPath, rel), 'project', found)
+    for (const skill of found.values()) {
+      const reason = taken.has(skill.name) ? 'Floe already has a skill with this name' : copySkill(skill, target)
+      if (reason) {
+        result.skipped.push({ name: skill.name, from: skill.file, reason })
+        continue
+      }
+      taken.add(skill.name)
+      result.imported.push({ name: skill.name, from: skill.file, file: join(target, relative(skill)) })
+    }
+  }
+  return result
+}
+
+/** Where a skill sits under its skills root: `name.md`, or `name/SKILL.md`. */
+const relative = (skill: Skill): string =>
+  isBundle(skill) ? join(basename(skill.dir), 'SKILL.md') : basename(skill.file)
+
+/** Copy one skill into `target`. Returns why it was not copied, or null. */
+function copySkill(skill: Skill, target: string): string | null {
+  const bundle = isBundle(skill)
+  const dest = join(target, bundle ? basename(skill.dir) : basename(skill.file))
+  if (existsSync(dest)) return `${dest} is already there`
+  mkdirSync(target, { recursive: true })
+  // Dereference: a harness skill is often a symlink, and the copy must stand alone.
+  if (bundle) cpSync(skill.dir, dest, { recursive: true, dereference: true })
+  else copyFileSync(skill.file, dest)
+  return null
 }

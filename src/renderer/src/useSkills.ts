@@ -11,6 +11,13 @@ import type { Skill } from '../../main/config/skills'
  * and so sees `skills/` too), and anything that happened while the window was
  * in the background.
  */
+/**
+ * Tell every open skills list to refetch. For writes the config watcher cannot
+ * see: an import lands in the repo's `.floe/skills`, outside the config dir.
+ */
+export const SKILLS_CHANGED = 'floe:skills-changed'
+export const skillsChanged = (): void => void window.dispatchEvent(new Event(SKILLS_CHANGED))
+
 export interface Skills {
   all: Skill[]
   loading: boolean
@@ -28,9 +35,11 @@ export function useSkills(worktreePath?: string): Skills {
   useEffect(() => {
     const stop = window.floe.config.onChange(reload)
     window.addEventListener('focus', reload)
+    window.addEventListener(SKILLS_CHANGED, reload)
     return () => {
       stop()
       window.removeEventListener('focus', reload)
+      window.removeEventListener(SKILLS_CHANGED, reload)
     }
   }, [reload])
 

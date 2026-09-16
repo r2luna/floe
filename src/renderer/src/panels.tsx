@@ -183,6 +183,13 @@ const DrawingPanel = lazy(async () => ({ default: (await import('./DrawingPanel'
  */
 export type PanelKind = keyof typeof KINDS
 
+/** A button in a panel header, wired to a command in the registry. */
+export interface PanelAction {
+  icon: ComponentType<IconProps>
+  title: string
+  command: string
+}
+
 export const KINDS = {
   // projects holds one short name per row; worktrees stacks a branch, its
   // sessions, a pipeline strip and a subagent tree — it earns the extra width.
@@ -390,7 +397,10 @@ export const KINDS = {
     order: 46,
     // Same command the `n` key and the context menu run: the header button is a
     // third way in, not a third create flow.
-    action: { icon: IconPlus, title: 'New skill…', command: 'skill.new' }
+    action: [
+      { icon: IconCopy, title: 'Copy harness skills into Floe (c)', command: 'skill.import' },
+      { icon: IconPlus, title: 'New skill…', command: 'skill.new' }
+    ]
   },
   // The worktree's processes. A narrow list whose rows open something wide, so
   // it sits with `files` and `plans` and for the same reason: left of the thing
@@ -520,7 +530,7 @@ export const KINDS = {
     grow?: boolean
     sticky?: boolean
     /** A button in the panel header, wired to a command in the registry. */
-    action?: { icon: ComponentType<IconProps>; title: string; command: string }
+    action?: PanelAction | PanelAction[]
     /** Panels sharing a slot replace each other. See Panel.slot in lane.ts. */
     slot?: string
     /**
@@ -4342,6 +4352,13 @@ function DrawList({
  * opens over the app, and the row you are naming is drawn where it will live —
  * which is the answer to "global or this project?" that a modal cannot give.
  */
+/** The heading over each scope's group of skills. */
+const SCOPE_LABEL: Record<Skill['scope'], string> = {
+  builtin: 'BUILT-IN',
+  global: 'GLOBAL',
+  project: 'PROJECT'
+}
+
 function SkillsList({
   cwd,
   onOpen,
@@ -4410,7 +4427,7 @@ function SkillsList({
   // the menu it drops is positioned from that button's own rectangle. Falls back
   // to the top of the list when the header is not there (a bare panel).
   const askScope = useCallback(() => {
-    const plus = document.querySelector('.panel[data-kind="skills"] .panel-act')
+    const plus = document.querySelector('.panel[data-kind="skills"] .panel-act[title="New skill…"]')
     const box = plus?.getBoundingClientRect()
     setScoping({ x: box ? box.left : 12, y: box ? box.bottom + 4 : 40 })
   }, [])
@@ -4441,7 +4458,8 @@ function SkillsList({
     { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('skill.edit') },
     { label: 'Rename…', keys: 'r', run: () => onCommand?.('skill.rename') },
     { label: 'Delete…', keys: 'd', run: () => onCommand?.('skill.delete') },
-    { label: 'New skill…', keys: 'n', run: () => onCommand?.('skill.new') }
+    { label: 'New skill…', keys: 'n', run: () => onCommand?.('skill.new') },
+    { label: 'Copy harness skills into Floe', keys: 'c', run: () => onCommand?.('skill.import') }
   ]
 
   const scopes: MenuAction[] = [
@@ -4520,7 +4538,7 @@ function SkillsList({
         if (!rows.length && !drafting) return null
         return (
           <Fragment key={scope}>
-            <div className="group-label">{scope === 'builtin' ? 'BUILT-IN' : scope.toUpperCase()}</div>
+            <div className="group-label">{SCOPE_LABEL[scope]}</div>
             {rows.map((skill) => {
               // The reader takes a path relative to a root, which for a skill is
               // its own directory — see the `root` override in PanelBody.

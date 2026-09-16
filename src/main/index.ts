@@ -159,7 +159,7 @@ import {
 import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
-import { createSkill, deleteSkill, listSkills, renameSkill } from './config/skills'
+import { createSkill, deleteSkill, importSkills, listSkills, renameSkill, type WritableScope } from './config/skills'
 import { projectFor, projectScan } from './config/projectStore'
 import {
   addMcpServer,
@@ -1408,7 +1408,7 @@ export function registerSettingsIpc(): void {
   // a path from the renderer: the name is what the row shows and what `/name`
   // sends, and resolving it here is what keeps the UI unable to write anywhere
   // but the two skills directories. Refusals throw, so the panel can say why.
-  handle('skills:create', (_event, name: string, scope: 'global' | 'project', worktreePath?: string) =>
+  handle('skills:create', (_event, name: string, scope: WritableScope, worktreePath?: string) =>
     createSkill(name, scope, projectScope(worktreePath))
   )
   handle('skills:rename', (_event, name: string, to: string, worktreePath?: string) =>
@@ -1417,6 +1417,13 @@ export function registerSettingsIpc(): void {
   handle('skills:delete', (_event, name: string, worktreePath?: string) =>
     deleteSkill(name, projectScope(worktreePath))
   )
+  // Copy the project's harness skills (.claude/skills, .codex/skills, …) into
+  // its `.floe/skills`. Floe's own names win, so a duplicate is skipped.
+  handle('skills:import', (_event, worktreePath?: string) => {
+    const project = projectScope(worktreePath)
+    if (!project) throw new Error('open a project to import its skills')
+    return importSkills(project)
+  })
   handle('config:get', () => floeConfig())
   handle('config:set', (_event, table: string, key: string, value: TomlValue) =>
     setConfigValue(table, key, value)

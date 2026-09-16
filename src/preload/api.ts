@@ -15,7 +15,7 @@ import type { ProjectCommand, CommandScope, CommandPatch } from '../main/command
 import type { CommandEvent, CommandRun } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
-import type { Skill } from '../main/config/skills'
+import type { Skill, SkillImport, WritableScope } from '../main/config/skills'
 import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
 import type { PluginPanelSection } from '../main/plugins/types'
@@ -757,12 +757,14 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // The Skills panel's three writes. Each one rejects with the reason —
       // a taken name, a name that could not be typed after a slash — so the
       // panel reports it instead of failing quietly.
-      create: (name: string, scope: 'global' | 'project', worktreePath?: string): Promise<Skill> =>
+      create: (name: string, scope: WritableScope, worktreePath?: string): Promise<Skill> =>
         ipcRenderer.invoke('skills:create', name, scope, worktreePath),
       rename: (name: string, to: string, worktreePath?: string): Promise<Skill> =>
         ipcRenderer.invoke('skills:rename', name, to, worktreePath),
       remove: (name: string, worktreePath?: string): Promise<void> =>
-        ipcRenderer.invoke('skills:delete', name, worktreePath)
+        ipcRenderer.invoke('skills:delete', name, worktreePath),
+      // Copy the project's harness skills into its `.floe/skills`; duplicates are skipped.
+      import: (worktreePath?: string): Promise<SkillImport> => ipcRenderer.invoke('skills:import', worktreePath)
     },
     slash: {
       list: (worktreePath: string): Promise<SlashCommand[]> => ipcRenderer.invoke('slash:list', worktreePath)

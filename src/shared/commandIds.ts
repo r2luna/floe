@@ -93,6 +93,7 @@ export const COMMAND_IDS: string[] = [
   'skill.rename',
   'skill.delete',
   'skill.edit',
+  'skill.import',
   'draw.open',
   'draw.new',
   'draw.rename',

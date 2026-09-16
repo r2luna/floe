@@ -55,24 +55,27 @@ test('frontmatter can rename the skill, and the token follows', () => {
   assert.equal(skills.readSkill('file-name'), null)
 })
 
+/** A real repository directory, since project skills live inside it. */
+const repoDir = (): string => mkdtempSync(join(tmpdir(), 'floe-repo-'))
+
 test('a project skill is offered only inside its project', () => {
   reset()
-  const project = projects.createProject('/code/app')
-  skill(join(project.dir, 'skills'), 'migrate', 'Run the migration.')
-  assert.deepEqual(skills.listSkills('/code/app').map((s) => s.name), ['migrate'])
+  const app = repoDir()
+  skill(skills.projectSkillsDir(app), 'migrate', 'Run the migration.')
+  assert.deepEqual(skills.listSkills(app).map((s) => s.name), ['migrate'])
   assert.deepEqual(skills.listSkills().map((s) => s.name), [], 'not global')
-  assert.deepEqual(skills.listSkills('/code/other').map((s) => s.name), [], 'not another project')
+  assert.deepEqual(skills.listSkills(repoDir()).map((s) => s.name), [], 'not another project')
 })
 
 test('a project skill wins over a global one of the same name', () => {
   reset()
-  const project = projects.createProject('/code/app')
+  const app = repoDir()
   skill(skills.globalSkillsDir(), 'deploy', 'The generic one.')
-  skill(join(project.dir, 'skills'), 'deploy', 'The one this repo needs.')
-  assert.equal(skills.readSkill('deploy', '/code/app'), 'The one this repo needs.')
+  skill(skills.projectSkillsDir(app), 'deploy', 'The one this repo needs.')
+  assert.equal(skills.readSkill('deploy', app), 'The one this repo needs.')
   assert.equal(skills.readSkill('deploy'), 'The generic one.')
-  assert.equal(skills.listSkills('/code/app').length, 1, 'one token, one skill')
-  assert.equal(skills.listSkills('/code/app')[0].scope, 'project')
+  assert.equal(skills.listSkills(app).length, 1, 'one token, one skill')
+  assert.equal(skills.listSkills(app)[0].scope, 'project')
 })
 
 test('a skill can be a directory holding SKILL.md, for bundled files', () => {
@@ -136,10 +139,10 @@ test('a new skill is created ready to edit, with its frontmatter filled in', () 
 
 test('a project skill is created inside that project', () => {
   reset()
-  const project = projects.createProject('/code/app')
-  const made = skills.createSkill('migrate', 'project', '/code/app')
-  assert.equal(made.file, join(project.dir, 'skills', 'migrate.md'))
-  assert.deepEqual(skills.listSkills('/code/app').map((s) => s.name), ['migrate'])
+  const app = repoDir()
+  const made = skills.createSkill('migrate', 'project', app)
+  assert.equal(made.file, join(app, '.floe', 'skills', 'migrate.md'))
+  assert.deepEqual(skills.listSkills(app).map((s) => s.name), ['migrate'])
   assert.deepEqual(skills.listSkills().map((s) => s.name), [], 'and nowhere else')
 })
 
@@ -218,11 +221,11 @@ test('deleting removes the file, and a bundled skill its whole directory', () =>
 
 test('the project copy is what a project-scoped delete removes', () => {
   reset()
-  const project = projects.createProject('/code/app')
+  const app = repoDir()
   skill(skills.globalSkillsDir(), 'deploy', 'the generic one')
-  skill(join(project.dir, 'skills'), 'deploy', 'the local one')
-  skills.deleteSkill('deploy', '/code/app')
-  assert.equal(skills.readSkill('deploy', '/code/app'), 'the generic one', 'the global one falls back in')
+  skill(skills.projectSkillsDir(app), 'deploy', 'the local one')
+  skills.deleteSkill('deploy', app)
+  assert.equal(skills.readSkill('deploy', app), 'the generic one', 'the global one falls back in')
 })
 
 test('acting on a skill that is not there says so', () => {
@@ -296,4 +299,46 @@ test('shadowing a built-in is what writing to it means', () => {
   assert.equal(made.file, join(skills.globalSkillsDir(), 'setup-commands.md'))
   skills.updateSkill('setup-commands', 'mine')
   assert.equal(skills.readSkill('setup-commands'), 'mine', 'the copy is what the write lands on')
+})
+
+/** A harness skill as Claude and Codex keep one: `<rel>/<name>/SKILL.md`. */
+function bundle(repo: string, rel: string, name: string, body: string): void {
+  const dir = join(repo, rel, name)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\n---\n\n${body}`)
+}
+
+test('import copies every harness skill into .floe/skills, bundled files included', () => {
+  reset()
+  const repo = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  bundle(repo, '.claude/skills', 'deploy', 'Ship it.')
+  writeFileSync(join(repo, '.claude/skills/deploy/checklist.md'), 'one')
+  bundle(repo, '.codex/skills', 'review', 'Look closely.')
+  const out = skills.importSkills(repo)
+  assert.deepEqual(out.imported.map((s) => s.name).sort(), ['deploy', 'review'])
+  assert.deepEqual(out.skipped, [])
+  assert.ok(existsSync(join(skills.projectSkillsDir(repo), 'deploy', 'checklist.md')))
+  assert.equal(skills.readSkill('review', repo), 'Look closely.')
+})
+
+test('import never overwrites a Floe skill, and the first harness keeps a shared name', () => {
+  reset()
+  const repo = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  skill(skills.globalSkillsDir(), 'deploy', 'Floe version')
+  bundle(repo, '.claude/skills', 'deploy', 'Claude version')
+  bundle(repo, '.claude/skills', 'review', 'Claude review')
+  bundle(repo, '.codex/skills', 'review', 'Codex review')
+  const out = skills.importSkills(repo)
+  assert.deepEqual(out.imported.map((s) => s.name), ['review'])
+  assert.deepEqual(out.skipped.map((s) => s.name).sort(), ['deploy', 'review'])
+  assert.equal(skills.readSkill('deploy', repo), 'Floe version')
+  assert.equal(skills.readSkill('review', repo), 'Claude review')
+  assert.equal(skills.importSkills(repo).imported.length, 0, 'a second import is a no-op')
+})
+
+test('import with no harness skills imports nothing', () => {
+  reset()
+  const repo = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  assert.deepEqual(skills.importSkills(repo), { imported: [], skipped: [] })
+  assert.ok(!existsSync(skills.projectSkillsDir(repo)), 'no empty directory left behind')
 })

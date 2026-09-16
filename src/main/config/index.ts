@@ -19,10 +19,13 @@ import { colonyConfig, globalColony } from './colony'
 import { ensureKeybindings } from '../keybindings'
 import { ensureBuiltinSkills, ensureSkills } from './skills'
 import { ensureSystemPrompt, systemPromptPath } from '../appSettings'
+import { migrateProjectsToRepo } from './migrateRepo'
+import { repoFloeDir } from './repoConfig'
 
 /** Create anything missing. Never throws: a read-only home is not a crash. */
 export function initConfig(): void {
-  for (const step of [ensureFloeConfig, ensureKeybindings, ensureSkills, ensureBuiltinSkills, ensureSystemPrompt]) {
+  const steps = [ensureFloeConfig, ensureKeybindings, ensureSkills, ensureBuiltinSkills, ensureSystemPrompt, migrateProjectsToRepo]
+  for (const step of steps) {
     try {
       step()
     } catch (err) {
@@ -67,12 +70,47 @@ export function invalidateAll(): void {
  * writing one has to show up in the sidebar without a restart. Debounced,
  * because an editor saving a file is two or three filesystem events, and a
  * package of them should reload once.
+ *
+ * Each project's `<repo>/.floe/` is watched too, since its settings, commands,
+ * MCP servers and skills live there now (repoConfig.ts).
  */
 export function watchConfig(onChange: (file: string) => void): () => void {
   const dir = configDir()
   let timer: NodeJS.Timeout | null = null
   let pending: string | null = null
   let watcher: FSWatcher | null = null
+  const repos = new Map<string, FSWatcher[]>()
+  // Whether a project's watchers include its `.floe/`, so sync can tell when
+  // that directory has appeared or gone since.
+  const floeWatched = new Map<string, boolean>()
+
+  const schedule = (file: string): void => {
+    pending = file
+    if (timer) clearTimeout(timer)
+    timer = setTimeout(() => {
+      invalidateAll()
+      syncRepos()
+      onChange(pending ?? '')
+    }, 120)
+  }
+
+  // One watcher set per project: its `.floe/` when there is one, and the repo
+  // root alone so a `.floe/` created later is noticed and picked up.
+  const syncRepos = (): void => {
+    const want = new Set(projectScan().projects.map((p) => p.path).filter((p) => existsSync(p)))
+    for (const [path, list] of repos) {
+      if (want.has(path) && floeWatched.get(path) === existsSync(repoFloeDir(path))) continue
+      list.forEach((w) => w.close())
+      repos.delete(path)
+      floeWatched.delete(path)
+    }
+    for (const path of want) {
+      if (repos.has(path)) continue
+      floeWatched.set(path, existsSync(repoFloeDir(path)))
+      repos.set(path, watchRepo(path, schedule))
+    }
+  }
+
   try {
     watcher = watch(dir, { recursive: true }, (_event, filename) => {
       if (!filename) return
@@ -84,21 +122,44 @@ export function watchConfig(onChange: (file: string) => void): () => void {
       // config: a plugin writing its own files must not repaint the app, and a
       // changed bundle only takes effect on relaunch anyway.
       if (filename.toString().split('/')[0] === 'plugins') return
-      pending = filename.toString()
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => {
-        invalidateAll()
-        onChange(pending ?? '')
-      }, 120)
+      schedule(filename.toString())
     })
   } catch {
     // No watcher (platform, permissions) just means edits need a relaunch.
     return () => {}
   }
+  syncRepos()
   return () => {
     if (timer) clearTimeout(timer)
     watcher?.close()
+    for (const list of repos.values()) list.forEach((w) => w.close())
   }
+}
+
+/** The files under `.floe/` that are config. Plans, drawings and reports are not. */
+export const isRepoConfigFile = (rel: string): boolean =>
+  /^(config\.toml|commands\.toml|mcp\.toml|local\/(commands|mcp)\.toml|skills(\/.*)?)$/.test(rel)
+
+function watchRepo(path: string, schedule: (file: string) => void): FSWatcher[] {
+  const out: FSWatcher[] = []
+  const add = (target: string, recursive: boolean, fn: (name: string) => void): void => {
+    try {
+      out.push(watch(target, { recursive }, (_event, filename) => filename && fn(filename.toString())))
+    } catch {
+      // Unwatchable (permissions, a path gone mid-scan): edits there need a relaunch.
+    }
+  }
+  const floe = repoFloeDir(path)
+  const watching = existsSync(floe)
+  // Only a `.floe/` appearing or vanishing matters here: the root also reports
+  // `.floe` whenever a plan or drawing is written inside it.
+  add(path, false, (name) => name === '.floe' && existsSync(floe) !== watching && schedule(floe))
+  if (watching) {
+    add(floe, true, (rel) => {
+      if (!rel.endsWith('.tmp') && isRepoConfigFile(rel)) schedule(join(floe, rel))
+    })
+  }
+  return out
 }
 
 /** Where the user's config lives, for "Reveal in Finder" and error messages. */

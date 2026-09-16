@@ -1,4 +1,6 @@
-// `~/.config/floe/projects/<dir>/commands.toml` — a project's named processes.
+// `<repo>/.floe/commands.toml` — a project's named processes, committed with it.
+// `<repo>/.floe/local/commands.toml` holds the ones scoped to a single worktree:
+// they name an absolute path, so they stay on this machine (gitignored).
 //
 // Two shape decisions worth knowing before reading:
 //
@@ -22,8 +24,9 @@ import { ErrorSink, type ConfigError } from './errors'
 import { TableReader } from './read'
 import { editToml, parseToml, type TomlEdit, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
-import { COMMANDS_TOML } from './template'
+import { COMMANDS_TOML, LOCAL_COMMANDS_TOML } from './template'
 import { createProject, invalidateProjects, projectScan } from './projectStore'
+import { ensureRepoDir, repoFloeDir, repoLocalDir } from './repoConfig'
 
 export type NotifyLevel = 'all' | 'important' | 'none'
 export const NOTIFY_LEVELS = ['all', 'important', 'none'] as const
@@ -41,6 +44,8 @@ export interface StoredCommand {
   worktree?: string
   /** Position in the file's `[[command]]` array — what writes address. */
   index: number
+  /** True when the entry lives in `.floe/local/commands.toml`. */
+  local?: boolean
 }
 
 export const commandsPath = (dir: string): string => join(dir, 'commands.toml')
@@ -101,36 +106,43 @@ export function parseCommands(raw: string, file: string): { commands: StoredComm
 }
 
 export interface CommandsFile {
-  /** Where the file is, or would be. Null when the project isn't tracked at all. */
+  /** The shared file, where it is or would be. Null when the project isn't tracked at all. */
   path: string | null
   commands: StoredCommand[]
   errors: ConfigError[]
 }
 
+function readFile(path: string, local: boolean): { commands: StoredCommand[]; errors: ConfigError[] } {
+  if (!existsSync(path)) return { commands: [], errors: [] }
+  const read = parseCommands(readFileSync(path, 'utf8'), path)
+  return { commands: read.commands.map((c) => ({ ...c, local })), errors: read.errors }
+}
+
 export function readCommands(projectPath: string): CommandsFile {
-  const dir = projectScan().byPath.get(projectPath)
-  if (!dir) return { path: null, commands: [], errors: [] }
-  const path = commandsPath(dir)
-  if (!existsSync(path)) return { path, commands: [], errors: [] }
-  const { commands, errors } = parseCommands(readFileSync(path, 'utf8'), path)
-  return { path, commands, errors }
+  if (!projectScan().byPath.has(projectPath)) return { path: null, commands: [], errors: [] }
+  const path = commandsPath(repoFloeDir(projectPath))
+  const shared = readFile(path, false)
+  const local = readFile(commandsPath(repoLocalDir(projectPath)), true)
+  // Ids are unique across both files, numbered in reading order: shared first.
+  const used = new Map<string, number>()
+  const commands = [...shared.commands, ...local.commands].map((c) => {
+    const base = slugId(c.name)
+    const seen = used.get(base) ?? 0
+    used.set(base, seen + 1)
+    return { ...c, id: seen === 0 ? base : `${base}-${seen + 1}` }
+  })
+  return { path, commands, errors: [...shared.errors, ...local.errors] }
 }
 
 // ---------------------------------------------------------------------------
 // Writing
 // ---------------------------------------------------------------------------
 
-/** The file's directory, creating the project entry if this is the first command. */
-function ensureDir(projectPath: string): string {
-  const dir = projectScan().byPath.get(projectPath)
-  if (dir) return dir
-  return createProject(projectPath).dir
-}
-
-function edit(projectPath: string, edits: TomlEdit[]): void {
-  const dir = ensureDir(projectPath)
-  const path = commandsPath(dir)
-  const raw = existsSync(path) ? readFileSync(path, 'utf8') : COMMANDS_TOML
+function edit(projectPath: string, local: boolean, edits: TomlEdit[]): void {
+  // Creating the project entry if this is its first command.
+  if (!projectScan().byPath.has(projectPath)) createProject(projectPath)
+  const path = commandsPath(ensureRepoDir(projectPath, local))
+  const raw = existsSync(path) ? readFileSync(path, 'utf8') : local ? LOCAL_COMMANDS_TOML : COMMANDS_TOML
   writeTomlFile(path, editToml(raw, edits))
   invalidateProjects()
 }
@@ -164,7 +176,7 @@ export function addCommand(projectPath: string, cmd: NewCommand): void {
     const value = cmd[prop]
     if (value !== undefined && value !== '') fields.push([key, value as TomlValue])
   }
-  edit(projectPath, [{ op: 'appendEntry', table: 'command', fields }])
+  edit(projectPath, !!cmd.worktree, [{ op: 'appendEntry', table: 'command', fields }])
 }
 
 export type CommandPatch = Partial<NewCommand>
@@ -181,22 +193,30 @@ export function updateCommand(projectPath: string, id: string, patch: CommandPat
     if (value === '') edits.push({ op: 'unset', table: 'command', key, index: found.index })
     else edits.push({ op: 'setInEntry', table: 'command', index: found.index, key, value: value as TomlValue })
   }
-  if (edits.length) edit(projectPath, edits)
+  if (edits.length) edit(projectPath, !!found.local, edits)
 }
 
 export function removeCommand(projectPath: string, id: string): void {
   const found = readCommands(projectPath).commands.find((c) => c.id === id)
   if (!found) return
-  edit(projectPath, [{ op: 'removeEntry', table: 'command', index: found.index }])
+  edit(projectPath, !!found.local, [{ op: 'removeEntry', table: 'command', index: found.index }])
 }
 
-/** Move a command between project scope and a single worktree. */
+/**
+ * Move a command between project scope and a single worktree.
+ *
+ * The scopes are two files, so a move is a remove from one and an append to the
+ * other. Within the local file, only the `worktree` key changes.
+ */
 export function setCommandWorktree(projectPath: string, id: string, worktree: string | null): void {
   const found = readCommands(projectPath).commands.find((c) => c.id === id)
   if (!found) return
-  edit(projectPath, [
-    worktree === null
-      ? { op: 'unset', table: 'command', key: 'worktree', index: found.index }
-      : { op: 'setInEntry', table: 'command', index: found.index, key: 'worktree', value: worktree }
-  ])
+  if (worktree !== null && found.local) {
+    edit(projectPath, true, [{ op: 'setInEntry', table: 'command', index: found.index, key: 'worktree', value: worktree }])
+    return
+  }
+  if (worktree === null && !found.local) return
+  const { id: _id, index: _index, local: _local, ...cmd } = found
+  edit(projectPath, !!found.local, [{ op: 'removeEntry', table: 'command', index: found.index }])
+  addCommand(projectPath, { ...cmd, worktree: worktree ?? undefined })
 }

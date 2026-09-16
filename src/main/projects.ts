@@ -18,12 +18,13 @@ import {
   removeProject as removeProjectDir,
   setProjectEnvValue,
   setProjectValue,
+  updateRepoProject,
   updateProject,
   type ProjectConfig
 } from './config/projectStore'
 
 // Storage lives in `~/.config/floe/projects/<dir>/config.toml`, one directory per
-// project (config/projectStore.ts). This module is the app's view of that: it
+// project, plus the repo's own `.floe/config.toml` (config/projectStore.ts). This module is the app's view of that: it
 // maps a stored project onto the `Project` the renderer speaks, and owns the
 // group list, which needs a home of its own since an empty group has no
 // directory to live in.
@@ -90,7 +91,7 @@ export function setProjectEnv(path: string, env: ProjectEnvConfig | null): Proje
       // set to some "off" value, so the block reads the way the template documents
       // it: absent means host-native.
       for (const key of ['mode', 'runtime', 'php', 'package-manager', 'db', 'db-admin']) {
-        updateProject(path, [{ op: 'unset', table: 'env', key }])
+        updateRepoProject(path, [{ op: 'unset', table: 'env', key }])
       }
     }
   }

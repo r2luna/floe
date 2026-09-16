@@ -1,5 +1,9 @@
 // `~/.config/floe/projects/<dir>/` — one directory per project.
 //
+// Only what this machine needs lives here: where the repo is and how the sidebar
+// shows it. The project's own settings (env, integrations, seeded) are read from
+// `<repo>/.floe/config.toml` and merged in; see repoConfig.ts.
+//
 // A single file listing every project is the thing that breaks: two writes race,
 // one bad edit takes out the whole sidebar, and an agent asked to change one
 // project has to rewrite a document describing forty. A directory each means a
@@ -19,7 +23,8 @@ import { ErrorSink, type ConfigError } from './errors'
 import { TableReader, subTable } from './read'
 import { editToml, parseToml, type TomlEdit, type TomlValue } from './toml'
 import { writeTomlFile } from './io'
-import { PROJECT_TOML } from './template'
+import { PROJECT_TOML, REPO_PROJECT_TOML } from './template'
+import { ensureRepoDir, repoConfigPath } from './repoConfig'
 
 export const PHP_VERSIONS = ['8.2', '8.3', '8.4', '8.5'] as const
 export const PACKAGE_MANAGERS = ['bun', 'pnpm', 'yarn', 'npm'] as const
@@ -128,10 +133,6 @@ export function parseProjectConfig(
   }
   const path = expandHome(rawPath)
 
-  const envTable = subTable(sink, raw, root, 'env')
-  const env = envTable ? readEnv(envTable) : undefined
-  const integrations = subTable(sink, raw, root, 'integrations')
-
   return {
     project: {
       path,
@@ -139,13 +140,41 @@ export function parseProjectConfig(
       name: t.optStr('name'),
       readOnly: t.bool('read-only', false),
       pinned: t.bool('pinned', false),
-      env,
-      jiraProject: integrations?.optStr('jira-project'),
-      seeded: t.bool('seeded', false),
+      seeded: false,
       dir
     },
     errors: sink.errors
   }
+}
+
+/** The settings a repo keeps in its own `.floe/config.toml`. */
+export type RepoSettings = Pick<ProjectConfig, 'env' | 'jiraProject' | 'seeded'>
+
+export function parseRepoSettings(raw: string, file: string): { settings: RepoSettings; errors: ConfigError[] } {
+  const sink = new ErrorSink(file, raw)
+  const parsed = parseToml(raw)
+  if (!parsed.ok) {
+    sink.add(parsed.error.line, parsed.error.message)
+    return { settings: { seeded: false }, errors: sink.errors }
+  }
+  const root = parsed.value as Record<string, unknown>
+  const t = new TableReader(sink, raw, root)
+  const envTable = subTable(sink, raw, root, 'env')
+  const integrations = subTable(sink, raw, root, 'integrations')
+  return {
+    settings: {
+      env: envTable ? readEnv(envTable) : undefined,
+      jiraProject: integrations?.optStr('jira-project'),
+      seeded: t.bool('seeded', false)
+    },
+    errors: sink.errors
+  }
+}
+
+function readRepoSettings(projectPath: string): { settings: RepoSettings; errors: ConfigError[] } {
+  const file = repoConfigPath(projectPath)
+  if (!existsSync(file)) return { settings: { seeded: false }, errors: [] }
+  return parseRepoSettings(readFileSync(file, 'utf8'), file)
 }
 
 function readEnv(t: TableReader): ProjectEnv {
@@ -202,8 +231,10 @@ export function scanProjects(): ProjectScan {
       })
       continue
     }
+    const repo = readRepoSettings(project.path)
+    errors.push(...repo.errors)
     byPath.set(project.path, dir)
-    projects.push(project)
+    projects.push({ ...project, ...repo.settings })
   }
 
   projects.sort((a, b) => {
@@ -291,8 +322,18 @@ export function setProjectValue(path: string, key: string, value: TomlValue): vo
   updateProject(path, [{ op: 'set', key, value }])
 }
 
+/** Change keys in the repo's own `.floe/config.toml`, creating it from the template. */
+export function updateRepoProject(path: string, edits: TomlEdit[]): void {
+  if (!projectScan().byPath.has(path)) throw new Error(`no project configured for ${path}`)
+  ensureRepoDir(path)
+  const file = repoConfigPath(path)
+  const raw = existsSync(file) ? readFileSync(file, 'utf8') : REPO_PROJECT_TOML
+  writeTomlFile(file, editToml(raw, edits))
+  invalidateProjects()
+}
+
 export function setProjectEnvValue(path: string, key: string, value: TomlValue): void {
-  updateProject(path, [{ op: 'set', table: 'env', key, value }])
+  updateRepoProject(path, [{ op: 'set', table: 'env', key, value }])
 }
 
 /** Remove a project: its directory and everything Floe put in it. */

@@ -94,3 +94,30 @@ test('an unknown name answers a clear error', () => {
   assert.throws(() => updateMcpServer('ghost', { enabled: true }), /no MCP server called/)
   assert.throws(() => removeMcpServer('ghost'), /no MCP server called/)
 })
+
+test('a project server is committed without its credentials, which stay in the ignored local file', async () => {
+  const { createProject } = await import('./projectStore.ts')
+  const app = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  createProject(app)
+  const made = addMcpServer(
+    'project',
+    { name: 'linear', transport: 'http', url: 'https://mcp.linear.app', headers: { Authorization: 'Bearer secret' } },
+    app
+  )
+  assert.equal(made.headers?.Authorization, 'Bearer secret', 'merged back on read')
+  const shared = readFileSync(join(app, '.floe', 'mcp.toml'), 'utf8')
+  assert.ok(shared.includes('https://mcp.linear.app') && !shared.includes('secret'))
+  const local = join(app, '.floe', 'local', 'mcp.toml')
+  assert.ok(readFileSync(local, 'utf8').includes('Bearer secret'))
+  assert.equal(statSync(local).mode & 0o777, 0o600)
+
+  const renamed = updateMcpServer('linear', { name: 'linear2', headers: { Authorization: 'Bearer new' } }, app)
+  assert.equal(renamed.headers?.Authorization, 'Bearer new', 'credentials follow a rename')
+  updateMcpServer('linear2', { headers: {} }, app)
+  assert.equal(listMcpServers(app).find((s) => s.name === 'linear2')?.headers, undefined)
+  assert.ok(!/^\[\[server\]\]/m.test(readFileSync(local, 'utf8')), 'an entry with nothing left is dropped')
+
+  addMcpServer('project', { name: 'gone', transport: 'stdio', command: 'x', env: { KEY: 'v' } }, app)
+  removeMcpServer('gone', app)
+  assert.ok(!readFileSync(local, 'utf8').includes('gone'), 'removing a server removes its credentials')
+})

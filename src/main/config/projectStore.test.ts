@@ -44,12 +44,18 @@ test('a missing projects dir is no projects, not a crash', () => {
   assert.deepEqual(store.scanProjects().projects, [])
 })
 
+/** A real repository with a `.floe/config.toml`, tracked by a project directory. */
+function repo(settings: string): string {
+  const path = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  mkdirSync(join(path, '.floe'))
+  writeFileSync(join(path, '.floe', 'config.toml'), settings)
+  project('app', `path = "${path}"\n`)
+  return path
+}
+
 test('the [env] block is optional and validated when present', () => {
   reset()
-  project(
-    'app',
-    'path = "/code/app"\n\n[env]\nmode = "container"\nruntime = "laravel"\nphp = "8.3"\npackage-manager = "bun"\ndb = "postgres"\n'
-  )
+  repo('[env]\nmode = "container"\nruntime = "laravel"\nphp = "8.3"\npackage-manager = "bun"\ndb = "postgres"\n')
   const env = store.scanProjects().projects[0].env
   assert.equal(env?.php, '8.3')
   assert.equal(env?.packageManager, 'bun')
@@ -59,12 +65,13 @@ test('the [env] block is optional and validated when present', () => {
 
 test('a bad php version is reported and falls back, keeping the project', () => {
   reset()
-  project('app', 'path = "/code/app"\n\n[env]\nphp = "8.1"\n')
+  const path = repo('[env]\nphp = "8.1"\n')
   const { projects, errors } = store.scanProjects()
   assert.equal(projects.length, 1, 'one bad key does not lose the project')
   assert.equal(projects[0].env?.php, '8.4')
   assert.match(errors[0].reason, /8\.2, 8\.3, 8\.4, 8\.5/)
-  assert.equal(errors[0].line, 4)
+  assert.equal(errors[0].file, join(path, '.floe', 'config.toml'))
+  assert.equal(errors[0].line, 2)
 })
 
 test('a config with no path is skipped, named, and never guessed at', () => {
@@ -149,14 +156,17 @@ test('renaming a project directory changes nothing — path is the identity', ()
 
 test('updateProject edits in place and keeps the documentation', () => {
   reset()
-  store.createProject('/code/app')
-  store.setProjectValue('/code/app', 'pinned', true)
-  store.setProjectEnvValue('/code/app', 'php', '8.5')
+  const app = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  store.createProject(app)
+  store.setProjectValue(app, 'pinned', true)
+  store.setProjectEnvValue(app, 'php', '8.5')
   const project_ = store.scanProjects().projects[0]
   assert.equal(project_.pinned, true)
   assert.equal(project_.env?.php, '8.5')
-  const raw = readFileSync(join(project_.dir, 'config.toml'), 'utf8')
-  assert.ok(raw.includes('# | Containerized Environment'), 'comments survive an app write')
+  assert.ok(readFileSync(join(project_.dir, 'config.toml'), 'utf8').includes('# | Identity'), 'comments survive an app write')
+  const settings = readFileSync(join(app, '.floe', 'config.toml'), 'utf8')
+  assert.ok(settings.includes('# | Containerized Environment'), 'env is written to the repo, from its template')
+  assert.ok(!readFileSync(join(project_.dir, 'config.toml'), 'utf8').includes('php'), 'and not to ~/.config')
 })
 
 test('removeProject deletes the directory and only that one', () => {

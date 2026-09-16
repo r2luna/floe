@@ -413,13 +413,13 @@ hosts  = []
 export const PROJECT_TOML = `# ==============================================================================
 #  Floe — project
 # ==============================================================================
-#  Everything Floe knows about this project lives in this directory. The
+#  How this machine finds the project and shows it in the sidebar. The
 #  directory name is only a label: \`path\` below is what identifies the project,
 #  so renaming the directory changes nothing. Delete the directory to remove the
 #  project from Floe.
 #
-#  This is config, not state. Sessions, caches and run history live elsewhere and
-#  are never written here.
+#  Everything that describes the project itself — its environment, commands,
+#  MCP servers and skills — lives in the repository, under \`<path>/.floe/\`.
 # ==============================================================================
 
 
@@ -436,6 +436,18 @@ export const PROJECT_TOML = `# =================================================
 
 path  = ""
 group = "Projects"
+`
+
+/**
+ * The repo's own settings, `<repo>/.floe/config.toml`. Committed with the
+ * project, so nothing machine-specific belongs here.
+ */
+export const REPO_PROJECT_TOML = `# ==============================================================================
+#  Floe — project settings
+# ==============================================================================
+#  What Floe knows about this project, kept in the repository so every clone
+#  gets it. Machine-only config goes in .floe/local/, which is gitignored.
+# ==============================================================================
 
 
 # ------------------------------------------------------------------------------
@@ -485,9 +497,18 @@ export const COMMANDS_TOML = `# ================================================
 #  restart it on change. \`cwd\` overrides the working directory, which defaults to
 #  the worktree path. \`notify\` takes \`all\`, \`important\` or \`none\`.
 #
-#  A command is shared by every worktree of this project unless it names one:
-#  add \`worktree = "/absolute/path"\` to scope it to a single branch, for a
-#  throwaway process you only need there.
+#  Every command here is shared by all worktrees and committed with the repo.
+#  A command for one worktree only names it by absolute path, so it lives in
+#  .floe/local/commands.toml instead, which is gitignored.
+# ==============================================================================
+`
+
+/** Commands scoped to one worktree. Gitignored: they name absolute paths. */
+export const LOCAL_COMMANDS_TOML = `# ==============================================================================
+#  Floe — worktree commands (this machine only)
+# ==============================================================================
+#  Same shape as .floe/commands.toml, plus \`worktree\`: the absolute path of the
+#  one worktree the command runs in. Gitignored, because that path is yours.
 #
 #    [[command]]
 #    name     = "Stripe listen"
@@ -503,7 +524,7 @@ export const MCP_TOML = `# =====================================================
 #  Third-party MCP servers Floe hands to every harness it spawns, so the same
 #  server works whichever CLI answers the turn (like skills: one copy, every
 #  harness). Global file: ~/.config/floe/mcp.toml — every project. A project's
-#  own projects/<dir>/mcp.toml adds to it, and a project server wins over a
+#  own <repo>/.floe/mcp.toml adds to it, and a project server wins over a
 #  global one of the same name.
 #
 #  Each [[server]] entry:
@@ -516,8 +537,22 @@ export const MCP_TOML = `# =====================================================
 #    headers   = { Authorization = "Bearer …" }  # http only, optional
 #    enabled   = true                      # optional, defaults to true
 #
-#  env and headers are the credentials the server needs. They are secrets in a
-#  plain file: keep this one to yourself (chmod 600), and prefer a project file
-#  outside the repo over committing a token.
+#  env and headers are the credentials the server needs. In the global file
+#  they sit beside the server (chmod 600). A project's credentials go in
+#  .floe/local/mcp.toml instead, which is gitignored, so .floe/mcp.toml can be
+#  committed.
+# ==============================================================================
+`
+
+/** A project's MCP credentials. Gitignored, 0600. */
+export const LOCAL_MCP_TOML = `# ==============================================================================
+#  Floe — MCP credentials (this machine only)
+# ==============================================================================
+#  The env and headers for servers defined in .floe/mcp.toml, matched by name.
+#  Gitignored and chmod 600: this is where API keys and bearer tokens go.
+#
+#    [[server]]
+#    name    = "linear"
+#    headers = { Authorization = "Bearer …" }
 # ==============================================================================
 `

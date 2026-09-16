@@ -28,7 +28,7 @@ import {
 } from './lane'
 import { dragAnchor, selRange } from './diff'
 import { pickDefinition } from './definition'
-import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelKind } from './panels'
+import { KINDS, RAIL, FileCrumbs, PanelBody, needsDesktop, needsProject, panelForFile, termIdOf, timeAgo, type PanelAction, type PanelKind } from './panels'
 import { KeyBar, type AppKey } from './KeyBar'
 import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
@@ -3196,17 +3196,18 @@ export default function App() {
                         <IconArrowBackUp size={14} stroke={1.8} />
                       </button>
                     )}
-                    {'action' in spec && spec.action && (
-                      <button
-                        className="panel-act"
-                        title={spec.action.title}
-                        onClick={() =>
-                          runCommand(REGISTRY, ctxRef.current, (spec.action as { command: string }).command)
-                        }
-                      >
-                        <spec.action.icon size={14} stroke={1.8} />
-                      </button>
-                    )}
+                    {'action' in spec &&
+                      spec.action &&
+                      ([spec.action] as PanelAction[][]).flat().map((act) => (
+                        <button
+                          key={act.command}
+                          className="panel-act"
+                          title={act.title}
+                          onClick={() => runCommand(REGISTRY, ctxRef.current, act.command)}
+                        >
+                          <act.icon size={14} stroke={1.8} />
+                        </button>
+                      ))}
                     {/* Every panel can stack, so every panel offers it — the
                         icon shows the shape you would GET, not the one you are
                         in. The first panel has nothing to go under. */}

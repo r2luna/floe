@@ -74,6 +74,46 @@ test('a plugin writing its own files does not count as a config change', async (
   assert.deepEqual(seen, [])
 })
 
+/** A real repository, registered as a project before the watcher starts. */
+function trackedRepo(withFloe: boolean): string {
+  const repo = mkdtempSync(join(tmpdir(), 'floe-repo-'))
+  if (withFloe) mkdirSync(join(repo, '.floe', 'plans'), { recursive: true })
+  const dir = join(configDir(), 'projects', repo.split('/').pop()!)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'config.toml'), `path = "${repo}"\n`)
+  config.invalidateAll()
+  return repo
+}
+
+// The project's commands, MCP servers and skills live in the repo now, so an
+// edit there has to repaint the app just like one in ~/.config did.
+test("a config file in a project's .floe is reported, a plan beside it is not", async () => {
+  const repo = trackedRepo(true)
+  const commands = join(repo, '.floe', 'commands.toml')
+  const seen = await watching(() => {
+    writeFileSync(join(repo, '.floe', 'plans', 'notes.md'), '# not config')
+    writeFileSync(commands, '[[command]]\nname = "Dev"\ncommand = "x"\n')
+  }, (seen) => seen.includes(commands))
+  assert.ok(!seen.some((f) => f.includes('plans')), JSON.stringify(seen))
+})
+
+test('a .floe created after the watcher started is picked up', async () => {
+  const repo = trackedRepo(false)
+  const mcp = join(repo, '.floe', 'mcp.toml')
+  const seen: string[] = []
+  const stop = config.watchConfig((file) => seen.push(file))
+  try {
+    await wait(200)
+    mkdirSync(join(repo, '.floe'))
+    await waitFor(() => seen.length > 0, 5000, 'the new .floe to be reported')
+    await wait(200)
+    writeFileSync(mcp, '')
+    await waitFor(() => seen.includes(mcp), 5000, 'a write inside the new .floe to be reported')
+  } finally {
+    stop()
+  }
+})
+
 test('the dispose function stops the callbacks', async () => {
   const seen: string[] = []
   const stop = config.watchConfig((file) => seen.push(file))
