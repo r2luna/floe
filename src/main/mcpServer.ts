@@ -56,6 +56,7 @@ import {
 import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
 import { provisionWorktree } from './provision'
+import { supportStack } from './support'
 import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
 // `./draw/index`, not `./draw`: the MCP test loads this graph under a plain
@@ -509,6 +510,7 @@ function registerTools(server: McpServer, token: string): void {
   registerUsageTools(server)
   registerPlanExtraTools(server)
   registerBrowserTools(server, token)
+  registerSupportTools(server)
   registerPluginToolsOn(server)
 }
 
@@ -2093,6 +2095,25 @@ function registerSkillTools(server: McpServer): void {
         return textResult({ error: (e as Error).message })
       }
     }
+  )
+}
+
+// --- The shared support stack (container-mode infrastructure) ---------------
+// Floe has no server CLI, so the stack's lifecycle is a tool + a palette command
+// rather than `floe server support up` — same two principles as everything else.
+function registerSupportTools(server: McpServer): void {
+  server.tool(
+    'support_stack',
+    "Manage the shared Docker support stack that container-mode worktrees run against: one MySQL + Postgres + Redis + DBGate for the whole machine. 'up' also writes the generated compose file and seeds ~/.floe/support.env on first run.",
+    {
+      action: z
+        .enum(['up', 'down', 'status', 'logs'])
+        .describe("What to do. Defaults to 'status'.")
+        .optional()
+    },
+    // supportStack owns the dispatch AND the error-to-text conversion, so the
+    // palette command and this tool cannot drift apart.
+    async ({ action }) => textResult(await supportStack(action))
   )
 }
 

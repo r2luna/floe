@@ -82,13 +82,13 @@ test('vite wrapper overrides the project server block rather than being overridd
 })
 
 // Runs before the file below is written: no support.env is the normal state on a
-// dev machine that has never run `floe server support up`.
+// dev machine that has never run the "Support stack: bring up" command.
 test('readSupportConfig falls back to the shipped defaults when support.env is absent', () => {
   assert.deepEqual(readSupportConfig(), {
     domain: 'pinguim.io',
     mysqlRootPassword: 'floe',
     postgresPassword: 'floe',
-    edgeBind: '100.72.153.33'
+    edgeBind: '100.105.189.56'
   })
 })
 
@@ -97,7 +97,7 @@ test('readSupportConfig reads support.env, unquoting and ignoring non-assignment
   writeFileSync(
     join(home, '.floe', 'support.env'),
     [
-      '# written by `floe server support up`',
+      '# written by Floe',
       'DOMAIN="example.test"',
       'MYSQL_ROOT_PASSWORD=s3cret  ',
       "POSTGRES_PASSWORD='pg-pass'",
@@ -120,5 +120,5 @@ test('a support.env missing a key keeps that one default rather than blanking it
   const cfg = readSupportConfig()
   assert.equal(cfg.domain, 'only.test')
   assert.equal(cfg.mysqlRootPassword, 'floe')
-  assert.equal(cfg.edgeBind, '100.72.153.33')
+  assert.equal(cfg.edgeBind, '100.105.189.56')
 })

@@ -272,6 +272,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // Resolves to the line to show the user — up to date, downloading, or why it
     // failed — so the caller never has to interpret an updater result itself.
     checkForUpdate: (): Promise<string> => ipcRenderer.invoke('update:check'),
+    supportStack: (action: 'up' | 'down' | 'status' | 'logs'): Promise<string> =>
+      ipcRenderer.invoke('support:stack', action),
     // Apply the update now: quitAndInstall where Squirrel can, and on macOS
     // fetch the build and swap the bundle (macUpdate.ts). Resolves to the line
     // to show the user, including why it fell back to the release page.

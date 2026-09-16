@@ -10,6 +10,14 @@ import { join } from 'node:path'
 
 const appVersion = process.env.FLOE_SERVER_VERSION ?? '0.0.0'
 
+// This shim is only ever linked into the headless bundle, so its presence IS the
+// answer to "is this Floe the server?". Provisioning reads it to force Laravel
+// worktrees into Docker (src/main/provision.ts): a server has no Herd and no host
+// PHP, so the host-native recipe could only ever fail there. Setting it here
+// rather than in the systemd unit means a fresh server box can't be misconfigured
+// by forgetting it.
+process.env.FLOE_IS_SERVER = '1'
+
 // The daemon owns the same canonical stores the packaged desktop app uses —
 // one machine, one state (the single-owner model: the local app attaches to
 // the daemon rather than running a second backend against these files).
