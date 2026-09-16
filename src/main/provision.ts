@@ -15,6 +15,7 @@ import {
   writePremise,
   type PremiseAnswer
 } from './premise'
+import { removeWorktreeRoute, writeWorktreeRoute } from './caddy'
 import { bwrapPresent, sandboxDisabled, sandboxedSpawn } from './sandbox'
 import { beginProvision, trackChild } from './provisionRuns'
 import { isLaravel, listCommands } from './commands'
@@ -22,6 +23,7 @@ import { startCommand, userShell } from './commandRunner'
 import { getProjectEnv } from './projects'
 import {
   appHost,
+  type SupportConfig,
   MYSQL_CONTAINER,
   POSTGRES_CONTAINER,
   readSupportConfig,
@@ -375,6 +377,50 @@ const storageDirsStep: StepDef = {
   }
 }
 
+// The PHP minors the App.Dockerfile can build (serversideup publishes these).
+const SUPPORTED_PHP = [2, 3, 4, 5]
+const DEFAULT_PHP_MINOR = 4
+
+// Read a composer `require.php` constraint into one PHP minor we can build.
+//
+// Naively taking the first `8.x` in the string picks the wrong end of a range:
+// `>=8.1 <8.4` would yield 8.4, the one version the project explicitly excludes,
+// and the image would fail its own composer install. So an exclusive upper bound
+// is read FIRST and applied as a ceiling — never as a candidate. (`<=8.4` is
+// inclusive and is not a ceiling.)
+//
+// This is a heuristic, not a semver solver: it picks the first buildable minor the
+// constraint mentions and clamps it. Pin an explicit Project.env to override.
+export function phpFromConstraint(req: string): ProjectEnvConfig['php'] {
+  const exclusive = req.match(/<\s*8\.(\d+)/)
+  const ceiling = exclusive ? Number(exclusive[1]) - 1 : Infinity
+  const mentioned = [...req.matchAll(/8\.(\d+)/g)].map((m) => Number(m[1]))
+  const picked = mentioned.find((n) => SUPPORTED_PHP.includes(n)) ?? DEFAULT_PHP_MINOR
+  // A constraint below everything we build (`<8.2`) still has to produce a
+  // buildable image; it will fail at composer install, where the reason is legible.
+  const clamped = Math.min(Math.max(Math.min(picked, ceiling), SUPPORTED_PHP[0]), SUPPORTED_PHP.at(-1) as number)
+  return `8.${clamped}` as ProjectEnvConfig['php']
+}
+
+// The headless server has no host PHP/Herd, so every Laravel worktree MUST run in
+// Docker even when the project never opted into `env.mode: 'container'`. Synthesize a
+// sensible container config: PHP pinned from composer.json's `require.php` (else the
+// latest supported), package manager from the lockfile, MySQL by default.
+// ponytail: MySQL/latest-PHP defaults; pin an explicit Project.env to override.
+export function defaultContainerEnv(worktreePath: string): ProjectEnvConfig {
+  let php: ProjectEnvConfig['php'] = '8.4'
+  const composer = join(worktreePath, 'composer.json')
+  if (existsSync(composer)) {
+    try {
+      const req = (JSON.parse(readFileSync(composer, 'utf8')).require ?? {}).php
+      if (typeof req === 'string') php = phpFromConstraint(req)
+    } catch {
+      // malformed composer.json — keep the default
+    }
+  }
+  return { mode: 'container', runtime: 'laravel', php, packageManager: detectPackageManager(worktreePath), db: 'mysql' }
+}
+
 // ── container recipe (opt-in via Project.env) ─────────────────────────────────
 // `docker compose exec` args for the worktree's app container. `extraEnv` is
 // forwarded via `-e` so a single call can carry one-off secrets (composer auth)
@@ -446,8 +492,11 @@ const containerEnvVarsStep: StepDef = {
   }
 }
 
-// Write the worktree's compose file, bring the app container up, and add its host
-// Caddy route (`<slug>.dev.<domain>` → the loopback port the container publishes).
+const served = (what: string, host: string, port: number, routed: boolean): string =>
+  routed ? `${what} served at https://${host} (127.0.0.1:${port})` : `${what} served at http://127.0.0.1:${port}`
+
+// Write the worktree's compose file, bring the app container up, and — on the
+// server — add its host Caddy route (`<slug>.dev.<domain>` → the loopback port).
 const composeUpStep: StepDef = {
   id: 'compose-up',
   label: 'Start app container',
@@ -458,9 +507,15 @@ const composeUpStep: StepDef = {
     log(`Wrote ${path}`)
     // --build so the Node+bun layer on top of serversideup is (re)built as needed.
     await runShell('docker', ['compose', '-f', path, 'up', '-d', '--build'], ctx.worktreePath, log)
-    log(`App served at http://127.0.0.1:${worktreePort(s)} (${appHost(s, cfg)})`)
-    // The containerized vite dev server (HMR) gets its own published port.
-    log(`Vite served at http://127.0.0.1:${worktreeVitePort(s)} (${viteHost(s, cfg)})`)
+    // Routed on the server, loopback-only on a desktop (see ./caddy.ts) — the app
+    // container is published either way, so container mode still works with no
+    // Caddy anywhere on the machine.
+    const host = appHost(s, cfg)
+    const routed = await writeWorktreeRoute(host, worktreePort(s))
+    log(served('App', host, worktreePort(s), routed))
+    // Second route for the containerized vite dev server (HMR over wss).
+    const vHost = viteHost(s, cfg)
+    log(served('Vite', vHost, worktreeVitePort(s), await writeWorktreeRoute(vHost, worktreeVitePort(s))))
     return 'done'
   }
 }
@@ -673,6 +728,20 @@ const nodeRecipe: StepDef[] = [copyEnvStep, nodeInstallStep, electronRepairStep,
 
 // Container teardown: `docker compose down` the app, then drop its database on
 // the shared DB container. The generated .env carries the engine + db name.
+// The app + vite hosts a worktree published, recovered from its generated compose
+// file (`name: floe-<slug>`). Returns nothing when the file is unreadable or does
+// not carry the project name — there is then no way to name the routes, and
+// guessing one would risk deleting another worktree's.
+export function teardownRouteHosts(composePath: string, cfg: SupportConfig): string[] {
+  let slug: string | undefined
+  try {
+    slug = readFileSync(composePath, 'utf8').match(/^name: floe-(.+)$/m)?.[1].trim()
+  } catch {
+    return []
+  }
+  return slug ? [appHost(slug, cfg), viteHost(slug, cfg)] : []
+}
+
 async function dropContainerWorktree(
   worktreePath: string,
   composePath: string,
@@ -684,6 +753,19 @@ async function dropContainerWorktree(
   } catch (e) {
     log(e instanceof Error ? e.message : String(e))
   }
+  // Drop the host Caddy routes. Both hosts are derived from the slug the SAME way
+  // the write side derives them — read back from the compose file's own project
+  // name, which is the write side's record of it. Deriving them from the .env's
+  // APP_URL instead would leak both route files whenever that file was edited or
+  // already deleted, leaving Caddy holding a dead upstream.
+  const cfg = readSupportConfig()
+  for (const h of teardownRouteHosts(composePath, cfg)) {
+    try {
+      if (await removeWorktreeRoute(h)) log(`Removed route ${h}`)
+    } catch (e) {
+      log(e instanceof Error ? e.message : String(e))
+    }
+  }
   const env = readEnvFile(join(worktreePath, '.env'))
   const db = env.DB_DATABASE
   const conn = (env.DB_CONNECTION || 'mysql').toLowerCase()
@@ -691,7 +773,6 @@ async function dropContainerWorktree(
     log('No DB_DATABASE in .env — nothing to drop')
     return 'skipped'
   }
-  const cfg = readSupportConfig()
   log(`Dropping database ${db}`)
   if (conn === 'pgsql' || conn === 'postgres' || conn === 'postgresql') {
     await runShell(
@@ -814,12 +895,17 @@ export async function ensureContainerUp(
   worktreePath: string,
   branch: string
 ): Promise<void> {
-  if (getProjectEnv(root)?.mode !== 'container') return
+  // On the server every worktree is container-mode; elsewhere gate on Project.env.
+  if (getProjectEnv(root)?.mode !== 'container' && process.env.FLOE_IS_SERVER !== '1') return
   const composePath = worktreeComposePath(worktreePath)
   if (!existsSync(composePath)) return // never provisioned as a container — nothing to ensure
   const s = slug(branch)
   const log: Log = (t) => console.log(`[ensureContainerUp ${s}]`, t.trimEnd())
   await runShell('docker', ['compose', '-f', composePath, 'up', '-d'], worktreePath, log)
+  // Route reconcile, server-only — both writes are no-ops on a desktop.
+  const cfg = readSupportConfig()
+  await writeWorktreeRoute(appHost(s, cfg), worktreePort(s))
+  await writeWorktreeRoute(viteHost(s, cfg), worktreeVitePort(s))
 }
 
 // Distributive Omit so each ProvisionEvent variant keeps its own fields.
@@ -1015,7 +1101,9 @@ async function runProvision(
   const linkName = `${projectName}-${slug(branch)}`
   // On the headless server there's no host PHP/Herd, so a Laravel worktree ALWAYS runs
   // in Docker — synthesize a container env when the project didn't pin one.
-  const env = getProjectEnv(root)
+  const env =
+    getProjectEnv(root) ??
+    (process.env.FLOE_IS_SERVER === '1' && stack === 'laravel' ? defaultContainerEnv(worktreePath) : undefined)
   const ctx: Ctx = { win, root, worktreePath, branch, projectName, linkName, domain: `${linkName}.test`, env }
 
   // Container mode (Project.env, or forced on the server above) overrides the

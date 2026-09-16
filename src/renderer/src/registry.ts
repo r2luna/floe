@@ -986,6 +986,45 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The shared MySQL/Postgres/Redis/DBGate every container-mode worktree
+        // runs against. Nothing provisions it implicitly: a worktree coming up
+        // against a stack that is down fails deep inside `docker compose`, so
+        // bringing it up is an explicit, visible act.
+        id: 'support.up',
+        title: 'Support stack: bring up',
+        group: 'App',
+        run: (c) => {
+          void window.floe.supportStack('up').then((message) => c.say(message))
+        }
+      },
+      {
+        id: 'support.down',
+        title: 'Support stack: take down',
+        group: 'App',
+        run: (c) => {
+          void window.floe.supportStack('down').then((message) => c.say(message))
+        }
+      },
+      {
+        id: 'support.status',
+        title: 'Support stack: status',
+        group: 'App',
+        run: (c) => {
+          void window.floe.supportStack('status').then((message) => c.say(message))
+        }
+      },
+      {
+        // The stack fails to come up for reasons only its own logs explain (a port
+        // already bound, a volume it cannot write). Without this the user has to
+        // leave Floe for a terminal to read them.
+        id: 'support.logs',
+        title: 'Support stack: logs',
+        group: 'App',
+        run: (c) => {
+          void window.floe.supportStack('logs').then((message) => c.say(message))
+        }
+      },
+      {
         // Manual fallback for the boot-time auto-registration (mcpServer.ts):
         // needed when Floe came up on a fallback port, or the `claude` CLI
         // appeared on PATH after launch.

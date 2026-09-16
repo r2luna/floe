@@ -253,6 +253,7 @@ import {
   unlinkWorktreeSite,
   ensureContainerUp
 } from './provision'
+import { supportStack } from './support'
 import type { AgentRunOptions, DrawDelta, DrawScope, Effort, FileAttachment, FileOp, ImageAttachment, McpCommandResult, PermissionMode, ProjectEnvConfig, ThreadComment, Worktree } from '../shared/types'
 
 // Launched from Finder, a packaged app gets a minimal PATH — so claude/git/npm
@@ -578,10 +579,18 @@ export function registerIpc(): void {
   registerWorktreeIpc()
   registerWindowIpc()
   registerSettingsIpc()
+  registerSupportIpc()
   watchThemeChanges()
   watchConfigReload()
 }
 
+
+// The shared Docker support stack that container-mode worktrees run against
+// (support.ts). One channel with an action, mirroring the `support_stack` MCP
+// tool, so ⌘K and an agent take the same path.
+export function registerSupportIpc(): void {
+  handle('support:stack', (_event, action?: unknown) => supportStack(action))
+}
 
 // Projects, groups and the cross-project activity rails.
 export function registerProjectsIpc(): void {

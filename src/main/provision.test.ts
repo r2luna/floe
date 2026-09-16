@@ -69,6 +69,10 @@ export async function resolve(specifier, context, next) {
   // turns the interview on decides what the model said.
   if (specifier === 'node:child_process' && (context.parentURL ?? '').endsWith('/premise.ts'))
     return { url: 'stub:child_process', shortCircuit: true, format: 'module' }
+  // caddy.ts shells out to \`caddy reload\` and pgrep. Same stub, so the route
+  // files land in the test HOME and the reload is recorded, not run.
+  if (specifier === 'node:child_process' && (context.parentURL ?? '').endsWith('/caddy.ts'))
+    return { url: 'stub:child_process', shortCircuit: true, format: 'module' }
   if ((specifier.startsWith('./') || specifier.startsWith('../')) && !/\\.[a-z]+$/i.test(specifier)) {
     try {
       const base = context.parentURL ? new URL(specifier, context.parentURL) : pathToFileURL(specifier)
@@ -108,6 +112,7 @@ const SOURCE = {
     "\\n  })" +
     "\\n  return child" +
     "\\n}" +
+    "\\nexport function spawnSync() { return { stdout: '' } }" +
     "\\nexport function execFile(cmd, args, opts, cb) {" +
     "\\n  const plan = globalThis.__provSpawnPlan(cmd, args) ?? {}" +
     "\\n  globalThis.__provSpawns.push({ cmd, args, cwd: opts.cwd, env: opts.env })" +
@@ -155,6 +160,9 @@ declare global {
 }
 
 const {
+  defaultContainerEnv,
+  phpFromConstraint,
+  teardownRouteHosts,
   dropWorktreeDatabase,
   ensureContainerUp,
   getAppUrl,
@@ -1075,4 +1083,107 @@ test('a container worktree with no database in .env drops nothing', async () => 
   assert.equal(await dropWorktreeDatabase(wt, main, (t) => logged.push(t)), 'skipped')
   assert.equal(lines().length, 1) // the compose down, and nothing else
   assert.match(logged.join(''), /No DB_DATABASE in \.env — nothing to drop/)
+})
+
+// ── the server's synthesized container env ───────────────────────────────────
+// A headless server has no PHP and no Herd, so a Laravel worktree there can only
+// run in Docker. Projects registered before container mode existed have no
+// Project.env at all, and must not fall through to the host-native recipe.
+
+test('defaultContainerEnv pins PHP from composer.json', () => {
+  const dir = tmp('floe-defenv-')
+  write(dir, { 'composer.json': JSON.stringify({ require: { php: '^8.3' } }) })
+  assert.equal(defaultContainerEnv(dir).php, '8.3')
+})
+
+test('defaultContainerEnv is always container mode, Laravel, MySQL', () => {
+  const dir = tmp('floe-defenv-')
+  write(dir, { 'composer.json': JSON.stringify({ require: { php: '^8.2' } }) })
+  const env = defaultContainerEnv(dir)
+  assert.equal(env.mode, 'container')
+  assert.equal(env.runtime, 'laravel')
+  assert.equal(env.db, 'mysql')
+})
+
+// A worktree whose composer.json is missing, unparseable, or pins a PHP this
+// build has no image for still has to come up — on the newest supported PHP.
+test('defaultContainerEnv falls back to 8.4 when composer.json cannot be read', () => {
+  const missing = tmp('floe-defenv-')
+  assert.equal(defaultContainerEnv(missing).php, '8.4')
+  const broken = tmp('floe-defenv-')
+  write(broken, { 'composer.json': '{ not json' })
+  assert.equal(defaultContainerEnv(broken).php, '8.4')
+  const unsupported = tmp('floe-defenv-')
+  write(unsupported, { 'composer.json': JSON.stringify({ require: { php: '^7.4' } }) })
+  assert.equal(defaultContainerEnv(unsupported).php, '8.4')
+})
+
+// ── the composer PHP constraint ──────────────────────────────────────────────
+// Picking the first `8.x` in the raw string reads the wrong end of a range: the
+// image would be built on a PHP the project excludes, and its own composer
+// install would then refuse to run inside it.
+
+test('an exclusive upper bound is a ceiling, never the choice', () => {
+  // 8.4 is the only buildable minor named, and it is the excluded one.
+  assert.equal(phpFromConstraint('>=8.1 <8.4'), '8.3')
+  assert.equal(phpFromConstraint('>=8.1,<8.3'), '8.2')
+})
+
+// `<=` includes its bound; treating it as exclusive would downgrade for nothing.
+test('an inclusive upper bound is not a ceiling', () => {
+  assert.equal(phpFromConstraint('<=8.3'), '8.3')
+})
+
+test('an ordinary caret constraint takes the version it names', () => {
+  assert.equal(phpFromConstraint('^8.2'), '8.2')
+  assert.equal(phpFromConstraint('^8.3|^8.4'), '8.3')
+})
+
+test('a constraint naming nothing buildable falls back to the default', () => {
+  assert.equal(phpFromConstraint('^7.4'), '8.4')
+  assert.equal(phpFromConstraint('*'), '8.4')
+})
+
+// A project we cannot satisfy still has to produce an image — the failure then
+// lands on composer install, which says which extension or version is missing,
+// rather than on an undefined Docker build arg.
+test('a constraint below everything we build still yields a buildable image', () => {
+  assert.equal(phpFromConstraint('>=8.0 <8.2'), '8.2')
+})
+
+// ── teardown names the routes the write side published ───────────────────────
+// Removal used to derive the host from the worktree's .env APP_URL. Removing a
+// worktree whose .env had been edited or deleted then left both route files
+// behind, and Caddy went on serving a dead upstream on a real hostname.
+
+const CFG = { domain: 'test.example', mysqlRootPassword: 'x', postgresPassword: 'x', edgeBind: '127.0.0.1' }
+
+test('teardown recovers both hosts from the compose project name', () => {
+  const dir = tmp('floe-teardown-')
+  const path = join(dir, 'docker-compose.yml')
+  writeFileSync(path, 'name: floe-feature-login\nservices:\n  app: {}\n')
+  assert.deepEqual(teardownRouteHosts(path, CFG), [
+    'feature-login.dev.test.example',
+    'feature-login-vite.dev.test.example'
+  ])
+})
+
+// The .env is what used to be read here; a worktree with none, or with APP_URL
+// stripped, must still give up its routes.
+test('teardown does not depend on the worktree .env', () => {
+  const dir = tmp('floe-teardown-')
+  const path = join(dir, 'docker-compose.yml')
+  writeFileSync(path, 'name: floe-x\n')
+  assert.deepEqual(teardownRouteHosts(path, CFG), ['x.dev.test.example', 'x-vite.dev.test.example'])
+})
+
+// Naming nothing is the only safe answer when the slug cannot be read: a guessed
+// host could name a DIFFERENT worktree's route and delete it.
+test('an unreadable or nameless compose file yields no hosts to remove', () => {
+  const dir = tmp('floe-teardown-')
+  const missing = join(dir, 'nope.yml')
+  assert.deepEqual(teardownRouteHosts(missing, CFG), [])
+  const nameless = join(dir, 'docker-compose.yml')
+  writeFileSync(nameless, 'services:\n  app: {}\n')
+  assert.deepEqual(teardownRouteHosts(nameless, CFG), [])
 })

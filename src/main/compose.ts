@@ -5,16 +5,20 @@ import type { ProjectEnvConfig } from '../shared/types'
 
 // Containerized per-worktree environments. Each worktree gets its own Compose
 // project (`floe-<slug>`) running one serversideup/php app container, joined to
-// the shared `floe` network the support stack owns (deploy/support). The app
-// publishes a loopback host port.
+// the shared `floe` network the support stack owns (see ./support.ts). The app
+// publishes a loopback host port; the host Caddy (see ./caddy.ts) reverse-proxies
+// `<slug>.dev.<domain>` to it and manages TLS. Routes are written/removed by
+// Floe as the container comes up / is torn down. (The Floe UI lives at
+// `ide.<domain>`; worktree apps sit under `dev`.)
 //
 // The app talks to the shared DBs/Redis by service name (`mysql`/`postgres`/`redis`)
 // over the `floe` network; the control plane (provisioning) creates/drops the
 // per-worktree database by `docker exec`-ing the DB container, so the app never
 // needs root DB credentials.
 
-// The support stack's env, written by `floe server support up` to ~/.floe.
-// Provisioning reads it for the domain and the DB root password (control plane).
+// The support stack's env, seeded into ~/.floe by ./support.ts on the first
+// "Support stack: bring up". Provisioning reads it for the domain and the DB root
+// password (control plane).
 const SUPPORT_ENV = join(homedir(), '.floe', 'support.env')
 
 export interface SupportConfig {
@@ -42,7 +46,7 @@ export function readSupportConfig(): SupportConfig {
     domain: env.DOMAIN || 'pinguim.io',
     mysqlRootPassword: env.MYSQL_ROOT_PASSWORD || 'floe',
     postgresPassword: env.POSTGRES_PASSWORD || 'floe',
-    edgeBind: env.EDGE_BIND || '100.72.153.33'
+    edgeBind: env.EDGE_BIND || '100.105.189.56'
   }
 }
 
@@ -67,8 +71,8 @@ export const worktreeVitePort = (slug: string): number => worktreePort(slug) + 1
 // Compose project name / container names are derived from the slug and stable, so
 // teardown and `docker exec` can find them without a lookup.
 export const composeProject = (slug: string): string => `floe-${slug}`
-// The shared support stack runs as compose project `floe-support` (see the
-// `name:` in deploy/support/docker-compose.yml), so its DB containers are these.
+// The shared support stack runs as compose project `floe-support` (see
+// SUPPORT_PROJECT in ./support.ts), so its DB containers are these.
 // ponytail: assumes the default replica index `-1`; fine for a single-instance stack.
 export const MYSQL_CONTAINER = 'floe-support-mysql-1'
 export const POSTGRES_CONTAINER = 'floe-support-postgres-1'

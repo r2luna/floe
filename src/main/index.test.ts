@@ -405,6 +405,7 @@ const CHANNELS = [
   'settings:probe',
   'settings:getSystemPrompt',
   'settings:setSystemPrompt',
+  'support:stack',
 ]
 
 test('registerIpc registers the whole IPC surface, once each, in order', () => {
