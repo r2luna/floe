@@ -73,6 +73,18 @@ export function browserHandlers(
       window.open(url, '_blank', 'noopener,noreferrer')
     },
 
+    // Floe's browser panel is a native view the daemon has no compositor for,
+    // so every `browser:*` channel reaching the socket lands on a shim that
+    // does nothing. Navigating is the one that must not silently vanish: it is
+    // what a link in the chat and the Preview button on a code block both call,
+    // and before they did, those links went out through `open:external`. So the
+    // tab answers it the only way a tab can — a new tab, the same one
+    // `open:external` would have opened. The panel that opened alongside stays
+    // empty here; it has nothing to draw with.
+    'browser:navigate': async (url: string) => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
+
     // The daemon has no notification centre; the tab does, once permitted.
     // Clicking one has to reach the renderer's `onNotificationClick`, which
     // listens for a `notification:click` frame — so the click emits one.

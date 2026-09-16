@@ -309,6 +309,11 @@ test('open:external opens a tab that cannot reach back at the token', async () =
   assert.deepEqual(openedCalls, ['https://example.com _blank noopener,noreferrer'])
 })
 
+test('browser:navigate becomes a tab — the daemon has no browser panel to draw in', async () => {
+  await browserHandlers(() => {})['browser:navigate']('https://example.com/x.html')
+  assert.deepEqual(openedCalls, ['https://example.com/x.html _blank noopener,noreferrer'])
+})
+
 test('notify:show is a no-op where the browser has no Notification API', async () => {
   const emitted: unknown[][] = []
   const handlers = browserHandlers((...a: unknown[]) => void emitted.push(a))

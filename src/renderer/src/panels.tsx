@@ -2052,18 +2052,26 @@ function LinkText({ text }: { text: string }) {
  * the link and ⏎ opens it, the same as every other row in the chat. Enter comes
  * from the anchor's own activation — the href is real, only the navigation is
  * intercepted.
+ *
+ * `http(s)` goes to Floe's own browser panel; the same rule as a link the model
+ * wrote inside markdown (ChatLink in MessageBody.tsx). Anything else — mailto:,
+ * a custom scheme — is the OS's to answer.
  */
 function ChatLink({ url }: { url: string }) {
+  const preview = useContext(PreviewInBrowser)
+  const href = hrefOf(url)
+  const inApp = !!preview && /^https?:\/\//i.test(href)
   return (
     <a
       className="chat-link"
-      href={hrefOf(url)}
+      href={href}
       data-nav
-      title={hrefOf(url)}
+      title={inApp ? 'Open in the browser panel' : href}
       onClick={(e) => {
         // Never navigate the app away — this window is the app.
         e.preventDefault()
-        void window.floe.openExternal(hrefOf(url))
+        if (inApp) preview!(href)
+        else void window.floe.openExternal(href)
       }}
     >
       {url}
