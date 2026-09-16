@@ -8,7 +8,7 @@ import type { ReactNode } from 'react'
 import { backendLabel, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { markAll } from './findMark'
-import { useActiveSessions } from './useActiveSessions'
+import { rowKey, useActiveSessions } from './useActiveSessions'
 import type { ActiveSession } from '../../shared/types'
 
 /** How many rows the panel asks each machine for, and keeps after the merge. */
@@ -101,8 +101,9 @@ export function ActiveSessionsList({
           {band.rows.map((s) => (
             <button
               className="sx"
-              // A session id is unique per machine, not across them.
-              key={`${s.backend ?? LOCAL}:${s.sessionId}`}
+              // The hook's identity for a row, and it has to be the same one:
+              // that key is what carries the row's frozen rank.
+              key={rowKey(s)}
               title={`${s.worktreePath} · ${s.title}`}
               data-active={(sessionKeyOf(s) === openSession) || undefined}
               onClick={() => onJump(s)}

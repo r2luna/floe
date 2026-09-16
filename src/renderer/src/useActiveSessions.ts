@@ -13,6 +13,7 @@ import {
   backendLabel,
   backendState,
   currentBackend,
+  LOCAL,
   recentSessionsOn
 } from './backends.ts'
 import type { ActiveSession } from '../../shared/types'
@@ -57,9 +58,43 @@ export interface ActiveSessions {
   reload: () => void
 }
 
+/** A session id is unique per machine, not across them — so the row's identity is both. */
+export const rowKey = (s: ActiveSession): string => `${s.backend ?? LOCAL}:${s.sessionId}`
+
+/**
+ * The rank each row keeps for as long as it stays on the list.
+ *
+ * Sorting by the live clock means every touch of a transcript re-orders the
+ * panel under the pointer: open a chat, the machine writes, and the row you
+ * just left jumps over three others while you read them. The information is
+ * real and the movement is not worth it — you already know which session you
+ * just touched.
+ *
+ * So a row is ranked by the activity it had when it ENTERED the list, and keeps
+ * that rank until it leaves. New rows still arrive ranked by their real clock,
+ * which puts them where they belong, and a row that drops out of the answer
+ * loses its stamp — coming back is entering again, and it comes back at the top.
+ */
+export function freezeOrder(
+  rows: ActiveSession[],
+  stamps: ReadonlyMap<string, number>
+): Map<string, number> {
+  const next = new Map<string, number>()
+  for (const s of rows) {
+    const key = rowKey(s)
+    next.set(key, stamps.get(key) ?? s.lastActivityAt)
+  }
+  return next
+}
+
 /** Newest first, then cut. The cut is what makes it "the last ten". */
-export function topSessions(rows: ActiveSession[], limit: number): ActiveSession[] {
-  return [...rows].sort((a, b) => b.lastActivityAt - a.lastActivityAt).slice(0, Math.max(0, limit))
+export function topSessions(
+  rows: ActiveSession[],
+  limit: number,
+  stamps?: ReadonlyMap<string, number>
+): ActiveSession[] {
+  const at = (s: ActiveSession): number => stamps?.get(rowKey(s)) ?? s.lastActivityAt
+  return [...rows].sort((a, b) => at(b) - at(a)).slice(0, Math.max(0, limit))
 }
 
 /**
@@ -77,21 +112,59 @@ export function mergeSlice(
   return [...prev.filter((s) => s.backend !== backend), ...slice.map((s) => ({ ...s, backend }))]
 }
 
+/**
+ * The last answer, kept outside the hook.
+ *
+ * The panel is unmounted and remounted by things that have nothing to do with
+ * it — a lane switch, a chat opening beside it — and a hook that starts empty
+ * turns each of those into a blank list and a "Loading…" flash, on a list the
+ * app was already holding. Kept here, a remount paints the last answer at once
+ * and the load in flight updates it in place.
+ */
+let lastRows: ActiveSession[] = []
+let lastOffline: OfflineBackend[] = []
+/** Ranks outlive the mount for the same reason: a remount must not re-sort. */
+let ranks: ReadonlyMap<string, number> = new Map()
+
 export function useActiveSessions(limit = 10): ActiveSessions {
-  const [rows, setRows] = useState<ActiveSession[]>([])
-  const [offline, setOffline] = useState<OfflineBackend[]>([])
+  const [rows, setRows] = useState<ActiveSession[]>(lastRows)
+  const [offline, setOffline] = useState<OfflineBackend[]>(lastOffline)
   const [pending, setPending] = useState<string[]>(() => backendIds())
+  // One load at a time. `sessions:changed` arrives in bursts — a turn ending
+  // writes several times in a row — and each load walks every project on every
+  // machine, so overlapping them buys nothing and lands their answers
+  // interleaved, which is the list rebuilding itself two or three times for one
+  // event. A load that arrives while one is running is remembered, not run.
+  const busy = useRef(false)
+  const queued = useRef(false)
+  const loadRef = useRef<() => void>(() => {})
   // A machine that answers after the next load started is answering an older
   // question. Its rows are still true, but which load they belong to decides
   // whether "pending" and "offline" are still about them.
   const gen = useRef(0)
 
   const load = useCallback(() => {
+    if (busy.current) {
+      queued.current = true
+      return
+    }
     const mine = ++gen.current
     const ids = backendIds()
     setPending(ids)
+    busy.current = true
+    // Per load, not a counter on the hook: a machine that times out and then
+    // answers anyway must not close the load twice.
+    const left = new Set(ids)
+    const finish = (id: string): void => {
+      if (!left.delete(id) || left.size) return
+      busy.current = false
+      if (!queued.current) return
+      queued.current = false
+      loadRef.current()
+    }
     for (const id of ids) {
       const late = setTimeout(() => {
+        finish(id)
         if (gen.current !== mine) return
         setOffline((o) => (o.some((b) => b.id === id) ? o : [...o, { id, label: backendLabel(id) }]))
         setPending((p) => p.filter((x) => x !== id))
@@ -99,6 +172,7 @@ export function useActiveSessions(limit = 10): ActiveSessions {
       void recentSessionsOn(id, limit)
         .then((slice) => {
           clearTimeout(late)
+          finish(id)
           if (gen.current !== mine) return
           // A late answer reports the machine back as up — it is the same
           // evidence that took it down, arriving.
@@ -108,6 +182,7 @@ export function useActiveSessions(limit = 10): ActiveSessions {
         })
         .catch((err) => {
           clearTimeout(late)
+          finish(id)
           if (gen.current !== mine) return
           // An error from a machine that is still connected is a bug or a
           // version skew, not an outage: it goes to the console, not the panel.
@@ -122,7 +197,10 @@ export function useActiveSessions(limit = 10): ActiveSessions {
           setPending((p) => p.filter((x) => x !== id))
         })
     }
+    // Nothing to wait for — no machines attached at all.
+    if (!left.size) busy.current = false
   }, [limit])
+  loadRef.current = load
 
   useEffect(() => {
     load()
@@ -138,8 +216,17 @@ export function useActiveSessions(limit = 10): ActiveSessions {
     }
   }, [load])
 
+  // The cache is what a remount reads, so it is written wherever the state is.
+  useEffect(() => {
+    lastRows = rows
+    lastOffline = offline
+  }, [rows, offline])
+
   return {
-    rows: useMemo(() => topSessions(rows, limit), [rows, limit]),
+    rows: useMemo(() => {
+      ranks = freezeOrder(rows, ranks)
+      return topSessions(rows, limit, ranks)
+    }, [rows, limit]),
     // The remotes are reported under the list instead, so this machine's
     // sessions are readable while the network is not.
     loading: pending.includes(currentBackend()),
