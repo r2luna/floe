@@ -63,6 +63,12 @@ test('--open is read wherever it sits on the argv', () => {
   assert.equal(cli.openPathFromArgv(['/Floe', '--open']), null)
 })
 
+test('--name is read off the argv beside --open', () => {
+  assert.equal(cli.openNameFromArgv(['/Floe', '--open', '/code/app', '--name', 'my-app']), 'my-app')
+  assert.equal(cli.openNameFromArgv(['/Floe', '--open', '/code/app']), null)
+  assert.equal(cli.openNameFromArgv(['/Floe', '--name', '--devtools']), null)
+})
+
 test('the shim execs the app binary as node and hands it back to the script', () => {
   const shim = cli.cliShim('/Apps/Floe', '/data/cli/floe.mjs', '9.9.9')
   assert.match(shim, /^#!\/bin\/sh/)
@@ -134,6 +140,20 @@ test('opening a repository registers it and says so', async () => {
   const again = await cli.openProject(dir)
   assert.equal(again.created, false)
   assert.match(again.message!, /^Opened /)
+})
+
+test('a name names a new project and renames an existing one', async () => {
+  const dir = repo()
+  const first = await cli.openProject(dir, 'my-app')
+  assert.equal(first.project?.name, 'my-app')
+  assert.match(first.message!, /^Added my-app /)
+
+  const again = await cli.openProject(dir, 'renamed')
+  assert.equal(again.project?.name, 'renamed')
+  assert.match(again.message!, /^Opened renamed /)
+
+  // No name leaves the one it has.
+  assert.equal((await cli.openProject(dir)).project?.name, 'renamed')
 })
 
 test('a directory that is not a repository is refused, with no project made', async () => {

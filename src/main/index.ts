@@ -39,7 +39,7 @@ import {
   setProjectReadOnly
 } from './projects'
 import { dataDir, setSharedDataDir } from './dataDir'
-import { installCli, openPathFromArgv, openProject, refreshCli, type CliPaths } from './cli'
+import { installCli, openNameFromArgv, openPathFromArgv, openProject, refreshCli, type CliPaths } from './cli'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
@@ -1632,13 +1632,14 @@ function cliPaths(): CliPaths {
 // own subscription — it lost, and the app came up on whatever project it had
 // last — while a project asked for at mount cannot arrive too early.
 let pendingCliOpen = openPathFromArgv(process.argv)
+const pendingCliName = openNameFromArgv(process.argv) ?? undefined
 let openedByCli: string | null = null
 
 async function registerCliOpen(): Promise<void> {
   const path = pendingCliOpen
   if (!path) return
   pendingCliOpen = null
-  const result = await openProject(path)
+  const result = await openProject(path, pendingCliName)
   if (result.project) openedByCli = result.project.path
   else log('cli:open:failed', { path, error: result.error })
 }

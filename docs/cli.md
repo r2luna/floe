@@ -3,12 +3,14 @@
 ```bash
 floe .              # this directory becomes a Floe project, on screen
 floe ~/code/app     # any repository
+floe . my-app       # and call it "my-app" in the sidebar
 floe --help
 ```
 
 One job: point it at a directory and that directory is a Floe project. The path
 is resolved to its repository root, a directory Floe already has is not an error
-(it just comes forward), and anything that is not a git repository is refused.
+(it just comes forward), and anything that is not a git repository is refused. The optional second argument
+is the sidebar name: it names a new project and renames an existing one.
 
 ## Installing it
 
@@ -36,8 +38,8 @@ Two routes, and both end in `main/cli.ts`'s `openProject`, so they cannot drift:
 
 | state | route |
 | --- | --- |
-| Floe is running | `POST 127.0.0.1:41673/cli/open {path}` — the MCP control server's own port (`main/mcpServer.ts`), behind the same loopback + CSRF guard. Answers with the line the command prints. |
-| Floe is not running | the command launches the app with `--open <path>`; main reads it off the argv and does the work once the renderer has loaded. |
+| Floe is running | `POST 127.0.0.1:41673/cli/open {path, name?}` — the MCP control server's own port (`main/mcpServer.ts`), behind the same loopback + CSRF guard. Answers with the line the command prints. |
+| Floe is not running | the command launches the app with `--open <path> [--name <name>]`; main reads it off the argv and does the work once the renderer has loaded. |
 
 Nothing here is MCP: the command is a dependency-free script and one JSON POST
 is the whole conversation. Registering plus putting the project on screen is

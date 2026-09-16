@@ -2310,10 +2310,13 @@ function registerProjectTools(server: McpServer, token: string): void {
   server.tool(
     'open_project',
     'What the `floe <path>` command does: register the repository if Floe does not have it yet, then select it in the sidebar and bring the window forward. Use this when the point is to put a project in front of the user; `add_project` only files it.',
-    { path: z.string().describe('Absolute path inside the repository. Resolved to its root.') },
-    async ({ path }) => {
+    {
+      path: z.string().describe('Absolute path inside the repository. Resolved to its root.'),
+      name: z.string().optional().describe('Sidebar name. Names a new project, renames an existing one.')
+    },
+    async ({ path, name }) => {
       try {
-        const answer = await openProject(path)
+        const answer = await openProject(path, name)
         if (answer.project) showProject(answer.project.path, token)
         return textResult(answer)
       } catch (e) {
@@ -3010,8 +3013,8 @@ export function showProject(projectPath: string, callerKey: string): void {
 // `POST /cli/open {path}` — bin/floe.mjs asking a running Floe to take a
 // directory. Answers with the message the command prints, or the refusal.
 async function handleCliOpen(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const body = (req.method === 'POST' ? await readBody(req) : undefined) as { path?: string } | undefined
-  const answer = body?.path ? await openProject(body.path) : { error: 'No path given.' }
+  const body = (req.method === 'POST' ? await readBody(req) : undefined) as { path?: string; name?: string } | undefined
+  const answer = body?.path ? await openProject(body.path, body.name) : { error: 'No path given.' }
   if ('project' in answer && answer.project) showProject(answer.project.path, 'cli')
   res.statusCode = 200
   res.setHeader('content-type', 'application/json')

@@ -22,10 +22,11 @@ import { resolve } from 'node:path'
 // one holding the fixed port, and it is the one the user means.
 const PORT = Number(process.env.FLOE_MCP_PORT || 41673)
 
-const USAGE = `floe <path> — register a git repository with Floe and open it
+const USAGE = `floe <path> [name] — register a git repository with Floe and open it
 
   floe .              the directory you are in
   floe ~/code/app     any repository
+  floe . my-app       and call it "my-app" in the sidebar
   floe --version      the app version behind this command
 `
 
@@ -35,12 +36,12 @@ function fail(message) {
 }
 
 /** Ask a running Floe. `null` means nothing was listening — the caller launches. */
-async function tell(path) {
+async function tell(path, name) {
   try {
     const res = await fetch(`http://127.0.0.1:${PORT}/cli/open`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path }),
+      body: JSON.stringify({ path, name }),
       signal: AbortSignal.timeout(5000)
     })
     // A Floe too old to have this route answers 404, which reads nothing like
@@ -54,7 +55,7 @@ async function tell(path) {
   }
 }
 
-function launch(path) {
+function launch(path, name) {
   const exe = process.env.FLOE_APP_EXE
   if (!exe || !existsSync(exe)) {
     fail(
@@ -65,7 +66,7 @@ function launch(path) {
   const env = { ...process.env }
   // We want the GUI, not another headless node: the shim set this for us.
   delete env.ELECTRON_RUN_AS_NODE
-  spawn(exe, ['--open', path], { detached: true, stdio: 'ignore', env }).unref()
+  spawn(exe, ['--open', path, ...(name ? ['--name', name] : [])], { detached: true, stdio: 'ignore', env }).unref()
   process.stdout.write(`Starting Floe on ${path}…\n`)
 }
 
@@ -79,7 +80,7 @@ if (args.includes('-v') || args.includes('--version')) {
   process.exit(0)
 }
 
-const target = args.find((a) => !a.startsWith('-'))
+const [target, name] = args.filter((a) => !a.startsWith('-'))
 if (!target) {
   process.stderr.write(USAGE)
   process.exit(2)
@@ -88,7 +89,7 @@ if (!target) {
 const path = resolve(process.cwd(), target)
 if (!existsSync(path) || !statSync(path).isDirectory()) fail(`Not a directory: ${path}`)
 
-const answer = await tell(path)
-if (!answer) launch(path)
+const answer = await tell(path, name)
+if (!answer) launch(path, name)
 else if (answer.error) fail(answer.error)
 else process.stdout.write(`${answer.message}\n`)

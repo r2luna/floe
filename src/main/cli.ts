@@ -10,7 +10,7 @@
 
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import { addProjectByPath } from './projects'
+import { addProjectByPath, renameProject } from './projects'
 import type { Project } from '../shared/types'
 
 export interface CliOpen {
@@ -26,13 +26,27 @@ export interface CliOpen {
  *
  * Re-adding a project Floe already has is not an error — it is how you bring an
  * existing project forward — so the two cases differ only in the sentence.
+ *
+ * `name` is the sidebar name (`floe . my-app`). It names a new project and
+ * renames an existing one, so the command says what the row reads either way.
  */
-export async function openProject(path: string): Promise<CliOpen> {
+export async function openProject(path: string, name?: string): Promise<CliOpen> {
   const added = await addProjectByPath(path)
   if (added.error) return { error: added.error }
   if (!added.project) return { error: `Could not add ${path}.` }
+  const root = added.project.path
+  const project = name?.trim()
+    ? (renameProject(root, name).find((p) => p.path === root) ?? added.project)
+    : added.project
   const verb = added.created ? 'Added' : 'Opened'
-  return { ...added, message: `${verb} ${added.project.name} — ${added.project.path}` }
+  return { ...added, project, message: `${verb} ${project.name} — ${project.path}` }
+}
+
+/** The `--name <name>` that rides along with `--open`, or null. */
+export function openNameFromArgv(argv: string[]): string | null {
+  const at = argv.indexOf('--name')
+  const value = at === -1 ? null : argv[at + 1]
+  return value && !value.startsWith('-') ? value : null
 }
 
 /**
