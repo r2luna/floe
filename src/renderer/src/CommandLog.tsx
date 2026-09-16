@@ -28,7 +28,9 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
 
     const term = new Xterm({
       fontFamily: MONO,
-      fontSize: 12.5,
+      // Whole pixels, like Terminal.tsx — see the comment there: a fractional
+      // size blurs every glyph the canvas/WebGL addons draw themselves.
+      fontSize: 13,
       lineHeight: 1.25,
       cursorBlink: false,
       disableStdin: true,

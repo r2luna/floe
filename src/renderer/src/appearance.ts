@@ -18,7 +18,7 @@ import {
   omarchyXtermTheme,
   type OmarchyPalette
 } from '../../shared/omarchyPalette'
-import { setXtermTheme } from './xtermTheme'
+import { setXtermMode, setXtermTheme } from './xtermTheme'
 
 type Theme = 'system' | 'dark' | 'light' | 'omarchy'
 
@@ -91,12 +91,16 @@ async function applyTheme(theme: Theme): Promise<void> {
   const palette = await window.floe.omarchy.palette().catch(() => null)
   omarchyPresent = palette !== null
   omarchy = theme === 'omarchy' ? palette : null
-  paintOmarchy(omarchy)
   const dark = omarchy
     ? omarchy.mode === 'dark'
     : theme === 'system' || theme === 'omarchy'
       ? await window.floe.theme.isDark()
       : theme === 'dark'
+  // Before paintOmarchy: an Omarchy palette overrides the base xterm colours,
+  // and setXtermMode must have already picked the base those fall back to
+  // once the palette comes off.
+  setXtermMode(dark)
+  paintOmarchy(omarchy)
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   applyGlass(dark)
 }

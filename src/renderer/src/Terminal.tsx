@@ -62,7 +62,12 @@ export function TerminalPanel({
       // definition rather than two that drift. xterm needs a concrete string —
       // it cannot take a CSS variable.
       fontFamily: MONO,
-      fontSize: 12.5,
+      // A whole number, unlike the body's 12.5px: xterm's canvas/WebGL addons
+      // draw every glyph themselves rather than handing it to the browser's
+      // text rasterizer, so a fractional size lands each cell half a device
+      // pixel off the next and blurs the whole line. The body text has no such
+      // problem — the browser hints and snaps DOM text on its own.
+      fontSize: 13,
       // 1.25 is the most air we can give without TUIs (nvim, lazygit) showing
       // gaps between box-drawing characters.
       lineHeight: 1.25,

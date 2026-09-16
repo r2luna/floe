@@ -6,7 +6,7 @@
 // rather than read from the CSS variables: reading computed styles at mount
 // would tie the shell's palette to whatever had painted first.
 
-export const XTERM_THEME = {
+export const XTERM_THEME_DARK = {
   background: '#00000000', // transparent — the panel's own fill shows through
   foreground: '#c9ccd2',
   cursor: '#c9ccd2',
@@ -29,24 +29,69 @@ export const XTERM_THEME = {
   brightWhite: '#e8eaee'
 }
 
+// Same hues as the dark palette, re-lit for a white panel — the dark values'
+// light tones (foreground, brightBlack, the pastel ANSI colours) sit at
+// L*80-90 and all but vanish on `--bg: #ffffff`. Every colour here is pulled
+// down to the L*30-55 band `index.css` already uses for light-theme text
+// (--text, --dim, --live, --working) so the same terminal reads on either
+// background.
+export const XTERM_THEME_LIGHT = {
+  background: '#00000000',
+  foreground: '#3d434e',
+  cursor: '#3d434e',
+  selectionBackground: '#c7d5f099',
+  black: '#1b1e25',
+  red: '#a8433a',
+  green: '#2f7d52',
+  yellow: '#8a6a1f',
+  blue: '#3a64a8',
+  magenta: '#a13f92',
+  cyan: '#1f7a7a',
+  white: '#3d434e',
+  brightBlack: '#767c88',
+  brightRed: '#c0554a',
+  brightGreen: '#3f9a68',
+  brightYellow: '#a8841f',
+  brightBlue: '#4d7ac2',
+  brightMagenta: '#b854a8',
+  brightCyan: '#2f9494',
+  brightWhite: '#1b1e25'
+}
+
 // The solid colour to answer OSC 11 with. The theme background above is
 // transparent so the panel shows through, but a program asking "what colour is
 // the background?" must not be told "none": xterm's own answer is the
 // transparent fill, which every program reads as black.
-export const SOLID_BG = '#141519'
+export const SOLID_BG_DARK = '#141519'
+export const SOLID_BG_LIGHT = '#ffffff'
 
-// The palette in force. Only `theme = "omarchy"` moves it off the literals
-// above (see appearance.ts); every live terminal is re-tinted when it does.
-let current: { theme: Record<string, string>; solidBg: string } = { theme: XTERM_THEME, solidBg: SOLID_BG }
+// Floe's own mode, set by appearance.ts whenever light/dark resolves — kept
+// apart from `override` below so an Omarchy palette can come and go without
+// losing track of which base palette to fall back to.
+let dark = true
+// Set only while `theme = "omarchy"` is worn (see appearance.ts); every live
+// terminal is re-tinted when it comes or goes.
+let override: { theme: Record<string, string>; solidBg: string } | null = null
 const watchers = new Set<() => void>()
 
-export const xtermTheme = (): Record<string, string> => current.theme
-export const xtermSolidBg = (): string => current.solidBg
+function base(): { theme: Record<string, string>; solidBg: string } {
+  return dark ? { theme: XTERM_THEME_DARK, solidBg: SOLID_BG_DARK } : { theme: XTERM_THEME_LIGHT, solidBg: SOLID_BG_LIGHT }
+}
 
-/** Swap the palette — null goes back to Floe's own. */
+export const xtermTheme = (): Record<string, string> => (override ?? base()).theme
+export const xtermSolidBg = (): string => (override ?? base()).solidBg
+
+/** Swap the palette — null goes back to Floe's own (light or dark, per `setXtermMode`). */
 export function setXtermTheme(next: { theme: Record<string, string>; solidBg: string } | null): void {
-  current = next ?? { theme: XTERM_THEME, solidBg: SOLID_BG }
+  override = next
   for (const w of watchers) w()
+}
+
+/** Tell the base palette which mode Floe resolved to, independent of any Omarchy override. */
+export function setXtermMode(isDark: boolean): void {
+  if (dark === isDark) return
+  dark = isDark
+  if (!override) for (const w of watchers) w()
 }
 
 /** Call `cb` whenever the palette changes; returns the unsubscribe. */
