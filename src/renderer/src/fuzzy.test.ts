@@ -29,6 +29,16 @@ test('a tighter, earlier match ranks first', () => {
   assert.equal(out[0].item.title, 'rkanban', 'adjacent letters at the start win')
 })
 
+test('the query typed as one run ranks above scattered letters', () => {
+  const items = [
+    item('app/Modules/Jira/Events/ProjectMappingUpdated.php'),
+    item('app/Modules/Recipes/Queries/InspectRecipeFileQuery.php')
+  ]
+  const [first] = filterItems(items, 'inspect')
+  assert.equal(first.item.title, 'app/Modules/Recipes/Queries/InspectRecipeFileQuery.php')
+  assert.deepEqual(first.hits, [28, 29, 30, 31, 32, 33, 34], 'highlights the run in the name')
+})
+
 test('detail is for reading, not for matching', () => {
   // Every project shares a group name, so matching the detail made short
   // queries return the whole list — the filter stopped filtering.

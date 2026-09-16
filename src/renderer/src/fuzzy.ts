@@ -85,6 +85,24 @@ export function subsequence(text: string, query: string): number[] | null {
 }
 
 /**
+ * The query typed as one run of letters, as indices. The last occurrence wins:
+ * in a path that is the file name, which is where the eye is.
+ */
+function substring(text: string, query: string): number[] | null {
+  if (!query) return null
+  const at = text.toLowerCase().lastIndexOf(query.toLowerCase())
+  if (at === -1) return null
+  return Array.from({ length: query.length }, (_, i) => at + i)
+}
+
+/**
+ * Added to every scattered match, so the letters typed as one run always rank
+ * above them. "inspect" has to find `InspectRecipeFileQuery.php` before a path
+ * that merely spells i-n-s-p-e-c-t across its directories.
+ */
+const SCATTERED = 1e6
+
+/**
  * Rank a match. Lower is better.
  *
  * Two things decide it: how early the match starts, and how tightly the letters
@@ -108,8 +126,13 @@ export function filterItems<T extends PaletteItem>(items: T[], query: string): S
   const out: Scored<T>[] = []
   for (const item of items) {
     if (item.pinned) continue
+    const run = substring(item.title, q)
+    if (run) {
+      out.push({ item, hits: run, score: run[0] })
+      continue
+    }
     const hits = subsequence(item.title, q)
-    if (hits) out.push({ item, hits, score: score(hits) })
+    if (hits) out.push({ item, hits, score: SCATTERED + score(hits) })
   }
   // Stable: equal scores keep the order they were given, which is the caller's
   // own (projects stay in the user's arrangement).
