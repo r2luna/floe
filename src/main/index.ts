@@ -1352,8 +1352,8 @@ export function registerWorktreeIpc(): void {
     stopWorktreeProcesses(target)
     return removeWorktreeGuided(root, target, force)
   })
-  handle('remove:branch', (_event, root: string, branch: string, force: boolean) =>
-    deleteBranch(root, branch, force)
+  handle('remove:branch', (_event, root: string, branch: string, force: boolean, base?: string) =>
+    deleteBranch(root, branch, force, base)
   )
   // Undo the `herd link` the Laravel recipe made. Runs while the directory is
   // still there — `herd unlink` reads the site from the cwd it is called in.

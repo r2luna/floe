@@ -35,6 +35,7 @@ const {
   changedFiles,
   commitPaths,
   createWorktree,
+  deleteBranch,
   dirtySnapshot,
   isMergedInto,
   removeWorktree,
@@ -96,6 +97,42 @@ test('fast-forwards base checked out in a linked worktree', async () => {
     const res = await mergeFastForward(fx.dir, 'base', 'feat')
     assert.equal(res.ok, true, res.message)
     assert.equal(fx.git('rev-parse', 'base'), featHead)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+// The guided merge fast-forwards base, then deletes the branch with a safe
+// delete. Git's `-d` measures "merged" against the root's HEAD, so a branch
+// merged into a sibling base (not master) was refused with a bare
+// "Command failed" — regression for the floe-cli → docker-worktrees merge.
+test('deleteBranch measures "merged" against the given base, and names the refusal', async () => {
+  const fx = seededRepo('floe-git-del-')
+  try {
+    fx.git('checkout', '-q', '-b', 'base')
+    fx.git('checkout', '-q', '-b', 'feat')
+    fx.write('a.txt', 'a2\n')
+    fx.commit('c2')
+    fx.git('checkout', '-q', 'base')
+    fx.git('merge', '-q', '--ff-only', 'feat')
+    // Root sits on main, which does NOT contain feat.
+    fx.git('checkout', '-q', 'main')
+
+    // Unmerged from main's point of view: a refusal that says why, not "Command failed".
+    const plain = await deleteBranch(fx.dir, 'feat', false)
+    assert.equal(plain.ok, false)
+    assert.match(plain.message ?? '', /not fully merged/)
+    assert.doesNotMatch(plain.message ?? '', /Command failed/)
+
+    // Not in a base that never got it.
+    const wrong = await deleteBranch(fx.dir, 'feat', false, 'main')
+    assert.equal(wrong.ok, false)
+    assert.match(wrong.message ?? '', /not fully merged into 'main'/)
+
+    // Fully in the base the merge used: safe delete goes through.
+    const res = await deleteBranch(fx.dir, 'feat', false, 'base')
+    assert.equal(res.ok, true, res.message)
+    assert.equal(fx.git('branch', '--list', 'feat').trim(), '')
   } finally {
     fx.cleanup()
   }

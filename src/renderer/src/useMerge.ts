@@ -391,13 +391,15 @@ export function useMerge(deps: {
     await runCloseBranch(key)
   }
 
-  // The branch is fully in base after the fast-forward, so a safe `-d` is
-  // enough — a `-D` here would hide the case where it somehow is not.
+  // The branch is fully in base after the fast-forward, so a safe delete is
+  // enough — a forced one would hide the case where it somehow is not. Safe
+  // means merged into THIS flow's base: a base that is another worktree's
+  // branch is not the root's HEAD, and measured there the branch looks unmerged.
   async function runCloseBranch(key: string): Promise<void> {
     const f = at(key)
     if (!f) return
     step(key, 'closebranch', { status: 'running' })
-    const res = await window.floe.remove.branch(f.root, f.branch, false)
+    const res = await window.floe.remove.branch(f.root, f.branch, false, f.base)
     if (!res.ok) {
       step(key, 'closebranch', { status: 'error', detail: res.message })
       return

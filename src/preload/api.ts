@@ -463,8 +463,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('remove:preflight', root, target),
       worktree: (root: string, target: string, force: boolean): Promise<Worktree[]> =>
         ipcRenderer.invoke('remove:worktree', root, target, force),
-      branch: (root: string, branch: string, force: boolean): Promise<RemoveBranchResult> =>
-        ipcRenderer.invoke('remove:branch', root, branch, force),
+      // `base` names the branch "merged" is measured against; without it, git
+      // measures against the root's HEAD.
+      branch: (root: string, branch: string, force: boolean, base?: string): Promise<RemoveBranchResult> =>
+        ipcRenderer.invoke('remove:branch', root, branch, force, base),
       dropDatabase: (root: string, target: string): Promise<DropDatabaseResult> =>
         ipcRenderer.invoke('remove:dropDatabase', root, target),
       // Undo the Herd site the Laravel recipe linked, before the directory goes.

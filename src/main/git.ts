@@ -539,13 +539,41 @@ export async function removeWorktreeGuided(root: string, target: string, force: 
 }
 
 // Delete the branch once its worktree is gone. `force` (`-D`) is used when the
-// branch isn't merged into base; otherwise a safe `-d`.
-export async function deleteBranch(root: string, branch: string, force: boolean): Promise<RemoveBranchResult> {
+// branch isn't merged into base; otherwise a safe delete.
+//
+// "Safe" is measured against `base` when the caller names one. Git's own `-d`
+// only checks the branch against HEAD of the tree it runs in — the root's, so
+// master — and a branch the guided merge just fast-forwarded into a sibling
+// base is fully merged there and still refused by `-d`. The check is done by
+// hand and the delete itself is `-D`, which is the same guarantee `-d` gives,
+// aimed at the right branch. Without a base, plain `-d` as before.
+export async function deleteBranch(
+  root: string,
+  branch: string,
+  force: boolean,
+  base?: string
+): Promise<RemoveBranchResult> {
   try {
+    if (!force && base) {
+      if (!(await isAncestor(root, branch, base)))
+        return { ok: false, message: `The branch '${branch}' is not fully merged into '${base}'.` }
+      await git(root, ['branch', '-D', branch])
+      return { ok: true }
+    }
     await git(root, ['branch', force ? '-D' : '-d', branch])
     return { ok: true }
   } catch (e) {
     return { ok: false, message: firstLine(e) }
+  }
+}
+
+/** Is every commit of `branch` reachable from `base`? */
+async function isAncestor(root: string, branch: string, base: string): Promise<boolean> {
+  try {
+    await git(root, ['merge-base', '--is-ancestor', branch, base])
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -784,8 +812,18 @@ export async function mergeStash(path: string): Promise<{ ok: boolean; message?:
   }
 }
 
-const firstLine = (e: unknown): string =>
-  e instanceof Error ? (e.message.split('\n').find((l) => l.trim()) ?? e.message) : String(e)
+// The reason git gave, not the command it was given. execFile's message opens
+// with "Command failed: git -C …", which names the step the panel already
+// names and hides git's own line under it. That line is what the user needs.
+const firstLine = (e: unknown): string => {
+  if (!(e instanceof Error)) return String(e)
+  const stderr = (e as { stderr?: unknown }).stderr
+  const lines = [
+    ...(typeof stderr === 'string' ? stderr.split('\n') : []),
+    ...e.message.split('\n').filter((l) => !l.startsWith('Command failed:'))
+  ]
+  return lines.map((l) => l.trim()).find(Boolean) ?? e.message
+}
 
 async function unmergedFiles(target: string): Promise<string[]> {
   try {
