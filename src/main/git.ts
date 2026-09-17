@@ -987,7 +987,20 @@ export async function reviewBase(worktreePath: string): Promise<string> {
       /* checkpoint commit no longer exists — fall back to the branch base */
     }
   }
-  const base = readBase(worktreePath) || (await mainBranch(worktreePath))
+  const recorded = readBase(worktreePath)
+  // No recorded base (a project's own checkout, not a Floe worktree): review what
+  // hasn't shipped — unpushed commits + edits — against the branch's upstream.
+  // Diffing a long-lived branch like `develop` against main would list every
+  // commit it ever made. No upstream → the main-branch fallback below.
+  if (!recorded) {
+    try {
+      const mb = (await git(worktreePath, ['merge-base', '@{upstream}', 'HEAD'])).trim()
+      if (mb) return mb
+    } catch {
+      /* no upstream */
+    }
+  }
+  const base = recorded || (await mainBranch(worktreePath))
   try {
     const mb = (await git(worktreePath, ['merge-base', base, 'HEAD'])).trim()
     if (mb) return mb

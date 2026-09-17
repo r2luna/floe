@@ -801,6 +801,36 @@ test('changedFiles returns [] outside a repo', async () => {
   }
 })
 
+// A project's own checkout on a long-lived branch (`develop`) has no .gw-base.
+// Diffing it against main listed every commit the branch ever made; it must
+// show only what hasn't reached its upstream. A .gw-base still wins.
+test('changedFiles on a checkout with an upstream reviews only unpushed work', async () => {
+  const fx = seededRepo('floe-git-upstream-')
+  try {
+    fx.git('checkout', '-q', '-b', 'develop')
+    fx.write('shipped.txt', 's\n')
+    fx.commit('already pushed')
+    fx.git('branch', 'origin-develop') // stands in for the remote-tracking ref
+    fx.git('branch', '--set-upstream-to=origin-develop')
+    fx.write('unpushed.txt', 'u\n')
+    fx.commit('not pushed')
+    writeFileSync(join(fx.dir, 'edit.txt'), 'e\n')
+
+    assert.deepEqual(
+      (await changedFiles(fx.dir)).map((f) => f.relPath),
+      ['edit.txt', 'unpushed.txt']
+    )
+
+    writeFileSync(join(fx.dir, '.gw-base'), 'main\n')
+    assert.deepEqual(
+      (await changedFiles(fx.dir)).map((f) => f.relPath),
+      ['edit.txt', 'shipped.txt', 'unpushed.txt']
+    )
+  } finally {
+    fx.cleanup()
+  }
+})
+
 // --- reviewCommits ---------------------------------------------------------
 
 test('reviewCommits builds the branch story with per-file counts', async () => {
