@@ -40,6 +40,7 @@ export const IconArrowLeft = make('IconArrowLeft', [{"d":"M20 11v2H8v2H6v-2H4v-2
 export const IconArrowRight = make('IconArrowRight', [{"d":"M4 11v2h12v2h2v-2h2v-2h-2V9h-2v2H4zm10-4h2v2h-2V7zm0 0h-2V5h2v2zm0 10h2v-2h-2v2zm0 0h-2v2h2v-2z"}])
 export const IconArrowUp = make('IconArrowUp', [{"d":"M11 20h2V8h2V6h-2V4h-2v2H9v2h2v12zM7 10V8h2v2H7zm0 0v2H5v-2h2zm10 0V8h-2v2h2zm0 0v2h2v-2h-2z"}])
 export const IconBook = make('IconBook', [{"d":"M8 2h12v20H4V2h4zm4 8h-2v2H8V4H6v16h12V4h-4v8h-2v-2z"}])
+export const IconBookmark = make('IconBookmark', [{"d":"M18 2H6v2h12v16h-2v-2h-2v-2h-4v2H8v2H6V2H4v20h4v-2h2v-2h4v2h2v2h4V2h-2z"}])
 export const IconBrackets = make('IconBrackets', [{"d":"M8 5h2v2H8V5zM6 7h2v2H6V7zM4 9h2v2H4V9zm-2 2h2v2H2v-2zm2 2h2v2H4v-2zm2 2h2v2H6v-2zm2 2h2v2H8v-2zm8-12h-2v2h2V5zm2 2h-2v2h2V7zm2 2h-2v2h2V9zm2 2h-2v2h2v-2zm-2 2h-2v2h2v-2zm-2 2h-2v2h2v-2zm-2 2h-2v2h2v-2z"}])
 export const IconBrandDocker = make('IconBrandDocker', [{"d":"M8 4v2h4v2H6v2h6V8h2v2h8v6h-2v-4H4v6h14v-2h2v2h4v2H0v-2h2v-8h2V6h2V4h2z"}])
 export const IconBrandGit = make('IconBrandGit', [{"d":"M7 7h10v4h5v2h-5v4H7v-4H2v-2h5V7zm2 2v6h6V9H9z"}])

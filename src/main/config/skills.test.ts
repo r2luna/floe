@@ -10,10 +10,12 @@ installHook()
 
 const skills = await import('./skills.ts')
 const projects = await import('./projectStore.ts')
+const floe = await import('./floe.ts')
 
 function reset(): void {
   process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'floe-cfg-'))
   projects.invalidateProjects()
+  floe.invalidateFloeConfig()
 }
 
 /** Write a skill the way a person would: a Markdown file with frontmatter. */
@@ -341,4 +343,53 @@ test('import with no harness skills imports nothing', () => {
   const repo = mkdtempSync(join(tmpdir(), 'floe-repo-'))
   assert.deepEqual(skills.importSkills(repo), { imported: [], skipped: [] })
   assert.ok(!existsSync(skills.projectSkillsDir(repo)), 'no empty directory left behind')
+})
+
+test('a global skill is starred in floe.toml, and unstarred back out of it', () => {
+  reset()
+  skill(skills.globalSkillsDir(), 'deploy', 'Cut a release.')
+  skill(skills.globalSkillsDir(), 'review', 'Read the branch.')
+
+  const starred = skills.setSkillFavorite('deploy', true)
+  assert.deepEqual(starred.filter((s) => s.favorite).map((s) => s.name), ['deploy'])
+  assert.ok(readFileSync(floe.floeConfigPath(), 'utf8').includes('deploy'))
+
+  const off = skills.setSkillFavorite('deploy', false)
+  assert.deepEqual(off.filter((s) => s.favorite).map((s) => s.name), [], 'the star is gone')
+})
+
+test("a project skill is starred in the repository's own config, not the global one", () => {
+  reset()
+  const app = repoDir()
+  projects.createProject(app)
+  skill(skills.projectSkillsDir(app), 'migrate', 'Run the migration.')
+
+  const list = skills.setSkillFavorite('migrate', true, app)
+  assert.deepEqual(list.filter((s) => s.favorite).map((s) => s.name), ['migrate'])
+  const repoConfig = readFileSync(join(app, '.floe', 'config.toml'), 'utf8')
+  assert.ok(repoConfig.includes('migrate'), 'the star travels with the repository')
+  // The global file is either absent or has nothing to say about this name.
+  const global = existsSync(floe.floeConfigPath()) ? readFileSync(floe.floeConfigPath(), 'utf8') : ''
+  assert.ok(!global.includes('migrate'))
+
+  assert.deepEqual(skills.listSkills().map((s) => s.name), [], 'and only inside that project')
+})
+
+test('both files are read at once — a global star and a project star are one list', () => {
+  reset()
+  const app = repoDir()
+  projects.createProject(app)
+  skill(skills.globalSkillsDir(), 'deploy', 'Cut a release.')
+  skill(skills.projectSkillsDir(app), 'migrate', 'Run the migration.')
+  skills.setSkillFavorite('deploy', true, app)
+  skills.setSkillFavorite('migrate', true, app)
+  assert.deepEqual(
+    skills.listSkills(app).filter((s) => s.favorite).map((s) => s.name),
+    ['deploy', 'migrate']
+  )
+})
+
+test('starring a name that is not a skill is refused', () => {
+  reset()
+  assert.throws(() => skills.setSkillFavorite('nope', true), /nope/)
 })

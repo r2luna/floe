@@ -1379,6 +1379,23 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // Star / unstar the row under the cursor. What it pins is the launcher's
+        // row of chips — see Launcher in panels.tsx.
+        id: 'skill.favorite',
+        title: 'Favourite skill',
+        group: 'Skills',
+        enabled: (c) => !!skillRow(c),
+        run: (c) => {
+          const row = skillRow(c)
+          const name = row?.dataset.skill
+          if (!name) return
+          void window.floe.skills
+            .favorite(name, row?.dataset.skillFav !== 'on', c.worktree?.path)
+            .then(() => skillsChanged())
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         // Copy the project's harness skills into its `.floe/skills`. A name Floe
         // already has is skipped, so Floe's copy keeps winning.
         id: 'skill.import',

@@ -13,6 +13,7 @@ const MAP = {
   ArrowRight: 'arrow-right',
   ArrowUp: 'arrow-up',
   Book: 'book',
+  Bookmark: 'bookmark',
   Brackets: 'code',
   BrandDocker: 'ship',
   BrandGit: 'git-commit',

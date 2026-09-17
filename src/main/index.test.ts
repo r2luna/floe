@@ -394,6 +394,7 @@ const CHANNELS = [
   'skills:create',
   'skills:rename',
   'skills:delete',
+  'skills:favorite',
   'skills:import',
   'config:get',
   'config:set',

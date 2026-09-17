@@ -1230,6 +1230,79 @@ button {
   color: var(--accent);
 }
 
+/* --- the launcher's favourite skills ------------------------------------- */
+
+/* Under the composer, against the 26px column gap, so the chips read as part of
+   the box rather than as a second block on the screen. */
+.fav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: -12px;
+}
+
+.fav-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.fav-keys {
+  margin-left: auto;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.fav-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* The app's outline control, dimmer: while you are typing, the composer is what
+   the screen is about, and a row of lit chips under it would compete. */
+.fav-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11.5px;
+}
+
+.fav-slash {
+  color: var(--faint);
+}
+
+/* The cursor, the same accent outline every other list cursor uses. */
+.fav-chip:focus-visible,
+.fav-chip:focus {
+  border-color: var(--accent);
+  color: var(--accent);
+  outline: none;
+}
+
+.fav-chip:focus .fav-slash {
+  color: inherit;
+}
+
+/* Reserved whether or not a chip has the cursor: filling it must not move the
+   chips you are walking. */
+.fav-desc {
+  min-height: 18px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.fav-desc b {
+  color: var(--text-strong);
+  font-weight: 400;
+}
+
 /* The first-run line under the composer. Centred on the composer, not the
    panel, so it reads as belonging to the box it sits under. `.chip` is the
    app's neutral outline button — see docs/ui-conventions.md. */
@@ -7451,6 +7524,14 @@ kbd {
      rather than pushing past it. */
   flex: 0 0 auto;
   max-width: 100%;
+}
+
+/* The star on a favourited skill. Drawn only when it is one — an empty outline
+   on every other row would be a column of marks that says nothing. */
+.skill-fav {
+  display: flex;
+  flex: none;
+  color: var(--accent);
 }
 
 .skill-note {

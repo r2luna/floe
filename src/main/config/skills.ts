@@ -34,7 +34,10 @@ import {
 import { basename, dirname, join } from 'node:path'
 import { configDir } from '../dataDir'
 import { BUILTIN_SKILLS } from './builtinSkills'
-import { repoFloeDir } from './repoConfig'
+import { favoriteNames, floeConfig, setFloeValue } from './floe'
+import { updateRepoProject } from './projectStore'
+import { repoConfigPath, repoFloeDir } from './repoConfig'
+import { parseToml } from './toml'
 
 /** Where a skill came from, narrowest last — the order they override in. */
 export type SkillScope = 'builtin' | 'global' | 'project'
@@ -47,6 +50,8 @@ export interface Skill {
   name: string
   description?: string
   scope: SkillScope
+  /** Starred — the launcher pins it under the composer. */
+  favorite?: boolean
   /** Absolute path of the markdown file, for opening it in the reader. */
   file: string
   /** The directory the file sits in — a bundled skill's reference files live here. */
@@ -140,7 +145,70 @@ export function listSkills(projectPath?: string): Skill[] {
   collect(builtinSkillsDir(), 'builtin', found)
   collect(globalSkillsDir(), 'global', found)
   if (projectPath) collect(projectSkillsDir(projectPath), 'project', found)
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name))
+  // A name starred in either file is starred here: the two lists are one list
+  // as far as the launcher is concerned, and which file holds a name is only
+  // about where it travels — see `setSkillFavorite`.
+  const starred = new Set([...globalFavorites(), ...projectFavorites(projectPath)])
+  return [...found.values()]
+    .map((skill) => (starred.has(skill.name) ? { ...skill, favorite: true } : skill))
+    .sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** The starred names in `floe.toml` — the ones that apply to every project. */
+function globalFavorites(): string[] {
+  return floeConfig().skills.favorites
+}
+
+/**
+ * The starred names in the repo's own `.floe/config.toml`.
+ *
+ * Read from the file rather than through the project scan: a project skill is
+ * starred in the repository that has it, and the answer must not depend on the
+ * project having been registered on this machine.
+ */
+function projectFavorites(projectPath?: string): string[] {
+  if (!projectPath) return []
+  const file = repoConfigPath(projectPath)
+  if (!existsSync(file)) return []
+  let parsed: ReturnType<typeof parseToml>
+  try {
+    parsed = parseToml(readFileSync(file, 'utf8'))
+  } catch {
+    return []
+  }
+  if (!parsed.ok) return []
+  const table = (parsed.value as Record<string, unknown>).skills
+  if (!table || typeof table !== 'object') return []
+  const names = (table as Record<string, unknown>).favorites
+  if (!Array.isArray(names)) return []
+  return favoriteNames(names.filter((n): n is string => typeof n === 'string'))
+}
+
+/**
+ * Star or unstar a skill, and answer with the list as it now reads.
+ *
+ * WHERE it is written follows the skill's own scope: a project skill is starred
+ * in the repository that ships it, so cloning the repo brings the star with it,
+ * and everything else is starred globally. Starring the same name in both files
+ * is not a state the UI can reach — the scope decides.
+ */
+export function setSkillFavorite(name: string, on: boolean, projectPath?: string): Skill[] {
+  const skill = find(name, projectPath)
+  if (skill.scope === 'project') {
+    if (!projectPath) throw new Error('open a project to favourite its skills')
+    const names = projectFavorites(projectPath)
+    updateRepoProject(projectPath, [
+      { op: 'set', table: 'skills', key: 'favorites', value: toggled(names, name, on) }
+    ])
+  } else {
+    setFloeValue('skills', 'favorites', toggled(globalFavorites(), name, on))
+  }
+  return listSkills(projectPath)
+}
+
+function toggled(names: string[], name: string, on: boolean): string[] {
+  const rest = names.filter((n) => n !== name)
+  return on ? [...rest, name].sort((a, b) => a.localeCompare(b)) : rest
 }
 
 /** One skill's text, ready to hand to a harness. Null when there is no such skill. */

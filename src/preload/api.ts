@@ -763,6 +763,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('skills:rename', name, to, worktreePath),
       remove: (name: string, worktreePath?: string): Promise<void> =>
         ipcRenderer.invoke('skills:delete', name, worktreePath),
+      // Star / unstar a skill: it answers with the list as it now reads.
+      favorite: (name: string, on: boolean, worktreePath?: string): Promise<Skill[]> =>
+        ipcRenderer.invoke('skills:favorite', name, on, worktreePath),
       // Copy the project's harness skills into its `.floe/skills`; duplicates are skipped.
       import: (worktreePath?: string): Promise<SkillImport> => ipcRenderer.invoke('skills:import', worktreePath)
     },

@@ -1,5 +1,6 @@
 import {
   IconActivity,
+  IconBookmark,
   IconCaretRightFilled,
   IconCheck,
   IconChecklist,
@@ -1186,8 +1187,10 @@ function Launcher({
   // second kind of conversation — and the record is created HERE, on send,
   // rather than when the launcher opened, so an abandoned launcher leaves
   // nothing behind.
-  const start = (choice: ModelChoice, attached?: Attached) => {
-    const typed = text.trim()
+  const start = (choice: ModelChoice, attached?: Attached, message?: string) => {
+    // `message` is the favourites row sending `/skill` — the box may be empty,
+    // and what the session opens on is not what was typed.
+    const typed = (message ?? text).trim()
     if (!typed) return
     const id = crypto.randomUUID()
     void window.floe.claude
@@ -1211,8 +1214,93 @@ function Launcher({
       })
   }
 
+  // The starred skills, alphabetical — `f` in the Skills panel is what puts one
+  // here. Only the launcher shows them: it is the one screen with nothing else
+  // to do, which is where a shortcut into a skill is worth the row.
+  const favorites = useSkills(cwd).all.filter((s) => s.favorite)
+  const favRef = useRef<HTMLDivElement>(null)
+  /** The chip the cursor is on, so the line under the row can say what it does. */
+  const [favAt, setFavAt] = useState<string>()
+
+  /** Back to typing, from anywhere in the chip row. */
+  const toComposer = (): void => {
+    favRef.current
+      ?.closest('.launcher')
+      ?.querySelector<HTMLTextAreaElement>('.composer-input')
+      ?.focus()
+  }
+
+  const runFavorite = (name: string): void => {
+    const typed = text.trim()
+    // The typed text becomes the skill's argument — `/review the auth change` —
+    // so a half-written thought is not thrown away by picking a skill for it.
+    start(choice, undefined, typed ? `/${name} ${typed}` : `/${name}`)
+  }
+
+  /**
+   * Escape out of the composer and onto the chips.
+   *
+   * With vim motions on this is the SECOND Escape: the first one is claimed by
+   * the box for normal mode and never reaches us. With them off there is only
+   * one box state, so one Escape does it.
+   */
+  const leaveComposer = (e: React.KeyboardEvent): void => {
+    if (e.key !== 'Escape' || !favorites.length) return
+    const el = e.target as HTMLElement
+    if (!el.closest('.composer')) return
+    e.preventDefault()
+    e.stopPropagation()
+    favRef.current?.querySelector<HTMLButtonElement>('.fav-chip')?.focus()
+  }
+
+  /**
+   * hjkl over the chips.
+   *
+   * h and l are the row; j and k are the WRAPPED LINES of that row, found by the
+   * chips' own tops rather than by a column count — the row reflows with the
+   * panel's width, so there is no grid to count.
+   */
+  const favKeys = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const chips = [...(favRef.current?.querySelectorAll<HTMLButtonElement>('.fav-chip') ?? [])]
+    const at = chips.indexOf(document.activeElement as HTMLButtonElement)
+    if (at < 0) return
+    const go = (i: number): void => {
+      e.preventDefault()
+      chips[Math.max(0, Math.min(chips.length - 1, i))].focus()
+    }
+    if (e.key === 'h' || e.key === 'ArrowLeft') return go(at - 1)
+    if (e.key === 'l' || e.key === 'ArrowRight') return go(at + 1)
+    if (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const up = e.key === 'k' || e.key === 'ArrowUp'
+      const top = chips[at].offsetTop
+      const line = chips.filter((c) => (up ? c.offsetTop < top : c.offsetTop > top))
+      // Up from the first line is back into the box: the chips sit UNDER the
+      // composer, so "up" has somewhere obvious to go.
+      if (!line.length) {
+        if (!up) return
+        e.preventDefault()
+        return toComposer()
+      }
+      // The nearest line in that direction, and on it the chip nearest the
+      // horizontal position we left — the same rule a text cursor follows.
+      const want = up ? Math.max(...line.map((c) => c.offsetTop)) : Math.min(...line.map((c) => c.offsetTop))
+      const row = line.filter((c) => c.offsetTop === want)
+      const x = chips[at].offsetLeft
+      const near = row.reduce((best, c) =>
+        Math.abs(c.offsetLeft - x) < Math.abs(best.offsetLeft - x) ? c : best
+      )
+      e.preventDefault()
+      return near.focus()
+    }
+    if (e.key === 'i' || e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      toComposer()
+    }
+  }
+
   return (
-    <div className="launcher">
+    <div className="launcher" onKeyDown={leaveComposer}>
       <h1 className="greet">
         <PenguinHead
           variant={penguin.head}
@@ -1246,6 +1334,50 @@ function Launcher({
         boxed
         menuItems={composerMenu}
       />
+
+      {favorites.length > 0 && (
+        <div className="fav" ref={favRef} onKeyDown={favKeys}>
+          <div className="fav-head">
+            <span>Favourites</span>
+            <span className="fav-keys">
+              <kbd>esc</kbd> to pick
+            </span>
+          </div>
+          <div className="fav-chips">
+            {favorites.map((skill) => (
+              <button
+                key={skill.name}
+                className="fav-chip"
+                type="button"
+                title={skill.description}
+                onFocus={() => setFavAt(skill.name)}
+                onBlur={() => setFavAt((at) => (at === skill.name ? undefined : at))}
+                onClick={() => runFavorite(skill.name)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return
+                  e.preventDefault()
+                  runFavorite(skill.name)
+                }}
+              >
+                <span className="fav-slash">/</span>
+                {skill.name}
+              </button>
+            ))}
+          </div>
+          {/* Always in the layout, filled only under the cursor: a line that
+              appears and disappears would move the chips as you walk them. */}
+          <div className="fav-desc">
+            {favAt && (
+              <>
+                <b>/{favAt}</b>
+                {favorites.find((s) => s.name === favAt)?.description
+                  ? ` — ${favorites.find((s) => s.name === favAt)?.description}`
+                  : ''}
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Gated on "none exist", not "none selected": with projects added but
           none picked, telling the user they have none would be false. */}
@@ -4532,6 +4664,11 @@ function SkillsList({
   const items: MenuAction[] = [
     { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
     { label: 'Edit in your editor', keys: 'e', run: () => onCommand?.('skill.edit') },
+    {
+      label: menu?.row.dataset.skillFav === 'on' ? 'Unfavourite' : 'Favourite',
+      keys: 'f',
+      run: () => onCommand?.('skill.favorite')
+    },
     { label: 'Rename…', keys: 'r', run: () => onCommand?.('skill.rename') },
     { label: 'Delete…', keys: 'd', run: () => onCommand?.('skill.delete') },
     { label: 'New skill…', keys: 'n', run: () => onCommand?.('skill.new') },
@@ -4631,6 +4768,8 @@ function SkillsList({
                   data-skill={skill.name}
                   data-skill-root={skill.dir}
                   data-skill-file={rel}
+                  // What `f` and the row menu read to know which way to toggle.
+                  data-skill-fav={skill.favorite ? 'on' : undefined}
                   onClick={() => onOpen({ kind: 'file', sub: rel, root: skill.dir })}
                   // Focus first: the commands the menu dispatches act on the row
                   // the cursor is on, so right-clicking has to MOVE the cursor
@@ -4642,6 +4781,13 @@ function SkillsList({
                     setMenu({ x: e.clientX, y: e.clientY, row })
                   }}
                 >
+                  {/* Only when starred: an outline on every other row would be
+                      a column of marks saying nothing. `f` is how you add one. */}
+                  {skill.favorite && (
+                    <span className="skill-fav" title="Pinned under the launcher's composer">
+                      <IconBookmark size={12} />
+                    </span>
+                  )}
                   <span className="row-name">{markAll(skill.name, find)}</span>
                   {skill.description && <span className="skill-note">{skill.description}</span>}
                 </button>

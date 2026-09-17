@@ -117,6 +117,14 @@ export interface FloeConfig {
   update: { checkIntervalHours: number }
   /** `hosts`: machines Add project offers, typed as `host@path` (docs in the template). */
   projects: { groups: string[]; hosts: string[] }
+  /**
+   * The skills pinned under the launcher's composer, by name.
+   *
+   * Global ones only. A project skill is starred in the repo's own
+   * `.floe/config.toml` instead, so it travels with the project that has it —
+   * see projectStore.ts. The launcher shows both lists, merged.
+   */
+  skills: { favorites: string[] }
   integrations: { jira: { site?: string; email?: string }; bitbucket: { email?: string } }
 }
 
@@ -159,6 +167,7 @@ export const DEFAULTS: FloeConfig = {
   notifications: { sound: 'chime' },
   update: { checkIntervalHours: 6 },
   projects: { groups: [DEFAULT_GROUP], hosts: [] },
+  skills: { favorites: [] },
   // The optional keys are spelled out rather than omitted so this object has the
   // same shape a parse produces — which is what lets a test assert that an empty
   // file and the defaults are the same thing.
@@ -186,6 +195,11 @@ export function ensureFloeConfig(): void {
  * `deleteGroup` moves orphaned projects into it, so it has to exist even in a
  * file where the user removed it.
  */
+/** Trimmed, de-duplicated, blanks dropped — a starred name is a skill's name. */
+export function favoriteNames(names: string[] | undefined): string[] {
+  return [...new Set((names ?? []).map((n) => n.trim()).filter(Boolean))]
+}
+
 function withDefaultGroup(groups: string[] | undefined): string[] {
   const rest = (groups ?? []).filter((g) => g && g !== DEFAULT_GROUP)
   return [DEFAULT_GROUP, ...rest]
@@ -261,6 +275,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
   const notifications = subTable(sink, raw, root, 'notifications')
   const update = subTable(sink, raw, root, 'update')
   const projects = subTable(sink, raw, root, 'projects')
+  const skills = subTable(sink, raw, root, 'skills')
   const harness = readHarnesses(sink, raw, root)
   const premise = subTable(sink, raw, root, 'premise')
   const integrations = (root.integrations ?? {}) as Record<string, unknown>
@@ -329,6 +344,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         groups: withDefaultGroup(projects?.strArray('groups')),
         hosts: [...new Set((projects?.strArray('hosts') ?? []).map((h) => h.trim()).filter(Boolean))]
       },
+      skills: { favorites: favoriteNames(skills?.strArray('favorites')) },
       integrations: {
         jira: { site: jira?.optStr('site'), email: jira?.optStr('email') },
         bitbucket: { email: bitbucket?.optStr('email') }

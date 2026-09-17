@@ -159,7 +159,15 @@ import {
 import { buildAppMenu } from './menu'
 import { loadKeybindings, rebindCommand, resetKeybindings, revealKeybindings } from './keybindings'
 import { configErrors, configPaths, initConfig, watchConfig } from './config'
-import { createSkill, deleteSkill, importSkills, listSkills, renameSkill, type WritableScope } from './config/skills'
+import {
+  createSkill,
+  deleteSkill,
+  importSkills,
+  listSkills,
+  renameSkill,
+  setSkillFavorite,
+  type WritableScope
+} from './config/skills'
 import { projectFor, projectScan } from './config/projectStore'
 import {
   addMcpServer,
@@ -1416,6 +1424,12 @@ export function registerSettingsIpc(): void {
   )
   handle('skills:delete', (_event, name: string, worktreePath?: string) =>
     deleteSkill(name, projectScope(worktreePath))
+  )
+  // Star / unstar. Answers with the whole list so the panel and the launcher
+  // redraw from one reply — the write lands in floe.toml or in the repo's own
+  // config depending on the skill's scope, and the caller need not know which.
+  handle('skills:favorite', (_event, name: string, on: boolean, worktreePath?: string) =>
+    setSkillFavorite(name, on, projectScope(worktreePath))
   )
   // Copy the project's harness skills (.claude/skills, .codex/skills, …) into
   // its `.floe/skills`. Floe's own names win, so a duplicate is skipped.

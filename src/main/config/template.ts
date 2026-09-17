@@ -315,6 +315,24 @@ groups = ["Projects"]
 hosts  = []
 
 # ------------------------------------------------------------------------------
+# | Favourite skills
+# ------------------------------------------------------------------------------
+# |
+# | The skills pinned under the launcher's composer, by name. \`f\` on a row in the
+# | Skills panel writes this list, and Escape out of the box walks it with
+# | \`hjkl\` — Enter starts the session on \`/name\`, with whatever you had typed as
+# | its argument.
+# |
+# | Global skills only. A PROJECT skill is starred in that repository's own
+# | \`.floe/config.toml\` instead, so the star travels with the project rather than
+# | with this machine. The launcher shows both lists as one.
+# |
+# ------------------------------------------------------------------------------
+
+[skills]
+favorites = []
+
+# ------------------------------------------------------------------------------
 # | The Colony Board
 # ------------------------------------------------------------------------------
 # |

@@ -262,13 +262,18 @@ A skill is addressed by NAME, not by filename — renaming moves the file and
 rewrites its frontmatter together, so \`/old-name\` stops working exactly when
 the list stops showing it.
 
-Right-clicking a row offers the same four, because they are the same commands:
+\`f\` stars the skill under the cursor, which pins it under the launcher's
+composer. A project skill is starred in that repository's own \`.floe/config.toml\`
+so the star travels with the project; anything else is starred in \`floe.toml\`.
+
+Right-clicking a row offers the same commands, because they are the same commands:
 the menu focuses the row it was opened on and dispatches an id.`,
     binds: [
       { key: 'n', command: 'skill.new', when: 'panel == "skills"' },
       { key: 'r', command: 'skill.rename', when: 'panel == "skills"' },
       { key: 'd', command: 'skill.delete', when: 'panel == "skills"' },
       { key: 'e', command: 'skill.edit', when: 'panel == "skills"' },
+      { key: 'f', command: 'skill.favorite', when: 'panel == "skills"' },
       { key: 'c', command: 'skill.import', when: 'panel == "skills"' }
     ]
   },
