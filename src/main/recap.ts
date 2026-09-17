@@ -81,7 +81,13 @@ export function parseRecapResult(stdout: string): string {
   return ''
 }
 
-function runCli(worktreePath: string, resumeId: string): Promise<string> {
+/**
+ * One print-mode run on a forked copy of the session, answering `input`.
+ *
+ * Exported for the query's opening summary (queries.ts), which asks a
+ * different question of the same throwaway fork.
+ */
+export function runForked(worktreePath: string, resumeId: string, input: string): Promise<string> {
   return new Promise((resolve) => {
     const child = spawn('claude', recapArgs(resumeId), { cwd: worktreePath, env: process.env })
     let out = ''
@@ -97,8 +103,8 @@ function runCli(worktreePath: string, resumeId: string): Promise<string> {
       clearTimeout(timer)
       resolve(out)
     })
-    // The prompt is the command, and the CLI waits on stdin until it closes.
-    child.stdin.end('/recap\n')
+    // The prompt goes in on stdin, and the CLI waits on it until it closes.
+    child.stdin.end(input)
   })
 }
 
@@ -120,7 +126,7 @@ export async function recapSession(
   // session has no `/recap` to ask for, and gets none until it grows one.
   const resumeId = agentResumeId(key)
   if (!resumeId) return null
-  const line = recapLine(parseRecapResult(await runCli(worktreePath, resumeId)), awayMs)
+  const line = recapLine(parseRecapResult(await runForked(worktreePath, resumeId, '/recap\n')), awayMs)
   if (!line) return null
   sendAgentEvent(win, key, { kind: 'tool', name: NICK, summary: line })
   return line

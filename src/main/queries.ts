@@ -26,14 +26,16 @@ import {
 // safe on the same terms as handoff↔agent.
 import { activeTurnKeys, onceTurnDone, sendAgentEvent, stopAgent } from './agent'
 import { dropRuntimeTranscript, logTurn } from './runtimeLog'
-import { forgetRead, forgetSeen, packetFrom } from './handoff'
+import { forgetRead, forgetSeen, packetFrom, sessionTranscript } from './handoff'
+import { parseRecapResult, runForked } from './recap'
+import { summaryInstruction, summaryPacket } from '../shared/queryContext'
 import { forgetThread } from './runtimes'
 import { forgetPeers } from './peer'
 import { queryPrompt, relayMark } from '../shared/relay'
 // Circular with turn.ts (it opens the queries this starts turns for) — safe on
 // the same terms as relay↔turn: neither side runs the other at import.
 import { optionsForRoute, optionsForSession, startTurn } from './turn'
-import { agentIdentityNames } from './identity'
+import { agentIdentityNames, agentResumeId } from './identity'
 import { log } from './log'
 
 /**
@@ -102,6 +104,7 @@ export function queryFor(parentKey: string, harness: string): Query | undefined 
  * here too or it holds only for the composer.
  */
 export function queryBusy(qkey: string): boolean {
+  if (opening.has(qkey)) return true
   const names = new Set(agentIdentityNames(qkey))
   return activeTurnKeys().some((k) => names.has(k))
 }
@@ -117,10 +120,71 @@ export function queryBusy(qkey: string): boolean {
 export function canRunInQuery(win: BrowserWindow | null, qkey: string, harness: string): boolean {
   // Claude steers: a second message joins the turn in flight rather than
   // starting one beside it. That is the CLI's own behaviour, not ours.
-  if (harness === 'claude' || !queryBusy(qkey)) return true
+  //
+  // Except while the opening context is still being written: there is no turn
+  // to steer yet, and a second message would become the first turn.
+  if (!queryBusy(qkey) || (harness === 'claude' && !opening.has(qkey))) return true
   log('query-busy', { key: qkey, harness })
   refuse(win, qkey, `${harness} is still answering. Wait for this turn to end.`)
   return false
+}
+
+/** Queries whose first turn is waiting on the chat's summary. */
+const opening = new Set<string>()
+
+/**
+ * Start a query's turn with the chat it was opened from in front of the prompt
+ * — on its FIRST turn only. A query that has already spoken holds that context
+ * in its own thread, and a reopened one has its transcript back.
+ *
+ * `start` gets the prefix ('' when there is none) so the caller keeps deciding
+ * what the turn runs on. See shared/queryContext.ts for what the prefix is.
+ */
+export function withOpeningContext(
+  win: BrowserWindow | null,
+  qkey: string,
+  parentKey: string,
+  worktreePath: string,
+  harness: string,
+  prompt: string,
+  start: (prefix: string) => void
+): void {
+  if (sessionTranscript(worktreePath, qkey).length) return start('')
+  opening.add(qkey)
+  if (win && !win.isDestroyed())
+    sendAgentEvent(win, qkey, { kind: 'tool', name: 'query', summary: 'summarizing the chat…' })
+  void chatContext(worktreePath, parentKey, qkey, harness, prompt)
+    .catch(() => '')
+    .then((prefix) => {
+      opening.delete(qkey)
+      if (win && !win.isDestroyed()) start(prefix)
+    })
+}
+
+/**
+ * The chat, for a query about to answer about it.
+ *
+ * A summary when the chat has a Claude session to fork — written by its own
+ * model, from the whole conversation, without touching its transcript (see
+ * recap.ts). Otherwise, or when that run fails or times out, the raw tail of
+ * the conversation, the same packet a harness switch sends: every harness gets
+ * a query that knows what the chat was about, not only Claude's.
+ */
+export async function chatContext(
+  worktreePath: string,
+  parentKey: string,
+  qkey: string,
+  harness: string,
+  prompt: string
+): Promise<string> {
+  const resumeId = agentResumeId(parentKey)
+  if (resumeId) {
+    const out = await runForked(worktreePath, resumeId, summaryInstruction(harness, prompt))
+    const summary = parseRecapResult(out)
+    log('query-summary', { key: qkey, chars: summary.length })
+    if (summary.trim()) return summaryPacket(summary)
+  }
+  return packetFrom(worktreePath, parentKey, qkey, { since: 'all', to: harness })?.packet ?? ''
 }
 
 export interface OpenedQuery {

@@ -40,6 +40,7 @@ const {
   pluginShape,
   projectRoot,
   redactServer,
+  queryTargetArgs,
   sendOptions,
   transcriptLine
 } = await import('./mcpServer.ts')
@@ -387,6 +388,16 @@ test('sendOptions: a handle in the prompt routes the same as naming the harness'
   assert.equal(named.route?.harness, 'claude')
   assert.equal(named.route?.prompt, '@codex revisa isso')
   assert.equal(named.options.shown, undefined)
+})
+
+test('queryTargetArgs: a query key reaches its parent, answering as its harness', () => {
+  const plain = { session_id: 'floe-1', prompt: 'x' }
+  assert.equal(queryTargetArgs(plain), plain)
+  const q = queryTargetArgs<{ session_id: string; prompt: string; harness?: string }>({ session_id: 'floe-1~codex', prompt: 'x' })
+  assert.equal(q.session_id, 'floe-1')
+  assert.equal(q.harness, 'codex')
+  // Named in the arguments: it still wins, as it does over a handle.
+  assert.equal(queryTargetArgs({ session_id: 'floe-1~codex', prompt: 'x', harness: 'claude' }).harness, 'claude')
 })
 
 // --- The lifted tool handlers, over the real transport --------------------

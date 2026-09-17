@@ -81,6 +81,7 @@ import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, w
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
 import { dispatchTurn, optionsForRoute, routeOf } from './turn'
+import { parseQueryKey } from '../shared/queries'
 import {
   discardQuery,
   fanOut,
@@ -877,7 +878,20 @@ async function sendResult(
   return { sessionId, queryKey, ack: true, answeredBy }
 }
 
-async function sendMessageTool(a: SendMessageArgs): Promise<ToolResult> {
+/**
+ * A query key names a session AND a harness, so it is read as both: the parent
+ * session, answering as that harness — which is the query already open, the
+ * same way the composer's `@codex` reaches it. Without this an agent that took
+ * the key from `list_queries` got `Unknown session` for the one conversation
+ * it was trying to talk into. A harness named in the arguments still wins.
+ */
+export function queryTargetArgs<T extends { session_id: string; harness?: string }>(a: T): T {
+  const q = parseQueryKey(a.session_id)
+  return q ? { ...a, session_id: q.sessionId, harness: a.harness ?? q.harness } : a
+}
+
+async function sendMessageTool(args: SendMessageArgs): Promise<ToolResult> {
+  const a = queryTargetArgs(args)
   try {
     const target = findSessionAny(a.session_id)
     if (!target) return textResult({ error: `Unknown session: ${a.session_id}` })
@@ -1010,7 +1024,9 @@ function registerSessionTools(server: McpServer, token: string): void {
     'send_message',
     'Send a prompt to another Floe session. With wait=true, block until that session finishes its turn and return its final assistant text.',
     {
-      session_id: z.string().describe('The Floe session id to send to.'),
+      session_id: z
+        .string()
+        .describe('The Floe session id to send to, or a query key (`<session>~codex`) to talk into that open query.'),
       prompt: z
         .string()
         .describe(
@@ -1152,13 +1168,13 @@ function registerQueryTools(server: McpServer): void {
   // and reaches none of this; that is D8.)
   server.tool(
     'open_query',
-    'Open a read-only side conversation with another harness beside a session, in its own panel, running in parallel. The same thing typing `@codex …` in the composer does.',
+    'Open a read-only side conversation with another harness beside a session, in its own panel, running in parallel. The same thing typing `@codex …` in the composer does. If that harness already has a query open on the session, this continues it: the prompt goes into the existing conversation.',
     {
       session_id: z.string().describe('The Floe session to open it beside.'),
       harness: z
         .enum(HARNESSES as [string, ...string[]])
         .describe('Who answers in it. Must be a harness with a read-only mode — codex, claude or opencode.'),
-      prompt: z.string().optional().describe('An optional first message, sent as the query opens.'),
+      prompt: z.string().optional().describe('A message for the query: the first one if it opens now, the next one if it is already open.'),
       model: z.string().optional().describe("That harness's own slug."),
       effort: z.enum(EFFORTS).optional().describe('How hard to think.')
     },

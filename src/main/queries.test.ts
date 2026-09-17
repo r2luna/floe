@@ -20,6 +20,7 @@ const STUBS = {
   './peer': 'stub:peer',
   './runtimeLog': 'stub:runtimeLog',
   './turn': 'stub:turn',
+  './recap': 'stub:recap',
   './log': 'stub:log'
 }
 export async function resolve(specifier, context, next) {
@@ -53,6 +54,7 @@ const SOURCE = {
   // bug it exists to catch: a second merge re-shipping the lot.
   'stub:handoff':
     "export function forgetSeen() {}" +
+    "\\nexport function sessionTranscript(wt, key) { return globalThis.__history[key] ?? [] }" +
     "\\nexport function forgetRead(key) { globalThis.__forgotRead.push(key); globalThis.__unread[key] = globalThis.__said[key] ?? 0 }" +
     "\\nexport function packetFrom(wt, from, to, opts) {" +
     "\\n  const left = opts.since === 'all' ? (globalThis.__said[from] ?? 0) : (globalThis.__unread[from] ?? 0)" +
@@ -60,6 +62,9 @@ const SOURCE = {
     "\\n  globalThis.__unread[from] = 0" +
     "\\n  return { packet: '[packet ' + left + ' from ' + from + ']', entries: left }" +
     "\\n}",
+  'stub:recap':
+    "export function runForked(wt, id, input) { globalThis.__forked.push({ id, input }); return Promise.resolve(globalThis.__summary) }" +
+    "\\nexport function parseRecapResult(out) { return out }",
   'stub:turn':
     "export function startTurn(win, key, wt, prompt, options) { globalThis.__sent.push({ key, prompt, options }) }" +
     "\\nexport function optionsForSession(key) { return { provider: 'claude', model: 'opus', effort: 'medium', permissionMode: 'default' } }" +
@@ -102,6 +107,14 @@ declare global {
   /** Everything each query has ever said — what a cleared watermark exposes. */
   // eslint-disable-next-line no-var
   var __said: Record<string, number>
+  /** Each key's transcript, for the first-turn check. */
+  // eslint-disable-next-line no-var
+  var __history: Record<string, unknown[]>
+  /** Forked summary runs, and what the next one prints. */
+  // eslint-disable-next-line no-var
+  var __forked: Array<{ id: string; input: string }>
+  // eslint-disable-next-line no-var
+  var __summary: string
   /** The keys main would report as answering right now. */
   // eslint-disable-next-line no-var
   var __busy: string[]
@@ -112,11 +125,12 @@ process.env.FLOE_TEST_USERDATA = dataDir
 const { setSharedDataDir } = await import('./dataDir.ts')
 setSharedDataDir(dataDir)
 
-const { addCreatedSession, findQuery } = await import('./sessionStore.ts')
+const { addCreatedSession, findQuery, linkCreatedSession } = await import('./sessionStore.ts')
 const {
   canOpenQuery,
   canRunInQuery,
   discardQuery,
+  withOpeningContext,
   fanOut,
   forgetQuery,
   mergeQuery,
@@ -143,6 +157,9 @@ function fresh(unread: number): { sessionId: string; qkey: string } {
   globalThis.__waits = {}
   globalThis.__said = {}
   globalThis.__busy = []
+  globalThis.__history = {}
+  globalThis.__forked = []
+  globalThis.__summary = ''
   const sessionId = `q-sess-${++n}`
   addCreatedSession({ id: sessionId, worktreePath: WT })
   const opened = openQueryFor(WIN, sessionId, WT, { harness: 'codex' })
@@ -309,4 +326,55 @@ test('@all skips a target already answering rather than running it twice', () =>
   assert.deepEqual(out.busy, ['codex'])
   assert.deepEqual(out.keys, [`${sessionId}~claude`])
   assert.deepEqual(globalThis.__sent.map((t) => t.key), [`${sessionId}~claude`])
+})
+
+/** withOpeningContext, resolved: the prefix `start` was handed. */
+function opened(sessionId: string, qkey: string, prompt = 'confere o erro'): Promise<string> {
+  return new Promise((resolve) => withOpeningContext(WIN, qkey, sessionId, WT, 'codex', prompt, resolve))
+}
+
+test('a query opened off a Claude chat starts with a summary of it', async () => {
+  const { sessionId, qkey } = fresh(0)
+  linkCreatedSession(sessionId, 'claude-parent')
+  globalThis.__summary = 'The Changes panel diffs against origin/HEAD.'
+  const prefix = await opened(sessionId, qkey)
+  // Forked off the parent's own Claude session, asked about THIS message.
+  assert.equal(globalThis.__forked[0].id, 'claude-parent')
+  assert.match(globalThis.__forked[0].input, /confere o erro/)
+  assert.match(prefix, /diffs against origin\/HEAD/)
+  assert.match(prefix, /floe:handoff/, 'wrapped as a packet, so it strips back out of the transcript')
+})
+
+test('a chat with no Claude session to fork sends its raw tail instead', async () => {
+  const { sessionId, qkey } = fresh(0)
+  globalThis.__said[sessionId] = 4
+  const prefix = await opened(sessionId, qkey)
+  assert.deepEqual(globalThis.__forked, [])
+  assert.match(prefix, new RegExp(`\\[packet 4 from ${sessionId}\\]`))
+})
+
+test('a summary run that comes back empty falls back to the raw tail', async () => {
+  const { sessionId, qkey } = fresh(0)
+  linkCreatedSession(sessionId, 'claude-parent-2')
+  globalThis.__said[sessionId] = 2
+  const prefix = await opened(sessionId, qkey)
+  assert.equal(globalThis.__forked.length, 1)
+  assert.match(prefix, /\[packet 2/)
+})
+
+test('a query that has already spoken gets no context, and waits for nothing', () => {
+  const { sessionId, qkey } = fresh(0)
+  globalThis.__history[qkey] = [{ role: 'user', text: 'antes' }]
+  let prefix: string | undefined
+  withOpeningContext(WIN, qkey, sessionId, WT, 'codex', 'e agora?', (p) => (prefix = p))
+  assert.equal(prefix, '', 'started synchronously, with nothing in front')
+})
+
+test('a second message while the summary is being written is refused, even for claude', async () => {
+  const { sessionId, qkey } = fresh(0)
+  const pending = opened(sessionId, qkey)
+  assert.equal(canRunInQuery(WIN, qkey, 'codex'), false)
+  assert.equal(canRunInQuery(WIN, qkey, 'claude'), false, 'there is no turn to steer yet')
+  await pending
+  assert.equal(canRunInQuery(WIN, qkey, 'codex'), true)
 })

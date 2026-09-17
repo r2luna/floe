@@ -34,7 +34,7 @@ const SOURCE = {
   'stub:agent':
     "export function sendToAgent(win, key, wt, prompt, options) { globalThis.__started.push({ key, prompt, options, on: 'claude' }) }",
   'stub:runtimes':
-    "export function runRuntime(win, key, wt, prompt, provider, model, effort, permissionMode) { globalThis.__started.push({ key, prompt, options: { provider, model, effort, permissionMode }, on: provider }) }",
+    "export function runRuntime(win, key, wt, prompt, provider, model, effort, permissionMode, shown) { globalThis.__started.push({ key, prompt, options: { provider, model, effort, permissionMode, shown }, on: provider }) }",
   'stub:relay':
     "export function armRelay(win, key) { globalThis.__armed.push({ kind: 'relay', key }) }" +
     "\\nexport function armAddress(win, key) { globalThis.__armed.push({ kind: 'address', key }) }",
@@ -53,7 +53,8 @@ const SOURCE = {
     "\\nexport function noteOpened() {}" +
     "\\nexport function echoOpening(win, key, text) { globalThis.__echoed.push({ key, text }) }" +
     "\\nexport function refuse(win, key, reason) { globalThis.__refused.push({ key, reason }) }" +
-    "\\nexport function queryOptions(base) { return { ...base, permissionMode: 'plan' } }"
+    "\\nexport function queryOptions(base) { return { ...base, permissionMode: 'plan' } }" +
+    "\\nexport function withOpeningContext(win, key, parent, wt, harness, prompt, start) { start(globalThis.__prefix) }"
 }
 export async function load(url, context, next) {
   if (SOURCE[url]) return { format: 'module', shortCircuit: true, source: SOURCE[url] }
@@ -106,6 +107,9 @@ declare global {
   // The harnesses that can hold a query in this test — the `plan` gate.
   // eslint-disable-next-line no-var
   var __canOpen: string[]
+  /** What the stubbed opening context puts in front of a query's turn. */
+  // eslint-disable-next-line no-var
+  var __prefix: string
   /** Query keys already answering, for the one-turn-at-a-time guard. */
   // eslint-disable-next-line no-var
   var __busyQ: string[]
@@ -124,6 +128,7 @@ function fresh(): void {
   globalThis.__refused = []
   globalThis.__canOpen = ['claude', 'codex', 'opencode']
   globalThis.__busyQ = []
+  globalThis.__prefix = ''
 }
 
 test('a handle is read the same way whichever door the prompt came in', () => {
@@ -199,6 +204,22 @@ test('a routed message opens the query and runs there, not in the session', () =
   assert.equal(turn.options.permissionMode, 'plan')
   // And the panel shows the line that opened it.
   assert.deepEqual(globalThis.__echoed, [{ key: 'sess~codex', text: '@codex analisa isso' }])
+})
+
+test("a query's opening context goes in front of the prompt, and the line stays as typed", () => {
+  fresh()
+  globalThis.__prefix = '[chat summary]\n'
+  dispatchTurn({
+    win: WIN,
+    parentKey: 'sess',
+    worktreePath: '/wt',
+    prompt: '@codex confere o erro',
+    route: { harness: 'codex', prompt: 'confere o erro' },
+    origin: 'user'
+  })
+  const [turn] = globalThis.__started
+  assert.equal(turn.prompt, '[chat summary]\nconfere o erro')
+  assert.equal((turn.options as { shown?: string }).shown, 'confere o erro')
 })
 
 test('a turn on a query key arms neither the relay nor the address', () => {

@@ -39,7 +39,8 @@ import {
   openQueryFor,
   queryOptions,
   refuse,
-  refuseReason
+  refuseReason,
+  withOpeningContext
 } from './queries'
 
 /**
@@ -266,14 +267,20 @@ export function dispatchTurn(d: Dispatch): Dispatched {
   // The panel shows the line that opened it. Before the turn, so it lands above
   // the answer rather than after it.
   echoOpening(win, opened.key, d.prompt)
-  startTurn(
-    win,
-    opened.key,
-    worktreePath,
-    d.route.prompt,
-    queryOptions(optionsForRoute(d.route, parentKey)),
-    d.images,
-    d.files
+  const route = d.route
+  const options = queryOptions(optionsForRoute(route, parentKey))
+  // The first turn waits on the chat's context; later ones start right away.
+  // Shown as typed either way — the context is ours, not the user's line.
+  withOpeningContext(win, opened.key, parentKey, worktreePath, route.harness, route.prompt, (prefix) =>
+    startTurn(
+      win,
+      opened.key,
+      worktreePath,
+      prefix + route.prompt,
+      prefix ? { ...options, shown: route.prompt } : options,
+      d.images,
+      d.files
+    )
   )
   return { key: opened.key, query: true }
 }
