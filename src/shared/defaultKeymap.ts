@@ -480,9 +480,15 @@ a rewritten paragraph is one edit, not twelve.
 
 \`p\` switches a markdown diff between prose and its source. Prose is the
 default for \`.md\`: the document with only the changed WORDS marked inside it,
-rather than a rewritten sentence shown as one red line and one green one.`,
+rather than a rewritten sentence shown as one red line and one green one.
+
+The changes list groups files by folder. \`l\` and \`h\` open and close a folder,
+as in the file tree, and \`t\` switches between the tree and one row per path.`,
     binds: [
       { key: 'p', command: 'diff.view', when: 'panel == "diff"' },
+      { key: 't', command: 'changes.view', when: 'panel == "changes"' },
+      { key: 'l', command: 'files.expand', when: 'panel == "changes"' },
+      { key: 'h', command: 'files.collapse', when: 'panel == "changes"' },
       { key: ']', command: 'diff.nextChange', when: 'panel == "diff"' },
       { key: '[', command: 'diff.prevChange', when: 'panel == "diff"' }
     ]

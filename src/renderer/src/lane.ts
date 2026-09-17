@@ -86,8 +86,11 @@ export type Panel = {
    * with the changed words marked inside it — and `code` is the line diff every
    * other file gets. Panel state, so flipping one file's view does not flip the
    * next one you open, and so it survives save and restore.
+   *
+   * The changes list uses it too: absent is the directory tree, `flat` is one
+   * row per path.
    */
-  view?: 'prose' | 'code'
+  view?: 'prose' | 'code' | 'flat'
 }
 
 /**

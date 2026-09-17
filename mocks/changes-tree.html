@@ -1,0 +1,114 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Changes panel — grouped by directory</title>
+<style>
+@font-face { font-family:"CommitMonoPinguim"; font-weight:400; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Regular.woff2") format("woff2"); }
+@font-face { font-family:"CommitMonoPinguim"; font-weight:700; src:url("../src/renderer/src/assets/fonts/CommitMonoPinguim-Bold.woff2") format("woff2"); }
+
+:root{
+  --mono:"CommitMonoPinguim",ui-monospace,Menlo,monospace;
+  --bg:#0d0e11; --panel:#141519; --panel-focused:#16181c; --line:#23252b; --line-soft:#1c1e23;
+  --text:#c9ccd2; --text-strong:#e8eaee; --dim:#6d7280; --faint:#575d6a;
+  --accent:#d3956d; --radius:5px; --head-h:31px; --wash-1:#ffffff08; --wash-3:#ffffff0d;
+}
+body{ margin:0; background:var(--bg); color:var(--text);
+  font:400 13px/1.55 var(--mono); padding:26px 30px 70px; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 3px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 2px; }
+.sub{ color:var(--dim); font-size:12px; margin:0 0 22px; max-width:900px; }
+.note{ color:var(--faint); font-size:12px; margin:0 0 9px; }
+.grid{ display:flex; flex-wrap:wrap; gap:26px 26px; align-items:flex-start; }
+.opt{ flex:none; }
+.w340{ width:340px; } .w440{ width:440px; }
+
+.panel{ display:flex; flex-direction:column; background:var(--panel-focused);
+  border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; }
+.panel-head{ display:flex; align-items:center; gap:7px; height:var(--head-h);
+  padding-inline:11px; border-bottom:1px solid var(--line-soft); }
+.panel-icon{ color:var(--dim); display:grid; place-items:center; }
+.panel-name{ color:var(--accent); }
+.panel-act{ margin-left:auto; color:var(--dim); display:grid; place-items:center; padding:3px; border-radius:var(--radius); }
+.panel-act + .panel-act{ margin-left:0; }
+.panel-act[data-on]{ color:var(--text-strong); background:var(--wash-3); }
+.panel-body{ padding:8px; }
+
+.changes-head{ display:flex; gap:8px; padding:4px 8px 8px; color:var(--dim); font-size:11px; }
+.stat-add{ color:#6ea86e; } .stat-del{ color:#c07a72; }
+.row{ display:flex; align-items:center; gap:9px; padding:4px 8px; border-radius:var(--radius); white-space:nowrap; }
+.row[data-cursor]{ background:var(--wash-3); color:var(--accent); box-shadow:inset 2px 0 var(--accent); }
+.row-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.status{ flex:none; width:11px; text-align:center; font-size:11px; color:var(--dim); }
+.status[data-s=A]{ color:#6ea86e; } .status[data-s=M]{ color:#c9a05f; } .status[data-s=D]{ color:#c07a72; }
+.mark{ flex:none; width:11px; color:var(--dim); display:grid; place-items:center; }
+.dir .row-name{ color:var(--text); }
+.chain{ color:var(--faint); }
+.count{ flex:none; color:var(--faint); font-size:11px; }
+.stat{ display:flex; gap:6px; flex:none; font-size:11px; }
+.d1{ padding-left:20px; } .d2{ padding-left:32px; } .d3{ padding-left:44px; }
+svg{ display:block; }
+ul{ margin:26px 0 0; padding-left:18px; color:var(--dim); font-size:12px; max-width:900px; }
+li{ margin-bottom:4px; } b{ color:var(--text-strong); font-weight:400; }
+</style>
+</head>
+<body>
+
+<h1>Changes panel — grouped by directory</h1>
+<p class="sub">Same data as the screenshot: 511 files, almost all untracked under docs/devsquad-design-system/projects/…. Left is today. Right is the proposal at the new default width (440px, was 340px).</p>
+
+<div class="grid">
+
+  <div class="opt w340">
+    <h2>Today — flat, 340px</h2>
+    <p class="note">Every row repeats the same long prefix and truncates before the file name.</p>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="changes-head"><span>511 files</span><span class="stat-add">+377</span><span class="stat-del">−55</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">.floe/config.toml</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row" data-cursor><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+        <div class="row"><span class="status">?</span><span class="row-name">docs/devsquad-design-system/project…</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt w440">
+    <h2>Proposal — tree, opened on arrival</h2>
+    <p class="note">Folders with a single child fold into one row (docs/devsquad-design-system/projects). Each folder shows its file count and +/−. Files show only their name.</p>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">changes</span>
+        <span class="panel-act" data-on title="tree / flat (t)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 5h6M8 12h6M8 19h6M6 5v14"/></svg></span>
+        <span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="changes-head"><span>511 files</span><span class="stat-add">+377</span><span class="stat-del">−55</span></div>
+        <div class="row dir"><span class="mark">▾</span><span class="row-name">.floe</span><span class="count">1</span></div>
+        <div class="row d1"><span class="status">?</span><span class="row-name">config.toml</span></div>
+        <div class="row dir"><span class="mark">▾</span><span class="row-name"><span class="chain">docs/devsquad-design-system/</span>projects</span><span class="count">510</span><span class="stat"><span class="stat-add">+377</span><span class="stat-del">−55</span></span></div>
+        <div class="row dir d1"><span class="mark">▸</span><span class="row-name">os</span><span class="count">212</span></div>
+        <div class="row dir d1" data-cursor><span class="mark">▾</span><span class="row-name">hub</span><span class="count">4</span><span class="stat"><span class="stat-add">+120</span><span class="stat-del">−8</span></span></div>
+        <div class="row d2"><span class="status" data-s="M">M</span><span class="row-name">overview.md</span><span class="stat"><span class="stat-add">+64</span><span class="stat-del">−8</span></span></div>
+        <div class="row d2"><span class="status">?</span><span class="row-name">screens.md</span></div>
+        <div class="row dir d2"><span class="mark">▸</span><span class="row-name">assets</span><span class="count">2</span></div>
+        <div class="row dir d1"><span class="mark">▸</span><span class="row-name">pulse</span><span class="count">180</span></div>
+        <div class="row dir d1"><span class="mark">▸</span><span class="row-name">eos</span><span class="count">114</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<ul>
+  <li><b>Default open state:</b> every folder opens when the list has 40 files or fewer. Above that, only the first level is open, so 511 files arrive as a few rows.</li>
+  <li><b>Keys:</b> the same as the files tree. <b>l</b> / <b>h</b> open and close a folder, <b>j</b> / <b>k</b> move, and landing on a file opens its diff beside the list like today.</li>
+  <li><b>Tree / flat toggle</b> in the header, remembered per project. Search (find) switches to flat hits, the way the files panel does.</li>
+  <li><b>Width:</b> the default goes from 340px to 440px. A width you already dragged is kept.</li>
+</ul>
+
+</body>
+</html>

@@ -3608,6 +3608,13 @@ button {
   gap: 9px;
 }
 
+/* A folder in the changes tree: its file count, before the +/− it rolls up. */
+.change-count {
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+}
+
 /* --- commands ------------------------------------------------------------ */
 
 /* A command row is two lines, not one: the name and its state read at a glance,

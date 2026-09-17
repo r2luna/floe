@@ -16,6 +16,7 @@ import {
   IconGitCompare,
   IconGitMerge,
   IconLayoutColumns,
+  IconMenu2,
   IconMessage,
   IconMessage2,
   IconNotes,
@@ -65,6 +66,7 @@ import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
+import { buildChangeTree, flattenChanges, isOpen } from './changesTree'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { wordAt } from './definition'
@@ -160,7 +162,7 @@ import {
 } from '../../shared/types'
 import { previewSound } from './sounds'
 import { omarchyAvailable } from './appearance'
-import type { ActiveSession, Attached, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
+import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
@@ -338,7 +340,15 @@ export const KINDS = {
     slot: 'nanny',
     dockHeight: '33%'
   },
-  changes: { icon: IconGitCompare, title: 'changes', width: 340, min: 250, order: 40, needsProject: true },
+  changes: {
+    icon: IconGitCompare,
+    title: 'changes',
+    width: 440,
+    min: 250,
+    order: 40,
+    needsProject: true,
+    action: { icon: IconMenu2, title: 'Tree or flat list (t)', command: 'changes.view' }
+  },
   // The guided merge's checklist. Beside `changes`, and deliberately narrow for
   // the same reason: the review checkpoint sends you to the diff, and both have
   // to be readable at once. Off the rail: a merge is always of the branch a chat
@@ -719,7 +729,7 @@ export function PanelBody({
   kind: PanelKind
   sub?: string
   /** Which view a diff panel is showing — see Panel.view. */
-  view?: 'prose' | 'code'
+  view?: 'prose' | 'code' | 'flat'
   projects: Projects
   /** The project being moved between groups, while `m` has a move running. */
   movingProject?: { path: string; group: string } | null
@@ -914,7 +924,8 @@ export function PanelBody({
         onOpen={() => onOpen({ kind: 'chat', sub, session })}
       />
     ) : null
-  if (kind === 'changes') return <ChangesList changes={changes} onOpen={onOpen} find={find} />
+  if (kind === 'changes')
+    return <ChangesList root={cwd} flat={view === 'flat'} changes={changes} onOpen={onOpen} find={find} />
   // The checklist draws itself from the flow and dispatches command ids for
   // everything it offers — the chips and the keys are the same commands.
   if (kind === 'merge')
@@ -3252,64 +3263,129 @@ function BashRow({ command }: { command: string }) {
 const LETTER = { added: 'A', modified: 'M', deleted: 'D', untracked: '?' } as const
 
 /**
+ * Which folders of the changes tree were flipped away from their default, keyed
+ * by worktree — kept for as long as the app runs, for the same reason as
+ * `openDirsByRoot`: the panel closes and reopens all the time.
+ */
+const flippedChangeDirsByRoot = new Map<string, Set<string>>()
+
+/**
  * Everything the worktree changed against its review base. The diff follows the
- * cursor: landing on a row opens that file beside the list, and the two stay on
+ * cursor: landing on a file opens it beside the list, and the two stay on
  * screen together — you read the branch by walking the list, one press per file.
  * Enter (or a click) hands the cursor to the diff, to scroll and select in it.
+ *
+ * Grouped by directory unless the panel's view is `flat` (`t`). A search always
+ * reads flat: a hit inside a closed folder would be a hit you cannot see.
  */
 function ChangesList({
+  root,
+  flat,
   changes,
   onOpen,
   find
 }: {
+  root?: string
+  flat: boolean
   changes: Changes
   onOpen: OpenFn
   find?: string
 }) {
+  const [flipped, setFlipped] = useState<Set<string>>(() => flippedChangeDirsByRoot.get(root ?? '') ?? new Set())
+  useEffect(() => setFlipped(flippedChangeDirsByRoot.get(root ?? '') ?? new Set()), [root])
+  const tree = useMemo(() => buildChangeTree(changes.files), [changes.files])
+
   if (changes.loading && !changes.files.length) return <p className="empty">Loading…</p>
   if (changes.error) return <p className="empty error">{changes.error}</p>
   if (!changes.files.length) return <p className="empty">No changes.</p>
 
+  const total = changes.files.length
   const add = changes.files.reduce((n, f) => n + f.additions, 0)
   const del = changes.files.reduce((n, f) => n + f.deletions, 0)
+  const asList = flat || !!find?.trim()
   // Factored out of every row and shown once — see commonDir in diff.ts.
-  const base = commonDir(changes.files.map((f) => f.relPath))
+  const base = asList ? commonDir(changes.files.map((f) => f.relPath)) : ''
+
+  const toggle = (path: string): void => {
+    const next = new Set(flipped)
+    if (!next.delete(path)) next.add(path)
+    flippedChangeDirsByRoot.set(root ?? '', next)
+    setFlipped(next)
+  }
+
+  const fileRow = (f: ChangedFile, label: string, depth = 0, parent?: string) => (
+    <button
+      className="row change-row"
+      key={f.relPath}
+      title={f.relPath}
+      style={depth ? { paddingLeft: 8 + depth * 12 } : undefined}
+      // What `o` reads to know which file to hand the OS — the same marker
+      // the tree's rows carry, so one command covers both lists.
+      data-file={f.relPath}
+      data-parent={parent}
+      onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
+      // The cursor IS the DOM focus here — j/k focus the row — so focusing
+      // is the only signal that the selected file changed. The preview must
+      // not take the focus back, or the next j would move inside the diff.
+      onFocus={() => onOpen({ kind: 'diff', sub: f.relPath, focus: false })}
+    >
+      <span className="change-status" data-status={LETTER[f.status]}>
+        {LETTER[f.status]}
+      </span>
+      <span className="row-name">{markAll(label, find)}</span>
+      <Stat additions={f.additions} deletions={f.deletions} />
+    </button>
+  )
 
   return (
     <>
       <div className="changes-head">
         <span>
-          {changes.files.length} {changes.files.length === 1 ? 'file' : 'files'}
+          {total} {total === 1 ? 'file' : 'files'}
         </span>
         {add > 0 && <span className="stat-add">+{add}</span>}
         {del > 0 && <span className="stat-del">−{del}</span>}
       </div>
       {base && <div className="changes-base">{base}</div>}
-      {changes.files.map((f) => (
-        <button
-          className="row change-row"
-          key={f.relPath}
-          title={f.relPath}
-          // What `o` reads to know which file to hand the OS — the same marker
-          // the tree's rows carry, so one command covers both lists.
-          data-file={f.relPath}
-          onClick={() => onOpen({ kind: 'diff', sub: f.relPath })}
-          // The cursor IS the DOM focus here — j/k focus the row — so focusing
-          // is the only signal that the selected file changed. The preview must
-          // not take the focus back, or the next j would move inside the diff.
-          onFocus={() => onOpen({ kind: 'diff', sub: f.relPath, focus: false })}
-        >
-          <span className="change-status" data-status={LETTER[f.status]}>
-            {LETTER[f.status]}
-          </span>
-          <span className="row-name">{markAll(f.relPath.slice(base.length), find)}</span>
-          <span className="change-stat">
-            {f.additions > 0 && <span className="stat-add">+{f.additions}</span>}
-            {f.deletions > 0 && <span className="stat-del">−{f.deletions}</span>}
-          </span>
-        </button>
-      ))}
+      {asList
+        ? changes.files.map((f) => fileRow(f, f.relPath.slice(base.length)))
+        : flattenChanges(tree, total, flipped).map(({ node, depth, parent }) => {
+            if (node.type === 'file') return fileRow(node.file, node.name, depth, parent)
+            const open = isOpen(node.path, depth, total, flipped)
+            return (
+              <button
+                className="row change-row change-dir-row"
+                key={`dir:${node.path}`}
+                title={node.path}
+                style={{ paddingLeft: 8 + depth * 12 }}
+                // The same markers the files tree carries, so `l` and `h` read
+                // both lists the same way — see files.expand in registry.ts.
+                data-dir={node.path}
+                data-open={open || undefined}
+                data-parent={parent}
+                onClick={() => toggle(node.path)}
+              >
+                {open ? (
+                  <IconChevronDown size={13} stroke={1.8} className="file-mark" />
+                ) : (
+                  <IconChevronRight size={13} stroke={1.8} className="file-mark" />
+                )}
+                <span className="row-name">{node.name}</span>
+                <span className="change-count">{node.files}</span>
+                <Stat additions={node.additions} deletions={node.deletions} />
+              </button>
+            )
+          })}
     </>
+  )
+}
+
+function Stat({ additions, deletions }: { additions: number; deletions: number }) {
+  return (
+    <span className="change-stat">
+      {additions > 0 && <span className="stat-add">+{additions}</span>}
+      {deletions > 0 && <span className="stat-del">−{deletions}</span>}
+    </span>
   )
 }
 
@@ -3360,7 +3436,7 @@ function FileDiff({
   changes: Changes
   onPatch?: (patch: string) => void
   find?: string
-  view?: 'prose' | 'code'
+  view?: 'prose' | 'code' | 'flat'
   onDefinition?: OnDefinition
 }) {
   // Markdown opens as prose: that is the whole point of the view, and the

@@ -180,6 +180,11 @@ function pageStep(c: CommandContext, rows: HTMLElement[]): number {
 }
 
 /** The file row the cursor is on, or null when it is somewhere else. */
+/** The two lists whose folder rows open and close: the file tree and the changes tree. */
+function isTree(kind?: string): boolean {
+  return kind === 'files' || kind === 'changes'
+}
+
 function fileRow(c: CommandContext): HTMLElement | null {
   const active = document.activeElement as HTMLElement | null
   return active && c.panelEl(c.lane.focus)?.contains(active) ? active : null
@@ -847,6 +852,17 @@ export const REGISTRY: Map<string, Command> = new Map(
           })
       },
       {
+        id: 'changes.view',
+        title: 'Changes as a tree, or one row per path',
+        group: 'Diff',
+        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'changes',
+        run: (c) =>
+          c.setLane((l) =>
+            // The two shapes have different rows, so the cursor starts over.
+            patchPanel(l, l.focus, { view: l.panels[l.focus]?.view === 'flat' ? undefined : 'flat', cursor: 0 })
+          )
+      },
+      {
         // Markdown only: every other file IS its source, so there is no second
         // way to read it and the chip would toggle between one thing and itself.
         id: 'diff.view',
@@ -1120,7 +1136,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.expand',
         title: 'Open directory',
         group: 'Cursor',
-        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
+        enabled: (c) => isTree(c.lane.panels[c.lane.focus]?.kind),
         run: (c) => {
           // The row already draws whether it is open, so the DOM answers this —
           // no need to lift a tree's expansion state into the lane just so a
@@ -1170,7 +1186,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'files.collapse',
         title: 'Close directory',
         group: 'Cursor',
-        enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'files',
+        enabled: (c) => isTree(c.lane.panels[c.lane.focus]?.kind),
         run: (c) => {
           const row = fileRow(c)
           if (!row) return
