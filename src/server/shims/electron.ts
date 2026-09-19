@@ -40,6 +40,9 @@ export const app = {
     return userDataDir()
   },
   setPath: (): void => {},
+  // The daemon is one process per host and nothing relaunches it, so the lock
+  // is always ours. Returning false would make src/main/index.ts exit at boot.
+  requestSingleInstanceLock: (): boolean => true,
   on: (): void => {},
   once: (): void => {},
   quit: (): void => process.exit(0),
