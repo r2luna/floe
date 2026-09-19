@@ -236,6 +236,9 @@ export const recentSessionsOn = (backend: string, limit: number): Promise<Active
 export const setGroupOn = (backend: string, path: string, group: string): Promise<Project[]> =>
   window.floe.backends.invokeOn(backend, 'projects:setGroup', path, group) as Promise<Project[]>
 
+export const renameOn = (backend: string, path: string, name: string): Promise<Project[]> =>
+  window.floe.backends.invokeOn(backend, 'projects:rename', path, name) as Promise<Project[]>
+
 export const removeOn = (backend: string, path: string): Promise<Project[]> =>
   window.floe.backends.invokeOn(backend, 'projects:remove', path) as Promise<Project[]>
 

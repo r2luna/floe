@@ -92,7 +92,14 @@ import { allSessions, needsYouSessions, projectsActivity, recentSessions, waitin
 // Re-exported because they used to live here: the IPC handlers below call them,
 // and so does index.test.ts, which is the test that covers the walk.
 export { allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions }
-import { installGlobal as installMcpGlobal, mcpConfigFor, resolveCommandResult, shutdown as shutdownMcpServer, startMcpServer } from './mcpServer'
+import {
+  installGlobal as installMcpGlobal,
+  mcpConfigFor,
+  resolveCommandResult,
+  showProject,
+  shutdown as shutdownMcpServer,
+  startMcpServer
+} from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
 import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
@@ -1658,6 +1665,33 @@ async function registerCliOpen(): Promise<void> {
   else log('cli:open:failed', { path, error: result.error })
 }
 
+/**
+ * A launch that hit a Floe already running: take its `--open <path>` and put it
+ * on screen here, in the window the user already has, instead of letting a
+ * second app start.
+ *
+ * Same landing as the other two routes (`openProject` + `showProject`), so a
+ * project opened from the command line looks the same however it arrived. A
+ * bare relaunch with no path just raises the window — that is what asking for
+ * an app you already have open means.
+ */
+async function adoptCliOpen(argv: string[]): Promise<void> {
+  const path = openPathFromArgv(argv)
+  if (!path) {
+    const win = localWindow ?? BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    }
+    if (process.platform === 'darwin') app.focus({ steal: true })
+    return
+  }
+  const result = await openProject(path, openNameFromArgv(argv) ?? undefined)
+  if (result.project) showProject(result.project.path, 'cli')
+  else log('cli:open:failed', { path, error: result.error })
+}
+
 /** The project this launch was asked to open, once. */
 function takeCliOpen(): string | null {
   const path = openedByCli
@@ -1668,12 +1702,12 @@ function takeCliOpen(): string | null {
 function openNewInstance(): void {
   if (process.platform === 'darwin' && app.isPackaged) {
     const bundle = app.getPath('exe').replace(/\/Contents\/MacOS\/[^/]+$/, '')
-    spawn('open', ['-n', bundle], { detached: true, stdio: 'ignore' }).unref()
+    spawn('open', ['-n', bundle, '--args', NEW_INSTANCE_FLAG], { detached: true, stdio: 'ignore' }).unref()
     return
   }
   // Dev (electron argv[1] = app entry) and non-mac: re-run our own launch args.
   const args = app.isPackaged ? [] : process.argv.slice(1)
-  spawn(process.execPath, args, { detached: true, stdio: 'ignore' }).unref()
+  spawn(process.execPath, [...args, NEW_INSTANCE_FLAG], { detached: true, stdio: 'ignore' }).unref()
 }
 
 /**
@@ -1835,6 +1869,27 @@ function createWindow(): void {
 }
 
 isolateUserDataPerWorktree()
+
+/** The argv flag that opts a launch out of the single-instance lock below. */
+const NEW_INSTANCE_FLAG = '--new-instance'
+
+// One Floe per profile. `floe <path>` prefers the control port (mcpServer's
+// /cli/open), but when nothing answers there it launches the app — and without
+// this that launch became a second, redundant instance on top of the one the
+// user was already looking at. The lock turns it into a message instead: this
+// process hands its argv to the running Floe (`second-instance`) and exits.
+//
+// Requested after the userData split above, so dev builds from different
+// worktrees each hold their own lock and still run side by side.
+//
+// ⌘⇧N "New Window" is the deliberate exception: it relaunches with the flag
+// below and skips the lock, because there the second process *is* the point.
+if (!process.argv.includes(NEW_INSTANCE_FLAG)) {
+  if (app.requestSingleInstanceLock()) app.on('second-instance', (_e, argv) => void adoptCliOpen(argv))
+  // Not app.quit(): packaged builds answer that with the "Quit Floe?" dialog,
+  // and this process has nothing to confirm. Leave, quietly and at once.
+  else app.exit(0)
+}
 
 // Dev-only escape hatch for GUI verification: opt in with FLOE_CDP_PORT to
 // expose Chromium's own debugger and keyboard-drive the app over CDP. Never on

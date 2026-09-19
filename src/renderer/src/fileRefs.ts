@@ -11,10 +11,18 @@
 /** A path, then optionally `:12` or `:12-30`. */
 const REF = /^(.*?)(:\d+(?:-\d+)?)?$/
 
-// What could be a reference: a path with an extension, a leading `#` or `@` if
-// it was typed as a mention, and an optional line range. Deliberately narrow —
-// an ordinary word must not be drawn as a file.
-const TOKEN = /(^|[\s([])([#@]?)((?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*(?::\d+(?:-\d+)?)?)/g
+// What could be a reference: a path with an extension, or a path anchored by
+// `./`, `../`, `~/` or `/` — those name a place even without one, so a folder
+// like `../infra/app` is an address the same way `src/a.ts` is. A leading `#`
+// or `@` if it was typed as a mention, and an optional line range. Deliberately
+// narrow — an ordinary word must not be drawn as a file, and `and/or` is not a
+// path because nothing anchors it.
+//
+// The anchored form comes first so `../a.b/infra` chips whole instead of
+// stopping at `../a.b`, and the trailing lookahead makes that a rule: a chip
+// never covers a prefix of the path that is written.
+const TOKEN =
+  /(^|[\s([])([#@]?)((?:(?:\.{1,2}|~)?\/(?:[\w.-]+\/)*[\w.-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*)(?::\d+(?:-\d+)?)?)(?![\w\-/])/g
 
 /**
  * Is this token a reference, or a word that merely looks like one?

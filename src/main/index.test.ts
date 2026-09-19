@@ -50,7 +50,9 @@ export async function load(url, context, next) {
       "  isPackaged: false,",
       "  getPath: () => process.env.FLOE_TEST_USERDATA,",
       "  getVersion: () => '0.0.0-test',",
-      "  on(){}, setPath(){}, quit(){},",
+      "  on(event, fn){ (g.__floeAppOn ??= []).push([event, fn]) },",
+      "  setPath(){}, quit(){}, exit(){},",
+      "  requestSingleInstanceLock: () => true,",
       "  whenReady: () => new Promise(() => {}),",
       "  commandLine: { appendSwitch(){} },",
       "  getLoginItemSettings: () => ({ openAtLogin: false }),",
@@ -109,7 +111,7 @@ register('data:text/javascript,' + encodeURIComponent(hookSource), import.meta.u
 const index = await import('./index.ts')
 const { registeredChannels } = await import('./plugins/handleMap.ts')
 const { addCreatedSession, touchCreatedSession } = await import('./sessionStore.ts')
-const { addProjectByPath } = await import('./projects.ts')
+const { addProjectByPath, listProjects } = await import('./projects.ts')
 const { setFloeValue } = await import('./config/floe.ts')
 
 // The glass is `[appearance] transparency` now, so a test that needs it on or
@@ -132,6 +134,7 @@ type TestGlobals = {
   __floeClipboard?: string[]
   __floeOpened?: string[]
   __floeMenus?: Electron.MenuItemConstructorOptions[][]
+  __floeAppOn?: [string, (...args: unknown[]) => unknown][]
 }
 const g = globalThis as TestGlobals
 
@@ -428,6 +431,33 @@ test('registerIpc registers the whole IPC surface, once each, in order', () => {
 test('every registered channel is a callable handler', () => {
   for (const [channel, fn] of g.__floeIpc ?? []) {
     assert.equal(typeof fn, 'function', `${channel} registered a non-function`)
+  }
+})
+
+// ── one Floe per profile ────────────────────────────────────────────────────
+
+test('a second launch hands its --open path over instead of starting another app', async () => {
+  const repo = makeGitRepo('floe-index-second-')
+  try {
+    repo.write('README.md', '# fixture\n')
+    repo.commit('init')
+    const handler = g.__floeAppOn?.find(([event]) => event === 'second-instance')?.[1]
+    assert.ok(handler, 'boot registered no second-instance handler')
+
+    // What `floe <path>` puts on the argv of the process that never gets a window.
+    await handler({}, [process.execPath, '--open', repo.dir, '--name', 'handed-over'])
+
+    // The handler answers the event without waiting on the registration it
+    // starts (git resolves the repo root off the main thread), so poll for it.
+    let project = listProjects().find((p) => p.path === repo.dir)
+    for (let i = 0; i < 100 && !project; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      project = listProjects().find((p) => p.path === repo.dir)
+    }
+    assert.ok(project, 'the handed-over path was not registered')
+    assert.equal(project.name, 'handed-over')
+  } finally {
+    repo.cleanup()
   }
 })
 

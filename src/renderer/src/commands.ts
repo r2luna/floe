@@ -100,6 +100,8 @@ export interface CommandContext {
   editPremise: () => void
   /** Pick a project, then the group to file it under. */
   moveProject: () => void
+  /** Rename the project the cursor is on — or, off the list, the one picked. Only Floe's label changes. */
+  renameProject: () => void
   /** Forget the project the cursor is on — or, off the list, the one picked — after asking. */
   deleteProject: () => void
   /**

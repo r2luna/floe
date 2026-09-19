@@ -76,6 +76,7 @@ export const COMMAND_IDS: string[] = [
   'project.add',
   'project.reload',
   'project.move',
+  'project.rename',
   'project.delete',
   'project.move.start',
   'project.move.up',

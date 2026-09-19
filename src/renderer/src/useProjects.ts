@@ -15,6 +15,7 @@ import {
   loadProjectUnion,
   mergeProjects,
   removeOn,
+  renameOn,
   setGroupOn
 } from './backends'
 
@@ -57,6 +58,8 @@ export interface Projects {
   deleteGroup: (name: string) => Promise<void>
   /** Move a project into a group, creating the group if it is new. */
   setGroup: (path: string, group: string) => Promise<void>
+  /** Rename a project in the sidebar. The folder on disk keeps its own name. */
+  rename: (path: string, name: string) => Promise<void>
   /** Forget a project. Its folder on disk is untouched — Floe just stops listing it. */
   remove: (path: string) => Promise<void>
   reload: () => void
@@ -241,6 +244,15 @@ export function useProjects(self: object): Projects {
     [backendFor]
   )
 
+  const rename = useCallback(
+    async (path: string, name: string) => {
+      const backend = backendFor(path)
+      const list = await renameOn(backend, path, name)
+      setAll((prev) => mergeProjects(prev, list, backend))
+    },
+    [backendFor]
+  )
+
   const remove = useCallback(
     async (path: string) => {
       const backend = backendFor(path)
@@ -312,6 +324,7 @@ export function useProjects(self: object): Projects {
     addGroup,
     deleteGroup,
     setGroup,
+    rename,
     remove,
     reload
   }

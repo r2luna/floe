@@ -390,7 +390,14 @@ export default function App() {
   // The chat panel you were on before this one (vim's ⌃^). The whole panel, not
   // just an id: it carries the worktree the session lives in, so the jump works
   // even when that chat belongs to another branch than the one selected.
-  const alternate = useRef<Panel | null>(null)
+  //
+  // With the project and machine it was on, because the `active` panel crosses
+  // both: going back has to re-enter them the way jumpToSession does, or ⌃W
+  // would open a chat under whatever repo happens to be current.
+  const alternate = useRef<{ panel: Panel; projectPath?: string; backend: string } | null>(null)
+  // The project the last render was on, read inside setLane — which runs before
+  // this render's assignment, so it is the project being LEFT.
+  const projectPath = useRef<string | undefined>(undefined)
 
   /**
    * Every lane change goes through here, and a change of SESSION carries its
@@ -413,7 +420,12 @@ export default function App() {
       // sees both sides of a session switch. Landing on the alternate records
       // the one you just left, which is what makes the two ping-pong.
       const leaving = l.panels.find((p) => p.session)
-      if (leaving) alternate.current = leaving
+      if (leaving)
+        alternate.current = {
+          panel: leaving,
+          projectPath: projectPath.current,
+          backend: currentBackend()
+        }
       const by = before ? remember(bySession.current, before, scopedOf(l)) : bySession.current
       bySession.current = by
       return withScoped(next, after ? (by[after] ?? []) : [])
@@ -423,6 +435,7 @@ export default function App() {
   // which is exactly the difference the handoff has to tell apart.
   const self = useRef({}).current
   const projects = useProjects(self)
+  projectPath.current = projects.current?.path
   // The worktrees of whichever project is current — switching project reloads
   // them, so the panel never shows a list belonging to somewhere else.
   const worktrees = useWorktrees(projects.current?.path)
@@ -1393,10 +1406,30 @@ export default function App() {
     })
   }
 
-  // ⌃W: back to the chat you came from.
+  // ⌃W: back to the chat you came from — in this project, or in the one the
+  // `active` panel took you out of. Crossing a project or a machine is
+  // jumpToSession's job, so ⌃W hands it the row it would have built: the panel
+  // already carries `claudeId ?? id`, which is the key that opens the chat.
   const alternateSession = () => {
-    const p = alternate.current
-    if (p?.session) setLane((l) => open(l, mkPanel('chat', p.sub, p.session)))
+    const a = alternate.current
+    const s = a?.panel.session
+    if (!a || !s) return
+    if (a.backend !== currentBackend() || (a.projectPath && a.projectPath !== projects.current?.path)) {
+      jumpToSession({
+        projectPath: a.projectPath ?? '',
+        projectName: '',
+        worktreePath: s.worktreePath,
+        branch: '',
+        sessionId: s.id,
+        title: a.panel.sub ?? '',
+        lastActivityAt: 0,
+        running: false,
+        needsYou: false,
+        backend: a.backend
+      })
+      return
+    }
+    setLane((l) => open(l, mkPanel('chat', a.panel.sub, s)))
   }
 
   // Every row a panel offers the cursor, in document order. The cursor is an
@@ -2018,6 +2051,29 @@ export default function App() {
     confirm: (opts) => askConfirm(opts),
     createGroup: () => pickGroup('New group…', { create: true, onPick: (g) => void projects.addGroup(g) }),
     reloadProjects: () => projects.reload(),
+    // Floe's label only: the folder keeps its name on disk, which is the whole
+    // point — a repo cloned into a cryptic directory reads as what you call it.
+    renameProject: () => {
+      const renameTo = (project: Project): void =>
+        askText({
+          placeholder: `Rename "${project.name}" to…`,
+          value: project.name,
+          verb: 'Rename project',
+          onDone: (name) => void projects.rename(project.path, name)
+        })
+      const project = projectAtCursor()
+      if (project) return renameTo(project)
+      // From the palette there is no row to read: ask which one, the way
+      // `project.delete` does.
+      setPicker({
+        placeholder: 'Rename which project?',
+        items: projects.all.map((p) => ({ id: p.path, title: p.name, detail: p.group })),
+        onPick: (path) => {
+          const picked = projects.all.find((p) => p.path === path)
+          if (picked) renameTo(picked)
+        }
+      })
+    },
     deleteProject: () => {
       // What is being removed is Floe's record of the project, not the code:
       // say so, because "delete" over a folder full of work reads much worse
@@ -2183,7 +2239,7 @@ export default function App() {
     cycleSession,
     // Undefined until there IS one, which is also how the command knows to dim
     // itself: on the first chat of a session there is nowhere to go back to.
-    alternateSession: alternate.current?.session ? alternateSession : undefined,
+    alternateSession: alternate.current?.panel.session ? alternateSession : undefined,
     goToDefinition: (names, line) => {
       const from = lane.panels[lane.focus]
       if (from) void goToDefinition(from, names, line)

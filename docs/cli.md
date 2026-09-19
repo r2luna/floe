@@ -39,7 +39,19 @@ Two routes, and both end in `main/cli.ts`'s `openProject`, so they cannot drift:
 | state | route |
 | --- | --- |
 | Floe is running | `POST 127.0.0.1:41673/cli/open {path, name?}` — the MCP control server's own port (`main/mcpServer.ts`), behind the same loopback + CSRF guard. Answers with the line the command prints. |
-| Floe is not running | the command launches the app with `--open <path> [--name <name>]`; main reads it off the argv and does the work once the renderer has loaded. |
+| Floe is not running (or is not answering on the port) | the command launches the app with `--open <path> [--name <name>]`; main reads it off the argv and does the work once the renderer has loaded. |
+
+The launch route is guarded by Electron's single-instance lock, so it cannot put
+a second app on screen by accident: if a Floe is already running, the launched
+process hands its argv to it (`second-instance` → the same `openProject` +
+`showProject`) and exits. That is the safety net for the case where the control
+port is silent — the app is up but nothing answers 41673 — which used to be
+exactly when `floe .` opened a duplicate window.
+
+⌘⇧N **New Window** is the one launch that skips the lock: it relaunches with
+`--new-instance`, where the second process is the point. The lock lives in
+`userData`, which dev builds split per worktree, so side-by-side dev instances
+are unaffected.
 
 Nothing here is MCP: the command is a dependency-free script and one JSON POST
 is the whole conversation. Registering plus putting the project on screen is

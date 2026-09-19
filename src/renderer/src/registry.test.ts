@@ -51,6 +51,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     createGroup: () => {},
     reloadProjects: () => {},
     moveProject: () => {},
+    renameProject: () => {},
     deleteProject: () => {},
     startMoveProject: () => {},
     stepMoveProject: () => {},

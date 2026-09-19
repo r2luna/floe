@@ -330,6 +330,9 @@ adds a project rather than repeating a search — \`/\` still searches it, and
       { key: 'n', command: 'project.add', when: 'panel == "projects"' },
       { key: 'r', command: 'project.reload', when: 'panel == "projects"' },
       { key: 'd', command: 'project.delete', when: 'panel == "projects"' },
+      // `r` is taken by reload here, so renaming borrows the `e` the other
+      // lists use for "edit this row".
+      { key: 'e', command: 'project.rename', when: 'panel == "projects"' },
       { key: 'm', command: 'project.move.start', when: 'panel == "projects"' },
       { key: 'j', command: 'project.move.down', when: 'moving' },
       { key: 'k', command: 'project.move.up', when: 'moving' },
@@ -531,7 +534,9 @@ comment on — loose, it would swallow the letter for no reason.`,
     doc: `\`⌃I\` and \`⌃O\` walk this branch's sessions with vim's jumplist sense: \`⌃O\`
 goes back through what you were doing, \`⌃I\` forward again. \`⌃W\` is the other
 chat, not the readline word-delete — it has to work from the composer, which
-is where you are when you want to go back.
+is where you are when you want to go back. It follows the chat wherever it
+lives: a jump out of the \`⌘A\` list into another project or another machine
+comes back the same way it went, project and branch included.
 
 \`⌘⇧W\` forgets the open session: shift on \`⌘W\`, which closes the panel, so
 the pair reads as "close this" and "close this for good". It asks first, and

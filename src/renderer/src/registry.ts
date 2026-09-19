@@ -1867,6 +1867,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.moveProject()
       },
       {
+        // Floe's label for the project, not the folder: renaming here never
+        // touches the path, so a repo checked out under a cryptic directory can
+        // read as whatever you call it.
+        id: 'project.rename',
+        title: 'Rename project…',
+        group: 'App',
+        run: (c) => c.renameProject()
+      },
+      {
         // The row the cursor is on, not the current project: `d` acts on what
         // you are looking at, which is the only reading that matches the list.
         // Not gated on the projects panel: from the palette there is no row, so
