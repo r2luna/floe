@@ -1,80 +1,93 @@
 ---
 name: deploy
-description: Cut and publish a new Floe release so the auto-updater can ship it. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, signed build, GitHub publish. Takes an optional bump level (patch/minor/major) as argument.
+description: Cut and publish a new Floe release so the auto-updater can ship it. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, tag push, watching the GitHub release workflow, updating the gtt daemon, and signing + installing the build on this Mac. Takes an optional bump level (patch/minor/major) as argument.
 ---
 
 # Deploy — release a new Floe version
 
-Floe auto-updates from **GitHub Releases**: `electron-updater` (see `src/main/autoUpdate.ts`)
-polls the private `r2luna/floe` repo, reads `latest-mac.yml`, downloads the signed `.zip`,
-and applies it on restart. A release only reaches users if **all** of these hold:
+Releases are built by GitHub Actions, not on this machine. Pushing a `vX.Y.Z` tag to
+`github.com/r2luna/floe` runs `.github/workflows/release.yml`: the gate, a draft release, an
+unsigned macOS arm64 build (`.dmg` + `.zip` + `latest-mac.yml`) and a Linux AppImage
+(`latest-linux.yml`) uploaded into it, then the draft is published.
 
-- The GitHub release is **published** (not draft) — the updater ignores drafts.
-- The version in `package.json` is **higher** than what users are running (semver compare).
-- Every build is signed with the **same** identity (`Floe Local Signing`) — Squirrel.Mac
-  refuses an update whose signature doesn't match the installed app.
-- The release carries `latest-mac.yml` **and** the `.zip` (Squirrel swaps the zip; the dmg is
-  first-install only).
-
-`pnpm release` (`electron-vite build && electron-builder --mac --publish always`) does the build +
-publish. This skill wraps it with the preflight and version bump so nothing ships broken.
+The app's updater reads that release (`electron-builder.yml` `publish:` and
+`src/main/autoUpdate.ts`). Linux installs itself. macOS builds are unsigned, so Squirrel.Mac cannot
+swap them in: the app announces the version and "Install update" opens the release page.
 
 ## Steps
 
-Run these in order. **Stop and report** at the first failure — never publish past a failed check.
+Run these in order. **Stop and report** at the first failure — never tag past a failed check.
 
 ### 1. Preflight — abort if any fails
-- **Branch + clean tree:** must be on `master` with nothing uncommitted.
-  `git rev-parse --abbrev-ref HEAD` → `master`; `git status --porcelain` → empty.
-  If the user is on a feature branch, tell them to merge to `master` first — releases ship from `master`.
-- **Synced with origin:** `git fetch` then confirm `master` is not behind `origin/master`.
-- **Signing identity present:** `security find-identity -v -p codesigning | grep "Floe Local Signing"`.
-  Missing → stop: without it Squirrel can't apply the update. (The cert must match prior releases.)
-- **Publish token:** `gh auth status` must be logged in. The build reads `GH_TOKEN` — supply it from gh
-  in step 3. Do not ask the user to paste a token.
+- **Branch + clean tree:** on `master`, `git status --porcelain` empty. On a feature branch, tell
+  the user to merge to `master` first.
+- **GitHub remote:** GitHub is where releases go. `origin` is the old Forgejo mirror
+  (`git.pinguim.io`) and never receives tags. Resolve the remote by URL, not by name:
+  `git remote -v | grep 'github.com[:/]r2luna/floe' | head -1 | cut -f1`. None → add it as
+  `github` pointing at `git@github.com:r2luna/floe.git`. Use that name as `$GH` below.
+- **In sync:** fetch `$GH`. `master` must contain `$GH/master` (`git merge-base --is-ancestor`), so
+  the push is a fast-forward. If not, GitHub has commits `master` lacks: stop and list them
+  (`git log --oneline master..$GH/master`). Never force-push.
+- **Tag is new:** `git ls-remote --tags $GH` must not already hold the version you are about to
+  cut. Old `v0.x` tags exist locally from the Forgejo era: never `git push --tags`, it would start
+  a release for each one.
+- **Gate:** `pnpm gate` passes.
 
 ### 2. Version bump
-- Read current `version` from `package.json`.
-- Bump level: use the `/deploy` argument if given (`patch`/`minor`/`major`); otherwise **ask** the user
-  which, showing the resulting version. Default suggestion: `patch`.
-- Edit `package.json` to the new version. Confirm it is strictly greater than the current one.
-- Commit: `git commit -am "chore(release): vX.Y.Z"` then `git push origin master`.
-  Push **before** publishing so the release tag points at the bump commit.
+- Read `version` from `package.json`.
+- Bump level: the `/deploy` argument if given. Otherwise decide it yourself, never ask: any
+  user-facing feature → `minor`; only fixes, refactors or chores → `patch`; `major` only when the
+  user says so. State the level and why in one line.
+- Edit `package.json`, commit `chore(release): vX.Y.Z`, tag `vX.Y.Z` on that commit.
+- Push `master` to `$GH`, then push only the tag `vX.Y.Z` to `$GH`. The tag push starts the
+  release workflow.
+- Then push `master` (no tag) to `origin` if it exists, so the Forgejo mirror has the code. A
+  failure there is reported but does not stop the release.
 
-### 3. Build + publish
-- Run: `GH_TOKEN=$(gh auth token) pnpm release`
-- This builds the signed mac `.dmg` + `.zip`, creates the GitHub release `vX.Y.Z`, and uploads the
-  assets + `latest-mac.yml`. It takes a few minutes (native rebuild + notarization-free signing).
-- If it fails on signing, re-check the identity from step 1. If it fails on publish (401/403), the gh
-  token lacks `repo` scope on the private repo.
+### 3. Watch the workflow
+- `gh run list --repo r2luna/floe --workflow release.yml --limit 1` to get the run, then
+  `gh run watch <id> --repo r2luna/floe --exit-status`.
+- A failed run: `gh run view <id> --repo r2luna/floe --log-failed`, report the failing step. The
+  tag stays; fix forward with a new patch version rather than moving a published tag.
 
 ### 4. Verify the release is live
-- `gh release view vX.Y.Z --json isDraft,assets -q '.isDraft, [.assets[].name]'`
-- Confirm **`isDraft` is `false`** and the asset list contains `latest-mac.yml`, a `.zip`, and a `.dmg`.
-  A draft release or a missing `latest-mac.yml`/`.zip` means the updater will find nothing — fix before
-  telling the user it's done.
-- Report the published version and the release URL.
+- `gh release view vX.Y.Z --repo r2luna/floe --json isDraft,assets` → `isDraft` false, and the
+  assets include the `.dmg`, the `.zip`, `latest-mac.yml`, the `.AppImage` and `latest-linux.yml`.
+- Report the version and the release URL.
 
-### 5. Install the new build into /Applications (this Mac)
-The release auto-updates *other* machines, but the Mac that just built it shouldn't have to wait for the
-6h auto-update check — drop the freshly-built app straight into `/Applications` so a quit+reopen runs the
-new version now.
+### 5. Update the `gtt` server
+The release only ships the desktop app. The headless daemon on `gtt` (systemd user unit
+`floe-server.service`, serving the WS gate on 41680 and `https://floe.pinguim.io` via Caddy) is
+deployed separately — a release is not done until this runs.
 
-- `electron-builder` already left the signed bundle unpacked under `dist/mac*/Floe.app` (alongside the
-  `.dmg`). Install *that* — no need to mount the dmg. Use `ditto`, not `cp -R`: it preserves the code
-  signature + xattrs (a `cp -R` can strip them and trip Gatekeeper):
+- One command, never a bare `scp`: `FLOE_SERVER=r2luna@gtt ./scripts/deploy-server.sh`
+  It builds `out/server/index.js` *and* `out/web`, ships both, and restarts the unit. A hand-copied
+  daemon leaves the web bundle stale, so `floe.pinguim.io` serves the old UI on the new backend.
+- Verify: `curl -s https://floe.pinguim.io/ | grep -c __FLOE_BOOT__` → `1`, and the hashed
+  `assets/index-*.js` filename must differ from before the deploy.
+- `~/.config/floe` on the server is its own config and is never carried by a deploy. Don't touch it
+  here.
+- If `gtt` is unreachable, report it — the GitHub release stays published; rerun the script later.
+
+### 6. Sign and install on this Mac
+CI builds are unsigned (`electron-builder.yml` sets `identity: null`), so Squirrel.Mac can't apply
+them and Gatekeeper blocks a bare copy. Take the published artifact, sign it locally with the
+`Floe Local Signing` identity, and install it — same bits everyone else gets.
+
+- Identity must exist: `security find-identity -v -p codesigning | grep "Floe Local Signing"`.
+  Missing → skip this step and say so; the release itself is fine.
+- Fetch and unpack the arm64 zip from the release:
   ```
-  APP=$(ls -d dist/mac*/Floe.app | head -1)
-  rm -rf /Applications/Floe.app && ditto "$APP" /Applications/Floe.app
+  cd $(mktemp -d) && gh release download vX.Y.Z --repo r2luna/floe --pattern '*arm64-mac.zip'
+  ditto -xk *arm64-mac.zip .
   ```
-- Safe while Floe is running — macOS keeps the running process on its old inode; the new version
-  applies on the **next launch**. Do **not** force-quit: the deploy may be running from inside Floe.
-- Tell the user it's installed and to quit+reopen (or ⌘Q → relaunch) to pick it up.
-
-## Notes
-- **Receiving** updates is separate from publishing: each machine needs a PAT at
-  `~/Library/Application Support/floe/.gh-update-token` (the repo is private). That's per-machine
-  setup, not part of deploy — see `src/main/autoUpdate.ts`.
-- This ships **mac** only (matches the auto-updater, which is Squirrel.Mac/zip based). The Linux
-  AppImage target exists in `electron-builder.yml` but is a manual `pnpm build:linux` — not wired to
-  auto-update.
+- Sign, verify, install. Use `ditto`, not `cp -R`: it preserves the signature and xattrs.
+  ```
+  codesign --force --deep --sign "Floe Local Signing" Floe.app
+  codesign --verify --deep --strict Floe.app
+  rm -rf /Applications/Floe.app && ditto Floe.app /Applications/Floe.app
+  xattr -dr com.apple.quarantine /Applications/Floe.app
+  ```
+- Safe while Floe is running — the running process keeps its old inode and the new version applies
+  on next launch. Do **not** force-quit: the deploy may be running from inside Floe.
+- Tell the user it's installed and to quit + reopen to pick it up.

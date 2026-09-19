@@ -1,6 +1,6 @@
 ---
 name: deploy
-description: Cut and publish a new Floe release so the auto-updater can ship it. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, tag push, and watching the GitHub release workflow. Takes an optional bump level (patch/minor/major) as argument.
+description: Cut and publish a new Floe release so the auto-updater can ship it. Use when the user runs /deploy or asks to release, publish, or ship a new version. Handles preflight checks, version bump, tag push, watching the GitHub release workflow, updating the gtt daemon, and signing + installing the build on this Mac. Takes an optional bump level (patch/minor/major) as argument.
 ---
 
 # Deploy — release a new Floe version
@@ -54,3 +54,40 @@ Run these in order. **Stop and report** at the first failure — never tag past 
 - `gh release view vX.Y.Z --repo r2luna/floe --json isDraft,assets` → `isDraft` false, and the
   assets include the `.dmg`, the `.zip`, `latest-mac.yml`, the `.AppImage` and `latest-linux.yml`.
 - Report the version and the release URL.
+
+### 5. Update the `gtt` server
+The release only ships the desktop app. The headless daemon on `gtt` (systemd user unit
+`floe-server.service`, serving the WS gate on 41680 and `https://floe.pinguim.io` via Caddy) is
+deployed separately — a release is not done until this runs.
+
+- One command, never a bare `scp`: `FLOE_SERVER=r2luna@gtt ./scripts/deploy-server.sh`
+  It builds `out/server/index.js` *and* `out/web`, ships both, and restarts the unit. A hand-copied
+  daemon leaves the web bundle stale, so `floe.pinguim.io` serves the old UI on the new backend.
+- Verify: `curl -s https://floe.pinguim.io/ | grep -c __FLOE_BOOT__` → `1`, and the hashed
+  `assets/index-*.js` filename must differ from before the deploy.
+- `~/.config/floe` on the server is its own config and is never carried by a deploy. Don't touch it
+  here.
+- If `gtt` is unreachable, report it — the GitHub release stays published; rerun the script later.
+
+### 6. Sign and install on this Mac
+CI builds are unsigned (`electron-builder.yml` sets `identity: null`), so Squirrel.Mac can't apply
+them and Gatekeeper blocks a bare copy. Take the published artifact, sign it locally with the
+`Floe Local Signing` identity, and install it — same bits everyone else gets.
+
+- Identity must exist: `security find-identity -v -p codesigning | grep "Floe Local Signing"`.
+  Missing → skip this step and say so; the release itself is fine.
+- Fetch and unpack the arm64 zip from the release:
+  ```
+  cd $(mktemp -d) && gh release download vX.Y.Z --repo r2luna/floe --pattern '*arm64-mac.zip'
+  ditto -xk *arm64-mac.zip .
+  ```
+- Sign, verify, install. Use `ditto`, not `cp -R`: it preserves the signature and xattrs.
+  ```
+  codesign --force --deep --sign "Floe Local Signing" Floe.app
+  codesign --verify --deep --strict Floe.app
+  rm -rf /Applications/Floe.app && ditto Floe.app /Applications/Floe.app
+  xattr -dr com.apple.quarantine /Applications/Floe.app
+  ```
+- Safe while Floe is running — the running process keeps its old inode and the new version applies
+  on next launch. Do **not** force-quit: the deploy may be running from inside Floe.
+- Tell the user it's installed and to quit + reopen to pick it up.
