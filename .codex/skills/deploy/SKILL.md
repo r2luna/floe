@@ -63,8 +63,15 @@ deployed separately — a release is not done until this runs.
 - One command, never a bare `scp`: `FLOE_SERVER=r2luna@gtt ./scripts/deploy-server.sh`
   It builds `out/server/index.js` *and* `out/web`, ships both, and restarts the unit. A hand-copied
   daemon leaves the web bundle stale, so `floe.pinguim.io` serves the old UI on the new backend.
-- Verify: `curl -s https://floe.pinguim.io/ | grep -c __FLOE_BOOT__` → `1`, and the hashed
+- The script's last line always fails with `ERR_DLOPEN_FAILED` on node-pty. Ignore it: that check
+  runs under the login shell's `node` (v22), while the unit runs mise node 26, which the addon was
+  built for. Judge the deploy by the checks below, not by the script's exit code.
+- Verify: `systemctl --user is-active floe-server.service` → `active`,
+  `curl -s https://floe.pinguim.io/ | grep -c __FLOE_BOOT__` → `1`, and the hashed
   `assets/index-*.js` filename must differ from before the deploy.
+- A daemon that won't start prints nothing useful to journald. Get the real error by running the
+  bundle by hand with the unit's node:
+  `ssh r2luna@gtt 'cd ~/floe && ~/.local/share/mise/installs/node/26.8.1/bin/node out/server/index.js'`
 - `~/.config/floe` on the server is its own config and is never carried by a deploy. Don't touch it
   here.
 - If `gtt` is unreachable, report it — the GitHub release stays published; rerun the script later.
