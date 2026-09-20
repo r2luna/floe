@@ -1,0 +1,280 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Changes panel — grouped by submodule</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+/* Everything in the panels below is the app's own CSS (index.css): .panel, .row,
+   .change-row, .change-status, .change-count, .change-stat, .file-mark, the
+   cursor band. Only the submodule row is new — .sub-* below is the proposal. */
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; overflow-x:auto; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:96ch; }
+.lede{ margin-bottom:22px; }
+.lede code,.why code,li code{ color:var(--text-strong); }
+.tag{ border:1px solid var(--edge); padding:1px 7px; color:var(--dim); font-size:10px; font-weight:400; }
+.tag[data-pick]{ border-color:var(--accent); color:var(--accent); }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge);
+  font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+.grid{ display:flex; flex-wrap:wrap; gap:26px; align-items:flex-start; margin-bottom:40px; }
+.opt{ flex:none; width:440px; }
+.opt .panel{ height:auto; }
+.panel-body{ padding-bottom:12px; }
+.row{ background:none; border:0; color:inherit; font:inherit; cursor:default; }
+svg{ display:block; }
+ul{ margin:8px 0 0; padding-left:18px; color:var(--dim); font-size:12px; max-width:96ch; }
+li{ margin-bottom:5px; } li b{ color:var(--text-strong); font-weight:400; }
+.section{ margin:0 0 40px; padding:0 0 30px; border-bottom:1px solid var(--line-soft); }
+
+/* --- the proposal: a submodule row --------------------------------------- */
+/* A folder row that carries a repo. Same chevron, same count and +/− rollup as
+   any directory, plus: a branch glyph in the name (it is a repo, not a folder),
+   and what the superproject sees of it, pushed right in the caption size. */
+.sub-row .row-name{ display:flex; align-items:center; gap:6px; min-width:0; }
+.sub-row .sub-glyph{ flex:none; color:var(--dim); width:12px; }
+.sub-row .sub-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sub-ref{ flex:none; color:var(--faint); font-size:10px; }
+.sub-ref b{ color:var(--dim); font-weight:400; }
+.sub-ref[data-ahead]{ color:#c9a05f; }
+:root[data-theme='light'] .sub-ref[data-ahead]{ color:#8a6314; }
+/* The gitlink itself: the superproject's `M app` line. It is a change in the
+   parent, so it sits under the parent as a file row — with the target commit
+   where a file's +/− would be. */
+.gitlink .row-name{ color:var(--dim); }
+.gitlink .sub-ptr{ flex:none; color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums; }
+
+/* --- O2: caption groups (the sidebar's model) ----------------------------- */
+.group-label{ display:flex; gap:8px; align-items:baseline; }
+.group-label .group-n{ margin-left:auto; }
+.group-label .group-ref{ color:var(--faint); letter-spacing:0; text-transform:none; }
+
+/* --- a hit in the search state ------------------------------------------- */
+mark{ background:var(--find-hit); color:inherit; }
+.flat-base{ padding:0 12px 6px; color:var(--faint); font-size:11px; }
+.search-line{ display:flex; align-items:center; gap:8px; margin:0 0 8px; padding:0 12px; height:26px; border-top:1px solid var(--accent); border-bottom:1px solid var(--line-soft); background:var(--bg); color:var(--dim); font-size:12px; }
+.search-line .k{ color:var(--accent); }
+.search-line .caret{ display:inline-block; width:2px; height:12px; background:var(--accent); }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">toggle theme</button>
+
+<h1>Changes panel — grouped by submodule</h1>
+<p class="lede">The screenshot's case: <code>infra</code> at master, with <code>app</code> as a submodule, and <code>app</code> carrying two submodules of its own (<code>packages/ui</code>, <code>packages/brain</code>). Today the panel asks the root repo only, so <code>git status</code> says <code>app (modified content, untracked content)</code> and the panel says <em>No changes.</em> The proposal walks every submodule recursively and shows each one as a repo inside the tree, nested as deep as it goes. All panels are the real <code>index.css</code>; only the submodule row is new.</p>
+
+<div class="section">
+<div class="grid">
+
+  <!-- ===================== today ===================== -->
+  <div class="opt">
+    <h2>Today <span class="tag">root repo only</span></h2>
+    <p class="why">Four root files show; the dirt inside <code>app</code> is invisible. Here the root happens to be clean, so the panel is empty while the terminal beside it lists five modified entries.</p>
+    <div class="panel" data-focused>
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-act">≡</span><span class="panel-act">⊟</span><span class="panel-act">×</span></div>
+      <div class="panel-body"><p class="empty">No changes.</p></div>
+    </div>
+  </div>
+
+  <!-- ===================== O1 ===================== -->
+  <div class="opt">
+    <h2>O1 — submodule as a repo row in the tree <span class="tag" data-pick>recommended</span></h2>
+    <p class="why">A submodule is a folder that happens to be a repo, so it takes the folder row: chevron, name, file count, +/− rollup. It adds a branch glyph before the name and, on the right, what the superproject sees: the branch it is on and how far it moved from the recorded commit. Nested submodules nest the same way, at any depth. <code>h</code>/<code>l</code> fold it like any folder.</p>
+    <div class="panel" data-focused>
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-sub">infra · master</span><span class="panel-act">≡</span><span class="panel-act">⊟</span><span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="changes-head"><span>13 files</span><span>·</span><span>3 repos</span><span class="stat-add">+412</span><span class="stat-del">−96</span></div>
+
+        <!-- root files -->
+        <button class="row change-row change-dir-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">.claude/skills</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+31</span><span class="stat-del">−4</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">migrate-screen/SKILL.md</span><span class="change-stat"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">setup/SKILL.md</span><span class="change-stat"><span class="stat-add">+9</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">docker/README.md</span><span class="change-stat"><span class="stat-add">+6</span><span class="stat-del">−1</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">integration.html</span><span class="change-stat"><span class="stat-add">+40</span><span class="stat-del">−12</span></span></button>
+
+        <!-- submodule app -->
+        <button class="row change-row change-dir-row sub-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">
+            <svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg>
+            <span class="sub-name">app</span>
+          </span>
+          <span class="sub-ref"><b>master</b> · dirty</span>
+          <span class="change-count">8</span>
+          <span class="change-stat"><span class="stat-add">+296</span><span class="stat-del">−79</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">AGENTS.md</span><span class="change-stat"><span class="stat-add">+38</span><span class="stat-del">−2</span></span></button>
+        <button class="row change-row change-dir-row" style="padding-left:20px" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">.claude/skills</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+140</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="?">?</span><span class="row-name">pest-plugin-agent/SKILL.md</span><span class="change-stat"><span class="stat-add">+88</span></span></button>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="?">?</span><span class="row-name">wayfinder-development/SKILL.md</span><span class="change-stat"><span class="stat-add">+52</span></span></button>
+        <button class="row change-row" data-cursor style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">composer.json</span><span class="change-stat"><span class="stat-add">+2</span><span class="stat-del">−3</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">composer.lock</span><span class="change-stat"><span class="stat-add">+96</span><span class="stat-del">−74</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="D">D</span><span class="row-name">package-lock.json</span><span class="change-stat"></span></button>
+
+        <!-- nested submodule app/packages/ui: dirty -->
+        <button class="row change-row change-dir-row sub-row" style="padding-left:20px" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">
+            <svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg>
+            <span class="sub-name">packages/ui</span>
+          </span>
+          <span class="sub-ref" data-ahead><b>main</b> · +2 commits</span>
+          <span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+20</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="M">M</span><span class="row-name">src/Button.tsx</span><span class="change-stat"><span class="stat-add">+14</span></span></button>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="?">?</span><span class="row-name">src/Button.test.tsx</span><span class="change-stat"><span class="stat-add">+6</span></span></button>
+
+        <!-- nested submodule app/packages/brain: pointer moved, tree clean -->
+        <button class="row change-row change-dir-row sub-row" style="padding-left:20px">
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v2h2V5H8zm4 4V7h-2v2h2zm2 2V9h-2v2h2zm0 2h2v-2h-2v2zm-2 2v-2h2v2h-2zm0 0h-2v2h2v-2zm-4 4v-2h2v2H8z"/></svg>
+          <span class="row-name">
+            <svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg>
+            <span class="sub-name">packages/brain</span>
+          </span>
+          <span class="sub-ref" data-ahead>3f1c2a9 → 9b56b50 · clean</span>
+          <span class="change-count">0</span>
+          <span class="change-stat"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== O2 ===================== -->
+  <div class="opt">
+    <h2>O2 — one caption group per repo <span class="tag">alternative</span></h2>
+    <p class="why">The sidebar's model: an uppercase caption per repo, files as a plain tree underneath. Reads cleanly at one level, but nesting has to flatten into the caption (<code>APP / PACKAGES/UI</code>), captions cannot fold, and the group is not a row the cursor can land on. Works for one level of submodules, fights the recursive case.</p>
+    <div class="panel" data-focused>
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-sub">infra · master</span><span class="panel-act">≡</span><span class="panel-act">⊟</span><span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="changes-head"><span>13 files</span><span>·</span><span>3 repos</span><span class="stat-add">+412</span><span class="stat-del">−96</span></div>
+
+        <div class="group-label">infra <span class="group-ref">master</span><span class="group-n">4</span></div>
+        <button class="row change-row change-dir-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">.claude/skills</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+31</span><span class="stat-del">−4</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">migrate-screen/SKILL.md</span><span class="change-stat"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">setup/SKILL.md</span><span class="change-stat"><span class="stat-add">+9</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">docker/README.md</span><span class="change-stat"><span class="stat-add">+6</span><span class="stat-del">−1</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">integration.html</span><span class="change-stat"><span class="stat-add">+40</span><span class="stat-del">−12</span></span></button>
+
+        <div class="group-label">app <span class="group-ref">master · dirty</span><span class="group-n">6</span></div>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">AGENTS.md</span><span class="change-stat"><span class="stat-add">+38</span><span class="stat-del">−2</span></span></button>
+        <button class="row change-row change-dir-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name">.claude/skills</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+140</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">pest-plugin-agent/SKILL.md</span><span class="change-stat"><span class="stat-add">+88</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">wayfinder-development/SKILL.md</span><span class="change-stat"><span class="stat-add">+52</span></span></button>
+        <button class="row change-row" data-cursor><span class="change-status" data-status="M">M</span><span class="row-name">composer.json</span><span class="change-stat"><span class="stat-add">+2</span><span class="stat-del">−3</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">composer.lock</span><span class="change-stat"><span class="stat-add">+96</span><span class="stat-del">−74</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="D">D</span><span class="row-name">package-lock.json</span><span class="change-stat"></span></button>
+
+        <div class="group-label">app / packages/ui <span class="group-ref">main · +2 commits</span><span class="group-n">2</span></div>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">src/Button.tsx</span><span class="change-stat"><span class="stat-add">+14</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="?">?</span><span class="row-name">src/Button.test.tsx</span><span class="change-stat"><span class="stat-add">+6</span></span></button>
+
+        <div class="group-label">app / packages/brain <span class="group-ref">3f1c2a9 → 9b56b50 · clean</span><span class="group-n">0</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ===================== O1 states ===================== -->
+<h2>O1 in its other two states</h2>
+<p class="why">The flat view (<code>t</code>) and a search. Both keep the repo rows: flat means no directory folding inside a repo, not one list across repos, because a path only means something relative to its own repo. The shared prefix is factored out per repo, the way <code>commonDir</code> already does for the whole list.</p>
+<div class="grid">
+
+  <div class="opt">
+    <h2>Flat <span class="tag">t</span></h2>
+    <div class="panel" data-focused>
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-sub">infra · master</span><span class="panel-act" data-on>≡</span><span class="panel-act">⊟</span><span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="changes-head"><span>13 files</span><span>·</span><span>3 repos</span><span class="stat-add">+412</span><span class="stat-del">−96</span></div>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">.claude/skills/migrate-screen/SKILL.md</span><span class="change-stat"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">.claude/skills/setup/SKILL.md</span><span class="change-stat"><span class="stat-add">+9</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">docker/README.md</span><span class="change-stat"><span class="stat-add">+6</span><span class="stat-del">−1</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">integration.html</span><span class="change-stat"><span class="stat-add">+40</span><span class="stat-del">−12</span></span></button>
+
+        <button class="row change-row change-dir-row sub-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name"><svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg><span class="sub-name">app</span></span>
+          <span class="sub-ref"><b>master</b> · dirty</span><span class="change-count">8</span>
+          <span class="change-stat"><span class="stat-add">+296</span><span class="stat-del">−79</span></span>
+        </button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">AGENTS.md</span><span class="change-stat"><span class="stat-add">+38</span><span class="stat-del">−2</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">.claude/skills/pest-plugin-agent/SKILL.md</span><span class="change-stat"><span class="stat-add">+88</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">.claude/skills/wayfinder-development/SKILL.md</span><span class="change-stat"><span class="stat-add">+52</span></span></button>
+        <button class="row change-row" data-cursor style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">composer.json</span><span class="change-stat"><span class="stat-add">+2</span><span class="stat-del">−3</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="M">M</span><span class="row-name">composer.lock</span><span class="change-stat"><span class="stat-add">+96</span><span class="stat-del">−74</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="D">D</span><span class="row-name">package-lock.json</span><span class="change-stat"></span></button>
+
+        <button class="row change-row change-dir-row sub-row" style="padding-left:20px" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name"><svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg><span class="sub-name">packages/ui</span></span>
+          <span class="sub-ref" data-ahead><b>main</b> · +2 commits</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+20</span></span>
+        </button>
+        <div class="flat-base" style="padding-left:32px">src/</div>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="M">M</span><span class="row-name">Button.tsx</span><span class="change-stat"><span class="stat-add">+14</span></span></button>
+        <button class="row change-row" style="padding-left:32px"><span class="change-status" data-status="?">?</span><span class="row-name">Button.test.tsx</span><span class="change-stat"><span class="stat-add">+6</span></span></button>
+
+        <button class="row change-row change-dir-row sub-row" style="padding-left:20px">
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v2h2V5H8zm4 4V7h-2v2h2zm2 2V9h-2v2h2zm0 2h2v-2h-2v2zm-2 2v-2h2v2h-2zm0 0h-2v2h2v-2zm-4 4v-2h2v2H8z"/></svg>
+          <span class="row-name"><svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg><span class="sub-name">packages/brain</span></span>
+          <span class="sub-ref" data-ahead>3f1c2a9 → 9b56b50 · clean</span><span class="change-count">0</span><span class="change-stat"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="opt">
+    <h2>Search <span class="tag">/ skill</span></h2>
+    <div class="panel" data-focused>
+      <div class="panel-head"><span class="panel-name">changes</span><span class="panel-sub">infra · master</span><span class="panel-act">≡</span><span class="panel-act">⊟</span><span class="panel-act">×</span></div>
+      <div class="panel-body">
+        <div class="search-line"><span class="k">/</span><span>skill</span><span class="caret"></span><span style="margin-left:auto;color:var(--faint);font-size:10px">4 hits · 2 repos</span></div>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">.claude/<mark>skill</mark>s/migrate-screen/SKILL.md</span><span class="change-stat"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></button>
+        <button class="row change-row"><span class="change-status" data-status="M">M</span><span class="row-name">.claude/<mark>skill</mark>s/setup/SKILL.md</span><span class="change-stat"><span class="stat-add">+9</span></span></button>
+        <button class="row change-row change-dir-row sub-row" data-open>
+          <svg class="file-mark" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 8H5v2h2v2h2v2h2v2h2v-2h2v-2h2v-2h2V8h-2v2h-2v2h-2v2h-2v-2H9v-2H7V8z"/></svg>
+          <span class="row-name"><svg class="sub-glyph" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2h2v12h3v3h7v-7h-3V2h8v8h-3v9h-9v3H2v-8h3V2zm15 6V4h-4v4h4zM8 19v-3H4v4h4v-1z"/></svg><span class="sub-name">app</span></span>
+          <span class="sub-ref"><b>master</b> · dirty</span><span class="change-count">2</span>
+          <span class="change-stat"><span class="stat-add">+140</span></span>
+        </button>
+        <button class="row change-row" data-cursor style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">.claude/<mark>skill</mark>s/pest-plugin-agent/SKILL.md</span><span class="change-stat"><span class="stat-add">+88</span></span></button>
+        <button class="row change-row" style="padding-left:20px"><span class="change-status" data-status="?">?</span><span class="row-name">.claude/<mark>skill</mark>s/wayfinder-development/SKILL.md</span><span class="change-stat"><span class="stat-add">+52</span></span></button>
+      </div>
+    </div>
+    <p class="why" style="margin-top:12px">A repo with no hit is not listed. The search is one string across all repos, so <code>app/composer</code> would also match: the path the matcher sees is the full one from the superproject root, the row shows it relative to its repo.</p>
+  </div>
+
+</div>
+
+<h2>What the row says</h2>
+<ul>
+  <li><b>name</b> — the submodule path relative to its parent repo, not to the superproject. <code>packages/ui</code>, not <code>app/packages/ui</code>: it sits under <code>app</code>, the nesting already says the rest.</li>
+  <li><b>ref</b> — the branch the submodule checkout is on (or the short SHA when detached), then one of: <code>dirty</code> (working tree changes), <code>+N commits</code> (HEAD moved past the commit the parent records, amber), <code>clean</code>. The pointer-only case shows <code>recorded → HEAD</code> and no branch, because "which branch" is not the question there.</li>
+  <li><b>count / +−</b> — roll up the files in that repo including its own submodules, exactly like a folder rolls up its children.</li>
+  <li><b>a moved pointer with a clean tree</b> is still a change in the parent (git's <code>M packages/brain</code>), so the row shows with count 0 rather than disappearing. Landing on it opens the parent's gitlink diff: <code>-Subproject commit 3f1c2a9</code> / <code>+Subproject commit 9b56b50</code>.</li>
+  <li><b>keyboard</b> — <code>h</code>/<code>l</code> fold and unfold like a folder, <code>o</code> opens the file in the OS, and the diff beside the list is run inside the submodule's own repo (<code>git -C app diff …</code>). Folded state persists per worktree like folders do.</li>
+  <li><b>header</b> — <code>13 files · 3 repos</code> so an all-clean superproject with a dirty submodule never reads as "No changes." again.</li>
+  <li><b>files panel and palette</b> — the same walk feeds them: the file search indexes every submodule's tree, and the files tree shows the same repo row where a submodule starts. Out of scope for this mock, same data.</li>
+</ul>
+
+</body>
+</html>

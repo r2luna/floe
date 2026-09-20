@@ -29,6 +29,7 @@ import type {
   AgentReplay,
   AgentRunOptions,
   ChangedFile,
+  SubmoduleState,
   ClaudeInfo,
   ContextUsage,
   CodexModel,
@@ -958,6 +959,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     review: {
       changedFiles: (worktreePath: string): Promise<ChangedFile[]> =>
         ipcRenderer.invoke('review:changedFiles', worktreePath),
+      // The submodules under the worktree, at every depth, as the superproject
+      // sees them — the Changes list's repo rows.
+      submodules: (worktreePath: string): Promise<SubmoduleState[]> =>
+        ipcRenderer.invoke('review:submodules', worktreePath),
       lastCommit: (worktreePath: string): Promise<LastCommit | null> =>
         ipcRenderer.invoke('review:lastCommit', worktreePath),
       fileDiff: (worktreePath: string, relPath: string, context?: number): Promise<string> =>

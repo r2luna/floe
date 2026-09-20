@@ -25,7 +25,19 @@ let treeDebounce: ReturnType<typeof setTimeout> | null = null
 // tree in a way fs.watch reliably reports, so we must refresh on them. These
 // names are relative to the git dir (no `.git/` prefix) — that's where they live
 // for a linked worktree, whose `.git` is a file pointing elsewhere, not a dir.
-function isGitState(f: string): boolean {
+export function isGitState(f: string): boolean {
+  // A submodule's git dir sits inside its parent's, under `modules/<path>/`
+  // (and a nested one under `modules/<a>/modules/<b>/`), with the same files
+  // in it: a commit made inside `app` moves `modules/app/index`. Read the
+  // name past every module prefix — a path carries slashes, so try each cut.
+  if (f.startsWith('modules/')) {
+    const parts = f.split('/')
+    return parts.some((_, i) => i > 1 && isGitStateName(parts.slice(i).join('/')))
+  }
+  return isGitStateName(f)
+}
+
+function isGitStateName(f: string): boolean {
   return (
     f === 'index' ||
     f === 'HEAD' ||

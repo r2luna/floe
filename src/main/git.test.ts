@@ -41,6 +41,7 @@ const {
   removeWorktree,
   restoreSnapshot,
   fileDiff,
+  submodules,
   listRemoteBranches,
   mergeFastForward,
   mergePreflight,
@@ -788,6 +789,73 @@ test('changedFiles lists untracked files on a repo with no commits', async () =>
     assert.equal(files[0].committed, false, 'nothing can be committed yet')
   } finally {
     fx.cleanup()
+  }
+})
+
+// A submodule inside a submodule: the walk has to find the nested checkout,
+// review its files against what ITS parent recorded, and keep every path from
+// the worktree root so `o`, `e` and file_diff still find the file.
+test('changedFiles, submodules and fileDiff walk nested submodules', async () => {
+  const leaf = makeGitRepo('floe-git-sub-leaf-')
+  const inner = makeGitRepo('floe-git-sub-inner-')
+  const outer = makeGitRepo('floe-git-sub-outer-')
+  const allowFile = ['-c', 'protocol.file.allow=always']
+  try {
+    leaf.write('l.txt', 'l\n')
+    leaf.commit('leaf')
+    inner.write('i.txt', 'i1\n')
+    inner.commit('inner')
+    inner.git(...allowFile, 'submodule', 'add', '-q', leaf.dir, 'packages/ui')
+    inner.commit('add leaf')
+    outer.write('o.txt', 'o1\n')
+    outer.commit('outer')
+    outer.git(...allowFile, 'submodule', 'add', '-q', inner.dir, 'app')
+    outer.commit('add inner')
+    outer.git(...allowFile, 'submodule', 'update', '-q', '--init', '--recursive')
+
+    // Root: an edit. app: an edit, plus a commit the parent has not recorded.
+    // app/packages/ui: an untracked file.
+    writeFileSync(join(outer.dir, 'o.txt'), 'o2\n')
+    writeFileSync(join(outer.dir, 'app', 'i.txt'), 'i1\nchanged\n')
+    writeFileSync(join(outer.dir, 'app', 'c.txt'), 'c\n')
+    outer.git('-C', 'app', 'add', 'c.txt')
+    outer.git('-C', 'app', 'commit', '-q', '-m', 'inside app')
+    writeFileSync(join(outer.dir, 'app', 'packages', 'ui', 'new.txt'), 'n\n')
+
+    const files = await changedFiles(outer.dir)
+    assert.deepEqual(
+      files.map((f) => [f.relPath, f.repo, f.status, f.committed]),
+      [
+        ['app/c.txt', 'app', 'added', true],
+        ['app/i.txt', 'app', 'modified', false],
+        ['app/packages/ui/new.txt', 'app/packages/ui', 'untracked', false],
+        ['o.txt', undefined, 'modified', false]
+      ],
+      'no gitlink rows (app, app/packages/ui): the files inside stand for them'
+    )
+    assert.equal(files[1].additions, 1)
+    assert.match(files[1].fingerprint, /^\d+:\d+$/, 'signed from the worktree root, through the submodule')
+
+    const subs = await submodules(outer.dir)
+    assert.deepEqual(
+      subs.map((s) => [s.path, s.parent, s.branch, s.ahead, s.head === s.recorded]),
+      [
+        ['app', '', 'main', 1, false],
+        // `submodule update --init` checks the nested one out detached: no branch.
+        ['app/packages/ui', 'app', undefined, 0, true]
+      ]
+    )
+    assert.equal(subs[0].recorded, outer.git('rev-parse', 'HEAD:app'))
+    assert.equal(subs[0].head, outer.git('-C', 'app', 'rev-parse', 'HEAD'))
+
+    assert.match(await fileDiff(outer.dir, 'app/i.txt'), /^\+changed$/m, 'diffed by the submodule, against its base')
+    assert.match(await fileDiff(outer.dir, 'app/c.txt'), /^\+c$/m)
+    assert.match(await fileDiff(outer.dir, 'app/packages/ui/new.txt'), /^\+n$/m, 'untracked, two repos down')
+    assert.match(await fileDiff(outer.dir, 'o.txt'), /^-o1$/m)
+  } finally {
+    outer.cleanup()
+    inner.cleanup()
+    leaf.cleanup()
   }
 })
 

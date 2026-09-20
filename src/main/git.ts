@@ -10,6 +10,7 @@ import type {
   RemoveBranchResult,
   RemovePreflight,
   ReviewCommit,
+  SubmoduleState,
   Worktree
 } from '../shared/types'
 import { slugifyBranch } from '../shared/slug'
@@ -1068,10 +1069,132 @@ function fingerprint(worktreePath: string, relPath: string, status: ChangedFile[
   }
 }
 
-// Every file that differs from the review base: tracked changes (committed +
-// uncommitted) via `git diff`, plus untracked files via `ls-files --others`.
+// One repo under review: the worktree itself (`path` '') or a submodule
+// checkout at any depth, each with the commit ITS files are diffed against.
+interface ReviewRepo {
+  path: string
+  dir: string
+  parent: string
+  base: string
+}
+
+// The submodule paths a repo declares, whether or not they are checked out.
+async function gitmodulePaths(dir: string): Promise<string[]> {
+  try {
+    const out = await git(dir, ['config', '--file', '.gitmodules', '--get-regexp', String.raw`^submodule\..*\.path$`])
+    return out
+      .split('\n')
+      .map((line) => line.slice(line.indexOf(' ') + 1).trim())
+      .filter(Boolean)
+      .sort()
+  } catch {
+    // No .gitmodules: `config` exits 1 on a missing file, and on no match.
+    return []
+  }
+}
+
+// What a submodule's files are reviewed against. The parent's base names a
+// commit of the submodule (its gitlink there), so "since the parent's base"
+// means the same thing inside as out. A submodule the base does not have yet
+// falls back to the parent's HEAD gitlink — reviewing every file a freshly
+// added repo ever had would drown the change that matters, the add itself —
+// and one nobody recorded reviews its own uncommitted work only.
+async function submoduleBase(parent: ReviewRepo, sub: string, dir: string): Promise<string> {
+  for (const ref of [parent.base, 'HEAD']) {
+    try {
+      const sha = (await git(parent.dir, ['rev-parse', `${ref}:${sub}`])).trim()
+      await git(dir, ['cat-file', '-e', `${sha}^{commit}`])
+      return sha
+    } catch {
+      /* the gitlink is not there, or the submodule has not fetched it */
+    }
+  }
+  try {
+    return (await git(dir, ['rev-parse', 'HEAD'])).trim()
+  } catch {
+    return ''
+  }
+}
+
+// The worktree and every submodule checked out under it, recursively, parents
+// before children. A declared submodule with no `.git` inside was never
+// initialised: there is no checkout to read, so it is not a repo here.
+async function reviewRepos(worktreePath: string): Promise<ReviewRepo[]> {
+  const root: ReviewRepo = { path: '', dir: worktreePath, parent: '', base: await reviewBase(worktreePath) }
+  const repos = [root]
+  const walk = async (repo: ReviewRepo): Promise<void> => {
+    for (const sub of await gitmodulePaths(repo.dir)) {
+      const dir = join(repo.dir, sub)
+      if (!existsSync(join(dir, '.git'))) continue
+      const child: ReviewRepo = {
+        path: repo.path ? `${repo.path}/${sub}` : sub,
+        dir,
+        parent: repo.path,
+        base: await submoduleBase(repo, sub, dir)
+      }
+      repos.push(child)
+      await walk(child)
+    }
+  }
+  await walk(root)
+  return repos
+}
+
+// Every file that differs from the review base, across the worktree and every
+// submodule under it. A submodule's files carry `repo`, and their paths run
+// from the worktree root so every consumer that joins a path to the root
+// (open, edit, diff) keeps working. The gitlink the parent lists for a
+// submodule (`M app`) is dropped: the files inside stand for it, and a pointer
+// that moved with a clean tree is the submodules() list's to report.
 export async function changedFiles(worktreePath: string): Promise<ChangedFile[]> {
-  const base = await reviewBase(worktreePath)
+  const repos = await reviewRepos(worktreePath)
+  const gitlinks = new Set(repos.map((r) => r.path))
+  const all: ChangedFile[] = []
+  for (const repo of repos) {
+    const prefix = repo.path ? `${repo.path}/` : ''
+    for (const file of await collectChanges(repo.dir, repo.base)) {
+      const relPath = prefix + file.relPath
+      if (gitlinks.has(relPath)) continue
+      all.push(repo.path ? { ...file, relPath, repo: repo.path } : file)
+    }
+  }
+  return all.sort((a, b) => a.relPath.localeCompare(b.relPath))
+}
+
+// Every submodule checked out under the worktree, with what its parent sees of
+// it — the repo rows of the Changes list, and the only trace of a pointer that
+// moved while the tree stayed clean.
+export async function submodules(worktreePath: string): Promise<SubmoduleState[]> {
+  const repos = await reviewRepos(worktreePath)
+  const byPath = new Map(repos.map((r) => [r.path, r]))
+  const sha = (dir: string, args: string[]): Promise<string> =>
+    git(dir, args)
+      .then((out) => out.trim())
+      .catch(() => '')
+  return Promise.all(
+    repos
+      .filter((r) => r.path)
+      .map(async (r) => {
+        const parent = byPath.get(r.parent) as ReviewRepo
+        const rel = parent.path ? r.path.slice(parent.path.length + 1) : r.path
+        const [head, branch, recorded] = await Promise.all([
+          sha(r.dir, ['rev-parse', 'HEAD']),
+          // `-q` exits 1 on a detached HEAD: no branch, not an error.
+          sha(r.dir, ['symbolic-ref', '--short', '-q', 'HEAD']),
+          sha(parent.dir, ['rev-parse', `HEAD:${rel}`])
+        ])
+        const ahead =
+          head && recorded && head !== recorded
+            ? Number(await sha(r.dir, ['rev-list', '--count', `${recorded}..HEAD`])) || 0
+            : 0
+        return { path: r.path, parent: r.parent, branch: branch || undefined, head, recorded, ahead }
+      })
+  )
+}
+
+// One repo's files against one base: tracked changes (committed + uncommitted)
+// via `git diff`, plus untracked files via `ls-files --others`.
+async function collectChanges(worktreePath: string, base: string): Promise<ChangedFile[]> {
   const map = new Map<string, ChangedFile>()
 
   // Tracked files that still differ from HEAD (staged + unstaged) — i.e. not yet
@@ -1157,28 +1280,32 @@ export async function changedFiles(worktreePath: string): Promise<ChangedFile[]>
 // view wants git's default three; the prose view asks for a number larger than
 // any file so the patch comes back as ONE hunk spanning the whole document —
 // prose cut into three-line neighbourhoods reads as fragments, not as a file.
+//
+// A path inside a submodule is diffed by that submodule, against its own base:
+// the superproject's git sees the gitlink there, not the file.
 export async function fileDiff(
   worktreePath: string,
   relPath: string,
   context?: number
 ): Promise<string> {
-  const base = await reviewBase(worktreePath)
+  const repos = await reviewRepos(worktreePath)
+  // The deepest repo whose path contains the file — nested submodules share a
+  // prefix with the one that holds them.
+  const owner = repos
+    .filter((r) => r.path && relPath.startsWith(`${r.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0] ?? repos[0]
+  const dir = owner.dir
+  const base = owner.base
+  const path = owner.path ? relPath.slice(owner.path.length + 1) : relPath
   const width = context === undefined ? [] : [`-U${Math.max(0, Math.trunc(context))}`]
   try {
-    const out = await git(worktreePath, ['diff', ...width, base, '--', relPath])
+    const out = await git(dir, ['diff', ...width, base, '--', path])
     if (out.trim()) return out
   } catch {
     /* fall through to the untracked path */
   }
   try {
-    return await gitAllowFail(worktreePath, [
-      'diff',
-      '--no-index',
-      ...width,
-      '--',
-      '/dev/null',
-      relPath
-    ])
+    return await gitAllowFail(dir, ['diff', '--no-index', ...width, '--', '/dev/null', path])
   } catch {
     return ''
   }

@@ -590,6 +590,29 @@ export interface ChangedFile {
   // uncommitted edits or is untracked — the review list groups on this so a
   // commit moves files from "Not committed" to "Committed".
   committed: boolean
+  // The submodule this file lives in (its path from the worktree root, e.g.
+  // `app/packages/ui`), when it is not the worktree's own repo. `relPath` is
+  // still from the worktree root — it is what the OS, the editor and `file_diff`
+  // take — and the Changes list is what strips the prefix.
+  repo?: string
+}
+
+// One submodule checkout under a worktree, at any depth, as the superproject
+// sees it: which repo records it, where its HEAD is against the commit that
+// repo has on record. The Changes list draws one repo row per entry.
+export interface SubmoduleState {
+  // From the worktree root, POSIX: `app`, `app/packages/ui`.
+  path: string
+  // The repo whose tree records this one: '' for the worktree itself.
+  parent: string
+  // Unset when the checkout is detached.
+  branch?: string
+  head: string
+  // The gitlink at the parent's HEAD; '' when the parent has none yet.
+  recorded: string
+  // Commits on `head` that `recorded` lacks — how far the checkout ran ahead
+  // of what its parent committed to.
+  ahead: number
 }
 
 // One file touched by a single commit (from `git log --name-status --numstat`).

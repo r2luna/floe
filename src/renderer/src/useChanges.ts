@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ChangedFile } from '../../shared/types'
+import type { ChangedFile, SubmoduleState } from '../../shared/types'
 
 export interface Changes {
   files: ChangedFile[]
+  /** Every submodule checked out under the worktree — the list's repo rows. */
+  repos: SubmoduleState[]
   loading: boolean
   error?: string
   /**
@@ -22,19 +24,25 @@ export interface Changes {
  */
 export function useChanges(worktreePath?: string): Changes {
   const [files, setFiles] = useState<ChangedFile[]>([])
+  const [repos, setRepos] = useState<SubmoduleState[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
 
   const reload = useCallback(() => {
     if (!worktreePath) {
       setFiles([])
+      setRepos([])
       return
     }
     setLoading(true)
-    window.floe.review
-      .changedFiles(worktreePath)
-      .then((list) => {
+    // The repo rows ride along with the files: one reload, one consistent list.
+    Promise.all([
+      window.floe.review.changedFiles(worktreePath),
+      window.floe.review.submodules(worktreePath).catch((): SubmoduleState[] => [])
+    ])
+      .then(([list, subs]) => {
         setFiles(list)
+        setRepos(subs)
         setError(undefined)
       })
       .catch((e: Error) => setError(e.message))
@@ -59,5 +67,5 @@ export function useChanges(worktreePath?: string): Changes {
     [worktreePath]
   )
 
-  return { files, loading, error, diffOf }
+  return { files, repos, loading, error, diffOf }
 }

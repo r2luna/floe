@@ -45,6 +45,7 @@ import {
 import { DONE, setProjectReport } from './config/colony'
 import {
   changedFiles,
+  submodules,
   createWorktree,
   fileDiff,
   listBranches,
@@ -745,6 +746,19 @@ function registerWorktreeTools(server: McpServer, token: string): void {
     async ({ worktree, path }) => {
       try {
         return textResult(await fileDiff(worktree, path))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'submodules',
+    "A worktree's submodule checkouts, at every depth, as the superproject sees them: branch, HEAD against the commit the parent records, how far ahead — the repo rows of the Changes panel. Their files come from changed_files, with `repo` set.",
+    { worktree: z.string().describe('The worktree path.') },
+    async ({ worktree }) => {
+      try {
+        return textResult(await submodules(worktree))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

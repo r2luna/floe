@@ -3688,6 +3688,54 @@ button {
   font-size: 11px;
 }
 
+/* A submodule in the changes tree: a folder row that carries a repo. The branch
+   glyph says it is one; the ref on the right says what the superproject sees
+   of it — the branch, how far HEAD ran past the recorded commit, dirty or
+   clean. Caption size in the faint tone: it labels the row, the name is what
+   you read. Amber when the pointer moved: the parent does not have this yet. */
+.change-repo-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /* Its own width, never shrunk: in a narrow panel the name is what you read,
+     so the ref (below) is what gives way. Capped so a long path still leaves
+     the ref a few words. */
+  flex: 1 0 auto;
+  max-width: 65%;
+}
+
+.change-repo-glyph {
+  flex: none;
+  color: var(--dim);
+}
+
+.change-repo-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.change-repo-ref {
+  /* Shrinks four times as readily as the name beside it and ellipsizes:
+     `main · +1 commit · dirty` is 24 characters, and a 250px panel does not
+     have them to spare after the name. */
+  flex: 0 4 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.change-repo-ref[data-moved] {
+  color: #c9a05f;
+}
+
+:root[data-theme='light'] .change-repo-ref[data-moved] {
+  color: #8a6314;
+}
+
 /* --- commands ------------------------------------------------------------ */
 
 /* A command row is two lines, not one: the name and its state read at a glance,

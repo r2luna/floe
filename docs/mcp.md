@@ -73,7 +73,7 @@ as that session under a token it was lent (`peerMcp`).
 1. **Main-process tools** — actions that live in main (git, sessionStore, the
    agent conns): `list_projects`, `list_worktrees`, `create_worktree` (runs
    provisioning like the in-app flow), `remove_worktree`, `merge_worktree`,
-   `worktree_status`, `list_branches`, `changed_files`, `file_diff`,
+   `worktree_status`, `list_branches`, `changed_files`, `file_diff`, `submodules`,
    `find_definition`, `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with
    `wait=true` for synchronous session-to-session calls), `ask_peer` (ask
@@ -119,7 +119,8 @@ as that session under a token it was lent (`peerMcp`).
      one write, so a mode the new harness cannot do snaps instead of failing the
      turn later) and `close_session`.
    - **Review**: `list_commits`, `commit_diff` and `set_review_base`
-     (clear/restore/status) alongside `changed_files` / `file_diff`.
+     (clear/restore/status) alongside `changed_files` / `file_diff` / `submodules`
+     (files inside a submodule carry `repo`; the list walks nested submodules too).
    - **Plans**: `plan_phases` and `copy_plan` (which refuses to overwrite).
    - **Accounts**: `harness_usage` — every harness's own plan window, for an
      agent deciding who to hand work to.

@@ -45,6 +45,7 @@ import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
 import {
   changedFiles,
+  submodules,
   lastCommit,
   clearReview,
   commitFileDiff,
@@ -1103,6 +1104,7 @@ export function registerFileIpc(): void {
     return path
   })
   handle('review:changedFiles', (_event, worktreePath: string) => changedFiles(worktreePath))
+  handle('review:submodules', (_event, worktreePath: string) => submodules(worktreePath))
   handle('review:lastCommit', (_event, worktreePath: string) => lastCommit(worktreePath))
   handle('review:fileDiff', (_event, worktreePath: string, relPath: string, context?: number) =>
     fileDiff(worktreePath, relPath, context)

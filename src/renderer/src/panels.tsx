@@ -67,7 +67,7 @@ import { backendLabel, backendOf, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
-import { buildChangeTree, flattenChanges, isOpen } from './changesTree'
+import { buildChangeTree, countRepos, flattenChanges, isOpen, repoRef, type ChangeNode } from './changesTree'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
 import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
 import { wordAt } from './definition'
@@ -3425,18 +3425,36 @@ function ChangesList({
 }) {
   const [flipped, setFlipped] = useState<Set<string>>(() => flippedChangeDirsByRoot.get(root ?? '') ?? new Set())
   useEffect(() => setFlipped(flippedChangeDirsByRoot.get(root ?? '') ?? new Set()), [root])
-  const tree = useMemo(() => buildChangeTree(changes.files), [changes.files])
+  const asList = flat || !!find?.trim()
+  const tree = useMemo(
+    () => buildChangeTree(changes.files, changes.repos, asList),
+    [changes.files, changes.repos, asList]
+  )
 
-  if (changes.loading && !changes.files.length) return <p className="empty">Loading…</p>
+  if (changes.loading && !tree.length) return <p className="empty">Loading…</p>
   if (changes.error) return <p className="empty error">{changes.error}</p>
-  if (!changes.files.length) return <p className="empty">No changes.</p>
+  // A submodule whose pointer moved is a change with no file in it, so the
+  // tree, not the file list, decides whether there is anything to show.
+  if (!tree.length) return <p className="empty">No changes.</p>
 
   const total = changes.files.length
+  const repos = countRepos(tree)
   const add = changes.files.reduce((n, f) => n + f.additions, 0)
   const del = changes.files.reduce((n, f) => n + f.deletions, 0)
-  const asList = flat || !!find?.trim()
-  // Factored out of every row and shown once — see commonDir in diff.ts.
-  const base = asList ? commonDir(changes.files.map((f) => f.relPath)) : ''
+  // Factored out of every row and shown once — see commonDir in diff.ts. Once
+  // PER REPO: a submodule's files share a prefix of their own, and one across
+  // repos would be a path that exists in neither.
+  const baseOf = (nodes: ChangeNode[]): string =>
+    asList ? commonDir(nodes.filter((n) => n.type === 'file').map((n) => n.name)) : ''
+  const bases = new Map<string, string>([['', baseOf(tree)]])
+  const collectBases = (nodes: ChangeNode[]): void => {
+    for (const n of nodes)
+      if (n.type === 'repo') {
+        bases.set(n.path, baseOf(n.children))
+        collectBases(n.children)
+      }
+  }
+  collectBases(tree)
 
   const toggle = (path: string): void => {
     const next = new Set(flipped)
@@ -3475,39 +3493,78 @@ function ChangesList({
         <span>
           {total} {total === 1 ? 'file' : 'files'}
         </span>
+        {repos > 0 && (
+          <span>
+            · {repos} {repos === 1 ? 'repo' : 'repos'}
+          </span>
+        )}
         {add > 0 && <span className="stat-add">+{add}</span>}
         {del > 0 && <span className="stat-del">−{del}</span>}
       </div>
-      {base && <div className="changes-base">{base}</div>}
-      {asList
-        ? changes.files.map((f) => fileRow(f, f.relPath.slice(base.length)))
-        : flattenChanges(tree, total, flipped).map(({ node, depth, parent }) => {
-            if (node.type === 'file') return fileRow(node.file, node.name, depth, parent)
-            const open = isOpen(node.path, depth, total, flipped)
-            return (
-              <button
-                className="row change-row change-dir-row"
-                key={`dir:${node.path}`}
-                title={node.path}
-                style={{ paddingLeft: 8 + depth * 12 }}
-                // The same markers the files tree carries, so `l` and `h` read
-                // both lists the same way — see files.expand in registry.ts.
-                data-dir={node.path}
-                data-open={open || undefined}
-                data-parent={parent}
-                onClick={() => toggle(node.path)}
-              >
-                {open ? (
-                  <IconChevronDown size={13} stroke={1.8} className="file-mark" />
-                ) : (
-                  <IconChevronRight size={13} stroke={1.8} className="file-mark" />
-                )}
-                <span className="row-name">{node.name}</span>
-                <span className="change-count">{node.files}</span>
-                <Stat additions={node.additions} deletions={node.deletions} />
-              </button>
-            )
-          })}
+      {bases.get('') && <div className="changes-base">{bases.get('')}</div>}
+      {flattenChanges(tree, total, flipped).map(({ node, depth, parent }) => {
+        if (node.type === 'file') return fileRow(node.file, node.name.slice((bases.get(parent) ?? '').length), depth, parent)
+        const open = isOpen(node.path, depth, total, flipped)
+        const chevron = open ? (
+          <IconChevronDown size={13} stroke={1.8} className="file-mark" />
+        ) : (
+          <IconChevronRight size={13} stroke={1.8} className="file-mark" />
+        )
+        if (node.type === 'dir')
+          return (
+            <button
+              className="row change-row change-dir-row"
+              key={`dir:${node.path}`}
+              title={node.path}
+              style={{ paddingLeft: 8 + depth * 12 }}
+              // The same markers the files tree carries, so `l` and `h` read
+              // both lists the same way — see files.expand in registry.ts.
+              data-dir={node.path}
+              data-open={open || undefined}
+              data-parent={parent}
+              onClick={() => toggle(node.path)}
+            >
+              {chevron}
+              <span className="row-name">{node.name}</span>
+              <span className="change-count">{node.files}</span>
+              <Stat additions={node.additions} deletions={node.deletions} />
+            </button>
+          )
+        // A submodule: a folder row that carries a repo. The glyph says which;
+        // the ref says what the superproject sees of it. A pointer that moved
+        // with a clean tree has no rows to open, so no chevron either.
+        const ref = repoRef(node)
+        const base = open ? bases.get(node.path) : ''
+        return (
+          <Fragment key={`repo:${node.path}`}>
+            <button
+              className="row change-row change-dir-row change-repo-row"
+              title={node.path}
+              style={{ paddingLeft: 8 + depth * 12 }}
+              data-dir={node.path}
+              data-open={open || undefined}
+              data-parent={parent}
+              onClick={() => toggle(node.path)}
+            >
+              {node.children.length ? chevron : <span className="file-mark" />}
+              <span className="row-name change-repo-name">
+                <IconGitBranch size={12} stroke={1.6} className="change-repo-glyph" />
+                <span className="change-repo-text">{node.name}</span>
+              </span>
+              <span className="change-repo-ref" data-moved={ref.moved || undefined}>
+                {ref.text}
+              </span>
+              <span className="change-count">{node.files}</span>
+              <Stat additions={node.additions} deletions={node.deletions} />
+            </button>
+            {base && (
+              <div className="changes-base" style={{ paddingLeft: 8 + (depth + 1) * 12 }}>
+                {base}
+              </div>
+            )}
+          </Fragment>
+        )
+      })}
     </>
   )
 }
