@@ -337,7 +337,11 @@ export type McpCommand =
   // Open the browser panel in the CALLER's session, not the one on screen.
   // `sessionKeys` is every name that session answers to (identity.ts), empty
   // when the caller is no Floe session — then it opens where you are.
-  | { kind: 'open_browser'; callerKey: string; sessionKeys: string[] }
+  //
+  // `url` carries the page, because on the headless daemon the command channel
+  // is the ONLY way there: that process has no view of its own, and the panel
+  // that will show the page belongs to whichever Floe is attached.
+  | { kind: 'open_browser'; callerKey: string; sessionKeys: string[]; url?: string }
   // Run a registry command (the same ids the palette and the keymap dispatch).
   | { kind: 'run_command'; callerKey: string; requestId: string; commandId: string; arg?: string }
   // List the registry's commands with their palette metadata and availability.

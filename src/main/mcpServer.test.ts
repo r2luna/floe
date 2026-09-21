@@ -736,8 +736,12 @@ test('on the headless server the browser tools refuse instead of faking a page',
   // call there reports a success that never happened.
   process.env.FLOE_IS_SERVER = '1'
   try {
+    // open_browser is NOT here: it is the one tool that still works headless,
+    // because it only has to put a url on screen and the command channel
+    // carries that to the attached Floe. The rest have to READ or DRIVE a page,
+    // which needs a view this process does not have.
     const every = [
-      'open_browser', 'browser_navigate', 'browser_snapshot', 'browser_screenshot',
+      'browser_navigate', 'browser_snapshot', 'browser_screenshot',
       'browser_screenshot_to_desk', 'browser_devtools', 'browser_history', 'browser_evaluate',
       'browser_click', 'browser_type', 'browser_press'
     ]
@@ -752,6 +756,12 @@ test('on the headless server the browser tools refuse instead of faking a page',
       const out = (await callTool(name, args)) as unknown as { error?: string }
       assert.match(String(out.error), /headless server/, `${name} must say why, not answer for a view it does not have`)
     }
+    // It gets as far as wanting a window, which is the desktop-only failure —
+    // it is no longer turned away for being on the server.
+    const opened = (await callTool('open_browser', { url: 'http://127.0.0.1:8787/preview.html' })) as unknown as {
+      error?: string
+    }
+    assert.doesNotMatch(String(opened.error), /headless server/, 'open_browser must survive on the daemon')
   } finally {
     delete process.env.FLOE_IS_SERVER
   }

@@ -2764,8 +2764,6 @@ function registerBrowserTools(server: McpServer, token: string): void {
     'Open the internal browser panel and optionally navigate it. Local URLs such as localhost:3000 work without a scheme.',
     { url: z.string().optional().describe('The URL to open. Omit to show the current page.') },
     async ({ url }) => {
-      const headless = noBrowserHere()
-      if (headless) return textResult({ error: headless })
       const win = getWindow()
       if (!win) return textResult({ error: 'No Floe window is open.' })
       // Opening is fire-and-forget: the renderer may currently point at a
@@ -2777,8 +2775,17 @@ function registerBrowserTools(server: McpServer, token: string): void {
       pushCommand({
         kind: 'open_browser',
         callerKey: token,
-        sessionKeys: resolveAgentIdentity(token) ? agentIdentityNames(token) : []
+        sessionKeys: resolveAgentIdentity(token) ? agentIdentityNames(token) : [],
+        url
       })
+      // On the daemon the command above IS the navigation. This process has no
+      // view — but the Floe attached to it does, and its panel is the one you
+      // are looking at, so the page belongs there rather than on the server's
+      // own screen (which nobody is sitting at). Answering the state of a fake
+      // view here is what made this read as a browser that refuses to load.
+      if (noBrowserHere()) {
+        return textResult({ opened: true, url: url ?? null, where: 'the browser panel of the Floe attached to this server' })
+      }
       const browser = await import('./browser')
       const key = browser.browserKeyFor(win, browserNames(token))
       return textResult(url ? await browser.navigateBrowser(win, url, key) : browser.browserState(win, key))
@@ -2895,7 +2902,7 @@ function browserNames(token: string): string[] {
  */
 function noBrowserHere(): string | undefined {
   if (!process.env.FLOE_IS_SERVER) return undefined
-  return 'This Floe is the headless server (no desktop, no browser view), so the browser tools cannot run here. Drive a browser on the host directly — or run the tool from a desktop Floe.'
+  return 'This Floe is the headless server: it has no browser view of its own, so a page cannot be read or driven from here. Use open_browser to put a URL on screen — it is shown by the Floe attached to this server.'
 }
 
 async function browserCall(

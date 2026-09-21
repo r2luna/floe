@@ -2430,8 +2430,17 @@ export default function App() {
         const shown = sessionKeyOf(ctxRef.current.lane)
         if (!keys.length || (shown && keys.includes(shown))) {
           runCommand(REGISTRY, ctxRef.current, 'browser.open')
+          // Open, then hand the page over — the order bash.preview and
+          // previewInBrowser already use. This is also the only navigation a
+          // headless caller gets: that Floe has no view, so the url rides the
+          // command here and OUR browser loads it.
+          if (command.url) void window.floe.browser.navigate(command.url)
           return
         }
+        // Filed for a chat that is not on screen: no navigate. `browser.navigate`
+        // drives whichever page is ACTIVE, and that is the one you are reading —
+        // an off-screen agent must not steer it. The panel comes up blank and
+        // the agent can say where to point it.
         bySession.current = fileIntoSession(bySession.current, keys, mkPanel('browser'))
         return
       }
