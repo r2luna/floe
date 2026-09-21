@@ -141,3 +141,31 @@ test('browserKeyFor prefers the on-screen name when the lane keys the chat by an
   selectBrowserSession(win, 'claude-a')
   assert.equal(browserKeyFor(win, ['chat-a', 'claude-a']), 'claude-a')
 })
+
+test('a closed window drops its pages without reaching through the dead window', () => {
+  const id = nextWindowId++
+  let closed: (() => void) | undefined
+  let destroyed = false
+  const win = {
+    // Electron throws on every property of a destroyed window, `webContents`
+    // included — and `closed` only ever fires once it is destroyed.
+    get webContents() {
+      if (destroyed) throw new TypeError('Object has been destroyed')
+      return { id }
+    },
+    on: (event: string, handler: () => void) => {
+      if (event === 'closed') closed = handler
+    },
+    isDestroyed: () => destroyed
+  } as unknown as Electron.BrowserWindow
+
+  selectBrowserSession(win, 'chat-a')
+  assert.ok(closed, 'the window should have a closed handler')
+  destroyed = true
+  assert.doesNotThrow(closed)
+
+  // The host went with the window: nothing is on screen for a window that
+  // comes back on the same id.
+  destroyed = false
+  assert.equal(browserKeyFor(win, ['chat-b', 'chat-a']), 'chat-b')
+})

@@ -94,7 +94,12 @@ function hostFor(win: BrowserWindow): Host {
   if (!host) {
     host = { active: '', sessions: new Map() }
     hosts.set(id, host)
-    win.on('closed', () => destroyBrowser(win))
+    // Close over the id, not the window: `closed` fires once the window is
+    // already gone, and every property access on it (`win.webContents`) throws
+    // "Object has been destroyed" from there. That throw leaves a pending napi
+    // exception, and the next node-pty callback to cross back into JS turns it
+    // into a SIGABRT inside pty.node — the app died on close, blaming the PTY.
+    win.on('closed', () => destroyBrowser(id))
   }
   return host
 }
@@ -243,14 +248,21 @@ export function unmountBrowser(win: BrowserWindow, key?: string): void {
   session.mounted = false
 }
 
-export function destroyBrowser(win: BrowserWindow): void {
-  const host = hosts.get(win.webContents.id)
+/**
+ * Drop a window's pages, keyed by its host webContents id.
+ *
+ * Takes the id rather than the window because it runs from `closed`, where the
+ * BrowserWindow is unusable (see hostFor). Nothing is unmounted here either:
+ * the content view holding the pages died with the window, so only the pages
+ * themselves are left to close.
+ */
+export function destroyBrowser(hostId: number): void {
+  const host = hosts.get(hostId)
   if (!host) return
   for (const session of host.sessions.values()) {
-    if (session.mounted && !win.isDestroyed()) win.contentView.removeChildView(session.view)
-    session.view.webContents.close()
+    if (!session.view.webContents.isDestroyed()) session.view.webContents.close()
   }
-  hosts.delete(win.webContents.id)
+  hosts.delete(hostId)
 }
 
 export function browserState(win: BrowserWindow, key?: string): BrowserState {
