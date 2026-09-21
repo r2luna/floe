@@ -2764,6 +2764,8 @@ function registerBrowserTools(server: McpServer, token: string): void {
     'Open the internal browser panel and optionally navigate it. Local URLs such as localhost:3000 work without a scheme.',
     { url: z.string().optional().describe('The URL to open. Omit to show the current page.') },
     async ({ url }) => {
+      const headless = noBrowserHere()
+      if (headless) return textResult({ error: headless })
       const win = getWindow()
       if (!win) return textResult({ error: 'No Floe window is open.' })
       // Opening is fire-and-forget: the renderer may currently point at a
@@ -2830,6 +2832,10 @@ function registerBrowserTools(server: McpServer, token: string): void {
   )
   server.tool('browser_screenshot', 'Capture the current internal browser page as PNG.', {}, async () => {
     try {
+      // Not browserCall's guard: this one answers an image, so it builds its
+      // own result — and on the daemon its shot is a 0-byte PNG.
+      const headless = noBrowserHere()
+      if (headless) return textResult({ error: headless })
       const win = getWindow()
       if (!win) return textResult({ error: 'No Floe window is open.' })
       const browser = await import('./browser')
@@ -2875,11 +2881,30 @@ function browserNames(token: string): string[] {
   return parent ? agentIdentityNames(parent) : agentIdentityNames(token)
 }
 
+/**
+ * Why a browser tool can't run here, or undefined when it can.
+ *
+ * The headless daemon (build:server) has no compositor, so
+ * src/server/shims/electron.ts fakes the native view: `loadURL` resolves
+ * without ever fetching, `getURL` answers '' and `capturePage` answers zero
+ * bytes. Left to run, every tool in the family reports a success that never
+ * happened — navigate comes back `about:blank` with no error, a screenshot is
+ * a 0-byte file, and the agent spends its turn debugging the page instead of
+ * being told there is no browser. It read as "the internal browser blocked
+ * file://"; it was the daemon answering for a view it does not have.
+ */
+function noBrowserHere(): string | undefined {
+  if (!process.env.FLOE_IS_SERVER) return undefined
+  return 'This Floe is the headless server (no desktop, no browser view), so the browser tools cannot run here. Drive a browser on the host directly — or run the tool from a desktop Floe.'
+}
+
 async function browserCall(
   token: string,
   run: (browser: typeof import('./browser'), win: BrowserWindow, key: string | undefined) => unknown | Promise<unknown>
 ): Promise<ReturnType<typeof textResult>> {
   try {
+    const headless = noBrowserHere()
+    if (headless) return textResult({ error: headless })
     const win = getWindow()
     if (!win) return textResult({ error: 'No Floe window is open.' })
     const browser = await import('./browser')

@@ -745,3 +745,30 @@ test('startMcpServer only resolves once the port is known', async () => {
   assert.ok(port() > 0, 'awaiting the boot promise is enough to have a real port')
   assert.doesNotMatch(mcpUrlFor('after-reboot'), /:0\//)
 })
+
+test('on the headless server the browser tools refuse instead of faking a page', async () => {
+  // The daemon's electron shim shape: loadURL resolves without fetching,
+  // getURL answers '' and capturePage answers 0 bytes. Answering a browser
+  // call there reports a success that never happened.
+  process.env.FLOE_IS_SERVER = '1'
+  try {
+    const every = [
+      'open_browser', 'browser_navigate', 'browser_snapshot', 'browser_screenshot',
+      'browser_screenshot_to_desk', 'browser_devtools', 'browser_history', 'browser_evaluate',
+      'browser_click', 'browser_type', 'browser_press'
+    ]
+    for (const name of every) {
+      const args: Record<string, string> = {}
+      if (name === 'browser_navigate') args.url = 'http://127.0.0.1:8787/preview.html'
+      if (name === 'browser_history') args.action = 'reload'
+      if (name === 'browser_evaluate') args.expression = '1'
+      if (name === 'browser_click' || name === 'browser_type') args.target = 'b1'
+      if (name === 'browser_type') args.text = 'x'
+      if (name === 'browser_press') args.key = 'Enter'
+      const out = (await callTool(name, args)) as unknown as { error?: string }
+      assert.match(String(out.error), /headless server/, `${name} must say why, not answer for a view it does not have`)
+    }
+  } finally {
+    delete process.env.FLOE_IS_SERVER
+  }
+})
