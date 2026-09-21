@@ -12,6 +12,12 @@ type Session = {
   visible: boolean
   navigationId: number
   state: BrowserState
+  /**
+   * The session's opening about:blank load. A fresh page is not ready the
+   * moment `createSession` returns, and the first navigation has to wait for
+   * it — see navigateBrowser.
+   */
+  ready: Promise<unknown>
 }
 
 /**
@@ -152,7 +158,8 @@ function createSession(win: BrowserWindow, key: string): Session {
     mounted: false,
     visible: true,
     navigationId: 0,
-    state: { url: START_URL, title: '', loading: false, canGoBack: false, canGoForward: false }
+    state: { url: START_URL, title: '', loading: false, canGoBack: false, canGoForward: false },
+    ready: Promise.resolve()
   }
   hostFor(win).sessions.set(key, session)
 
@@ -174,7 +181,10 @@ function createSession(win: BrowserWindow, key: string): Session {
     void navigateBrowser(win, url, key)
     return { action: 'deny' }
   })
-  void view.webContents.loadURL(START_URL).catch(() => undefined)
+  // Held, not fired and forgotten: a navigation started while this is still in
+  // flight is queued BEHIND it on the same webContents, so the blank page
+  // commits last and throws the real one away (navigateBrowser awaits it).
+  session.ready = view.webContents.loadURL(START_URL).catch(() => undefined)
   return session
 }
 
@@ -251,6 +261,13 @@ export async function navigateBrowser(win: BrowserWindow, raw: string, key?: str
   const session = sessionFor(win, key)
   const url = normalizeBrowserUrl(raw)
   const navigationId = ++session.navigationId
+  // When this call is what CREATED the session, its opening about:blank is
+  // still loading. Both loads sit on the same webContents and the blank one
+  // commits last: the page below it is discarded and the panel answers
+  // `about:blank` with no error at all. That is the whole of "the internal
+  // browser blocked file://" — the very first open_browser of a chat lost its
+  // page whatever the scheme was, and the second one always worked.
+  await session.ready
   try {
     await session.view.webContents.loadURL(url)
     return publish(session, { error: undefined })
