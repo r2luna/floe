@@ -41,3 +41,6 @@
 # [integrations]
 # jira-project = "PROJ"
 seeded = true
+
+[skills]
+favorites = ["deploy"]
