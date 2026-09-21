@@ -1927,6 +1927,15 @@ void app.whenReady().then(async () => {
   protocol.handle(MEDIA_SCHEME, (req) => mediaResponse(req.url, req.headers.get('Range')))
   registerIpc()
   ensureAgentHookInstalled()
+  // The in-app MCP control server: agents drive Floe over /mcp/<token>. First
+  // async step of boot, and AWAITED, because every session config embeds the
+  // port this bind resolves and the port is only readable from `listen`'s
+  // callback. Spawn a session before that and its --mcp-config names
+  // `127.0.0.1:0`: the session comes up with every mcp__floe__* tool answering
+  // ConnectionRefused and nothing saying why. reconcileColony below is a real
+  // path into that — it dispatches lanes synchronously. Lazy window getter, so
+  // running ahead of createWindow costs the server nothing.
+  await startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Runtime plugins from ~/.config/floe/plugins — loaded BEFORE the window so
   // the backends a plugin registers are already there when the preload asks
   // (backends:get runs at window load). A broken plugin logs and is skipped;
@@ -1939,9 +1948,6 @@ void app.whenReady().then(async () => {
   // Keep an installed `floe` command pointing at this build — an update moves
   // the binary the shim execs. No-op when the command was never installed.
   refreshCli(cliPaths())
-  // The in-app MCP control server: agents drive Floe over /mcp/<token>. Lazy
-  // window getter so ordering vs. createWindow doesn't matter.
-  startMcpServer(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Background auto-update: polls the GitHub release feed, installs on next quit.
   initAutoUpdate(() => localWindow ?? BrowserWindow.getAllWindows()[0])
   // Watchdog: log any turn that gets stuck "Thinking…" (never emits done) so a

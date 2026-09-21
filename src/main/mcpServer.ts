@@ -3123,11 +3123,23 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 // it's taken (a second Floe instance), retries once on an ephemeral port so the
 // app still works — per-session configs are rewritten each spawn, only the
 // global registration wants the fixed port.
-export function startMcpServer(getWindow: () => BrowserWindow | undefined): void {
+//
+// Returns once the port is KNOWN, and boot awaits it (index.ts) before the
+// window exists. Every session config carries `http://127.0.0.1:<port>/mcp/…`
+// and the port is only readable from `listen`'s callback — so a spawn that
+// raced the bind wrote `:0` into the file and that session came up with every
+// `mcp__floe__*` tool dead (ConnectionRefused), silently. Awaiting the bind is
+// what makes that race impossible rather than unlikely; the belt in
+// mcpConfigFor is there to make a regression loud instead of silent.
+export function startMcpServer(getWindow: () => BrowserWindow | undefined): Promise<void> {
   getWindowRef = getWindow
-  if (httpServer) return
+  if (httpServer) return Promise.resolve()
   httpServer = createServer((req, res) => {
     void handle(req, res)
+  })
+  let settle = (): void => {}
+  const bound = new Promise<void>((resolve) => {
+    settle = resolve
   })
   const onListening = (): void => {
     const addr = httpServer?.address()
@@ -3143,11 +3155,20 @@ export function startMcpServer(getWindow: () => BrowserWindow | undefined): void
     // command stays as the manual fallback. FLOE_MCP_NO_REGISTER keeps the
     // hermetic test from shelling `claude mcp add` on every `pnpm test`.
     if (boundPreferred && !process.env.FLOE_MCP_NO_REGISTER) void ensureGlobalRegistered()
+    settle()
   }
   httpServer.once('error', () => {
+    // The ephemeral retry. If it fails too, release boot anyway: an app with no
+    // control server is worse than an app with one, but an app that never opens
+    // a window is worse than both.
+    httpServer?.once('error', (e) => {
+      log('mcp-listen-failed', { error: (e as Error).message })
+      settle()
+    })
     httpServer?.listen(0, '127.0.0.1', onListening)
   })
   httpServer.listen(PREFERRED_PORT, '127.0.0.1', onListening)
+  return bound
 }
 
 // Register Floe's MCP server in the user's GLOBAL Claude config (`-s user`),
@@ -3222,7 +3243,11 @@ function clearSessionConfigs(): void {
 export function mcpConfigFor(key: string, worktreePath?: string): string {
   const file = join(app.getPath('temp'), `floe-mcp-${key}.json`)
   written.add(file)
-  written.add(file)
+  // Boot awaits the bind before any window exists (startMcpServer), so this
+  // cannot be reached with the port unknown. If it ever is, the file would name
+  // port 0 and every floe tool in that session would answer ConnectionRefused
+  // with nothing to read about why — so say it here.
+  if (!serverPort) log('mcp-config-before-listen', { key })
   try {
     writeFileSync(file, JSON.stringify(claudeMcpConfig(serversFor(key, worktreePath))), { mode: 0o600 })
   } catch {

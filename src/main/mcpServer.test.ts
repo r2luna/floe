@@ -44,13 +44,14 @@ const {
   sendOptions,
   transcriptLine
 } = await import('./mcpServer.ts')
+const { mcpUrlFor } = await import('./mcpHarness.ts')
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js')
 const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js')
 
 before(async () => {
-  startMcpServer(() => undefined) // no window — the tools exercised here don't need one
-  // Wait for the port: the preferred one, or the ephemeral fallback when a real
-  // Floe instance is running on this machine.
+  // Resolves once the port is bound — the preferred one, or the ephemeral
+  // fallback when a real Floe instance is running on this machine.
+  await startMcpServer(() => undefined) // no window — the tools exercised here don't need one
   await waitFor(() => port() > 0, 5000, 'the server to bind a port')
 })
 
@@ -236,7 +237,12 @@ test('mcpConfigFor writes a config file pointing at the token url', () => {
   const cfg = JSON.parse(readFileSync(path, 'utf8'))
   assert.equal(cfg.mcpServers.floe.type, 'http')
   assert.match(cfg.mcpServers.floe.url, /\/mcp\/abc-123$/)
+  // Never `127.0.0.1:0` — a config written before the bind resolved leaves the
+  // session with every floe tool answering ConnectionRefused, and says nothing.
+  assert.doesNotMatch(cfg.mcpServers.floe.url, /:0\//, 'the url must carry the bound port, not 0')
+  assert.match(cfg.mcpServers.floe.url, new RegExp(`127\\.0\\.0\\.1:${port()}/`))
 })
+
 
 test('skills lifecycle over MCP: create, update, read, rename, delete', async () => {
   const client = await connect()
@@ -722,4 +728,20 @@ test('every registered tool name is unique across the domain registrars', async 
   } finally {
     await client.close()
   }
+})
+
+test('startMcpServer only resolves once the port is known', async () => {
+  // The whole point of awaiting it at boot (index.ts): no session can spawn —
+  // and so no --mcp-config can be written — while the port is still 0.
+  shutdown()
+  assert.equal(port(), 0, 'shutdown clears the port')
+  const booted = startMcpServer(() => undefined)
+  assert.equal(port(), 0, 'the port is not known synchronously — that is the race')
+  // The bug, pinned: a session spawned in this window wrote a dead config, and
+  // the session came up with every floe tool answering ConnectionRefused.
+  const raced = JSON.parse(readFileSync(mcpConfigFor('raced'), 'utf8'))
+  assert.match(raced.mcpServers.floe.url, /127\.0\.0\.1:0\//, 'writing before the bind is what produced :0')
+  await booted
+  assert.ok(port() > 0, 'awaiting the boot promise is enough to have a real port')
+  assert.doesNotMatch(mcpUrlFor('after-reboot'), /:0\//)
 })
