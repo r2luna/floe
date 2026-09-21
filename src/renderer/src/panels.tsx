@@ -1035,7 +1035,7 @@ export function PanelBody({
     )
   // Keyed on the session so switching chats swaps the page, not just the state.
   if (kind === 'browser')
-    return <BrowserPanel key={openSession ?? ''} sessionKey={openSession ?? ''} onCommand={onCommand} />
+    return <BrowserPanel key={openSession ?? ''} sessionKey={openSession ?? ''} initialUrl={sub} onCommand={onCommand} />
   // Owns its own state: the account is global, so nothing above it needs to
   // hold the status or thread it back down.
   if (kind === 'account') return <AccountPanel onOpen={onOpen} />

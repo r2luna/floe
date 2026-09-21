@@ -2784,7 +2784,14 @@ function registerBrowserTools(server: McpServer, token: string): void {
       // own screen (which nobody is sitting at). Answering the state of a fake
       // view here is what made this read as a browser that refuses to load.
       if (noBrowserHere()) {
-        return textResult({ opened: true, url: url ?? null, where: 'the browser panel of the Floe attached to this server' })
+        // `delivered`, not `opened`: this process cannot see the panel and must
+        // not claim it painted. The page lands in the chat that ASKED, so it is
+        // on screen when that chat is — and waits on its panel when it is not.
+        return textResult({
+          delivered: true,
+          url: url ?? null,
+          where: 'the browser panel of the Floe attached to this server, in the chat that asked'
+        })
       }
       const browser = await import('./browser')
       const key = browser.browserKeyFor(win, browserNames(token))

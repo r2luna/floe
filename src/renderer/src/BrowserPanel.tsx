@@ -30,12 +30,21 @@ function boundsOf(el: HTMLElement): { x: number; y: number; width: number; heigh
   }
 }
 
-/** `sessionKey` picks the page: each Floe session keeps its own. */
+/**
+ * `sessionKey` picks the page: each Floe session keeps its own.
+ *
+ * `initialUrl` is a page an agent handed over while this chat was OFF SCREEN.
+ * There was no panel to navigate then, so the url was filed with the panel and
+ * waits here — without it, `open_browser` from a chat you had left answered
+ * "opened" and showed you nothing, ever.
+ */
 export function BrowserPanel({
   sessionKey,
+  initialUrl,
   onCommand
 }: {
   sessionKey: string
+  initialUrl?: string
   onCommand?: (id: string) => void
 }): React.JSX.Element {
   const viewport = useRef<HTMLDivElement>(null)
@@ -69,6 +78,16 @@ export function BrowserPanel({
         setState(next)
         setUrl(next.url)
       }
+      // Only onto a page that is still blank. This panel remounts every time
+      // you scroll it back into view, and the url it was filed with does not
+      // expire — so once you have browsed somewhere of your own, remounting
+      // must not drag you back to wherever the agent pointed.
+      if (!initialUrl || (next && next.url !== 'about:blank')) return
+      void window.floe.browser.navigate(initialUrl).then((after) => {
+        if (!after) return
+        setState(after)
+        setUrl(after.url)
+      })
     })
     return () => {
       cancelAnimationFrame(frame)
@@ -77,7 +96,7 @@ export function BrowserPanel({
       window.removeEventListener('resize', place)
       void window.floe.browser.unmount(sessionKey)
     }
-  }, [sessionKey])
+  }, [sessionKey, initialUrl])
 
   const navigate = (event: FormEvent): void => {
     event.preventDefault()

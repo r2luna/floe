@@ -2437,11 +2437,15 @@ export default function App() {
           if (command.url) void window.floe.browser.navigate(command.url)
           return
         }
-        // Filed for a chat that is not on screen: no navigate. `browser.navigate`
-        // drives whichever page is ACTIVE, and that is the one you are reading —
-        // an off-screen agent must not steer it. The panel comes up blank and
-        // the agent can say where to point it.
-        bySession.current = fileIntoSession(bySession.current, keys, mkPanel('browser'))
+        // Filed for a chat that is not on screen. It must NOT navigate now —
+        // `browser.navigate` drives whichever page is ACTIVE, and that is the
+        // one you are reading. So the url rides on the panel instead and the
+        // panel loads it when it mounts (BrowserPanel), which is the first
+        // moment a page exists that belongs to the chat that asked.
+        //
+        // Dropping the url here is what made `open_browser` from a chat you had
+        // left answer "opened" and show nothing, ever.
+        bySession.current = fileIntoSession(bySession.current, keys, mkPanel('browser', command.url))
         return
       }
       case 'open_plan': {
