@@ -26,7 +26,19 @@ import {
   readAttachment,
   renumberImageRefs
 } from './attachments'
+import { bangTokens, isBang } from './bang'
 import { isFileRef } from './fileRefs'
+import {
+  describePaste,
+  expandPastes,
+  insertPasteRail,
+  isBigPaste,
+  pasteNum,
+  pasteRailAt,
+  pasteRailBefore,
+  pasteRailOf,
+  renumberPasteRails
+} from './pastes'
 import { continueList, tokenizeMarkdown } from './markdown'
 import { applyTrigger, refBefore, triggerAt, type Trigger } from './trigger'
 import { capGroups, filterItems, type PaletteItem } from './fuzzy'
@@ -102,14 +114,21 @@ export function Composer({
   onDigit,
   onEmptyEnter,
   modelLeft,
+  shell,
   draftKey,
   historyKey
 }: {
   value: string
   onChange: (next: string) => void
-  /** Send, with the model and effort picked in this composer, plus whatever was
-      dropped or pasted into it. The chips live here, so they leave from here. */
-  onSend: (choice: ModelChoice, attached?: Attached) => void
+  /**
+   * Send, with the model and effort picked in this composer, plus whatever was
+   * dropped or pasted into it. The chips live here, so they leave from here.
+   *
+   * `message` is what is actually sent, which is not always what is on screen:
+   * a collapsed paste reads as a two-line rail and leaves as the 900 lines it
+   * stands for (pastes.ts). Callers must send `message` when it is given.
+   */
+  onSend: (choice: ModelChoice, attached?: Attached, message?: string) => void
   /**
    * What the composer is set to, and whether a PERSON set it.
    *
@@ -179,6 +198,13 @@ export function Composer({
   /** Put the model chip on the left, beside the tool buttons, instead of the
       far right — in a chat it then sits under the start of what you type. */
   modelLeft?: boolean
+  /**
+   * A `!` line here RUNS (bang.ts). Set by the caller, because only it knows
+   * whether there is a worktree to run in and an agent to hand the output to —
+   * the launcher has neither, and colouring `!` there would promise a run that
+   * never happens and send the line out as prose instead.
+   */
+  shell?: boolean
   /** Where the unsent message is filed — the same key its text is under. What
       was pasted in follows the text: without a key the chips only live as long
       as this composer is mounted. */
@@ -552,15 +578,22 @@ export function Composer({
 
   // Kept beside the text under the same key, so leaving the panel with a
   // pasted screenshot and coming back finds it still attached.
-  const { images, files, setImages, setFiles } = usePending(draftKey)
+  const { images, files, pastes, setImages, setFiles, setPastes } = usePending(draftKey)
+  // Which collapsed paste the caret is sitting in, if any — the rail is two
+  // lines on screen and this is how you see what is under them.
+  const [peek, setPeek] = useState<number | null>(null)
 
   // Memoised on the draft: the composer re-renders for plenty that is not
   // typing (a streaming panel above it, menu state), and re-tokenizing the
   // whole draft each time is pure repeat work. The image count is a dependency
   // because it decides which `image NN` tokens are references at all.
+  // Addressed to the shell: `!` and the command, painted as a command. Only
+  // where a `!` line actually runs — see `shell`.
+  const bang = Boolean(shell) && isBang(value)
+
   const mirrorTokens = useMemo(
-    () => tokenizeMarkdown(value, isRef, images.length),
-    [value, isRef, images.length]
+    () => (bang ? bangTokens(value) : tokenizeMarkdown(value, isRef, images.length)),
+    [bang, value, isRef, images.length]
   )
 
   const [rejected, setRejected] = useState<string[]>([])
@@ -721,6 +754,15 @@ export function Composer({
           setCaret(next.length - (value.length - img.end))
           return
         }
+        // A rail IS the paste it names, the same way an image's token is the
+        // image: erasing the block takes the text it stood for with it.
+        const rail = pasteRailBefore(value, el.selectionStart)
+        if (rail && rail.n >= 1 && rail.n <= pastes.length) {
+          e.preventDefault()
+          dropPaste(rail.n)
+          setCaret(rail.start)
+          return
+        }
         const cut = refBefore(value, el.selectionStart, isRef)
         if (cut) {
           e.preventDefault()
@@ -847,10 +889,51 @@ export function Composer({
   // Paste is the same gesture by another name: a screenshot on the clipboard
   // should land exactly where a dropped one does. Only claim the event when
   // files are actually present, or pasting text would stop working.
-  const onPaste = (e: React.ClipboardEvent) => {
-    if (!e.clipboardData.files.length) return
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (e.clipboardData.files.length) {
+      e.preventDefault()
+      void absorb(e.clipboardData.files)
+      return
+    }
+    // A wall of text is held rather than poured into the bar: nine hundred
+    // lines of crash log leave nothing of the message you were writing. Only
+    // when it is genuinely too big to read — below that it is text, and text
+    // is typed. What is held goes out in full on send (pastes.ts).
+    const text = e.clipboardData.getData('text/plain')
+    if (!text || !isBigPaste(text)) return
     e.preventDefault()
-    void absorb(e.clipboardData.files)
+    const el = e.currentTarget
+    const n = pastes.length + 1
+    // A paste over a selection replaces it, exactly as the browser's would.
+    const at = el.selectionStart
+    const cut = value.slice(0, at) + value.slice(el.selectionEnd)
+    const put = insertPasteRail(cut, at, n, text)
+    setPastes((prev) => [...prev, { id: crypto.randomUUID(), text }])
+    onChange(put.text)
+    setCaret(put.caret)
+  }
+
+  /** Take a paste back out: its rail, its text, and the numbering above it. */
+  const dropPaste = (n: number): string => {
+    const next = renumberPasteRails(value, n, pastes.length)
+    setPastes((prev) => prev.filter((_, i) => i !== n - 1))
+    setPeek(null)
+    onChange(next)
+    return next
+  }
+
+  /** Put a paste back where its rail is: it was held to keep the message
+      readable, and sometimes what you meant to do is edit it. */
+  const openPaste = (n: number): void => {
+    const rail = pasteRailOf(value, n)
+    const body = pastes[n - 1]?.text
+    if (!rail || body === undefined) return
+    const laid = value.slice(0, rail.start) + body + value.slice(rail.end)
+    setPastes((prev) => prev.filter((_, i) => i !== n - 1))
+    setPeek(null)
+    onChange(renumberPasteRails(laid, n, pastes.length))
+    setCaret(rail.start + body.length)
+    input.current?.focus()
   }
 
   const onDrop = (e: React.DragEvent) => {
@@ -882,22 +965,37 @@ export function Composer({
     // The chips go with the message, and only then stop being pending. An
     // empty send is a no-op downstream, so the attachments stay put rather
     // than being thrown away on a stray ⏎.
-    onSend(choice, images.length || files.length ? { images, files } : undefined)
+    onSend(
+      choice,
+      images.length || files.length ? { images, files } : undefined,
+      // What is on screen is rails; what leaves is the text they stand for.
+      pastes.length ? expandPastes(value, pastes) : undefined
+    )
     // A sent message ends the edit: the next draft starts typing.
     if (vimOn) setVim(vimStart('insert'))
-    if (value.trim() !== '') {
+    // A `!` line takes nothing with it — the message that goes out is the
+    // command's OUTPUT, written afterwards, and an image dropped in before you
+    // thought to run something must still be there to send with what you say
+    // about it. Dropping the chips here loses a file nothing ever carried.
+    if (!bang && value.trim() !== '') {
       setImages([])
       setFiles([])
+      setPastes([])
+      setPeek(null)
       setRejected([])
     }
   }
 
   const chips = images.length + files.length + rejected.length > 0
+  // The rail the caret is in may have been erased since — a paste that is gone
+  // has nothing to show, and the panel goes with it.
+  const peeked = peek ? pastes[peek - 1] : undefined
 
   return (
     <div
       className="composer"
       data-boxed={boxed || undefined}
+      data-shell={bang || undefined}
       data-tone={modes.length ? mode : undefined}
       ref={box}
       data-model-left={modelLeft || undefined}
@@ -949,6 +1047,49 @@ export function Composer({
         </div>
       )}
 
+      {/* What the rail the caret is in stands for. It opens by landing on the
+          rail and closes by leaving it — no key to remember, and no way to be
+          left with a panel you cannot get rid of. Its two actions come before
+          the textarea in the DOM, so ⇧⇥ out of the message reaches them. */}
+      {peeked && (
+        <div className="paste-peek">
+          <div className="paste-peek-head">
+            <span>
+              paste {pasteNum(peek ?? 0)} · {describePaste(peeked.text)}
+            </span>
+            <span className="paste-peek-acts">
+              <button
+                className="paste-act"
+                // Never take focus off the message to do something to it.
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => openPaste(peek ?? 0)}
+              >
+                expand into text
+              </button>
+              <button
+                className="paste-act"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => dropPaste(peek ?? 0)}
+              >
+                remove
+              </button>
+            </span>
+          </div>
+          <pre className="paste-peek-body">{peeked.text}</pre>
+        </div>
+      )}
+
+      {/* What ⏎ is about to do, while it is not the usual thing. In flow above
+          the bar rather than floating over the transcript: the strip is the
+          panel's own footer growing a line, and a message that reads "this
+          runs" must not be the thing that covers what you are running it on. */}
+      {bang && (
+        <div className="composer-shell">
+          <span className="composer-shell-mark">!</span>
+          <span>shell mode — ⏎ runs this here and hands the output to the agent</span>
+        </div>
+      )}
+
       {/* One row: the text on the left edge, every action grouped on the
           right. The bar is the panel's footer — see `.composer` in the CSS. */}
       <div className="composer-bar">
@@ -990,6 +1131,9 @@ export function Composer({
           onSelect={(e) => {
             syncTrigger(e.currentTarget)
             blockCursor(e.currentTarget)
+            // Landing in a rail is asking what is under it — by click or by
+            // arrow key, which is the same question either way.
+            setPeek(pasteRailAt(value, e.currentTarget.selectionStart)?.n ?? null)
           }}
           onBlur={() => setTrigger(null)}
           onKeyDown={onKeyDown}

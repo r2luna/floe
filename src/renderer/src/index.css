@@ -1390,6 +1390,69 @@ button {
   border-color: var(--composer-lit, var(--accent));
 }
 
+/* Shell mode: the draft opens with `!`, so ⏎ runs a command instead of sending
+   a message (bang.ts). The Accept tone, and — unlike a mode — lit whether or not
+   the composer has focus: which key sends is not a thing to discover by
+   clicking back into the box. Last, and paired with [data-tone], because it
+   OVERRIDES the mode's tone: what ⏎ does outranks how it will run. */
+.composer[data-shell],
+.composer[data-tone][data-shell]:focus-within {
+  --composer-lit: #93b8a1;
+}
+
+.composer[data-shell] {
+  border-top-color: var(--composer-lit);
+}
+
+.composer[data-boxed][data-shell] {
+  border-color: var(--composer-lit);
+}
+
+:root[data-theme='light'] .composer[data-shell],
+:root[data-theme='light'] .composer[data-tone][data-shell]:focus-within {
+  --composer-lit: #2f7d52;
+}
+
+/* What ⏎ is about to do, said in words: the tone alone says "something is
+   different", not what. */
+.composer-shell {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 10px 0;
+  padding: 3px 9px;
+  border: 1px solid #283129;
+  background: #1b201d;
+  color: #93b8a1;
+  font-size: 11px;
+}
+
+.composer-shell-mark {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+
+:root[data-theme='light'] .composer-shell {
+  border-color: #b6d9c3;
+  background: #eef6f1;
+  color: #2f7d52;
+}
+
+/* The command itself, in the mirror behind the text (bangTokens). */
+.md-bang {
+  color: #93b8a1;
+  font-weight: 600;
+}
+
+.md-shell {
+  color: #93b8a1;
+}
+
+:root[data-theme='light'] .md-bang,
+:root[data-theme='light'] .md-shell {
+  color: #2f7d52;
+}
+
 /* Stacked, the way it always was: the text takes the width, the tools sit on
    their own row beneath it. */
 .composer[data-boxed] .composer-bar {
@@ -1804,6 +1867,73 @@ button {
     0 0 0 4px var(--edge);
   background: var(--well);
   color: #2f7350;
+}
+
+/* A big paste, collapsed to the rail that stands in for it — see pastes.ts.
+   Colour only: the rail is real characters in the textarea, and anything with
+   a width here would slide the mirror off the caret it sits under. */
+.md-paste-bar {
+  color: var(--accent);
+}
+
+.md-paste {
+  color: var(--dim);
+}
+
+.md-paste-line {
+  color: var(--faint);
+}
+
+/* What the rail stands for, while the caret is in it. Sits above the bar the
+   way the attachment chips do, and is the same recessed surface as any other
+   block of read-only text in the app. */
+.paste-peek {
+  margin: 10px 10px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  overflow: hidden;
+}
+
+.paste-peek-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.paste-peek-acts {
+  display: flex;
+  gap: 4px;
+}
+
+.paste-act {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.paste-act:hover,
+.paste-act:focus-visible {
+  color: var(--text-strong);
+  border-color: var(--edge);
+}
+
+.paste-peek-body {
+  max-height: 160px;
+  margin: 0;
+  padding: 7px 9px;
+  overflow: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
 }
 
 .tool {
@@ -4428,6 +4558,19 @@ button {
   background: var(--bg);
 }
 
+/* A page drawn in the reader. White, not `--bg`: this is the document's canvas,
+   and most pages never set one — they were written expecting a browser's white.
+   It fills the panel and scrolls inside itself, the way the browser panel does;
+   `s` swaps it for the source. */
+.file-page {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 70vh;
+  border: 0;
+  background: #ffffff;
+}
+
 /* A deck read as text: the slide's title heads its bullets, and the speaker
    notes sit under them, dimmed — they are not on the slide. */
 
@@ -6565,6 +6708,28 @@ kbd {
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
+}
+
+/* An inline code pill that names a page: still code, and now an address. The
+   colour has to be written here rather than left to `.chat-link`, which the
+   `.md .md-code` rule above outweighs. The arrow is the affordance — without it
+   a coloured pill is just a coloured pill. */
+.md .md-code-link,
+.irc-body .md-code-link {
+  color: #79b2cf;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+:root[data-theme='light'] .md .md-code-link,
+:root[data-theme='light'] .irc-body .md-code-link {
+  color: #2a6f9e;
+}
+
+.md-code-link svg {
+  margin-left: 4px;
+  vertical-align: -1px;
+  opacity: 0.75;
 }
 
 .md table {

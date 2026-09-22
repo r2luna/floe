@@ -13,6 +13,7 @@ import {
   IconFolders,
   IconFileDiff,
   IconFileText,
+  IconFileTypeHtml,
   IconGitBranch,
   IconGitCompare,
   IconGitMerge,
@@ -89,6 +90,7 @@ import { splitSkills } from '../../shared/skills'
 import { resetsIn } from '../../shared/resets'
 import { renderMarkdown, type MdLine } from './markdown'
 import { bashGist, bashProgram, highlightShell } from './shell'
+import { bangPrompt, isBang, readBang } from './bang'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
 import { sendToTerminal } from './terminalBus'
 import { CommandsPane } from './CommandsPane'
@@ -137,7 +139,7 @@ import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
 import { PreviewInBrowser, RunInTerminal } from './runInTerminal'
-import { previewTarget, previewUrl } from './previewTarget'
+import { inWorktree, previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
 import { RemovePanel } from './RemovePanel'
@@ -165,6 +167,7 @@ import { previewSound } from './sounds'
 import { omarchyAvailable } from './appearance'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
+import { mediaUrl } from '../../shared/mediaUrl.ts'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -468,7 +471,19 @@ export const KINDS = {
   // What a file row opens: the file as it is on disk, not as a patch. Shares
   // the diff's slot — both are "the file you just picked", and two of them side
   // by side would be the same file twice.
-  file: { icon: IconFile, title: 'file', width: 760, grow: true, min: 460, order: 50, slot: 'diff', needsProject: true },
+  file: {
+    icon: IconFile,
+    title: 'file',
+    width: 760,
+    grow: true,
+    min: 460,
+    order: 50,
+    slot: 'diff',
+    needsProject: true,
+    // The drawn/source switch, for the files that have two ways to be read: a
+    // page and a markdown document. The command decides when it applies.
+    action: { icon: IconFileTypeHtml, title: 'Page or source (s)', command: 'file.source' }
+  },
   // The same file, in your editor. Shares the diff's slot for the same reason
   // the reader does — pressing `e` turns the file window INTO the editor rather
   // than opening a second copy of it beside itself.
@@ -975,7 +990,9 @@ export function PanelBody({
   // `root` overrides the worktree — that is how a skill opens in the same
   // reader as any other file.
   if (kind === 'file')
-    return <FileView root={root ?? cwd} path={sub ?? ''} find={find} onDefinition={onDefinition} />
+    return (
+      <FileView root={root ?? cwd} path={sub ?? ''} find={find} view={view} onDefinition={onDefinition} />
+    )
   // The editor panel is a terminal running your editor, one per worktree: every
   // file you open lands in the same session, the way it would in a real
   // terminal. `sub` carries the file and the line — see editSub.
@@ -1874,6 +1891,38 @@ function ChatPanel({
   const onOpenRef = useRef(onOpen)
   onOpenRef.current = onOpen
   const cwd = session?.worktreePath
+
+  // The `!` command running right now, if any. Held so the composer can name
+  // what it is waiting on: ⏎ empties the draft, and without this a slow
+  // command leaves an empty box and no sign that anything is happening.
+  const [bangCmd, setBangCmd] = useState<string | null>(null)
+
+  /**
+   * `!command` — run it here and hand the output to the agent (bang.ts).
+   *
+   * What goes out is the RESULT, not the line typed. Queueing is not this
+   * function's business: `send` already decides whether a message starts a
+   * turn now or waits for the one in flight, and that decision belongs to the
+   * moment the output exists rather than to the moment the command was typed.
+   */
+  const runBang = useCallback(
+    async (command: string, going: ModelChoice): Promise<void> => {
+      if (!cwd) return
+      setBangCmd(command)
+      try {
+        const { output, code } = await window.floe.shell.run(cwd, command)
+        send(bangPrompt(command, output, code), going)
+      } catch (e) {
+        // The run itself fell over. Still a result, and still the agent's to
+        // see — swallowing it would make ⏎ do nothing at all.
+        send(bangPrompt(command, reason(e), -1), going)
+      } finally {
+        setBangCmd(null)
+      }
+    },
+    [cwd, send]
+  )
+
   const runInTerminal = useMemo(
     () =>
       cwd
@@ -1889,12 +1938,20 @@ function ChatPanel({
   )
   // The same shape as runInTerminal: open the panel, then hand the page to the
   // native view — the order the MCP open_browser tool already uses.
+  //
+  // Except for a page of this worktree, which never leaves for the browser at
+  // all: the reader draws it, beside the tree it came from. See inWorktree.
   const previewInBrowser = useMemo(
     () =>
       cwd
         ? (command: string) => {
             const target = previewTarget(command)
             if (!target) return
+            const inside = inWorktree(target, cwd)
+            if (inside) {
+              onOpenRef.current?.({ kind: 'file', sub: inside })
+              return
+            }
             onOpenRef.current?.({ kind: 'browser' })
             void window.floe.browser.navigate(previewUrl(target, cwd))
           }
@@ -2016,8 +2073,24 @@ function ChatPanel({
         onChange={setText}
         draftKey={session?.id}
         historyKey={cwd}
-        onSend={(choice, attached) => {
+        onSend={(choice, attached, message) => {
           repin()
+          // What the composer says is going out, which is not always what is in
+          // the box: a big paste reads as a rail and leaves as the text it
+          // stands for (pastes.ts). Everything below routes on what is SAID.
+          const said = message ?? text
+          // `!command` runs here instead of being said (bang.ts). Before any
+          // routing: `!` addresses the shell, and a line that opens with it
+          // never reaches a harness as words.
+          if (cwd && isBang(said)) {
+            const command = readBang(said)
+            // A bare `!` is a keystroke, not an errand. The draft stays put —
+            // clearing it would throw away the `!` on the way to typing one.
+            if (!command) return
+            void runBang(command, choice)
+            setText('')
+            return
+          }
           // A line that OPENS with `@codex` is addressed to codex: that one
           // message goes to it instead of to the picker's harness, and the
           // handle comes off on the way. Mid-sentence the same handle is only a
@@ -2026,7 +2099,7 @@ function ChatPanel({
           // the plain line it is, rather than starting a turn with no message.
           // `@all` first: it is not a handle naming a harness, so `routeAt`
           // would read it as prose and send it to whoever the picker says.
-          const all = routeAll(text)
+          const all = routeAll(said)
           if (all?.prompt.trim() && session) {
             // Queries already open ARE the answer to "who": you have already
             // said who you are talking to, and asking again would be the app
@@ -2052,7 +2125,7 @@ function ChatPanel({
             setAsking({ prompt: all.prompt, effort: all.effort })
             return
           }
-          const addressed = routeAt(text, harnesses)
+          const addressed = routeAt(said, harnesses)
           const route = addressed?.prompt.trim() ? addressed : null
           // Busy or idle, ⏎ means "this is what I want to say". The hook decides
           // whether that starts a turn now or waits for the current one to end.
@@ -2062,11 +2135,11 @@ function ChatPanel({
             // it. Main takes the handle back off on the way to the query — the
             // decision of WHERE it goes is turn.ts's, for all five doors at
             // once, so this passes the route on rather than acting on it.
-            send(text, going, attached?.images, attached?.files, linking, {
-              shown: text,
+            send(said, going, attached?.images, attached?.files, linking, {
+              shown: said,
               route
             })
-          else send(text, going, attached?.images, attached?.files, linking)
+          else send(said, going, attached?.images, attached?.files, linking)
           // The mode this chat actually ran on, so reopening it restores that
           // mode rather than whatever another chat last picked.
           if (!route && session?.id && choice.mode)
@@ -2090,10 +2163,20 @@ function ChatPanel({
         pinned={sessionChoice}
         pinPending={!sessionChoice && loading}
         modelLeft
+        // A `!` line runs only where there is a worktree to run it in.
+        shell={Boolean(cwd)}
         linking={linking}
         onToggleLink={() => setLinking((v) => !v)}
         onStop={running ? stop : undefined}
-        placeholder={question ? questionHint(question) : running ? 'Type while it works — ⏎ queues…' : 'Reply…'}
+        placeholder={
+          bangCmd
+            ? `running ${bangCmd}…`
+            : question
+              ? questionHint(question)
+              : running
+                ? 'Type while it works — ⏎ queues…'
+                : 'Reply…'
+        }
         menuItems={composerMenu}
         onDigit={
           question
@@ -4279,6 +4362,36 @@ function PdfView({ dataUrl, path }: { dataUrl: string; path: string }) {
 }
 
 /**
+ * An `.html` file, drawn.
+ *
+ * SERVED, not inlined: a mock loads its stylesheet, its script and its images
+ * by relative path, and a document handed to `srcdoc` has no directory to
+ * resolve them against — it would draw unstyled. `floe-media://` (main/media.ts)
+ * gives the file a real address, and the neighbours resolve off it.
+ *
+ * The sandbox reads as permissive and is not. The frame's origin is the SCHEME,
+ * never this window's, so `allow-same-origin` grants the page itself — its
+ * fetches, its storage — and grants it nothing here: `parent.document` and
+ * `window.floe` are across an origin from it either way. What is withheld is
+ * the one thing that would be felt, `allow-top-navigation`: this window is the
+ * app, and a page in a panel must not be able to steer it.
+ *
+ * White behind it, like the browser panel: a page that never set a background
+ * expects the UA's white one, and Floe's chrome showing through is not what its
+ * author drew.
+ */
+function HtmlPage({ root, path }: { root: string; path: string }) {
+  return (
+    <iframe
+      className="file-page"
+      src={mediaUrl(`${root.replace(/\/+$/, '')}/${path}`)}
+      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+      title={path}
+    />
+  )
+}
+
+/**
  * A deck.
  *
  * Two previews of the same file, and the better one arrives late. The words are
@@ -4359,11 +4472,15 @@ function FileView({
   root,
   path,
   find,
+  view,
   onDefinition
 }: {
   root?: string
   path: string
   find?: string
+  /** `code` asks for the source of a file that would otherwise be drawn — see
+      Panel.view and the `file.source` command. */
+  view?: 'prose' | 'code' | 'flat'
   onDefinition?: OnDefinition
 }) {
   const [content, setContent] = useState<FileContent | null>(null)
@@ -4418,8 +4535,12 @@ function FileView({
   if (kind === 'slides') return <SlidesView root={root} path={path} content={content} find={find} />
   if (kind === 'none' || content.kind !== 'text')
     return <p className="empty">No preview for this file.</p>
+  // A page is drawn, not read: a mock is made to be looked at, and looking at
+  // it used to mean opening it in the browser panel. `s` (file.source) asks for
+  // the source instead, the same way `p` asks a markdown diff for its patch.
+  if (kind === 'html' && view !== 'code' && root) return <HtmlPage root={root} path={path} />
   // Prose is read as prose — but still as lines, with their numbers.
-  if (kind === 'markdown') return <MarkdownLines text={content.text} />
+  if (kind === 'markdown' && view !== 'code') return <MarkdownLines text={content.text} />
 
   return (
     <div className="diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>

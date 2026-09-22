@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { FileAttachment, ImageAttachment } from '../../shared/types'
+import type { PastedText } from './pastes'
 
 // Unsent text, kept per place you were typing.
 //
@@ -88,9 +89,14 @@ export function useDraft(key?: string): [string, (text: string) => void] {
 // in the store on its way to blowing the quota. Living for the run of the app
 // is the whole bug; a relaunch losing them is the same deal a queued turn gets.
 
-export type Pending = { images: ImageAttachment[]; files: FileAttachment[] }
+export type Pending = {
+  images: ImageAttachment[]
+  files: FileAttachment[]
+  /** The big pastes the draft's rails stand for — see pastes.ts. */
+  pastes: PastedText[]
+}
 
-const NONE: Pending = { images: [], files: [] }
+const NONE: Pending = { images: [], files: [], pastes: [] }
 
 // ponytail: 10 drafts holding attachments, newest kept. Bigger than anyone
 // pastes into in one sitting, small enough that abandoned images are not held
@@ -104,7 +110,7 @@ export function keep(store: Map<string, Pending>, key: string, next: Pending): v
   store.delete(key)
   // Nothing attached is not a draft — same rule as the text, so a sent message
   // leaves no empty entry behind.
-  if (!next.images.length && !next.files.length) return
+  if (!next.images.length && !next.files.length && !next.pastes.length) return
   store.set(key, next)
   for (const old of [...store.keys()].slice(0, Math.max(0, store.size - MAX_PENDING)))
     store.delete(old)
@@ -120,8 +126,10 @@ export function keep(store: Map<string, Pending>, key: string, next: Pending): v
 export function usePending(key?: string): {
   images: ImageAttachment[]
   files: FileAttachment[]
+  pastes: PastedText[]
   setImages: Dispatch<SetStateAction<ImageAttachment[]>>
   setFiles: Dispatch<SetStateAction<FileAttachment[]>>
+  setPastes: Dispatch<SetStateAction<PastedText[]>>
 } {
   const [state, setState] = useState<Pending>(() => (key ? (pending.get(key) ?? NONE) : NONE))
 
@@ -153,5 +161,16 @@ export function usePending(key?: string): {
     [key]
   )
 
-  return { images: state.images, files: state.files, setImages, setFiles }
+  const setPastes = useCallback<Dispatch<SetStateAction<PastedText[]>>>(
+    (action) =>
+      setState((prev) => {
+        const pastes = typeof action === 'function' ? action(prev.pastes) : action
+        const next = { ...prev, pastes }
+        if (key) keep(pending, key, next)
+        return next
+      }),
+    [key]
+  )
+
+  return { images: state.images, files: state.files, pastes: state.pastes, setImages, setFiles, setPastes }
 }

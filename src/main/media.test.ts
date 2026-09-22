@@ -119,3 +119,21 @@ test('a transcript screenshot is served with its own type; a text file still is 
   writeFileSync(txt, 'hi')
   assert.equal(mediaResponse(mediaUrl(txt), null).status, 415)
 })
+
+test('a page and what it loads are served; probeMedia still only answers about media', async () => {
+  const page = join(dir, 'mock.html')
+  writeFileSync(page, '<html><link rel="stylesheet" href="./page.css"></html>')
+  const css = join(dir, 'page.css')
+  writeFileSync(css, 'body { color: red }')
+
+  const html = mediaResponse(mediaUrl(page), null)
+  assert.equal(html.status, 200)
+  assert.match(html.headers.get('Content-Type') ?? '', /^text\/html/)
+  assert.match(await html.text(), /stylesheet/)
+
+  assert.match(mediaResponse(mediaUrl(css), null).headers.get('Content-Type') ?? '', /^text\/css/)
+
+  // The reader points an <iframe> at these; a message that names one is still
+  // not something to put a player under.
+  assert.equal(probeMedia(page), null)
+})

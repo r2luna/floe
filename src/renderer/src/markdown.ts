@@ -15,6 +15,11 @@ const HEADING = /^(#{1,6}\s+)(.*)$/
 const QUOTE = /^(\s*>\s?)(.*)$/
 const HR = /^\s*([-*_])(?:\s*\1){2,}\s*$/
 const LIST = /^(\s*)([-*+]|\d+[.)])(\s+)(.*)$/
+/* The two lines a collapsed paste writes into the message — see pastes.ts. The
+   bar is a real glyph, so it colours as its own token and the caret still lands
+   where the textarea says it does. */
+const PASTE = /^(│ )(paste \d\d · .*)$/
+const PASTE_LINE = /^(│ )(.*)$/
 
 // Inline spans, longest-first so `**a**` never matches the `*a*` branch.
 const INLINE =
@@ -130,6 +135,14 @@ export function tokenizeMarkdown(
     }
     if (HR.test(line) && line.trim()) {
       out.push({ text: line, cls: 'md-marker' })
+      return
+    }
+
+    const paste = PASTE.exec(line) ?? PASTE_LINE.exec(line)
+    if (paste) {
+      out.push({ text: paste[1], cls: 'md-paste-bar' })
+      if (paste[2])
+        out.push({ text: paste[2], cls: PASTE.test(line) ? 'md-paste' : 'md-paste-line' })
       return
     }
 

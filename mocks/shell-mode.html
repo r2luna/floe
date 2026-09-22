@@ -1,0 +1,95 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8" /><title>Floe — composer shell mode (!)</title><!-- The app's real stylesheet. Nothing here re-declares a composer rule: if
+     something looks wrong in this page it is wrong in the app. --><link rel="stylesheet" href="../src/renderer/src/index.css" /><style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { padding: 24px 28px 60px; }
+  .sec { margin: 0 0 26px; }
+  .lbl { margin: 0 0 6px; color: var(--dim); font-size: 11px; }
+  .lbl b { color: var(--text-strong); font-weight: 700; }
+  .panel { width: 860px; background: var(--panel); border: 1px solid var(--line); }
+  .panel .filler { height: 54px; padding: 10px 12px; color: var(--faint); font-size: 11.5px; }
+  .theme { position: fixed; top: 14px; right: 18px; padding: 4px 10px; border: 1px solid var(--edge); background: transparent; color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+</style></head><body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light'">theme</button><script>
+if (new URLSearchParams(location.search).get('theme') === 'light')
+  document.documentElement.dataset.theme = 'light';
+</script><div class="page">
+
+<div class="sec">
+  <p class="lbl"><b>1 · an ordinary message</b> — the hairline is the accent, the text is markdown</p>
+  <div class="panel"><div class="filler">…transcript…</div>
+    <div class="composer" data-model-left data-tone="acceptEdits">
+      <div class="composer-bar">
+        <div class="composer-stack">
+          <pre class="composer-mirror" aria-hidden="true"><span>run the tests and fix what breaks</span></pre>
+          <textarea class="composer-input" rows="1" spellcheck="false">run the tests and fix what breaks</textarea>
+        </div>
+        <div class="composer-tools"><button class="tool">+</button><button class="model"><span class="model-mode" data-tone="acceptEdits">accept</span><span class="model-harness">claude</span></button><button class="composer-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <p class="lbl"><b>2 · shell mode</b> — the draft opens with <code>!</code>: green hairline, the command painted as a command, and a strip saying what ⏎ will do</p>
+  <div class="panel"><div class="filler">…transcript…</div>
+    <div class="composer" data-model-left data-shell data-tone="acceptEdits">
+      <div class="composer-shell"><span class="composer-shell-mark">!</span><span>shell mode — ⏎ runs this here and hands the output to the agent</span></div>
+      <div class="composer-bar">
+        <div class="composer-stack">
+          <pre class="composer-mirror" aria-hidden="true"><span class="md-bang">!</span><span class="md-shell">pnpm test -- src/renderer/src/bang.test.ts</span></pre>
+          <textarea class="composer-input" rows="1" spellcheck="false">!pnpm test -- src/renderer/src/bang.test.ts</textarea>
+        </div>
+        <div class="composer-tools"><button class="tool">+</button><button class="model"><span class="model-mode" data-tone="acceptEdits">accept</span><span class="model-harness">claude</span></button><button class="composer-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <p class="lbl"><b>3 · shell mode over the plan tone</b> — what ⏎ does outranks how it would have run: the hairline stays green</p>
+  <div class="panel"><div class="filler">…transcript…</div>
+    <div class="composer" data-model-left data-shell data-tone="plan">
+      <div class="composer-shell"><span class="composer-shell-mark">!</span><span>shell mode — ⏎ runs this here and hands the output to the agent</span></div>
+      <div class="composer-bar">
+        <div class="composer-stack">
+          <pre class="composer-mirror" aria-hidden="true"><span class="md-bang">!</span><span class="md-shell">git log --oneline -5</span></pre>
+          <textarea class="composer-input" rows="1" spellcheck="false">!git log --oneline -5</textarea>
+        </div>
+        <div class="composer-tools"><button class="tool">+</button><button class="model"><span class="model-mode" data-tone="plan">plan</span><span class="model-harness">claude</span></button><button class="composer-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <p class="lbl"><b>4 · while it runs</b> — the draft is gone the moment ⏎ is pressed, so the placeholder names what is being waited on</p>
+  <div class="panel"><div class="filler">…transcript…</div>
+    <div class="composer" data-model-left data-tone="acceptEdits">
+      <div class="composer-bar">
+        <div class="composer-stack">
+          <pre class="composer-mirror" aria-hidden="true"></pre>
+          <textarea class="composer-input" rows="1" spellcheck="false" placeholder="running pnpm test -- src/renderer/src/bang.test.ts…"></textarea>
+        </div>
+        <div class="composer-tools"><button class="tool">+</button><button class="model"><span class="model-mode" data-tone="acceptEdits">accept</span><span class="model-harness">claude</span></button><button class="composer-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sec">
+  <p class="lbl"><b>5 · the launcher</b> — no worktree to run in, so <code>!</code> is only punctuation and the line goes out as words</p>
+  <div class="panel" style="padding:14px">
+    <div class="composer" data-boxed>
+      <div class="composer-bar">
+        <div class="composer-stack">
+          <pre class="composer-mirror" aria-hidden="true"><span>!important — start with the failing test
+</span></pre>
+          <textarea class="composer-input" rows="2" spellcheck="false">!important — start with the failing test</textarea>
+        </div>
+        <div class="composer-tools"><button class="tool">+</button><button class="model"><span class="model-harness">claude</span><span class="model-name">opus-5</span><span class="model-effort">high</span></button><button class="composer-send">↑</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div></body></html>
