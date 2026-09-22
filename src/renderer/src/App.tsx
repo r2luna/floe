@@ -884,6 +884,50 @@ export default function App() {
   // invalidates the worktree selection (see useWorktrees).
   useEffect(clearMarks, [projects.current?.path])
 
+  /**
+   * Give a session a name of your own.
+   *
+   * The row the cursor is on in the worktrees list, else the chat you have
+   * open — the same rule `session.unread` follows, so `r` on a row and the
+   * palette entry from the composer both rename the session you are looking at.
+   *
+   * The rename is also what stops Claude's own ai-title from following along
+   * (see sessionStore.renameCreatedSession): once you have named it, it keeps
+   * the name. Ticks are ignored on purpose — a name is one session's, and
+   * renaming four chats to the same thing is not a thing anyone means.
+   */
+  const renameSession = (): void => {
+    const at = cursorSession() ?? lane.panels.find((p) => p.session)?.session
+    if (!at) return say('put the cursor on a session, or open a chat')
+    // A panel's key is `claudeId ?? id` and a row's is the store id, so the two
+    // names for one session have to be collected before either can be matched
+    // against the other. The store resolves either on its own; the lane and the
+    // current title do not.
+    const found = worktrees.rows
+      .flatMap((r) => r.sessions)
+      .find((s) => s.id === at.id || s.claudeId === at.id)
+    const keys = new Set([at.id, found?.id, found?.claudeId].filter((k): k is string => !!k))
+    askText({
+      placeholder: 'Name…',
+      value: found?.title,
+      verb: 'Call it',
+      onDone: (title) => {
+        const name = title.trim()
+        if (!name) return
+        void window.floe.claude.renameCreated(at.id, name).then(() => {
+          worktrees.reload()
+          // The chat header carries the name it was opened under, so renaming
+          // the session you are IN has to repaint it — reloading the sidebar
+          // never touches the lane.
+          setLane((l) => {
+            const i = l.panels.findIndex((p) => p.session && keys.has(p.session.id))
+            return i === -1 ? l : patchPanel(l, i, { sub: name })
+          })
+        })
+      }
+    })
+  }
+
   const deleteSession = (scope: 'one' | 'others' | 'all' | 'idle' | 'marked' = 'one') => {
     const at = lane.panels.findIndex((p) => p.session)
     const panel = lane.panels[at]
@@ -2232,6 +2276,7 @@ export default function App() {
       cancel: setup.cancel,
       openChat: setup.openChat
     },
+    renameSession,
     deleteSession,
     markedSessions: [...marks],
     markSession,

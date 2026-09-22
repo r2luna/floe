@@ -5748,6 +5748,11 @@ function WorktreesList({
       run: () => onCommand?.('session.unread')
     },
     {
+      label: 'Rename…',
+      keys: 'r',
+      run: () => onCommand?.('session.rename')
+    },
+    {
       // Says how many, because with a selection open `d` is not about the row
       // you right-clicked — and a menu reading "Delete session…" over four
       // ticked sessions would be describing the wrong thing.

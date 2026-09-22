@@ -38,6 +38,7 @@ const {
   setCreatedSessionChoice,
   createdSessionChoice,
   applyAiTitle,
+  renameCreatedSession,
   normalizeSessionTitles
 } = await import('./sessionStore.ts')
 
@@ -205,6 +206,37 @@ test('an ai-title is followed until the user renames the session by hand', () =>
   assert.equal(applyAiTitle('c-free', '   '), false)
   assert.equal(applyAiTitle('', 'Anything'), false)
   assert.equal(applyAiTitle('c-nobody', 'Anything'), false)
+})
+
+test('a rename sticks: it answers to every key, and locks the ai-title out', () => {
+  store([
+    { id: 'a', worktreePath: '/wt', title: 'Session 1', claudeId: 'c-a' },
+    { id: 'b', worktreePath: '/wt', title: 'Session 2' }
+  ])
+
+  // By the store id, on a linked session: the lock lands in `meta` too, so the
+  // next ai-title finds the door shut.
+  renameCreatedSession('a', '  Parser rewrite  ')
+  assert.equal(readStore().created[0].title, 'Parser rewrite')
+  assert.equal(readStore().meta['c-a'].title, 'Parser rewrite')
+  assert.equal(applyAiTitle('c-a', 'Whatever Claude thinks'), false)
+
+  // By the claudeId — the key the chat panel holds.
+  renameCreatedSession('c-a', 'Parser rewrite II')
+  assert.equal(readStore().created[0].title, 'Parser rewrite II')
+  assert.equal(readStore().meta['c-a'].title, 'Parser rewrite II')
+
+  // Unlinked: nothing to key `meta` by, and nothing to lock — the first
+  // ai-title it gets is still an improvement on "Session 2".
+  renameCreatedSession('b', 'Notes')
+  assert.equal(readStore().created[1].title, 'Notes')
+  assert.deepEqual(Object.keys(readStore().meta), ['c-a'])
+
+  // Nothing to rename, and nothing to rename it to.
+  renameCreatedSession('b', '   ')
+  assert.equal(readStore().created[1].title, 'Notes')
+  renameCreatedSession('nobody', 'Ghost')
+  assert.equal(readStore().created.length, 2)
 })
 
 test('normalizeSessionTitles renumbers 1..k per worktree in creation order', () => {

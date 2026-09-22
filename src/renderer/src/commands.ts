@@ -254,6 +254,13 @@ export interface CommandContext {
    */
   useBackend: (id?: string) => void
   /**
+   * Give a session a name of your own: the row the cursor is on in the
+   * worktrees list, else the chat you have open. Lives in App for the same
+   * reason `deleteSession` does — only it holds the list the row is resolved
+   * against, and the registry must not learn where sessions come from.
+   */
+  renameSession: () => void
+  /**
    * Forget sessions, after asking: the open one, the rest of the worktree's,
    * all of them, the stale ones, or the ones ticked in the worktrees list.
    */

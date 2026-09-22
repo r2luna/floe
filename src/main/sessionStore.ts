@@ -333,6 +333,14 @@ export function normalizeSessionTitles(): void {
   if (changed) write(store)
 }
 
+// Rename by any of the keys a session answers to — the store id, its claudeId,
+// or one it used to have (see findByKey), because the renderer holds
+// `claudeId ?? id` and the sidebar row holds the store id.
+//
+// A linked session also gets the name written into `meta[claudeId]`, which is
+// what `sessionTitle` reads first and what `applyAiTitle` treats as the lock.
+// Without it a rename would survive exactly until the next turn, when Claude's
+// own ai-title overwrote `c.title` and the name the user chose disappeared.
 export function renameCreatedSession(id: string, title: string): void {
   const t = title.trim()
   if (!t) return
@@ -340,6 +348,7 @@ export function renameCreatedSession(id: string, title: string): void {
   const c = findByKey(store.created, id)
   if (!c) return
   c.title = t
+  if (c.claudeId) store.meta[c.claudeId] = { ...store.meta[c.claudeId], title: t }
   write(store)
 }
 

@@ -135,6 +135,7 @@ export const COMMAND_IDS: string[] = [
   'session.next',
   'session.alternate',
   'session.new',
+  'session.rename',
   'session.delete',
   'session.deleteOthers',
   'session.deleteAll',

@@ -2013,6 +2013,18 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // Sessions name themselves — "Session 3" until Claude has read enough
+        // of the conversation to call it something. This is how you overrule
+        // that, and it is permanent: a session you have named stops following
+        // the ai-title, so the name survives the next turn.
+        id: 'session.rename',
+        title: 'Rename session…',
+        group: 'Sessions',
+        enabled: (c) => !!unreadTarget(c),
+        unavailable: () => 'put the cursor on a session, or open a chat',
+        run: (c) => c.renameSession()
+      },
+      {
         // "Delete" is Floe's record of the session, not the conversation:
         // the Claude transcript stays on disk and `claude --resume` still finds
         // it. Same call the sidebar's close uses — one way to forget a session.

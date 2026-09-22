@@ -64,6 +64,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     confirm: async () => true,
     enterWorktreeAt: () => {},
     useBackend: () => {},
+    renameSession: () => {},
     deleteSession: () => {},
     markedSessions: [],
     markSession: () => {},

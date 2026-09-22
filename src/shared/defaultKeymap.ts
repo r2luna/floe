@@ -600,9 +600,15 @@ transcripts stay on disk.
 In the list it marks the row under the cursor; \`⌘⇧U\` marks the chat you are
 reading, from anywhere — including mid-sentence in the composer, which is where
 you are when you decide this one is for later. Both toggle, and a mark on the
-chat you have open stays on until you leave and come back.`,
+chat you have open stays on until you leave and come back.
+
+\`r\` renames the session under the cursor — the same \`r\` that renames a file,
+a skill or a drawing one panel over. A session names itself until you do it;
+after that the name is yours, and the harness stops retitling it. From the
+composer the palette says the same thing, about the chat you have open.`,
     binds: [
       { key: 'x', command: 'session.mark', when: 'panel == "worktrees"' },
+      { key: 'r', command: 'session.rename', when: 'panel == "worktrees"' },
       { key: 'd', command: 'session.deleteMarked', when: 'panel == "worktrees"' },
       { key: 'escape', command: 'session.markClear', when: 'panel == "worktrees" and marked' },
       { key: 'u', command: 'session.unread', when: 'panel == "worktrees"' },
