@@ -156,6 +156,7 @@ export function FilePreview({ root, path }: { root: string; path: string }) {
  */
 export function SessionPreview({
   title,
+  project,
   branch,
   worktree,
   at,
@@ -164,6 +165,8 @@ export function SessionPreview({
   mode
 }: {
   title: string
+  /** Which repo it belongs to — the list spans every project, so the pane says. */
+  project?: string
   branch: string
   worktree: string
   /** When the session was last written to — epoch ms. */
@@ -176,6 +179,7 @@ export function SessionPreview({
     <>
       <PaneTitle>{title}</PaneTitle>
       <Facts>
+        {project && <Fact label="project">{project}</Fact>}
         <Fact label="branch">{branch}</Fact>
         <Fact label="worktree">{tilde(worktree)}</Fact>
         <Fact label="state" tone={running ? 'warn' : 'ok'}>

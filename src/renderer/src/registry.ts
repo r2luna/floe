@@ -985,12 +985,10 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'palette.files',
         title: 'Find a chat or a file…',
         group: 'App',
-        // The list is the checked-out tree's, so it needs one — same refusal,
-        // and the same sentence, as opening the Files panel. The chats would
-        // survive without a worktree, but half a palette is not worth a second
-        // set of rules for when the key works.
-        enabled: (c) => c.canOpen('file'),
-        unavailable: (c) => c.whyCannotOpen('file'),
+        // No worktree needed any more: the chats are every machine's, every
+        // project's, so the list still answers "where was that conversation"
+        // with nothing checked out. Only the files half needs a tree, and it
+        // simply comes back empty.
         run: (c) => c.openFiles()
       },
       {
