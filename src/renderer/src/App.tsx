@@ -954,7 +954,9 @@ export default function App() {
     })
   }
 
-  const deleteSession = (scope: 'one' | 'others' | 'all' | 'idle' | 'marked' = 'one') => {
+  const deleteSession = (
+    scope: 'one' | 'others' | 'all' | 'idle' | 'marked' | 'unmarked' = 'one'
+  ) => {
     const at = lane.panels.findIndex((p) => p.session)
     const panel = lane.panels[at]
     const openId = panel?.session?.id
@@ -1013,6 +1015,26 @@ export default function App() {
       // Only once it actually deleted. Answering "no" and finding the selection
       // gone would make the cancel cost as much as the delete.
       void forget(targets, `Delete ${what}?`).then((went) => went && clearMarks())
+      return
+    }
+
+    // The other way round: keep what you ticked, throw away the rest. Same pool
+    // as `marked` — the whole open project, across worktrees — because the two
+    // scopes are one question asked from either end, and a "keep these" that
+    // only cleared the current branch would leave the copies next door behind.
+    //
+    // A selection is required. With nothing ticked this would mean "delete
+    // every session in the project", which is a different command with a
+    // different confirm, and not one you should be able to reach by pressing a
+    // key on a list you have not ticked anything in.
+    if (scope === 'unmarked') {
+      if (!marks.size) return say('select the sessions to keep first')
+      const targets = sessionOrder().filter((t) => !marks.has(t.s.id))
+      if (!targets.length) return say('every session is selected — nothing else to delete')
+      void forget(
+        targets,
+        `Delete the other ${targets.length} session${targets.length > 1 ? 's' : ''}, keeping the ${marks.size} selected?`
+      ).then((went) => went && clearMarks())
       return
     }
 

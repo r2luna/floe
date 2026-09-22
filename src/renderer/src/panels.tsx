@@ -5885,6 +5885,15 @@ function WorktreesList({
       label: picks > 1 ? `Delete ${picks} selected sessions…` : 'Delete session…',
       keys: 'd',
       run: () => onCommand?.('session.deleteMarked')
+    },
+    {
+      // The inverse, and it only means anything with a selection open: what it
+      // keeps is what is ticked. Named "the others" rather than a count,
+      // because the number it deletes spans every worktree in the project and
+      // this menu is showing one branch's rows.
+      label: 'Delete all other sessions…',
+      disabled: picks === 0,
+      run: () => onCommand?.('session.deleteUnmarked')
     }
   ]
 
