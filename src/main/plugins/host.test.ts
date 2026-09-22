@@ -59,6 +59,15 @@ before(async () => {
     { name: 'future', version: '1.0.0', main: 'main.cjs', minFloeVersion: '99.0.0' },
     'module.exports = { activate() {} }'
   )
+  // activate() that never settles — the shape of the `server` plugin when its
+  // port is taken. It must be skipped, not hang boot; the short timeout keeps
+  // the test fast.
+  writePlugin(
+    'hangs',
+    { name: 'hangs', version: '1.0.0', main: 'main.cjs' },
+    'module.exports = { activate() { return new Promise(() => {}) } }'
+  )
+  process.env.FLOE_PLUGIN_ACTIVATE_TIMEOUT_MS = '150'
 
   await loadPlugins('0.1.0', () => undefined)
 })
@@ -114,4 +123,13 @@ test('a broken plugin is reported and skipped without stopping the others', () =
 test('minFloeVersion above the running version refuses to load', () => {
   const future = loadedPlugins().find((p) => p.name === 'future')
   assert.match(future?.error ?? '', /needs Floe >= 99\.0\.0/)
+})
+
+test('a plugin whose activate() never settles is skipped, not allowed to hang boot', () => {
+  // The whole point: loadPlugins RESOLVED (this test runs), and the hung plugin
+  // is reported failed alongside the ones that worked.
+  const hangs = loadedPlugins().find((p) => p.name === 'hangs')
+  assert.match(hangs?.error ?? '', /did not finish|port already in use/)
+  // The good plugin still loaded — one bad neighbour takes nothing else down.
+  assert.ok(loadedPlugins().find((p) => p.name === 'hello' && !p.error))
 })

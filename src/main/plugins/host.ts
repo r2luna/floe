@@ -183,6 +183,40 @@ function versionAtLeast(version: string, min: string): boolean {
   return true
 }
 
+/**
+ * A plugin's `activate()` runs before the window, so boot waits on it — but it
+ * must not wait FOREVER. The `server` plugin binds a fixed port, and when a
+ * second Floe instance (a dev build beside the packaged app) boots, that bind
+ * fails with EADDRINUSE. The failure surfaces as an async `error` event, not a
+ * throw, so `activate()`'s promise never settles: `await` on it hangs, and
+ * `createWindow()` below it never runs — the app comes up with no window at
+ * all (agent.log: main:uncaughtException EADDRINUSE 41680, 2026-09-22). Bound
+ * here, an activate that has not resolved in time is treated as the failure it
+ * is — logged and skipped — and boot goes on, exactly as the comment at the
+ * call site has always promised.
+ */
+const PLUGIN_ACTIVATE_TIMEOUT_MS = Number(process.env.FLOE_PLUGIN_ACTIVATE_TIMEOUT_MS) || 8_000
+
+function activateWithTimeout(plugin: FloePlugin, ctx: FloePluginContext): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`activate() did not finish in ${PLUGIN_ACTIVATE_TIMEOUT_MS}ms (port already in use?)`)),
+      PLUGIN_ACTIVATE_TIMEOUT_MS
+    )
+    timer.unref?.()
+    Promise.resolve(plugin.activate(ctx)).then(
+      (v) => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(timer)
+        reject(e instanceof Error ? e : new Error(String(e)))
+      }
+    )
+  })
+}
+
 export async function loadPlugins(floeVersion: string, getWin: () => BrowserWindow | undefined): Promise<void> {
   getWindowRef = getWin
   const dir = pluginsDir()
@@ -213,7 +247,7 @@ export async function loadPlugins(floeVersion: string, getWin: () => BrowserWind
       const mod = createRequire(entryPath)(entryPath) as FloePlugin | { default: FloePlugin }
       const plugin = 'activate' in mod ? mod : (mod as { default: FloePlugin }).default
       if (typeof plugin?.activate !== 'function') throw new Error('bundle exports no activate()')
-      await plugin.activate(buildContext(manifest, pluginDir, floeVersion))
+      await activateWithTimeout(plugin, buildContext(manifest, pluginDir, floeVersion))
       if (plugin.deactivate) deactivators.push(plugin.deactivate)
       log('plugin:loaded', { name: manifest.name, version: manifest.version })
     } catch (e) {
