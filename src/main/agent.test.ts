@@ -1546,3 +1546,191 @@ test('applyLiveMode: switches the running claude in place and keeps the conn', (
   applyLiveMode(conn, 'acceptEdits')
   assert.equal(JSON.parse(written[1]).request.mode, 'acceptEdits')
 })
+
+// ── status: what the CLI is doing while nothing streams ─────────────────────
+
+const { apiRetryText, backgroundTaskText, idleConnKeys, runIdleReap, stopAgentFor } = await import('./agent.ts')
+const { agentLogPath } = await import('./log.ts')
+const statusTexts = (events: AgentEvent[]): string[] =>
+  events.filter((e): e is Extract<AgentEvent, { kind: 'status' }> => e.kind === 'status').map((e) => e.text)
+
+test('handleLine: an api_retry line becomes a status line, a transcript line and a log entry', () => {
+  const conn = fakeConn({ statusShown: false })
+  // The exact shape claude 2.1.269 emits against a 529 (captured 2026-09-22).
+  const { events } = run(
+    { type: 'system', subtype: 'api_retry', attempt: 2, max_retries: 10, retry_delay_ms: 4506, error_status: 529, error: 'overloaded' },
+    conn
+  )
+  assert.deepEqual(statusTexts(events), ['API overloaded · retry 2/10 in 5s'])
+  assert.equal(conn.statusShown, true)
+  // An agent watching this session over MCP reads it too (read_session_output).
+  assert.ok(conn.transcriptBuffer.some((l) => l === '[status] API overloaded · retry 2/10 in 5s'))
+  // And the log, where `lastLineSubtype: api_retry` used to be all it said.
+  const logged = readFileSync(agentLogPath(), 'utf8')
+    .split('\n')
+    .filter((l) => l.includes('"api-retry"'))
+  assert.ok(logged.length >= 1, 'api-retry logged')
+  assert.match(logged[logged.length - 1], /"attempt":2,"maxRetries":10,"delayMs":4506,"status":529/)
+})
+
+test('apiRetryText: reads each status the CLI retries on, and survives missing fields', () => {
+  assert.equal(apiRetryText({ attempt: 1, max_retries: 10, retry_delay_ms: 1000, error_status: 429 }), 'API rate limited · retry 1/10 in 1s')
+  assert.equal(apiRetryText({ attempt: 3, max_retries: 10, retry_delay_ms: 30_000, error_status: 503 }), 'API error 503 · retry 3/10 in 30s')
+  assert.equal(apiRetryText({ error_status: null }), 'API not responding · retrying')
+  assert.equal(apiRetryText({}), 'API not responding · retrying')
+})
+
+test('handleLine: tool_progress past 2s shows the tool with its elapsed; its tool_result takes it down', () => {
+  const conn = fakeConn({ statusShown: false })
+  // Under the threshold the tool row is enough — no line.
+  assert.deepEqual(run({ type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 1, tool_use_id: 't1' }, conn).events, [])
+  assert.deepEqual(statusTexts(run({ type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 7.4, tool_use_id: 't1' }, conn).events), ['Bash · 7s'])
+  assert.deepEqual(statusTexts(run({ type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 21, tool_use_id: 't1' }, conn).events), ['Bash · 21s'])
+  // The result of that tool: the line goes, once.
+  const cleared = run({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'done' }] } }, conn)
+  assert.deepEqual(statusTexts(cleared.events), [''])
+  assert.equal(conn.statusShown, false)
+  // A tool that never showed a line costs no clear.
+  assert.deepEqual(run({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't2', content: 'x' }] } }, conn).events, [])
+  // Missing name: still a line, still an elapsed.
+  assert.deepEqual(statusTexts(run({ type: 'tool_progress', elapsed_time_seconds: 5 }, conn).events), ['tool · 5s'])
+})
+
+test('handleLine: a backgrounded long tool shows a running line, cleared when the task list empties', () => {
+  const conn = fakeConn({ statusShown: false })
+  // The shape claude 2.1.269 emits when it auto-backgrounds a long command.
+  const started = run(
+    { type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1', task_type: 'local_bash', description: 'pnpm gate' }] },
+    conn
+  )
+  assert.deepEqual(statusTexts(started.events), ['running: pnpm gate'])
+  assert.equal(conn.statusShown, true)
+  // Two out at once: the first, plus a count of the rest.
+  assert.deepEqual(
+    statusTexts(run({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ description: 'pnpm gate' }, { description: 'pnpm build' }] }, conn).events),
+    ['running: pnpm gate (+1)']
+  )
+  // The model narrating ("Let me background this") must NOT take the line down —
+  // only an empty task list does.
+  const narrate = run({ type: 'assistant', message: { content: [{ type: 'text', text: 'Running that in the background.' }] } }, conn)
+  assert.deepEqual(statusTexts(narrate.events), [], 'no status event from an assistant line')
+  assert.equal(conn.statusShown, true, 'the running line still stands')
+  // All tasks done → the line clears, once.
+  const done = run({ type: 'system', subtype: 'background_tasks_changed', tasks: [] }, conn)
+  assert.deepEqual(statusTexts(done.events), [''])
+  assert.equal(conn.statusShown, false)
+})
+
+test('backgroundTaskText: names the first task, counts the rest, truncates, empties', () => {
+  assert.equal(backgroundTaskText({ tasks: [{ description: 'run the e2e suite' }] }), 'running: run the e2e suite')
+  assert.equal(backgroundTaskText({ tasks: [{ description: 'a' }, { description: 'b' }, { description: 'c' }] }), 'running: a (+2)')
+  assert.equal(backgroundTaskText({ tasks: [] }), '')
+  assert.equal(backgroundTaskText({}), '')
+  const long = 'x'.repeat(80)
+  assert.equal(backgroundTaskText({ tasks: [{ description: long }] }), `running: ${'x'.repeat(57)}…`)
+})
+
+test("handleLine: a subagent's tool_progress goes to its row, never to the parent's status line", () => {
+  const conn = fakeConn({ statusShown: false })
+  const { events } = run({ type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 9, parent_tool_use_id: 'agent-1' }, conn)
+  assert.deepEqual(events, [])
+  assert.equal(conn.statusShown, false)
+})
+
+test('handleLine: the model talking again resets the status flag without spending an event', () => {
+  const conn = fakeConn({ statusShown: false })
+  run({ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 10, retry_delay_ms: 1000, error_status: 529 }, conn)
+  assert.equal(conn.statusShown, true)
+  // The retry worked: deltas stream. The panel clears itself on a delta.
+  const { events } = run({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } } }, conn)
+  assert.equal(conn.statusShown, false)
+  assert.deepEqual(statusTexts(events), [])
+  // So the tool_result that follows sends no clear for a line already gone
+  // (it does flush the delta queued above — that is the text, not a status).
+  const after = run({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: '' }] } }, conn)
+  assert.deepEqual(statusTexts(after.events), [])
+})
+
+test('replay keeps one status line, the latest, at the end — and none once cleared', () => {
+  const { win } = fakeWin()
+  const key = 'status-replay'
+  markTurnStart(key, undefined, win)
+  sendAgentEvent(win, key, { kind: 'text', text: 'working' })
+  sendAgentEvent(win, key, { kind: 'status', text: 'API overloaded · retry 1/10 in 1s', at: 1 })
+  sendAgentEvent(win, key, { kind: 'status', text: 'API overloaded · retry 2/10 in 2s', at: 2 })
+  let events = replaySnapshot(key).events
+  assert.deepEqual(statusTexts(events), ['API overloaded · retry 2/10 in 2s'])
+  assert.equal(events[events.length - 1].kind, 'status', 'after the text it followed')
+  sendAgentEvent(win, key, { kind: 'status', text: '', at: 3 })
+  events = replaySnapshot(key).events
+  assert.deepEqual(statusTexts(events), [])
+  assert.deepEqual(kinds(events), ['text'])
+  sendAgentEvent(win, key, { kind: 'done', ok: true })
+})
+
+// ── idle reap + stop on close ───────────────────────────────────────────────
+
+test('idleConnKeys: idle past the window; not mid-turn, not parked on a prompt, not fresh', () => {
+  const now = 10_000_000
+  const idle = fakeConn({ turnActive: false, lastActivityAt: now - 31 * 60_000 })
+  const fresh = fakeConn({ turnActive: false, lastActivityAt: now - 5 * 60_000 })
+  const busy = fakeConn({ turnActive: true, lastActivityAt: now - 31 * 60_000 })
+  const parked = fakeConn({ turnActive: false, lastActivityAt: now - 31 * 60_000, pendingPerms: new Map([['r', {}]]) })
+  assert.deepEqual(
+    idleConnKeys([['idle', idle], ['fresh', fresh], ['busy', busy], ['parked', parked]], now),
+    ['idle']
+  )
+  // The window is a parameter, so the sweep can be tested at any size.
+  assert.deepEqual(idleConnKeys([['fresh', fresh]], now, 60_000), ['fresh'])
+})
+
+test('runIdleReap: stops an idle child; the next send respawns with --resume and the same history', () => {
+  const key = 'reap-me'
+  addCreatedSession({ id: key, worktreePath: WT, title: 'idle chat' })
+  const { win, events, spawn } = startSession(key)
+  // The CLI reports its id, the turn runs and ends: an ordinary idle session.
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'cc-reap' })
+  emit(spawn.child, { type: 'result', is_error: false })
+  assert.equal(hasActiveTurn(key), false)
+  assert.ok(only(events, 'done').length === 1)
+
+  // Not idle long enough: nothing happens.
+  runIdleReap(Date.now())
+  assert.deepEqual(spawn.child.signals, [])
+
+  // Half an hour on: the child is stopped, silently — no `done`, there was no turn.
+  const before = events.length
+  runIdleReap(Date.now() + 31 * 60_000)
+  assert.deepEqual(spawn.child.signals, ['SIGTERM'])
+  assert.equal(events.length, before, 'no event for a reap')
+  assert.equal(readSessionBuffer(key), '', 'the conn is gone')
+  spawn.child.exitCode = 0
+  spawn.child.emit('close', 0)
+
+  // The next message respawns — resuming the id the CLI reported, so the
+  // conversation carries on where it was.
+  const at = spawned.length
+  sendToAgent(win, key, WT, 'and then?', DEFAULT_OPTS)
+  assert.equal(spawned.length, at + 1)
+  const args = spawned[at].args
+  assert.equal(args[args.indexOf('--resume') + 1], 'cc-reap')
+  endSession(win, key, spawned[at].child)
+})
+
+test('stopAgentFor: stops the child behind any of a session’s names, with no window in hand', () => {
+  const key = 'close-me'
+  addCreatedSession({ id: key, worktreePath: WT, title: 'to close' })
+  const { events, spawn } = startSession(key)
+  emit(spawn.child, { type: 'system', subtype: 'init', session_id: 'cc-close' })
+  emit(spawn.child, { type: 'result', is_error: false })
+  // Asked by the CLI's own id — the name the panel may hold — not the conn's.
+  stopAgentFor('cc-close')
+  assert.deepEqual(spawn.child.signals, ['SIGTERM'])
+  assert.equal(readSessionBuffer(key), '')
+  // The `done` still reaches the window the conn was spawned for.
+  assert.equal(only(events, 'done').length, 2)
+  // Nothing to stop twice.
+  stopAgentFor(key)
+  assert.deepEqual(spawn.child.signals, ['SIGTERM'])
+  spawn.child.emit('close', 0)
+})

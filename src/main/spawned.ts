@@ -17,12 +17,10 @@
 
 import type { BrowserWindow } from 'electron'
 import { onceTurnDone, sendAgentEvent } from './agent'
-import {
-  closeSession,
-  getAllCreatedSessions,
-  getCreatedSession,
-  type CreatedSession
-} from './sessionStore'
+import { getAllCreatedSessions, getCreatedSession, type CreatedSession } from './sessionStore'
+// Circular with sessionClose → queries → turn → spawned: safe on the usual
+// terms, nothing here is touched at module top level.
+import { closeSessionFully } from './sessionClose'
 import { log } from './log'
 
 /**
@@ -123,7 +121,9 @@ function closeSpawned(win: BrowserWindow, key: string): void {
     sendAgentEvent(win, parent, { kind: 'peer', from, text })
   }
   log('spawned-closed', { key, parent: child.spawnedBy, chars: text.length })
-  closeSession({ id: child.id, worktreePath: child.worktreePath, claudeId: child.claudeId })
+  // All the way down, the child process included: a lane's `claude` used to
+  // outlive its row, and a fan-out of sixteen left sixteen of them behind.
+  closeSessionFully(win, { id: child.id, worktreePath: child.worktreePath, claudeId: child.claudeId })
   // The sidebar is rebuilt from disk, and nothing else would tell it the row is
   // gone: the reload it already does runs 500ms after `done`, a minute before
   // this fires.

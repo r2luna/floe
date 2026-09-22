@@ -1646,6 +1646,7 @@ function ChatPanel({
     running,
     tokens,
     startedAt,
+    status,
     queued,
     send,
     unqueue,
@@ -1971,6 +1972,10 @@ function ChatPanel({
             is typing
             <Spinner />
             <TypingMeter startedAt={startedAt} tokens={tokens} />
+            {/* Why nothing is streaming, when the CLI has said: an API retry
+                with its count, or a tool and how long it has been running.
+                Without it a rate-limited turn reads exactly like a hung one. */}
+            {status && <span className="irc-dim irc-status"> · {status}</span>}
             {/* No stop here any more: the composer's send button becomes the
                 stop while a turn runs, which is where your hand already is. */}
           </div>

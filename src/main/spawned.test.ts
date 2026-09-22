@@ -10,7 +10,7 @@ import { register } from 'node:module'
 const hookSource = `
 import { existsSync } from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-const STUBS = { './agent': 'stub:agent', './sessionStore': 'stub:store', './log': 'stub:log' }
+const STUBS = { './agent': 'stub:agent', './sessionStore': 'stub:store', './sessionClose': 'stub:close', './log': 'stub:log' }
 export async function resolve(specifier, context, next) {
   if (specifier === 'electron') return { url: 'stub:electron', shortCircuit: true, format: 'module' }
   if (STUBS[specifier] && (context.parentURL ?? '').endsWith('/spawned.ts'))
@@ -32,8 +32,9 @@ const SOURCE = {
     "\\nexport function sendAgentEvent(win, key, event) { globalThis.__peerSent.push({ key, event }) }",
   'stub:store':
     "export function getCreatedSession(id) { return globalThis.__sessions.find((s) => s.id === id || s.claudeId === id) }" +
-    "\\nexport function getAllCreatedSessions() { return globalThis.__sessions }" +
-    "\\nexport function closeSession(opts) { globalThis.__closed.push(opts); globalThis.__sessions = globalThis.__sessions.filter((s) => s.id !== opts.id) }"
+    "\\nexport function getAllCreatedSessions() { return globalThis.__sessions }",
+  'stub:close':
+    "export function closeSessionFully(win, opts) { globalThis.__closed.push(opts); globalThis.__sessions = globalThis.__sessions.filter((s) => s.id !== opts.id) }"
 }
 export async function load(url, context, next) {
   if (SOURCE[url]) return { format: 'module', shortCircuit: true, source: SOURCE[url] }

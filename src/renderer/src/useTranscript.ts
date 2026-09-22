@@ -93,6 +93,8 @@ export interface Transcript {
   tokens: number
   /** Epoch ms the turn in flight started, for the "is typing" clock. */
   startedAt?: number
+  /** Why nothing is streaming, when the CLI has said: a retry, a long tool. '' otherwise. */
+  status: string
   /**
    * Typed while a ONE-SHOT runtime (codex, opencode…) was busy, not sent yet;
    * drains one entry per turn boundary. Claude never queues — a mid-turn send
@@ -154,6 +156,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   const [running, setRunning] = useState(false)
   const [tokens, setTokens] = useState(0)
   const [startedAt, setStartedAt] = useState<number | undefined>(undefined)
+  // What the CLI is doing while nothing streams — an API retry, a tool that
+  // has run for a while. Shown after the typing meter; '' is nothing to show.
+  const [status, setStatus] = useState('')
   // `apply` is built once — its identity must not change mid-turn — so the two
   // numbers the turn footer needs are mirrored here for it to read on `done`.
   const startedRef = useRef<number | undefined>(undefined)
@@ -286,6 +291,18 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
 
   /** Fold one streamed event into the panel. Also used for the replay events. */
   const apply = useCallback((event: AgentEvent) => {
+    // A status stands until the next thing that IS the turn moving — a delta,
+    // a tool row, a question, the end. The token gauge and a subagent's own
+    // progress are not that: they arrive beside a retry, not instead of it.
+    if (event.kind === 'status') {
+      setStatus(event.text)
+      return
+    }
+    // A status stands until the turn actually moves. A streamed delta or a
+    // settled reply is that; the token gauge, a subagent's own progress, and a
+    // `tool` row that merely accompanies a backgrounded task are not.
+    if (event.kind === 'text' || event.kind === 'reasoning' || event.kind === 'done' || event.kind === 'error' || event.kind === 'question' || event.kind === 'permission')
+      setStatus('')
     if (event.kind === 'session') {
       // The CLI resolves the alias you picked to a concrete id and reports it
       // here. Kept in a ref so the very next delta can be stamped with it —
@@ -481,6 +498,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       dispatch({ type: 'reset' })
       setRunning(false)
       setQuestion(null)
+      setStatus('')
       setTokens(0)
       tokensRef.current = 0
       setStartedAt(undefined)
@@ -874,6 +892,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     running,
     tokens,
     startedAt,
+    status,
     queued,
     send,
     unqueue,

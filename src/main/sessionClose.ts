@@ -6,6 +6,7 @@
 
 import type { BrowserWindow } from 'electron'
 import { closeSession } from './sessionStore'
+import { stopAgentFor } from './agent'
 import { forgetQueriesOf } from './queries'
 import { forgetThread } from './runtimes'
 import { forgetSeen } from './handoff'
@@ -25,6 +26,11 @@ export function closeSessionFully(win: BrowserWindow | null, opts: CloseSessionO
   // thread goes the record of how much of the conversation each harness was
   // holding — the two are the same fact from opposite ends.
   for (const key of sessionKeys(opts)) {
+    // The process first: the record is what everything else finds the conn
+    // by, and a child left running after it is gone is invisible to every
+    // sweep — it just sits there, 400 MB and its MCP connections, until the
+    // app quits.
+    stopAgentFor(key)
     forgetThread(key)
     forgetSeen(key)
   }

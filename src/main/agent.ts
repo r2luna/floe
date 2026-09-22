@@ -71,6 +71,10 @@ export interface Conn {
   taskWatcher: FSWatcher | null
   taskJsonlOffset: number // bytes of the transcript already scanned
   taskJsonlBuffer: string // partial trailing line carried between reads
+  // A `status` line is up in the panel (see setStatus). Tracked so a tool
+  // result can take a tool's elapsed line down without sending a clear for
+  // every tool that never had one.
+  statusShown: boolean
 }
 
 const BUFFER_CAP = 200
@@ -437,6 +441,15 @@ function recordForReplay(key: string, event: AgentEvent, seq: number): void {
       else r.events[at] = event
       break
     }
+    case 'status': {
+      // One line, the latest. Kept at the END so a panel mounting mid-retry
+      // reads it after the text that preceded it — and a later delta in the
+      // replay takes it down, exactly as it did live.
+      const at = r.events.findIndex((e) => e.kind === 'status')
+      if (at !== -1) r.events.splice(at, 1)
+      if (event.text) r.events.push(event)
+      break
+    }
     case 'done':
       r.running = false
       r.events = []
@@ -598,7 +611,8 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     worktreePath,
     taskWatcher: null,
     taskJsonlOffset: 0,
-    taskJsonlBuffer: ''
+    taskJsonlBuffer: '',
+    statusShown: false
   }
   conns.set(key, conn)
   log('spawn', { key, worktreePath, optionsKey, resume: Boolean(resumeId) })
@@ -1059,6 +1073,62 @@ export function stopAgent(win: BrowserWindow, key: string): void {
   send(win, connKey, { kind: 'done', ok: true })
 }
 
+/**
+ * Stop the process behind any of a session's names, for a caller that has no
+ * window of its own — closing a session (sessionClose.ts).
+ *
+ * The conn remembers the window it was spawned for, so the `done` stopAgent
+ * emits still reaches whichever panel is listening. Before this, closing a
+ * session dropped the store record and left the child running: 84 of the 93
+ * `claude` processes on this machine belonged to sessions that no longer
+ * existed (2026-09-22), 34 GB of them.
+ */
+export function stopAgentFor(key: string): void {
+  const found = resolveConn(key)
+  if (found) stopAgent(found[1].win, key)
+}
+
+// An idle child holds ~400 MB, an MCP client per server and a stdio server
+// or two, for as long as the app runs — the session you used this morning is
+// still a process tonight. Past IDLE_REAP_MS without a line from the CLI and
+// no turn in flight, it is stopped; the next send respawns it with --resume,
+// which costs the boot (~5s measured) and nothing else. A pending question or
+// permission is a turn parked on the user, not an idle one, and is left alone.
+const IDLE_REAP_MS = Number(process.env.FLOE_IDLE_REAP_MS) || 30 * 60_000
+
+/** The keys whose conn has sat idle past the window. Pure, for its test. */
+export function idleConnKeys(
+  entries: Iterable<[string, { turnActive: boolean; pendingPerms: { size: number }; lastActivityAt: number }]>,
+  now: number,
+  idleMs = IDLE_REAP_MS
+): string[] {
+  const keys: string[] = []
+  for (const [key, c] of entries) {
+    if (c.turnActive || c.pendingPerms.size > 0) continue
+    if (now - c.lastActivityAt > idleMs) keys.push(key)
+  }
+  return keys
+}
+
+// One sweep over the idle conns. No `done` — there is no turn to end — and no
+// waiter to release: a send_message(wait) parked on an idle key resolves off
+// the next turn, which the respawn will run.
+export function runIdleReap(now: number): void {
+  for (const key of idleConnKeys(conns, now)) {
+    const conn = conns.get(key)
+    if (!conn) continue
+    try {
+      conns.delete(key)
+      stopTaskWatcher(conn)
+      clearDeltas(conn)
+      log('reap-idle', { key, idleMs: now - conn.lastActivityAt, pid: conn.child.pid })
+      conn.child.kill('SIGTERM')
+    } catch (e) {
+      log('watchdog-error', { key, message: e instanceof Error ? e.message : String(e) })
+    }
+  }
+}
+
 // PIDs of every live Claude session process, for the topbar memory readout.
 // Each `claude` spawns its own subtree (MCP servers, ripgrep…); systemStats sums
 // the descendants too.
@@ -1365,6 +1435,7 @@ export function startAgentWatchdog(): void {
     const now = Date.now()
     runWatchdogTick(conns, now)
     runReplaySweep(now)
+    runIdleReap(now)
   }, WATCHDOG_MS)
   watchdog.unref?.() // never keep the app alive just for the watchdog
 }
@@ -1492,7 +1563,99 @@ function handleControlRequest(win: BrowserWindow, key: string, conn: Conn, msg: 
   })
 }
 
-function handleSystemLine(win: BrowserWindow, key: string, msg: Record<string, unknown>): void {
+/**
+ * The status line, or nothing.
+ *
+ * `text` replaces whatever line is up; '' takes it down. The clear is only
+ * sent when a line IS up — a tool result arrives for every tool, and most of
+ * them never showed one.
+ */
+function setStatus(win: BrowserWindow, key: string, conn: Conn, text: string): void {
+  if (!text && !conn.statusShown) return
+  conn.statusShown = text.length > 0
+  send(win, key, { kind: 'status', text, at: Date.now() })
+}
+
+/**
+ * What an `api_retry` line says on the typing line: `API overloaded · retry
+ * 2/10 in 8s`. The CLI's own fields — attempt, max_retries, retry_delay_ms,
+ * error_status — read defensively, since none of them is promised.
+ */
+export function apiRetryText(msg: Record<string, unknown>): string {
+  const status = typeof msg.error_status === 'number' ? msg.error_status : null
+  const why =
+    status === 529
+      ? 'API overloaded'
+      : status === 429
+        ? 'API rate limited'
+        : status === null
+          ? 'API not responding'
+          : `API error ${status}`
+  const attempt = typeof msg.attempt === 'number' ? msg.attempt : 0
+  const max = typeof msg.max_retries === 'number' ? msg.max_retries : 0
+  const tries = attempt && max ? `retry ${attempt}/${max}` : 'retrying'
+  const delay = typeof msg.retry_delay_ms === 'number' ? Math.max(1, Math.round(msg.retry_delay_ms / 1000)) : 0
+  return delay ? `${why} · ${tries} in ${delay}s` : `${why} · ${tries}`
+}
+
+// The API refused the call and the CLI is backing off. Before this the line
+// was dropped on the floor: a session rate-limited for an hour showed
+// "Thinking…" for an hour, indistinguishable from a hang — two of those in
+// agent.log ran 87 minutes and 3.4 hours (2026-09-02, 2026-09-08). Said on
+// the typing line, in the transcript buffer (for an agent watching over MCP)
+// and in the log, where the watchdog's `lastLineSubtype` already pointed at it
+// without saying how many retries were left.
+function handleApiRetry(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  const text = apiRetryText(msg)
+  log('api-retry', {
+    key,
+    attempt: msg.attempt,
+    maxRetries: msg.max_retries,
+    delayMs: msg.retry_delay_ms,
+    status: msg.error_status,
+    error: msg.error
+  })
+  pushTranscript(conn, `[status] ${text}`)
+  setStatus(win, key, conn, text)
+}
+
+// A tool that has been running for a while: the CLI reports its elapsed time
+// every couple of seconds. Under this many seconds the tool row itself is
+// enough; past it, `Bash · 45s` on the typing line is what tells a 20s
+// `pnpm gate` from a stall.
+const TOOL_PROGRESS_MIN_S = 2
+
+function handleToolProgress(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  const seconds = typeof msg.elapsed_time_seconds === 'number' ? msg.elapsed_time_seconds : 0
+  if (seconds < TOOL_PROGRESS_MIN_S) return
+  const name = typeof msg.tool_name === 'string' && msg.tool_name ? msg.tool_name : 'tool'
+  setStatus(win, key, conn, `${name} · ${Math.round(seconds)}s`)
+}
+
+// A long Bash command is auto-backgrounded by the CLI (~10s in), and from then
+// on the turn shows nothing while it waits — the exact "why is this hanging"
+// moment. `background_tasks_changed` lists what is running and fires with an
+// empty list when they finish, so it drives the same status line: `running:
+// pnpm gate (+1)` while work is out, gone when it lands. Verified against
+// claude 2.1.269 (2026-09-22): tool_progress never arrives in -p mode, this
+// does.
+export function backgroundTaskText(msg: Record<string, unknown>): string {
+  const tasks = Array.isArray(msg.tasks) ? (msg.tasks as Array<Record<string, unknown>>) : []
+  if (!tasks.length) return ''
+  const first = typeof tasks[0]?.description === 'string' ? tasks[0].description : 'background task'
+  const label = first.length > 60 ? first.slice(0, 57) + '…' : first
+  return tasks.length > 1 ? `running: ${label} (+${tasks.length - 1})` : `running: ${label}`
+}
+
+function handleBackgroundTasks(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  const text = backgroundTaskText(msg)
+  if (text) pushTranscript(conn, `[status] ${text}`)
+  setStatus(win, key, conn, text)
+}
+
+function handleSystemLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  if (msg.subtype === 'api_retry') return handleApiRetry(win, key, conn, msg)
+  if (msg.subtype === 'background_tasks_changed') return handleBackgroundTasks(win, key, conn, msg)
   if (msg.subtype !== 'init' || typeof msg.session_id !== 'string') return
   send(win, key, {
     kind: 'session',
@@ -1658,6 +1821,8 @@ function handleUserLine(win: BrowserWindow, key: string, conn: Conn, msg: Record
     return
   }
   if (!Array.isArray(content)) return
+  // The tool this line answers is over, and so is its `Bash · 45s`.
+  setStatus(win, key, conn, '')
   for (const block of content as Array<Record<string, unknown>>) handleToolResultBlock(win, key, conn, block)
 }
 
@@ -1728,6 +1893,12 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
 
   const type = typeof msg.type === 'string' ? msg.type : undefined
   noteLineActivity(conn, msg, type)
+  // A streamed delta means the model is writing its answer — any status line
+  // is stale, and the panel clears it on the delta, so keep the flag honest.
+  // NOT on `assistant`: a backgrounded task's `running:` line is set and then
+  // the model narrates it in the same turn, and clearing here would drop the
+  // line while the task is still out. background_tasks_changed:[] clears that.
+  if (type === 'stream_event') conn.statusShown = false
 
   // Anything that isn't a streaming delta drains the coalesced delta queue
   // first, so the renderer always sees text/tools/results in arrival order.
@@ -1736,6 +1907,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
   const parentToolUseId = typeof msg.parent_tool_use_id === 'string' ? msg.parent_tool_use_id : ''
   if (parentToolUseId && routeSubagentLine(win, key, msg, type, parentToolUseId)) return
 
+  if (type === 'tool_progress') return handleToolProgress(win, key, conn, msg)
   if (type === 'control_request') return handleControlRequest(win, key, conn, msg)
   // The CLI's answer to a request we made (applyLiveMode). Only a refusal is news.
   if (type === 'control_response') {
@@ -1743,7 +1915,7 @@ export function handleLine(win: BrowserWindow, key: string, conn: Conn, line: st
     if (response?.subtype === 'error') log('control-error', { key, error: response.error })
     return
   }
-  if (type === 'system') return handleSystemLine(win, key, msg)
+  if (type === 'system') return handleSystemLine(win, key, conn, msg)
   if (type === 'stream_event') return handleStreamEvent(win, key, conn, msg)
   if (type === 'assistant') return handleAssistantLine(win, key, conn, msg)
   if (type === 'user') return handleUserLine(win, key, conn, msg)

@@ -1105,6 +1105,13 @@ export type AgentEvent =
   // absorbs it, which can be a whole tool call later, and until then this is
   // the only copy a panel mounting mid-turn can get.
   | { kind: 'steer'; text: string; at: number; panel?: string }
+  // What the CLI is doing while nothing streams: an API call being retried
+  // (`API overloaded · retry 2/10 in 8s`) or a tool that has been running for
+  // a while (`Bash · 45s`). One line under "is typing" — the latest replaces
+  // the last, an empty `text` takes it down, and any event that IS the turn
+  // moving (a delta, a tool row, the end) takes it down too. Without it a
+  // rate-limited turn reads exactly like a hung one, for as long as it lasts.
+  | { kind: 'status'; text: string; at: number }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
