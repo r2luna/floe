@@ -2294,6 +2294,19 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.deleteSession('marked')
       },
       {
+        // The selection read the other way: these are the keepers, bin the
+        // rest. Ticking the two chats you still want beats ticking the fifteen
+        // you don't. Unlike `d` this one needs a selection — without one it
+        // would mean "delete the whole project's sessions", which is not
+        // something a single key should be able to reach.
+        id: 'session.deleteUnmarked',
+        title: 'Delete every session except the selected…',
+        group: 'Sessions',
+        enabled: (c) => c.markedSessions.length > 0,
+        unavailable: () => 'select the sessions to keep first',
+        run: (c) => c.deleteSession('unmarked')
+      },
+      {
         id: 'worktree.new',
         title: 'New worktree',
         group: 'Worktrees',

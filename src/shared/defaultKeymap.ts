@@ -596,6 +596,11 @@ what is ticked — or, with nothing ticked, the one you are on. Ticks are a SET,
 not a range: sessions worth clearing out are scattered down the list and under
 different branches, so \`v\`'s contiguous selection would be the wrong shape.
 
+The palette reads the same ticks the other way round: "Delete every session
+except the selected" keeps what you ticked and throws away the rest of the
+project's, which is the shorter list to tick when two chats out of twenty are
+worth keeping. It ships unbound, beside the other bulk deletes.
+
 \`escape\` unticks everything. The mouse says the same three things — \`⌘\`-click
 ticks one, \`⇧\`-click ticks up to it from the last one, and right-click offers
 all three with their keys printed beside them — and a red button appears in
@@ -654,6 +659,7 @@ export const UNBOUND_SUGGESTIONS: Array<{ command: string; key?: string }> = [
   { command: 'session.deleteOthers' },
   { command: 'session.deleteAll' },
   { command: 'session.deleteIdle' },
+  { command: 'session.deleteUnmarked', key: 'alt+d' },
   { command: 'query.open', key: 'super+shift+q' },
   { command: 'query.focus' },
   { command: 'query.reopen' }

@@ -10,6 +10,7 @@ import {
   pasteRailBefore,
   pasteRailOf,
   renumberPasteRails,
+  splitMessage,
   type PastedText
 } from './pastes.ts'
 
@@ -127,4 +128,43 @@ test('a rail can be found by its number', () => {
   const rail = pasteRailOf(text, 2)!
   assert.equal(text.slice(rail.start, rail.end), pasteRail(2, 'second'))
   assert.equal(pasteRailOf(text, 3), null)
+})
+
+/* --- finding the paste again, in the chat --------------------------------- */
+
+test('a small message is one piece of words', () => {
+  assert.deepEqual(splitMessage('olha isso'), [{ text: 'olha isso' }])
+})
+
+test('a message that is only a paste collapses whole', () => {
+  assert.deepEqual(splitMessage(log(40)), [{ paste: log(40) }])
+})
+
+test('a line-in stays as words, the wall collapses', () => {
+  const parts = splitMessage(`olha esse erro:\n\n${log(40)}`)
+  assert.deepEqual(parts, [{ text: 'olha esse erro:' }, { paste: log(40) }])
+})
+
+test('the question after the paste stays as words too', () => {
+  const parts = splitMessage(`olha esse erro:\n\n${log(40)}\n\no que voce acha?`)
+  assert.deepEqual(parts, [
+    { text: 'olha esse erro:' },
+    { paste: log(40) },
+    { text: 'o que voce acha?' }
+  ])
+})
+
+test('blank lines inside the paste do not shred it', () => {
+  const body = `${log(20)}\n\n${log(20)}`
+  assert.deepEqual(splitMessage(`here:\n\n${body}`), [{ text: 'here:' }, { paste: body }])
+})
+
+test('a long opening paragraph is not a line-in, so nothing is peeled off', () => {
+  const text = `${log(30)}\n\nok?`
+  assert.deepEqual(splitMessage(text), [{ paste: log(30) }, { text: 'ok?' }])
+})
+
+test('a message that is merely long, with no wall in it, is left whole', () => {
+  const text = ['a', 'b', 'c'].join('\n') + '\n\n' + 'x'.repeat(1990) + '\n\nok'
+  assert.deepEqual(splitMessage(text), [{ text }])
 })

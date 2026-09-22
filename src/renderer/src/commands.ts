@@ -262,9 +262,10 @@ export interface CommandContext {
   renameSession: () => void
   /**
    * Forget sessions, after asking: the open one, the rest of the worktree's,
-   * all of them, the stale ones, or the ones ticked in the worktrees list.
+   * all of them, the stale ones, the ones ticked in the worktrees list, or
+   * everything the ticks did NOT name.
    */
-  deleteSession: (scope?: 'one' | 'others' | 'all' | 'idle' | 'marked') => void
+  deleteSession: (scope?: 'one' | 'others' | 'all' | 'idle' | 'marked' | 'unmarked') => void
   /**
    * The sessions ticked in the worktrees list, by Floe's own session id.
    *

@@ -86,6 +86,7 @@ import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
 import { describeRef, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
+import { describePaste, pastePreview, splitMessage } from './pastes'
 import { splitSkills } from '../../shared/skills'
 import { resetsIn } from '../../shared/resets'
 import { renderMarkdown, type MdLine } from './markdown'
@@ -2236,6 +2237,51 @@ const isMessage = (item: TranscriptItem): boolean =>
  * as markdown would reformat their own sentence back at them.
  */
 function RefText({ text }: { text: string }) {
+  return (
+    <>
+      {splitMessage(text).map((part, i) =>
+        'paste' in part ? (
+          <PasteBlock body={part.paste} key={i} />
+        ) : (
+          <RefSkills text={part.text} key={i} />
+        )
+      )}
+    </>
+  )
+}
+
+/**
+ * A paste, still collapsed on the other side of Enter.
+ *
+ * The composer holds a big paste back so the message stays readable while it is
+ * being written; the chat has the same problem after it is sent, and the wall
+ * of text is the same wall. So it reads here as it read there — how much it is,
+ * and its first line — and opens in place when you want it. Nothing is hidden
+ * that was not already hidden while it was typed.
+ *
+ * A button, which is what puts it on the lane's j/k walk: ⏎ opens it, the same
+ * key that opens every other row in the chat.
+ */
+function PasteBlock({ body }: { body: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="chat-paste" data-open={open || undefined}>
+      <button
+        className="chat-paste-head"
+        data-nav
+        title={open ? 'Collapse this paste' : 'Show the whole paste'}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="chat-paste-size">{describePaste(body)}</span>
+        <span className="chat-paste-preview">{pastePreview(body)}</span>
+      </button>
+      {open && <pre className="chat-paste-body">{body}</pre>}
+    </div>
+  )
+}
+
+/** The skills named in a stretch of words, drawn as the commands they were. */
+function RefSkills({ text }: { text: string }) {
   const known = useContext(SkillNames)
   return (
     <>
@@ -5885,6 +5931,15 @@ function WorktreesList({
       label: picks > 1 ? `Delete ${picks} selected sessions…` : 'Delete session…',
       keys: 'd',
       run: () => onCommand?.('session.deleteMarked')
+    },
+    {
+      // The inverse, and it only means anything with a selection open: what it
+      // keeps is what is ticked. Named "the others" rather than a count,
+      // because the number it deletes spans every worktree in the project and
+      // this menu is showing one branch's rows.
+      label: 'Delete all other sessions…',
+      disabled: picks === 0,
+      run: () => onCommand?.('session.deleteUnmarked')
     }
   ]
 
