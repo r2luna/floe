@@ -633,6 +633,15 @@ test('update_session writes the picker, and close_session takes the row away', a
   assert.match(String((await callTool('update_session', { session_id: id })).error), /Unknown session/)
 })
 
+test('update_session only steers a session this caller made', async () => {
+  // A session nobody claims (no spawnedBy) is not steerable from here — the
+  // same owner check answer_session_prompt already had, now on update_session too.
+  const store = await import('./sessionStore.ts')
+  store.addCreatedSession({ id: 'floe-mcp-orphan-picker-session', worktreePath: '/tmp/floe-mcp-wt', title: 'Theirs' })
+  const refused = await callTool('update_session', { session_id: 'floe-mcp-orphan-picker-session', mode: 'skip' })
+  assert.match(String(refused.error), /only its owner may steer it/)
+})
+
 test('the review tools answer for a directory that is not a repository', async () => {
   const commits = await callTool('list_commits', { worktree: '/tmp/floe-mcp-not-a-repo' })
   assert.ok(commits.error || Array.isArray(commits), 'either the commits or a reason, never a throw')

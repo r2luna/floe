@@ -508,7 +508,7 @@ function registerTools(server: McpServer, token: string): void {
   registerCommandTools(server, token)
   registerCommandRunTools(server)
   registerSessionStateTools(server, token)
-  registerSessionPickerTools(server)
+  registerSessionPickerTools(server, token)
   registerReviewTools(server)
   registerUsageTools(server)
   registerPlanExtraTools(server)
@@ -2616,10 +2616,13 @@ function registerSessionStateTools(server: McpServer, token: string): void {
 }
 
 // Steering one from outside: the composer's picker, and the close button.
-function registerSessionPickerTools(server: McpServer): void {
+function registerSessionPickerTools(server: McpServer, token: string): void {
   server.tool(
     'update_session',
-    "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. A mode change reaches a running turn immediately; the rest takes effect on its next turn.",
+    [
+      "Change what a session answers as, without sending it anything: harness, model, effort, permission mode, title. The picker in the composer, for an agent. A mode change reaches a running turn immediately; the rest takes effect on its next turn.",
+      'Only for a session THIS caller created (create_session) — steering a session the user is sitting in front of, or one another agent made, is not something Floe will do.'
+    ].join(' '),
     {
       session_id: z.string().describe('The Floe session id.'),
       harness: z.enum(HARNESSES as [string, ...string[]]).optional().describe('Who answers from now on.'),
@@ -2635,6 +2638,9 @@ function registerSessionPickerTools(server: McpServer): void {
       try {
         const target = findSessionAny(session_id)
         if (!target) return textResult({ error: `Unknown session: ${session_id}` })
+        if (target.spawnedBy !== token) {
+          return textResult({ error: 'That session was not created by this one — only its owner may steer it.' })
+        }
         if (title !== undefined) renameCreatedSession(target.id, title)
         if (harness || model || effort || mode) {
           // One write, because these four are one choice: a mode the new
