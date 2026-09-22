@@ -22,6 +22,25 @@ if (new URLSearchParams(location.search).get('theme') === 'light')
 </script><div class="page">
 
 <div class="sec">
+  <p class="lbl"><b>1b · a big paste</b> — collapsed as it was in the composer, and open</p>
+  <div class="chat"><div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>olha esse erro:<div class="chat-paste"><button class="chat-paste-head"><span class="chat-paste-size">912 lines · 41 KB</span><span class="chat-paste-preview">TypeError: Cannot read properties of undefined (reading 'send')</span></button></div>o que voce acha?</div></div><div class="irc-entry" data-me data-cont style="--nick:var(--nick-you)"><div class="irc-body"><div class="chat-paste" data-open><button class="chat-paste-head"><span class="chat-paste-size">912 lines · 41 KB</span><span class="chat-paste-preview">TypeError: Cannot read properties of undefined (reading 'send')</span></button><pre class="chat-paste-body">TypeError: Cannot read properties of undefined (reading 'send')
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:800:10)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:801:11)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:802:12)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:803:13)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:804:14)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:805:15)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:806:16)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:807:17)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:808:18)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:809:19)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:810:110)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:811:111)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:812:112)
+  at Object.&lt;anonymous&gt; (/Users/r2luna/code/floe/src/main/agent.ts:813:113)</pre></div></div></div></div>
+</div>
+
+<div class="sec">
   <p class="lbl"><b>1 · messages</b> — the head is the message's own first line: time, nick, then the words</p>
   <div class="chat"><div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>the composer eats the first keystroke after the palette closes — it only happens when the palette was opened with ⌘K, not from the row menu</div></div><div class="irc-entry" style="--nick:var(--nick-claude)"><div class="irc-body"><span class="irc-cost"><span>1m 12s</span><span class="irc-cost-sep">·</span><span>↓18.4k tokens</span></span><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude<span class="irc-host">@opus-5</span></span></span><div class="md"><p>Looking. <code class="md-code">Palette.tsx</code> restores focus on unmount, but the composer's <code class="md-code">onFocus</code> guard drops the event that arrives in the same tick.</p></div></div></div><div class="irc-entry" data-cont style="--nick:var(--nick-claude)"><div class="irc-body"><div class="md"><p>A second message from the same speaker — no head, because the run continues.</p></div></div></div>
     <div class="irc-entry" style="--nick:var(--nick-codex)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:05</span><span class="irc-nick" style="color:var(--nick-codex)">codex</span><span class="irc-peer">session</span></span><div class="md"><p>another Claude session speaking into this channel.</p></div></div></div>

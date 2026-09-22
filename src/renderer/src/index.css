@@ -1936,6 +1936,66 @@ button {
   white-space: pre;
 }
 
+/* The same paste, read back in the chat. The composer keeps a wall of text out
+   of the message being written; this keeps it out of the message once it is
+   sent. Bordered rather than shadowed, like every other block in the app. */
+.chat-paste {
+  display: block;
+  margin: 4px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  overflow: hidden;
+}
+
+.chat-paste-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 9px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: left;
+}
+
+.chat-paste[data-open] .chat-paste-head {
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.chat-paste-head:hover,
+.chat-paste-head:focus-visible {
+  color: var(--text-strong);
+}
+
+.chat-paste-size {
+  flex: none;
+  color: var(--accent);
+}
+
+/* One line, whatever the paste's first line is — it is a hint at what is in
+   there, not the thing itself, so it never wraps the row into two. */
+.chat-paste-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-paste-body {
+  max-height: 340px;
+  margin: 0;
+  padding: 7px 9px;
+  overflow: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
 .tool {
   display: grid;
   place-items: center;

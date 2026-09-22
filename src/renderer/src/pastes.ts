@@ -69,7 +69,7 @@ export const describePaste = (text: string): string =>
  * measure the same as the textarea under it, and a tab's width depends on
  * where in the line it lands — which the preview has just moved.
  */
-function preview(text: string): string {
+export function pastePreview(text: string): string {
   const line = text.split('\n').find((l) => l.trim() !== '') ?? ''
   const flat = line.replace(/\t/g, '  ').trimEnd()
   return flat.length > PREVIEW ? `${flat.slice(0, PREVIEW - 1)}…` : flat
@@ -77,7 +77,7 @@ function preview(text: string): string {
 
 /** The two lines the nth paste writes into the message. */
 export const pasteRail = (n: number, body: string): string =>
-  `${BAR}paste ${pasteNum(n)} · ${describePaste(body)}\n${BAR}${preview(body)}`
+  `${BAR}paste ${pasteNum(n)} · ${describePaste(body)}\n${BAR}${pastePreview(body)}`
 
 /**
  * Where the rail goes: on lines of its own, whatever the caret was sitting in
@@ -169,4 +169,67 @@ export function pasteRailOf(
   n: number
 ): { start: number; end: number; n: number } | null {
   return rails(text).find((r) => r.n === n) ?? null
+}
+
+/* --- the same paste, read back in the chat -------------------------------- */
+
+/**
+ * What a sent message is made of: words, and the wall of text among them.
+ *
+ * The composer's rail does not survive being sent — the message leaves with the
+ * paste written out in full, and the transcript is re-read from the harness's
+ * own file, where nothing marks where the paste began. So the chat finds it
+ * again by shape rather than by a marker, which has the side of being true for
+ * every harness and for every message already on disk.
+ */
+export type MessagePart = { text: string } | { paste: string }
+
+/** A line-in that reads as something said, not as something pasted. */
+const LEAD_LINES = 3
+const LEAD_CHARS = 200
+
+const isLead = (s: string): boolean =>
+  countLines(s) <= LEAD_LINES && s.length <= LEAD_CHARS
+
+/** The message's paragraphs, as ranges — blank lines are what part them. */
+function paragraphs(text: string): { start: number; end: number }[] {
+  const out: { start: number; end: number }[] = []
+  let at = 0
+  for (const m of text.matchAll(/\n[ \t]*\n+/g)) {
+    out.push({ start: at, end: m.index })
+    at = m.index + m[0].length
+  }
+  out.push({ start: at, end: text.length })
+  return out.filter((p) => text.slice(p.start, p.end).trim() !== '')
+}
+
+/**
+ * Split a message into the prose around a big paste and the paste itself.
+ *
+ * The two shapes that actually get typed are `here is the error:` + 900 lines,
+ * and the same with a question after it. So a short opening paragraph and a
+ * short closing one stay as words, and everything between them collapses — but
+ * only if what is between is still big on its own. A message that is merely
+ * long, with nothing in it big enough to bury the rest, is left whole.
+ */
+export function splitMessage(text: string): MessagePart[] {
+  if (!isBigPaste(text)) return [{ text }]
+  const ps = paragraphs(text)
+  if (!ps.length) return [{ text }]
+  let first = 0
+  let last = ps.length - 1
+  if (last > first && isLead(text.slice(ps[first].start, ps[first].end))) first++
+  if (last > first && isLead(text.slice(ps[last].start, ps[last].end))) last--
+  if (first === 0 && last === ps.length - 1) return [{ paste: text }]
+  const from = ps[first].start
+  const to = ps[last].end
+  const body = text.slice(from, to)
+  if (!isBigPaste(body)) return [{ text }]
+  const out: MessagePart[] = []
+  const lead = text.slice(0, from).replace(/\s+$/, '')
+  if (lead) out.push({ text: lead })
+  out.push({ paste: body })
+  const tail = text.slice(to).replace(/^\s+/, '')
+  if (tail) out.push({ text: tail })
+  return out
 }
