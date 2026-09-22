@@ -1,4 +1,4 @@
-// Serving a video to the chat.
+// Serving a video to the chat, and a page to the file reader.
 //
 // A screenshot rides in the transcript as base64 because it is a few hundred
 // kilobytes; a screen recording is tens of megabytes, and a data URL of one
@@ -17,8 +17,11 @@ import { homedir } from 'node:os'
 import { isAbsolute, resolve, basename } from 'node:path'
 import { Readable } from 'node:stream'
 import type { MediaChunk, MediaFile } from '../shared/types'
+import { mediaUrl, pathFromMediaUrl, SCHEME } from '../shared/mediaUrl.ts'
 
-export const SCHEME = 'floe-media'
+// Spelled in shared/ because the renderer builds these URLs too; re-exported so
+// this file stays the one import for everything about the scheme.
+export { mediaUrl, pathFromMediaUrl, SCHEME }
 
 /** Extension → what the player is being handed. Chromium plays `.mov` when it
     is h264/aac, which is what every screen recorder writes. */
@@ -35,6 +38,38 @@ const MIME: Record<string, string> = {
   jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp'
+}
+
+/**
+ * Extension → what a PAGE is being handed.
+ *
+ * The scheme serves two jobs: a player asking for a recording, and the file
+ * reader's <iframe> drawing an `.html` file from the worktree (panels.tsx,
+ * HtmlPage). The second one is why a stylesheet and a script are here — a mock
+ * that loads `./style.css` has to get it, or the page draws unstyled.
+ *
+ * Deliberately a short list of what a page loads, and separate from `MIME`:
+ * `probeMedia` must keep answering only about media, or a `.css` path in a
+ * message would come back as something to put a player under.
+ *
+ * The exposure this adds is bounded by who can ask. `protocol.handle` binds the
+ * DEFAULT session, and the native browser view runs on `persist:floe-browser`
+ * (main/browser.ts) — so a page from the internet cannot reach this scheme at
+ * all. What can is a file the reader was pointed at, which came off this disk.
+ */
+const PAGE_MIME: Record<string, string> = {
+  html: 'text/html; charset=utf-8',
+  htm: 'text/html; charset=utf-8',
+  css: 'text/css; charset=utf-8',
+  js: 'text/javascript; charset=utf-8',
+  mjs: 'text/javascript; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  ttf: 'font/ttf',
+  otf: 'font/otf'
 }
 
 /**
@@ -78,25 +113,6 @@ export function probeMedia(candidate: string, cwd?: string): MediaFile | null {
 }
 
 /**
- * The path as a URL of our scheme. Encoded segment by segment so a space, a `#`
- * or a `?` in a file name survives the round trip — the pathname is the path.
- */
-export function mediaUrl(path: string): string {
-  return `${SCHEME}://file` + path.split('/').map(encodeURIComponent).join('/')
-}
-
-/** The path back out of a `floe-media://` URL, or null if it is not one. */
-export function pathFromMediaUrl(url: string): string | null {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol !== `${SCHEME}:`) return null
-    return parsed.pathname.split('/').map(decodeURIComponent).join('/')
-  } catch {
-    return null
-  }
-}
-
-/**
  * The byte range the player asked for, clamped to the file, or null for "all of
  * it". Only the single-range form matters: it is the only one <video> sends.
  */
@@ -126,8 +142,8 @@ export function mediaResponse(url: string, range: string | null): Response {
   const path = pathFromMediaUrl(url)
   if (!path) return new Response('bad media url', { status: 400 })
 
-  const mediaType = MIME[extOf(path)]
-  if (!mediaType) return new Response('not a media file', { status: 415 })
+  const mediaType = MIME[extOf(path)] ?? PAGE_MIME[extOf(path)]
+  if (!mediaType) return new Response('not a servable file', { status: 415 })
 
   let size = 0
   try {

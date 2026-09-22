@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { FileContent } from '../../shared/types'
-import { extOf, isConvertible, previewKind } from './previewKind.ts'
+import { extOf, isConvertible, previewKind, READS_AS_DRAWN } from './previewKind.ts'
 
 const text: FileContent = { kind: 'text', text: 'x' }
 
@@ -43,4 +43,14 @@ test('convertible is the deck formats, and nothing else', () => {
 
 test('a pdf is the viewer', () => {
   assert.equal(previewKind('spec.pdf', { kind: 'pdf', dataUrl: 'data:,' }), 'pdf')
+})
+
+test('an html file is a page, and only while it really is text', () => {
+  assert.equal(previewKind('mocks/app-icon.html', text), 'html')
+  assert.equal(previewKind('a/b.HTM', text), 'html')
+  // Named like a page, arrived as bytes: it is not one.
+  assert.equal(previewKind('page.html', { kind: 'binary' }), 'none')
+  assert.match('mocks/a.html', READS_AS_DRAWN)
+  assert.match('NOTES.md', READS_AS_DRAWN)
+  assert.doesNotMatch('src/index.ts', READS_AS_DRAWN)
 })

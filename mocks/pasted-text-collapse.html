@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — collapsing a big paste in the composer</title>
+<style>
+  :root {
+    --mono: "CommitMonoPinguim", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --bg: #0d0e11;
+    --panel: rgb(20 21 25);
+    --panel-focused: rgb(23 24 29);
+    --line: #23252b;
+    --line-soft: #1c1e23;
+    --text: #c9ccd2;
+    --text-strong: #e8eaee;
+    --dim: #6d7280;
+    --faint: #575d6a;
+    --edge: #343a45;
+    --well: rgb(27 29 35);
+    --accent: #d3956d;
+    --attach: #a8dcbc;
+    --wash-3: #ffffff0d;
+    --radius: 5px;
+  }
+  :root[data-theme='light'] {
+    --bg: #ffffff;
+    --panel: rgb(248 249 251);
+    --panel-focused: #ffffff;
+    --line: #d7dae1;
+    --line-soft: #e4e7ec;
+    --text: #3d434e;
+    --text-strong: #1b1e25;
+    --dim: #767c88;
+    --faint: #939aa6;
+    --edge: #c3c8d1;
+    --well: rgb(238 240 244);
+    --accent: #a9631f;
+    --attach: #2f7350;
+    --wash-3: #0000000d;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 13px/1.5 var(--mono);
+    padding: 28px 28px 80px;
+  }
+  h1 { font-size: 14px; color: var(--text-strong); font-weight: 500; }
+  .sub { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .opt { margin-top: 34px; max-width: 860px; }
+  .opt > h2 {
+    font-size: 12px; font-weight: 500; color: var(--text-strong);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .opt > h2 b { color: var(--accent); font-weight: 500; }
+  .opt > p { color: var(--dim); font-size: 12px; margin: 4px 0 12px; max-width: 70ch; }
+
+  /* ---- the panel + composer, as in the app ---- */
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .transcript { padding: 14px; color: var(--faint); font-size: 12px; min-height: 52px; }
+  .transcript .nick { color: #b9416f; }
+  .composer { border-top: 1px solid var(--accent); background: var(--panel-focused); }
+  .attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 10px 0; }
+  .chip {
+    display: flex; align-items: center; gap: 6px; padding: 3px 7px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    color: var(--dim); font-size: 11px; background: none; font-family: inherit; cursor: pointer;
+  }
+  .chip:hover { color: var(--text-strong); border-color: var(--edge); }
+  .chip .count { color: var(--faint); }
+  .chip .x { color: var(--faint); }
+  .composer-bar { display: flex; align-items: flex-end; min-height: 40px; }
+  .composer-text { flex: 1; padding: 12px 12px 10px; white-space: pre-wrap; color: var(--text); }
+  .caret { display: inline-block; width: 7px; height: 15px; background: var(--accent); vertical-align: -3px; opacity: .8; }
+  .composer-tools { display: flex; align-items: center; gap: 6px; padding: 8px 10px; color: var(--dim); }
+  .tool { padding: 2px 5px; border-radius: var(--radius); color: var(--dim); }
+  .mode { border: 1px solid var(--line); border-radius: var(--radius); padding: 2px 7px; font-size: 11px; color: var(--dim); }
+
+  /* ---- O1: inline token, painted like .md-attach ---- */
+  .md-attach {
+    color: var(--attach); background: var(--panel-focused);
+    box-shadow: 0 0 0 3px var(--panel-focused), 0 0 0 4px var(--line);
+    cursor: pointer;
+  }
+  .md-attach:hover { box-shadow: 0 0 0 3px var(--panel-focused), 0 0 0 4px var(--edge); }
+
+  /* popover preview for O1 */
+  .peek {
+    margin: 14px 12px 0; border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--well); overflow: hidden;
+  }
+  .peek-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 9px; border-bottom: 1px solid var(--line-soft);
+    color: var(--dim); font-size: 11px;
+  }
+  .peek-head .acts { display: flex; gap: 10px; }
+  .peek-head .acts span { cursor: pointer; }
+  .peek-head .acts span:hover { color: var(--text-strong); }
+  .peek-body {
+    max-height: 150px; overflow: auto; padding: 8px 9px;
+    color: var(--faint); font-size: 11.5px; white-space: pre; tab-size: 2;
+  }
+
+  /* ---- O3: collapsed block inside the text ---- */
+  .fold {
+    display: block; margin: 6px 0; border-left: 2px solid var(--edge);
+    padding-left: 9px; color: var(--faint); cursor: pointer;
+  }
+  .fold .lines { white-space: pre; overflow: hidden; }
+  .fold[data-open='0'] .lines { max-height: 34px; -webkit-mask-image: linear-gradient(#000 40%, transparent); mask-image: linear-gradient(#000 40%, transparent); }
+  .fold[data-open='1'] .lines { max-height: 190px; overflow: auto; }
+  .fold .more { display: block; margin-top: 2px; color: var(--dim); font-size: 11px; }
+  .fold:hover .more { color: var(--text-strong); }
+
+  /* ---- O4: gutter rail ---- */
+  .rail {
+    display: flex; align-items: stretch; gap: 8px; margin: 6px 0;
+    cursor: pointer;
+  }
+  .rail .bar { width: 3px; border-radius: 2px; background: var(--attach); opacity: .55; }
+  .rail:hover .bar { opacity: 1; }
+  .rail .meta { color: var(--faint); font-size: 11.5px; padding: 1px 0; }
+  .rail .meta b { color: var(--dim); font-weight: 500; }
+  .rail .first { color: var(--faint); opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60ch; display: block; }
+
+  .note { margin-top: 10px; color: var(--faint); font-size: 11.5px; max-width: 74ch; }
+  .note b { color: var(--dim); font-weight: 500; }
+  .theme {
+    position: fixed; top: 16px; right: 20px; padding: 4px 10px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel); color: var(--dim); font: inherit; font-size: 11px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<button class="theme" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">theme</button>
+
+<h1>Pasting 900 lines into the composer</h1>
+<div class="sub">Four ways to hide the bulk. The full text always goes out on send — only the reading changes. Click the pills.</div>
+
+<!-- ============ O1 ============ -->
+<section class="opt">
+  <h2><b>O1</b> Inline token — the paste becomes one word in the sentence</h2>
+  <p>The same trick <code>[image 01]</code> already uses: the textarea holds a short token, the mirror paints it as a pill. It keeps its place in the sentence, so you can write before and after it. Click opens a read-only peek; ⌫ on the token deletes the whole paste.</p>
+  <div class="panel">
+    <div class="transcript"><span class="nick">&lt;you&gt;</span> can you look at this crash</div>
+    <div class="composer">
+      <div class="composer-bar">
+        <div class="composer-text">this crashed after ~15h of uptime: <span class="md-attach" onclick="pk('p1')">[paste 01 · 912 lines]</span> pty.node is in frame 9<span class="caret"></span></div>
+        <div class="composer-tools"><span class="tool">+</span><span class="mode">bypass</span></div>
+      </div>
+      <div class="peek" id="p1" hidden>
+        <div class="peek-head"><span>paste 01 — 912 lines · 41 KB</span><span class="acts"><span>expand into text</span><span>remove</span><span onclick="pk('p1')">close</span></span></div>
+        <div class="peek-body">-------------------------------------
+Translated Report (Full Report Below)
+-------------------------------------
+Process:             Floe [56380]
+Path:                /Applications/Floe.app/Contents/MacOS/Floe
+Identifier:          me.lunardelli.floe
+Version:             0.37.5 (0.37.5)
+Code Type:           ARM-64 (Native)
+Role:                Foreground
+Parent Process:      launchd [1]</div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Cost:</b> the token is real characters in the textarea, so caret motion and ⌫ have to treat it as one unit.</div>
+</section>
+
+<!-- ============ O2 ============ -->
+<section class="opt">
+  <h2><b>O2</b> Attachment chip — the paste leaves the text entirely</h2>
+  <p>Treated like a dropped file: a chip above the bar, nothing in the textarea. The composer stays one clean line. The text is appended to the message on send, so the model still reads it verbatim.</p>
+  <div class="panel">
+    <div class="transcript"><span class="nick">&lt;you&gt;</span> can you look at this crash</div>
+    <div class="composer">
+      <div class="attachments">
+        <button class="chip" onclick="pk('p2')">📄 pasted-text-1 <span class="count">· 912 lines</span> <span class="x">✕</span></button>
+      </div>
+      <div class="composer-bar">
+        <div class="composer-text">this crashed after ~15h of uptime, pty.node is in frame 9<span class="caret"></span></div>
+        <div class="composer-tools"><span class="tool">+</span><span class="mode">bypass</span></div>
+      </div>
+      <div class="peek" id="p2" hidden>
+        <div class="peek-head"><span>pasted-text-1 — 912 lines · 41 KB</span><span class="acts"><span>paste into text</span><span>remove</span><span onclick="pk('p2')">close</span></span></div>
+        <div class="peek-body">Process:             Floe [56380]
+Exception Type:      EXC_CRASH (SIGABRT)
+Termination Reason:  Namespace SIGNAL, Code 6, Abort trap: 6
+
+Thread 0 Crashed:: CrBrowserMain
+0   libsystem_kernel.dylib   __pthread_kill + 8
+1   libsystem_pthread.dylib  pthread_kill + 296</div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Cost:</b> you lose the position — three pastes in one message arrive in chip order, not where you put them.</div>
+</section>
+
+<!-- ============ O3 ============ -->
+<section class="opt">
+  <h2><b>O3</b> Folded block — the text is all there, just clamped</h2>
+  <p>Nothing is moved or tokenised. The pasted run is drawn as a two-line window with a fade and a counter; click unfolds it to a scrollable 190px and click again refolds. What you see is literally what is in the textarea.</p>
+  <div class="panel">
+    <div class="transcript"><span class="nick">&lt;you&gt;</span> can you look at this crash</div>
+    <div class="composer">
+      <div class="composer-bar">
+        <div class="composer-text">this crashed after ~15h of uptime:<span class="fold" data-open="0" onclick="fold(this)"><span class="lines">-------------------------------------
+Translated Report (Full Report Below)
+-------------------------------------
+Process:             Floe [56380]
+Path:                /Applications/Floe.app/Contents/MacOS/Floe
+Version:             0.37.5 (0.37.5)
+Exception Type:      EXC_CRASH (SIGABRT)
+Thread 0 Crashed:: CrBrowserMain
+0   libsystem_kernel.dylib   __pthread_kill + 8
+9   pty.node                 Napi::Error::ThrowAsJavaScriptException()</span><span class="more">⌄ 912 lines folded — click to open</span></span>pty.node is in frame 9<span class="caret"></span></div>
+        <div class="composer-tools"><span class="tool">+</span><span class="mode">bypass</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Cost:</b> the mirror can no longer sit glyph-for-glyph over the textarea — a clamped run breaks caret alignment for everything after it. This is the expensive one.</div>
+</section>
+
+<!-- ============ O4 ============ -->
+<section class="opt">
+  <h2><b>O4</b> Quote rail — one line of the paste, kept as a quote</h2>
+  <p>Halfway between O1 and O3: the run collapses to a rail with the first line and a count, reading like a quoted block rather than a pill. Click expands in place. Same mechanism as O1 (a token under the hood), a softer look.</p>
+  <div class="panel">
+    <div class="transcript"><span class="nick">&lt;you&gt;</span> can you look at this crash</div>
+    <div class="composer">
+      <div class="composer-bar">
+        <div class="composer-text">this crashed after ~15h of uptime:<span class="rail" onclick="pk('p4')"><span class="bar"></span><span class="meta"><b>pasted 912 lines</b> · 41 KB<span class="first">Process:             Floe [56380] — EXC_CRASH (SIGABRT)</span></span></span>pty.node is in frame 9<span class="caret"></span></div>
+        <div class="composer-tools"><span class="tool">+</span><span class="mode">bypass</span></div>
+      </div>
+      <div class="peek" id="p4" hidden>
+        <div class="peek-head"><span>pasted text — 912 lines · 41 KB</span><span class="acts"><span>expand into text</span><span>remove</span><span onclick="pk('p4')">close</span></span></div>
+        <div class="peek-body">Thread 0 Crashed:: CrBrowserMain  Dispatch queue: com.apple.main-thread
+0   libsystem_kernel.dylib   __pthread_kill + 8
+1   libsystem_pthread.dylib  pthread_kill + 296
+2   libsystem_c.dylib        abort + 148
+9   pty.node                 Napi::Error::ThrowAsJavaScriptException() + 208</div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>Cost:</b> two lines tall instead of inline, so it always interrupts the sentence — fine when the paste is the message, noisy when it is an aside.</div>
+</section>
+
+<script>
+  function pk(id) { const el = document.getElementById(id); el.hidden = !el.hidden }
+  function fold(el) { el.dataset.open = el.dataset.open === '1' ? '0' : '1' }
+</script>
+</body>
+</html>

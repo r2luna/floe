@@ -317,3 +317,17 @@ test('a token is only a chip when it names an image that is attached', () => {
 
   assert.equal(tokenizeMarkdown(text, undefined, 2).filter((t) => t.cls === 'md-attach').length, 2)
 })
+
+/* --- the rail a big paste collapses to ----------------------------------- */
+
+test('a paste rail paints its bar, header and preview apart', () => {
+  const out = tokenizeMarkdown('│ paste 01 · 912 lines · 41 KB\n│ Process: Floe')
+  assert.deepEqual(
+    out.filter((t) => t.cls).map((t) => t.cls),
+    ['md-paste-bar', 'md-paste', 'md-paste-bar', 'md-paste-line']
+  )
+  assert.equal(
+    out.map((t) => t.text).join(''),
+    '│ paste 01 · 912 lines · 41 KB\n│ Process: Floe'
+  )
+})

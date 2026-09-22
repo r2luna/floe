@@ -27,20 +27,20 @@ test('old drafts fall off the end', () => {
 
 test('a pasted image is kept under the draft it was pasted into', () => {
   const store = new Map<string, Pending>()
-  keep(store, 's1', { images: [img('a1')], files: [] })
+  keep(store, 's1', { images: [img('a1')], files: [], pastes: [] })
   assert.deepEqual(store.get('s1')?.images.map((i) => i.id), ['a1'])
 })
 
 test('sending clears the chips instead of leaving an empty entry', () => {
   const store = new Map<string, Pending>()
-  keep(store, 's1', { images: [img('a1')], files: [] })
-  keep(store, 's1', { images: [], files: [] })
+  keep(store, 's1', { images: [img('a1')], files: [], pastes: [] })
+  keep(store, 's1', { images: [], files: [], pastes: [] })
   assert.equal(store.has('s1'), false)
 })
 
 test('old attachments fall off the end', () => {
   const store = new Map<string, Pending>()
-  for (let i = 0; i < 15; i++) keep(store, `s${i}`, { images: [img(`a${i}`)], files: [] })
+  for (let i = 0; i < 15; i++) keep(store, `s${i}`, { images: [img(`a${i}`)], files: [], pastes: [] })
   assert.equal(store.size, 10)
   assert.equal(store.has('s0'), false)
   assert.equal(store.has('s14'), true)

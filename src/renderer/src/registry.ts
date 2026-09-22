@@ -26,7 +26,8 @@ import type { Command, CommandContext } from './commands.ts'
 import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
-import { previewTarget, previewUrl } from './previewTarget.ts'
+import { inWorktree, previewTarget, previewUrl } from './previewTarget.ts'
+import { READS_AS_DRAWN } from './previewKind.ts'
 import { startSkillDraft } from './skillDraft.ts'
 import { skillsChanged } from './useSkills.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
@@ -863,6 +864,29 @@ export const REGISTRY: Map<string, Command> = new Map(
           )
       },
       {
+        // The reader's half of diff.view, for the two kinds of file it does not
+        // show as itself: an `.html` page is drawn, and markdown is prose. Every
+        // other file IS its source, and the chip would toggle one thing against
+        // itself.
+        id: 'file.source',
+        title: 'Read a page as it is drawn, or as its source',
+        group: 'Files',
+        enabled: (c) => {
+          const panel = c.lane.panels[c.lane.focus]
+          return panel?.kind === 'file' && READS_AS_DRAWN.test(panel.sub ?? '')
+        },
+        run: (c) =>
+          c.setLane((l) =>
+            patchPanel(l, l.focus, {
+              view: l.panels[l.focus]?.view === 'code' ? undefined : 'code',
+              // The drawn view has no rows at all, so an index into the source
+              // means nothing in it.
+              cursor: 0,
+              selection: null
+            })
+          )
+      },
+      {
         // Markdown only: every other file IS its source, so there is no second
         // way to read it and the chip would toggle between one thing and itself.
         id: 'diff.view',
@@ -961,12 +985,10 @@ export const REGISTRY: Map<string, Command> = new Map(
         id: 'palette.files',
         title: 'Find a chat or a file…',
         group: 'App',
-        // The list is the checked-out tree's, so it needs one — same refusal,
-        // and the same sentence, as opening the Files panel. The chats would
-        // survive without a worktree, but half a palette is not worth a second
-        // set of rules for when the key works.
-        enabled: (c) => c.canOpen('file'),
-        unavailable: (c) => c.whyCannotOpen('file'),
+        // No worktree needed any more: the chats are every machine's, every
+        // project's, so the list still answers "where was that conversation"
+        // with nothing checked out. Only the files half needs a tree, and it
+        // simply comes back empty.
         run: (c) => c.openFiles()
       },
       {
@@ -1231,17 +1253,24 @@ export const REGISTRY: Map<string, Command> = new Map(
       },
       {
         id: 'bash.preview',
-        title: 'Open this command’s page in the browser panel',
+        title: 'Open this command’s page',
         group: 'Chat',
         enabled: (c) => !!c.worktree && !!previewTarget(bashCommand(c) ?? ''),
         // The Preview button on a shell block, from the keyboard: the page the
-        // command opens (a mock, a served URL) shown in the browser panel — the
-        // same open-then-navigate the MCP open_browser tool does.
+        // command opens (a mock, a served URL) shown where it belongs — the
+        // reader for a page of this worktree, the browser panel for anything
+        // else, which is the same open-then-navigate the MCP open_browser tool
+        // does. Kept in lockstep with previewInBrowser in panels.tsx.
         run: (c) => {
           const command = bashCommand(c)
           const cwd = c.worktree?.path
           const target = command ? previewTarget(command) : null
           if (!target || !cwd) return
+          const inside = inWorktree(target, cwd)
+          if (inside) {
+            c.setLane((l) => open(l, c.makePanel('file', inside)))
+            return
+          }
           c.setLane((l) => open(l, c.makePanel('browser')))
           void window.floe.browser.navigate(previewUrl(target, cwd))
         }

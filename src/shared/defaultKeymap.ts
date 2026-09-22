@@ -482,6 +482,15 @@ comes before the \`selecting\` one.`,
     ]
   },
   {
+    title: 'Reading a File',
+    doc: `\`s\` switches a file the reader DRAWS between the drawing and its source.
+An \`.html\` file is a page — the reader shows it the way a browser would, which is
+what a mock is for — and markdown is prose. \`s\` asks for the file itself.
+
+Every other file already IS its source, and the key does nothing there.`,
+    binds: [{ key: 's', command: 'file.source', when: 'panel == "file"' }]
+  },
+  {
     title: 'Reading a Diff',
     doc: `\`]\` and \`[\` walk the changes, a run of changed lines counting as one —
 a rewritten paragraph is one edit, not twelve.

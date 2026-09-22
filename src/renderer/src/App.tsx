@@ -71,6 +71,14 @@ import {
   pairHost,
   peekLanding
 } from './backends'
+import {
+  chatItems,
+  finderChats,
+  loadChats,
+  mergeChats,
+  type ChatRow,
+  type FinderChat
+} from './finderChats'
 import type { NewWorktreeProps } from './NewWorktree'
 import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
@@ -560,15 +568,33 @@ export default function App() {
   // ⌘P's files, or null while it is closed — which is also what says the
   // palette is up. The list is fetched when it opens rather than kept in sync:
   // files appear and vanish behind the app all day, and a list read at the
-  // moment you ask for it cannot be stale. The chats it offers above them need
-  // no fetch at all — the sidebar's worktree list already carries them.
+  // moment you ask for it cannot be stale.
   const [finderFiles, setFinderFiles] = useState<string[] | null>(null)
+  // Every machine's sessions, every project — the chat half, which the open
+  // project's worktree list cannot answer for. Kept between opens rather than
+  // cleared: the palette paints the last answer at once and the load in flight
+  // updates it in place, the way the `active` panel does.
+  const [chatIndex, setChatIndex] = useState<ChatRow[]>([])
   // What ⌘P offers, rebuilt when either half moves. Null while it is closed:
   // the same state says whether the palette is up and what is in it.
-  const finder = useMemo(
-    () => (finderFiles === null ? null : finderItems(worktrees.rows, finderFiles)),
-    [finderFiles, worktrees.rows]
-  )
+  const finder = useMemo(() => {
+    if (finderFiles === null) return null
+    const project = projects.current
+    const chats = finderChats(
+      chatIndex,
+      worktrees.rows,
+      project && worktrees.repo === project.path
+        ? {
+            backend: currentBackend(),
+            projectPath: project.path,
+            projectName: project.name
+          }
+        : undefined
+    )
+    const { items, map } = chatItems(chats, timeAgo, backendLabel)
+    for (const path of finderFiles) items.push({ id: path, title: path, group: 'files' })
+    return { items, chats: map }
+  }, [finderFiles, chatIndex, worktrees.rows, worktrees.repo, projects.current])
   // The keymap, read from ~/.config/floe/keybindings.toml. It is the whole map,
   // not a set of overrides — the main process generates the file with every
   // default in it — so installing it REPLACES what resolveKey walks rather than
@@ -1143,6 +1169,35 @@ export default function App() {
     if (projects.current?.path !== s.projectPath) return enterProject(s.projectPath, false)
     worktrees.select(s.worktreePath)
     setLane((l) => open(l, mkPanel('chat', s.title, { id: key, worktreePath: s.worktreePath })))
+  }
+
+  /**
+   * Open a chat picked in ⌘P — which may be in another project, or on another
+   * machine, now that the list spans every one of them.
+   *
+   * The open project takes the short path: `openChat` puts the panel up without
+   * re-entering anything, which is what a pick inside the project you are
+   * already in should do. Everything else is the jump the `active` panel makes.
+   */
+  const openFinderChat = (chat: FinderChat): void => {
+    if (chat.backend === currentBackend() && chat.projectPath === projects.current?.path)
+      return ctxRef.current.openChat({ id: chat.id, worktreePath: chat.worktreePath })
+    jumpToSession({
+      projectPath: chat.projectPath,
+      projectName: chat.projectName,
+      worktreePath: chat.worktreePath,
+      branch: chat.branch,
+      sessionId: chat.sessionId,
+      // The key the panel is filed under, which is `claudeId ?? id` — already
+      // resolved into `chat.id`, so handing it over as the claudeId gives
+      // jumpToSession the same key it would have computed.
+      claudeId: chat.id,
+      title: chat.title,
+      lastActivityAt: chat.mtime,
+      running: !!chat.running,
+      needsYou: false,
+      backend: chat.backend
+    })
   }
 
   /**
@@ -2075,13 +2130,17 @@ export default function App() {
     openCommands: () => setCommandsOpen(true),
     openKeys: () => setKeysOpen(true),
     openFiles: () => {
-      if (!here) return
       // Opens empty and fills: reading a large repo takes a moment, and a
       // palette that waits for it looks like the key did nothing. The chats are
-      // in the box from the first frame either way — they are the rows you are
-      // most likely to have opened it for.
+      // in the box from the first frame either way — the last answer is still
+      // held, and they are the rows you are most likely to have opened it for.
       setFinderFiles([])
-      void window.floe.files.all(here).then(setFinderFiles)
+      // Re-asked on every open rather than polled: this is the one moment the
+      // list is read, and a session created behind the app has to be in it.
+      loadChats((slice, backend) => setChatIndex((prev) => mergeChats(prev, slice, backend)))
+      // No worktree — no files, and the chats are the whole list. ⌘P still
+      // opens, because "where was that conversation" is asked from anywhere.
+      if (here) void window.floe.files.all(here).then(setFinderFiles)
     },
     // Opens on the last query, selected, so `/` then typing replaces it and `/`
     // then Enter repeats it.
@@ -3743,6 +3802,7 @@ export default function App() {
               return (
                 <SessionPreview
                   title={chat.title}
+                  project={chat.projectName}
                   branch={chat.branch}
                   worktree={chat.worktreePath}
                   at={timeAgo(chat.mtime)}
@@ -3766,7 +3826,10 @@ export default function App() {
             const chat = finder.chats.get(id)
             // A chat carries its own worktree: picking one on another branch
             // takes you there, the same as clicking its row in the sidebar.
-            if (chat) return ctxRef.current.openChat({ id: chat.id, worktreePath: chat.worktreePath })
+            // Another project or another machine is jumpToSession's job — the
+            // `active` panel's rows already cross both, and picking one here
+            // means the same thing it means there.
+            if (chat) return openFinderChat(chat)
             // Not a chat, so the id is the path itself.
             setLane((l) => open(l, panelOf(panelForFile(id), id)))
           }}
@@ -3883,73 +3946,6 @@ const FINDER_SCOPES = [
   { id: 'files', label: 'files' },
   { id: ALL, label: 'all' }
 ]
-
-/** A chat row's other half — what picking it needs, which no id can carry. */
-interface FinderChat {
-  /** What openChat is called with: the harness's id when the session has one. */
-  id: string
-  worktreePath: string
-  title: string
-  branch: string
-  mtime: number
-  running?: boolean
-  model?: string
-  mode?: string
-}
-
-/**
- * What ⌘P offers: every chat in the project, then every file in the worktree.
- *
- * Chats first because that is what the key is most often for — you are going
- * back to something you were doing, and a session is a place you left rather
- * than a name you remember exactly. The files keep the behaviour they always
- * had: the whole path is the title, so `srcapp` finds src/App.tsx, and a bare
- * filename would make the directory unsearchable.
- *
- * The chats come back in a map beside the rows because a palette hands back an
- * id and nothing else: opening one needs the worktree it lives in, and the
- * pane beside it needs facts that were never in the row.
- */
-function finderItems(
-  rows: WorktreeRow[],
-  files: string[]
-): { items: PaletteItem[]; chats: Map<string, FinderChat> } {
-  const chats = new Map<string, FinderChat>()
-  const items: PaletteItem[] = []
-  const sessions = rows
-    .flatMap((row) => row.sessions.map((session) => ({ row, session })))
-    // Newest first: with no query typed, the list is a list of where you were.
-    .sort((a, b) => b.session.mtime - a.session.mtime)
-  for (const { row, session } of sessions) {
-    const key = `chat:${session.id}`
-    chats.set(key, {
-      id: session.claudeId ?? session.id,
-      worktreePath: row.worktree.path,
-      title: session.title,
-      branch: row.worktree.branch,
-      mtime: session.mtime,
-      running: session.running,
-      model: session.model,
-      mode: session.permissionMode
-    })
-    items.push({
-      id: key,
-      title: session.title,
-      // Where it is and when it last moved — the two things that tell two
-      // sessions of the same name apart.
-      detail: `${row.worktree.branch} · ${timeAgo(session.mtime)}`,
-      group: 'chats',
-      // Present, so every chat row gets the dot and the block keeps one left
-      // edge; filled only for a turn in flight.
-      mark: !!session.running,
-      // A title, not a path: "Count src/shared files" must not be drawn as a
-      // directory and a file name.
-      flat: true
-    })
-  }
-  for (const path of files) items.push({ id: path, title: path, group: 'files' })
-  return { items, chats }
-}
 
 /**
  * What the palette offers: every project, plus the one action that belongs

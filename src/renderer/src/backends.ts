@@ -9,7 +9,7 @@
 //
 // Channel strings live here and nowhere else in the renderer — `backends.invokeOn`
 // is the only untyped seam, so it stays behind these wrappers.
-import type { ActiveSession, Project } from '../../shared/types'
+import type { ActiveSession, JumpSession, Project } from '../../shared/types'
 
 export const LOCAL = 'local'
 
@@ -232,6 +232,16 @@ export function mergeProjects(
 /** One machine's most recent sessions — the `active` panel's slice of it. */
 export const recentSessionsOn = (backend: string, limit: number): Promise<ActiveSession[]> =>
   window.floe.backends.invokeOn(backend, 'sessions:recent', limit) as Promise<ActiveSession[]>
+
+/**
+ * Every session on one machine, whatever project — ⌘P's chat index.
+ *
+ * Unlimited where `recentSessionsOn` is capped, and cheaper per row for it:
+ * this is the index walk without the per-session transcript read that decides
+ * `needsYou`, which the finder does not draw.
+ */
+export const allSessionsOn = (backend: string): Promise<JumpSession[]> =>
+  window.floe.backends.invokeOn(backend, 'sessions:all') as Promise<JumpSession[]>
 
 export const setGroupOn = (backend: string, path: string, group: string): Promise<Project[]> =>
   window.floe.backends.invokeOn(backend, 'projects:setGroup', path, group) as Promise<Project[]>

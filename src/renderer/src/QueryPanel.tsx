@@ -153,11 +153,13 @@ export function QueryPanel({
         value={text}
         onChange={setText}
         historyKey={session.worktreePath}
-        onSend={(choice, attached) => {
+        onSend={(choice, attached, message) => {
           pinned.current = true
           // No handle read here, on purpose: the panel IS the address. A line
           // opening with `@codex` inside the codex query is text, not routing.
-          send(text, choice, attached?.images, attached?.files)
+          // `message` is the text with its collapsed pastes put back — see
+          // pastes.ts. What is sent is never the rail.
+          send(message ?? text, choice, attached?.images, attached?.files)
           setText('')
         }}
         // The mode is not the user's to change here — a query is read-only by

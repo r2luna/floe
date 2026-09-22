@@ -24,13 +24,44 @@ export function previewTarget(code: string): PreviewTarget | null {
 }
 
 /**
- * The URL the browser panel loads for a target. `$PWD` and a relative path
- * mean the session's worktree — the block was written to be run there.
+ * The file a target names, as one absolute path. `$PWD` and a relative path
+ * mean the session's worktree — the block was written to be run there. A `~`
+ * path is left as it is: it is absolute already, for a home this side cannot
+ * spell.
+ */
+function absoluteOf(value: string, cwd: string): string {
+  const base = cwd.replace(/\/+$/, '')
+  const path = value.replace(/^\$\{?PWD\}?/, base)
+  if (path.startsWith('~') || path.startsWith('/')) return path
+  return `${base}/${path.replace(/^\.\//, '')}`
+}
+
+/**
+ * The URL the browser panel loads for a target.
  */
 export function previewUrl(target: PreviewTarget, cwd: string): string {
   if (target.kind === 'url') return target.value
-  let path = target.value.replace(/^\$\{?PWD\}?/, cwd)
+  const path = absoluteOf(target.value, cwd)
   if (path.startsWith('~')) return `file://${path}`
-  if (!path.startsWith('/')) path = `${cwd.replace(/\/$/, '')}/${path.replace(/^\.\//, '')}`
   return `file://${encodeURI(path)}`
+}
+
+/**
+ * The path INSIDE the worktree this target names, or null.
+ *
+ * A page that lives in the tree you are working in has a better home than the
+ * browser panel: the file reader draws it (previewKind 'html'), in the panel
+ * every other file of that worktree opens in, with the tree still beside it.
+ * The browser stays for what is really elsewhere — a URL, a file under `~`.
+ *
+ * `..` disqualifies rather than resolves: a path that climbs out and back in is
+ * not something this should be guessing about.
+ */
+export function inWorktree(target: PreviewTarget, cwd: string): string | null {
+  if (target.kind !== 'file' || !cwd) return null
+  const base = cwd.replace(/\/+$/, '')
+  const path = absoluteOf(target.value, cwd)
+  if (!path.startsWith(`${base}/`)) return null
+  const rel = path.slice(base.length + 1)
+  return rel && !rel.split('/').includes('..') ? rel : null
 }

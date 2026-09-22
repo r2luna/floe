@@ -21,6 +21,8 @@ export type PreviewKind =
   | 'image'
   /** A deck's words, and its slides once LibreOffice has drawn them. */
   | 'slides'
+  /** The page itself, drawn — a mock is meant to be looked at, not read. */
+  | 'html'
   /** Nothing to show. */
   | 'none'
 
@@ -29,12 +31,21 @@ const BY_EXT: Record<string, PreviewKind> = {
   md: 'markdown',
   markdown: 'markdown',
   mdx: 'markdown',
+  html: 'html',
+  htm: 'html',
   pdf: 'pdf',
   pptx: 'slides',
   pptm: 'slides',
   ppt: 'slides',
   odp: 'slides'
 }
+
+/**
+ * The files the reader DRAWS rather than showing as source: a page and a
+ * markdown document. What `file.source` toggles, and asked by name — the
+ * command has only the panel's path, the bytes are not read yet.
+ */
+export const READS_AS_DRAWN = /\.(md|markdown|mdx|html?)$/i
 
 /** A path's extension, lowercased, without the dot. `''` when it has none. */
 export function extOf(path: string): string {
@@ -61,5 +72,8 @@ export function previewKind(path: string, content: FileContent): PreviewKind {
   if (content.kind === 'pdf') return 'pdf'
   if (content.kind === 'slides') return 'slides'
   if (content.kind === 'binary') return isConvertible(path) ? 'slides' : 'none'
-  return BY_EXT[extOf(path)] === 'markdown' ? 'markdown' : 'code'
+  // Text with a presentation of its own — prose, a page — gets it; everything
+  // else IS its source, and reads as code.
+  const byExt = BY_EXT[extOf(path)]
+  return byExt === 'markdown' || byExt === 'html' ? byExt : 'code'
 }

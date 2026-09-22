@@ -13,8 +13,11 @@ import { createContext } from 'react'
 export const RunInTerminal = createContext<((command: string) => void) | null>(null)
 
 /**
- * Show what a shell block opens — an HTML file, a URL — in the browser panel.
- * Provided by the chat panel (it knows the worktree the block is written for);
- * absent where there is no worktree to resolve a path against.
+ * Show what a message names — an HTML file, a URL — as a page.
+ *
+ * A page of this worktree opens in the file reader, which draws it; anything
+ * else goes to the browser panel. Provided by the chat panel (it knows the
+ * worktree a path is written against); absent where there is no worktree to
+ * resolve one.
  */
 export const PreviewInBrowser = createContext<((command: string) => void) | null>(null)
