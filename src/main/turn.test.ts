@@ -116,6 +116,7 @@ declare global {
 }
 
 const { routeOf, optionsForRoute, dispatchTurn, startTurn } = await import('./turn.ts')
+const { addCreatedSession, getCreatedSession } = await import('./sessionStore.ts')
 
 const WIN = {} as never
 const CLAUDE = { provider: 'claude', model: 'opus', effort: 'medium', permissionMode: 'skip' } as never
@@ -181,6 +182,24 @@ test('a message with no handle is the session\'s own turn', () => {
   assert.equal(out.query, undefined)
   assert.deepEqual(globalThis.__opened, [])
   assert.equal(globalThis.__started[0].key, 'sess')
+})
+
+test('a chat begun on codex is codex\'s: its answer does not hand the turn to Claude', () => {
+  fresh()
+  const id = 'codex-chat'
+  addCreatedSession({ id, worktreePath: '/wt' })
+  const CODEX = { provider: 'codex', model: 'gpt-5.6-sol', effort: 'xhigh', permissionMode: 'skip' } as never
+  dispatchTurn({ win: WIN, parentKey: id, worktreePath: '/wt', prompt: 'segue', origin: 'user', options: CODEX })
+  assert.equal(globalThis.__started[0].on, 'codex')
+  // Its own voice: watched for a handle it writes, not relayed back to Claude.
+  assert.deepEqual(globalThis.__armed, [{ kind: 'address', key: id }])
+  assert.equal(getCreatedSession(id)?.provider, 'codex')
+
+  // And a later Claude turn in the same chat takes the role back the same way.
+  fresh()
+  dispatchTurn({ win: WIN, parentKey: id, worktreePath: '/wt', prompt: 'agora tu', origin: 'user', options: CLAUDE })
+  assert.deepEqual(globalThis.__armed, [{ kind: 'address', key: id }])
+  assert.equal(getCreatedSession(id)?.provider, undefined)
 })
 
 test('a routed message opens the query and runs there, not in the session', () => {

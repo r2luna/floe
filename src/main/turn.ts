@@ -28,7 +28,7 @@ import { resolveSessionRef } from './sessionRefs'
 import { readSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
 import { floeConfig } from './config/floe'
-import { getCreatedSession } from './sessionStore'
+import { getCreatedSession, setCreatedSessionChoice } from './sessionStore'
 import { isQueryKey, parentKeyOf } from '../shared/queries'
 // Circular with queries.ts (it starts the turns that merge and peek) — safe on
 // the same terms as relay.ts: neither side touches the other at module level.
@@ -102,6 +102,14 @@ export function optionsForSession(key: string): AgentRunOptions {
 }
 
 /**
+ * The harness these options run on. Stated by the caller; `isCodexModel` stays
+ * only as the fallback for a choice made before providers existed (a persisted
+ * model with no provider beside it).
+ */
+const providerOf = (options: AgentRunOptions): string =>
+  options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
+
+/**
  * Run one turn.
  *
  * Skills and `#session` references expand ABOVE the provider split, because
@@ -133,10 +141,8 @@ export function startTurn(
     (slug) => resolveSessionRef(slug, worktreePath)
   )
   // Anything but Claude runs on the machine's own runtime and answers over the
-  // same agent:event channel. The provider is stated by the caller;
-  // `isCodexModel` stays only as the fallback for a choice made before
-  // providers existed (a persisted model with no provider beside it).
-  const provider = options.provider ?? (isCodexModel(options.model) ? 'codex' : 'claude')
+  // same agent:event channel.
+  const provider = providerOf(options)
   const own = optionsForSession(key)
   // Either way, somebody is listening to how this turn ends. Handed to another
   // harness, the relay brings the answer back here; answered in the session's
@@ -222,19 +228,19 @@ export interface Dispatched {
 
 export function dispatchTurn(d: Dispatch): Dispatched {
   const { win, parentKey, worktreePath, prompt } = d
-  if (!d.route)
-    return (
-      startTurn(
-        win,
-        parentKey,
-        worktreePath,
-        prompt,
-        d.options ?? optionsForSession(parentKey),
-        d.images,
-        d.files
-      ),
-      { key: parentKey }
-    )
+  if (!d.route) {
+    const options = d.options ?? optionsForSession(parentKey)
+    // An unaddressed message is the session's own turn, so whoever takes it IS
+    // who the session answers as. Recorded before startTurn reads it back:
+    // left to the picker alone, a chat begun on codex had no provider stored,
+    // read as `claude`, and every codex answer armed the relay — Claude then
+    // took a turn nobody asked for, in a chat that was codex's.
+    const provider = providerOf(options)
+    if (!isQueryKey(parentKey) && provider !== (getCreatedSession(parentKey)?.provider ?? 'claude'))
+      setCreatedSessionChoice(parentKey, { provider, model: options.model })
+    startTurn(win, parentKey, worktreePath, prompt, options, d.images, d.files)
+    return { key: parentKey }
+  }
 
   // A query cannot open a query. The cascade already dies one hop out — nothing
   // watches a query's answer (see startTurn) and a query gets no MCP token
