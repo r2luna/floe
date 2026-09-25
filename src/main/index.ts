@@ -246,6 +246,8 @@ import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from '
 import {
   boardFor,
   reconcileMerged,
+  reconcileLanded,
+  clearDone,
   mergeTask,
   nannyFor,
   nannyOpener,
@@ -1168,9 +1170,12 @@ export function registerColonyIpc(): void {
   handle('colony:board', async (event, project: string) => {
     // A finished card merged outside the board is noticed on the read, so the
     // panel never shows as waiting what has already landed.
-    await reconcileMerged(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
+    await reconcileMerged(win, project)
+    await reconcileLanded(win, project)
     return boardFor(project)
   })
+  handle('colony:clearDone', (event, project: string) => clearDone(winOf(event), project))
   handle('colony:add', (event, task: NewTask) => {
     const created = addTask(task)
     pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, task.project)

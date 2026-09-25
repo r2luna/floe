@@ -27,6 +27,8 @@ import {
   overlappingTasks,
   pushBoard,
   reconcileMerged,
+  reconcileLanded,
+  clearDone,
   releaseTask,
   unmetDeps,
   writeTaskReport
@@ -1827,6 +1829,7 @@ function registerColonyTools(server: McpServer): void {
         // A finished card merged by hand is merged: noticed here, where the board
         // is read on request, so its dependents are already released in this answer.
         await reconcileMerged(getWindow(), root)
+        await reconcileLanded(getWindow(), root)
         return textResult(compact ? compactBoard(root) : boardFor(root))
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -1901,6 +1904,20 @@ function registerColonyTools(server: McpServer): void {
         removeTask(task)
         pushBoard(getWindow(), found.project)
         return textResult({ ok: true, removed: found.name })
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'colony_clear_done',
+    "Clear every merged card off `done`. Merged cards otherwise stay there, worktree cleaned up or not, until their base branch lands on the project's main branch. A card in `done` that did not merge stays. Nothing in git is touched.",
+    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    async ({ project }) => {
+      try {
+        const cleared = clearDone(getWindow(), projectRoot(project))
+        return textResult({ ok: true, cleared: cleared.map((t) => t.name) })
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

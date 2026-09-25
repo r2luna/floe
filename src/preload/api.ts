@@ -1032,6 +1032,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       // The step report: measure every card that enters the first stage from now on.
       setReport: (project: string, on: boolean): Promise<string> =>
         ipcRenderer.invoke('colony:setReport', project, on),
+      // Take every merged card off `done`. Resolves to the cards it cleared.
+      clearDone: (project: string): Promise<ColonyTask[]> => ipcRenderer.invoke('colony:clearDone', project),
       // Write a tracked card's report now and open it. Resolves to the file.
       openReport: (id: string): Promise<string> => ipcRenderer.invoke('colony:openReport', id),
       // Park a card back in the backlog, worktree intact — the way out of an

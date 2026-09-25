@@ -114,6 +114,7 @@ export const COMMAND_IDS: string[] = [
   'colony.stages',
   'colony.automerge',
   'colony.report',
+  'colony.clearDone',
   'colony.openReport',
   'support.up',
   'support.down',

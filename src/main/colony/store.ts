@@ -140,8 +140,14 @@ export interface ColonyTask {
   autonomous?: boolean
   /** Remove the worktree and branch once merged. Unset takes the board's `cleanup`. */
   cleanup?: boolean
-  /** Merged and cleaned up: off the board, but still a satisfied dependency and a row in the log. */
+  /** Merged and cleaned up: no worktree or branch left, but still a satisfied dependency and a row in the log. */
   archivedAt?: number
+  /**
+   * Off the board. A merged card stays in `done` after its cleanup, so you can
+   * see what landed, until its base branch lands on the project's main branch
+   * or you clear `done` by hand.
+   */
+  clearedAt?: number
   /**
    * Tracked files provisioning left modified, with the content hash it left
    * them at. A file still at that hash when the task merges was never touched

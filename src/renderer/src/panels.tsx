@@ -321,7 +321,12 @@ export const KINDS = {
     // queued ahead of it — `n` and ESC are how you reach her. The one thing a
     // header button is right for here is the board's own definition, because the
     // board IS its config file.
-    action: { icon: IconSettings, title: 'Edit the stages…', command: 'colony.stages' }
+    // Clearing done is the other: merged cards stay there until their base
+    // lands on main, and this is how you take them off sooner.
+    action: [
+      { icon: IconCheck, title: 'Clear merged cards from done (c)', command: 'colony.clearDone' },
+      { icon: IconSettings, title: 'Edit the stages…', command: 'colony.stages' }
+    ]
   },
   // The board's own session, and the ONE panel that is about the whole board
   // rather than about one card. It docks under the colony (order 21 puts it

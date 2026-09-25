@@ -78,15 +78,16 @@ export const taskDirFor = (branch: string): string => join('specs', branch.repla
 /** Assemble one project's board: the config's stages, plus the two fixed ends. */
 export function boardFor(project: string): Board {
   const config = colonyConfig(project)
-  // Merged and cleaned up: its worktree and branch are gone, so there is nothing
-  // left on the board to act on. The store keeps it — a dependency it satisfied
-  // and a merge the log can still undo both point at it.
+  // Cleared: a merged card whose base landed on main, or that you cleared off
+  // `done` (see `clearDone`). A cleaned-up card is NOT cleared — it stays in
+  // `done` so you can see what landed. The store keeps both — a dependency it
+  // satisfied and a merge the log can still undo point at it.
   //
   // A measured step keeps the lane's whole last message for the report. The
   // board is read on every card move and by the nanny on every question, so it
   // goes out without them — `writeTaskReport` is where they are read.
   const tasks = listTasks(project)
-    .filter((t) => !t.archivedAt)
+    .filter((t) => !t.clearedAt)
     .map((t) =>
       t.report ? { ...t, visits: t.visits.map((v) => (v.step ? { ...v, step: { ...v.step, message: '' } } : v)) } : t
     )
@@ -521,6 +522,51 @@ export async function reconcileMerged(win: BrowserWindow | undefined, project: s
   return merged
 }
 
+/** Merged cards still drawn in `done`. */
+const landedCards = (project: string): ColonyTask[] =>
+  listTasks(project).filter((t) => t.stage === DONE && t.mergedAt && !t.clearedAt)
+
+/**
+ * Take merged cards off the board once their base branch has landed on main.
+ *
+ * A card cut from main has nothing further to land, so it stays until you clear
+ * `done` by hand. The remote's main counts too: a base merged through a pull
+ * request is on `origin/<main>` before anybody pulls. Same call site rule as
+ * `reconcileMerged` — git per base, so only on a read somebody asked for.
+ */
+export async function reconcileLanded(win: BrowserWindow | undefined, project: string): Promise<ColonyTask[]> {
+  const cards = landedCards(project)
+  if (!cards.length) return []
+  const main = await defaultBranch(project)
+  const landed = new Map<string, boolean>()
+  const cleared: ColonyTask[] = []
+  for (const task of cards) {
+    const base = await baseOf(task)
+    if (base === main) continue
+    if (!landed.has(base)) {
+      landed.set(
+        base,
+        (await isMergedInto(project, base, main)) || (await isMergedInto(project, base, `origin/${main}`))
+      )
+    }
+    const card = landed.get(base) ? patchTask(task.id, { clearedAt: Date.now() }) : undefined
+    if (card) cleared.push(card)
+  }
+  if (cleared.length) pushBoard(win, project)
+  return cleared
+}
+
+/**
+ * Clear every merged card off `done`. A card that reached `done` and did not
+ * merge stays: it still has something for you to do.
+ */
+export function clearDone(win: BrowserWindow | null | undefined, project: string): ColonyTask[] {
+  const now = Date.now()
+  const cleared = landedCards(project).flatMap((t) => patchTask(t.id, { clearedAt: now }) ?? [])
+  if (cleared.length) pushBoard(win, project)
+  return cleared
+}
+
 /**
  * Put base back where it was before one of the board's own merges.
  *
@@ -554,6 +600,7 @@ export async function undoTaskMerge(win: BrowserWindow | undefined, eventId: str
   patchTask(event.task, {
     mergedAt: undefined,
     archivedAt: undefined,
+    clearedAt: undefined,
     line: card?.archivedAt ? 'merge undone — branch restored, its worktree was removed' : 'merge undone',
     warn: restored ? undefined : `could not restore ${event.branch} at ${event.baseAfter.slice(0, 8)}`
   })
@@ -1186,7 +1233,7 @@ export async function writeTaskReport(
 // Telling the renderer
 // ---------------------------------------------------------------------------
 
-export function pushBoard(win: BrowserWindow | undefined, project: string): void {
+export function pushBoard(win: BrowserWindow | null | undefined, project: string): void {
   if (!win || win.isDestroyed()) return
   win.webContents.send('colony:event', { project })
 }

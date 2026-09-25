@@ -84,6 +84,9 @@ already knows the base branch and which stage is full.
 \`s\` releases a task from the backlog, which is where its worktree gets cut, and
 \`x\` takes a card off the board without touching its branch.
 
+A merged card stays in done until its base branch lands on main. \`c\` clears every
+merged card off done now.
+
 \`m\` turns the step report (measure) on or off: from then on, every card that enters the
 first stage has each step's tokens, findings and diff recorded, and gets an HTML
 report in \`.floe/colony/reports/\` when it reaches done. \`r\` writes the report
@@ -95,6 +98,7 @@ for the card under the cursor now and opens it.`,
       { key: 'x', command: 'colony.archive', when: 'panel == "colony"' },
       { key: 'n', command: 'colony.new', when: 'panel == "colony"' },
       { key: 'm', command: 'colony.report', when: 'panel == "colony"' },
+      { key: 'c', command: 'colony.clearDone', when: 'panel == "colony"' },
       { key: 'r', command: 'colony.openReport', when: 'panel == "colony"' },
       { key: 'escape', command: 'colony.nanny', when: 'panel == "colony"' }
     ]

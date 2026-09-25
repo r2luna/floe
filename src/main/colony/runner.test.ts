@@ -15,6 +15,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
+import type { ColonyTask } from './store'
 
 // ---------------------------------------------------------------------------
 // The seam
@@ -231,6 +232,8 @@ const {
   compactBoard,
   mergeTask,
   reconcileMerged,
+  reconcileLanded,
+  clearDone,
   nannyFor,
   overlappingTasks,
   reconcileColony,
@@ -1339,7 +1342,7 @@ test('what provisioning dirtied is recorded, and put back before the merge', asy
   assert.ok(getTask(task.id)?.mergedAt)
 })
 
-test('cleanup after a merge removes the tree, deletes the branch and takes the card off the board', async () => {
+test('cleanup after a merge removes the tree and deletes the branch, and the card stays in done', async () => {
   const root = project(`cleanup = true\n\n${ONE_STAGE}`)
   const worktree = tree('cleaned')
   stubs.worktreeFor = (_root, branch) => [{ path: worktree, branch }]
@@ -1359,7 +1362,7 @@ test('cleanup after a merge removes the tree, deletes the branch and takes the c
   assert.equal(stubs.deletedBranches.at(-1), 'feat/cleaned')
   assert.ok(listEvents(root).some((e) => e.kind === 'cleaned' && e.task === task.id))
   const onBoard = boardFor(root).columns.flatMap((c) => [...c.settled, ...c.holding, ...c.working, ...c.blocked])
-  assert.equal(onBoard.some((t) => t.id === task.id), false)
+  assert.equal(onBoard.some((t) => t.id === task.id), true, 'still in done until its base lands or you clear it')
   // The dependent was still released.
   assert.equal(getTask(behind.id)?.stage, 'coder')
 
@@ -1426,6 +1429,51 @@ test('a finished card merged outside the board counts as merged, and releases wh
   assert.equal(event?.baseBefore, undefined, 'no commits to undo with')
 })
 
+/** Every card id the board draws. */
+const drawn = (root: string): string[] =>
+  boardFor(root).columns.flatMap((c) => [...c.settled, ...c.holding, ...c.working, ...c.blocked].map((t) => t.id))
+
+/** A card that reached done and merged into `base`. */
+function landedOn(root: string, name: string, base: string, extra: Partial<ColonyTask> = {}): string {
+  const task = addTask({ project: root, name, brief: 'x', base })
+  patchTask(task.id, { stage: 'done', status: 'settled', branch: `feat/${name}`, mergedAt: 1, ...extra })
+  return task.id
+}
+
+test('a merged card leaves done once its base branch lands on main, locally or on origin', async () => {
+  const root = project(ONE_STAGE)
+  const onParent = landedOn(root, 'on-parent', 'feat/parent', { archivedAt: 1 })
+  const onOther = landedOn(root, 'on-other', 'feat/other')
+  const onRemote = landedOn(root, 'on-remote', 'feat/remote')
+  const onMain = landedOn(root, 'on-main', 'main')
+  const before = stubs.mergedInto
+  stubs.mergedInto = (branch, base) =>
+    (branch === 'feat/parent' && base === 'main') || (branch === 'feat/remote' && base === 'origin/main')
+  try {
+    const cleared = await reconcileLanded(win, root)
+    assert.deepEqual(cleared.map((t) => t.id).sort(), [onParent, onRemote].sort())
+    const ids = drawn(root)
+    assert.equal(ids.includes(onParent), false)
+    assert.equal(ids.includes(onRemote), false)
+    assert.equal(ids.includes(onOther), true, 'its base has not landed')
+    assert.equal(ids.includes(onMain), true, 'cut from main: nothing further to land, so only a clear takes it')
+  } finally {
+    stubs.mergedInto = before
+  }
+})
+
+test('clearing done takes every merged card off and leaves the unmerged one', () => {
+  const root = project(ONE_STAGE)
+  const merged = landedOn(root, 'merged', 'main', { archivedAt: 1 })
+  const kept = landedOn(root, 'merged-kept', 'feat/parent')
+  const refused = addTask({ project: root, name: 'refused', brief: 'x' })
+  patchTask(refused.id, { stage: 'done', status: 'settled', warn: 'conflicts', line: 'not merged' })
+
+  assert.deepEqual(clearDone(win, root).map((t) => t.id).sort(), [merged, kept].sort())
+  assert.deepEqual(drawn(root), [refused.id])
+  assert.deepEqual(clearDone(win, root), [], 'nothing left to clear')
+})
+
 test('the compact board carries where each card is and its last verdicts, never the brief', async () => {
   const root = project()
   const id = holdingAt(root, 'coder', 'compact')
@@ -1438,8 +1486,8 @@ test('the compact board carries where each card is and its last verdicts, never 
       { at: 4, stage: 'coder', verdict: 'none' }
     ]
   })
-  const gone = addTask({ project: root, name: 'archived', brief: 'long brief' })
-  patchTask(gone.id, { stage: 'done', status: 'settled', archivedAt: Date.now() })
+  const gone = addTask({ project: root, name: 'cleared', brief: 'long brief' })
+  patchTask(gone.id, { stage: 'done', status: 'settled', archivedAt: Date.now(), clearedAt: Date.now() })
 
   const board = compactBoard(root)
   const card = board.columns.flatMap((c) => c.tasks).find((t) => t.id === id)

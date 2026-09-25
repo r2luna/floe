@@ -124,6 +124,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'colony_update_task',
       'colony_start_task',
       'colony_remove_task',
+      'colony_clear_done',
       'colony_set_report',
       'colony_report',
       'support_stack',

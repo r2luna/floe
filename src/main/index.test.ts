@@ -338,6 +338,7 @@ const CHANNELS = [
   'draw:reveal',
   'plans:implementPhases',
   'colony:board',
+  'colony:clearDone',
   'colony:add',
   'colony:release',
   'colony:remove',

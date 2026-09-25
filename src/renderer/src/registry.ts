@@ -1642,6 +1642,26 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // Merged cards stay in done until their base lands on main. This is the
+        // other way out — a command, so the header button, `c` and the palette
+        // all reach the one writer.
+        id: 'colony.clearDone',
+        title: 'Clear merged cards from done',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'done belongs to a project board — open one first',
+        run: (c) => {
+          const project = c.project
+          if (!project) return
+          void window.floe.colony
+            .clearDone(project)
+            .then((cleared) =>
+              c.say(cleared.length ? `cleared ${cleared.length} merged from done` : 'no merged cards in done')
+            )
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'colony.openReport',
         title: 'Open this task\u2019s step report',
         group: 'Colony',
