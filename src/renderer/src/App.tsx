@@ -570,6 +570,21 @@ export default function App() {
   // files appear and vanish behind the app all day, and a list read at the
   // moment you ask for it cannot be stale.
   const [finderFiles, setFinderFiles] = useState<string[] | null>(null)
+  const finderOpen = finderFiles !== null
+  // While ⌘P is up, a file an agent writes joins the list without a reopen.
+  useEffect(() => {
+    if (!finderOpen || !here) return
+    let live = true
+    void window.floe.review.watch(here)
+    const off = window.floe.files.onChanged((event) => {
+      if (event.worktreePath !== here) return
+      void window.floe.files.all(here).then((files) => live && setFinderFiles(files))
+    })
+    return () => {
+      live = false
+      off()
+    }
+  }, [finderOpen, here])
   // Every machine's sessions, every project — the chat half, which the open
   // project's worktree list cannot answer for. Kept between opens rather than
   // cleared: the palette paints the last answer at once and the load in flight

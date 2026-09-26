@@ -2456,7 +2456,7 @@ function FileChip({ ref_ }: { ref_: string }) {
   const { path, lines, full } = describeRef(ref_)
   return (
     <span className="file-ref" title={full}>
-      <IconFileText size={12} stroke={1.6} />
+      {path.endsWith('/') ? <IconFolder size={12} stroke={1.6} /> : <IconFileText size={12} stroke={1.6} />}
       <span className="file-ref-name">{path}</span>
       {lines && <span className="file-ref-lines">{lines}</span>}
     </span>
@@ -4572,14 +4572,30 @@ function FileView({
     let live = true
     setContent(null)
     setError(undefined)
-    window.floe.files
-      .read(root, path)
-      .then((c) => live && setContent(c))
-      .catch((e: Error) => live && setError(e.message))
+    // Unchanged text keeps the old object, so a write elsewhere in the tree
+    // does not re-tokenize or re-draw the file on screen.
+    const load = (): void => {
+      window.floe.files
+        .read(root, path)
+        .then((c) => {
+          if (!live) return
+          setError(undefined)
+          setContent((prev) => (prev?.kind === 'text' && c.kind === 'text' && prev.text === c.text ? prev : c))
+        })
+        .catch((e: Error) => live && setError(e.message))
+    }
+    load()
+    // Follow the file, don't snapshot it: an agent writing it beside the chat
+    // is the normal case. The event is worktree-wide, hence the text check.
+    void window.floe.review.watch(root)
+    const off = window.floe.files.onChanged((event) => {
+      if (event.worktreePath === root) load()
+    })
     // Guard the late reply the same way the diff does: walking the tree quickly
     // must not land an earlier file in a panel showing a later one.
     return () => {
       live = false
+      off()
     }
   }, [root, path])
 
