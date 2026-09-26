@@ -19,11 +19,13 @@ const {
   codexMcpConfig,
   geminiMcpConfig,
   harnessMcp,
+  mcpRebind,
   mcpUrlFor,
   opencodeMcpConfig,
   queryServers,
   serversFor,
-  setMcpPort
+  setMcpPort,
+  setMcpRebind
 } = await import('./mcpHarness.ts')
 
 after(() => {
@@ -135,4 +137,25 @@ test('a query key reaches the off switch through harnessMcp too', () => {
 
 test('the url is the one place the caller becomes a token', () => {
   assert.equal(mcpUrlFor('a b'), 'http://127.0.0.1:41673/mcp/a%20b')
+})
+
+test('a spawn waits for the rebind only while the port is unknown', async () => {
+  let calls = 0
+  setMcpRebind(async () => {
+    calls++
+    setMcpPort(41673)
+  })
+  try {
+    assert.equal(mcpRebind(), null, 'a known port spawns at once')
+    setMcpPort(0)
+    await mcpRebind()
+    assert.equal(calls, 1, 'port 0 rebinds before the url is written')
+    assert.equal(mcpUrlFor('k'), 'http://127.0.0.1:41673/mcp/k')
+    setMcpRebind(undefined)
+    setMcpPort(0)
+    assert.equal(mcpRebind(), null, 'with no server to rebind (the tests), nothing to wait for')
+  } finally {
+    setMcpRebind(undefined)
+    setMcpPort(41673)
+  }
 })

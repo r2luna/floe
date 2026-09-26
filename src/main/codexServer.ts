@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
 import type { AgentQuestion, PermissionMode } from '../shared/types'
 import { dropSettled, sendAgentEvent } from './agent'
-import { codexThreadConfig } from './mcpHarness'
+import { codexThreadConfig, mcpRebind } from './mcpHarness'
 import { codexPosture, resolveModel } from './codex'
 import { logTurn } from './runtimeLog'
 import { addCumulative, codexRunningUsage } from './usageLedger'
@@ -356,6 +356,8 @@ export async function chatWithCodexServer(
   const posture = codexPosture(mode)
   try {
     await ensureServer()
+    // Both thread calls below put Floe's url in the thread's config.
+    await mcpRebind()
 
     let threadId = threadFor(key, 'codex')
     if (threadId && !turnsByThread.has(threadId)) {
