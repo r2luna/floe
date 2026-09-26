@@ -130,7 +130,7 @@ import { closeSessionFully } from './sessionClose'
 import { clearReview, commitFileDiff, hasReviewCheckpoint, restoreReview, reviewCommits } from './git'
 import { localUsage } from './localAgents'
 import { copyPlan, PLANS_DIR, readImplementPhases } from './plans'
-import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort } from './mcpHarness'
+import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort, setMcpRebind } from './mcpHarness'
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import { diagnoseWorktreeFailure } from '../shared/worktreeError'
@@ -180,6 +180,8 @@ const PREFERRED_PORT = 41673
 const GLOBAL_TOKEN = 'global'
 
 let httpServer: Server | undefined
+// The bind in flight, so a rebind racing boot (or another rebind) joins it.
+let binding: Promise<void> | undefined
 let serverPort = 0
 let boundPreferred = false
 let getWindowRef: (() => BrowserWindow | undefined) | undefined
@@ -3244,14 +3246,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 // mcpConfigFor is there to make a regression loud instead of silent.
 export function startMcpServer(getWindow: () => BrowserWindow | undefined): Promise<void> {
   getWindowRef = getWindow
-  if (httpServer) return Promise.resolve()
+  // Also how a spawn gets the server back when it finds the port at 0 (mcpRebind).
+  setMcpRebind(() => startMcpServer(getWindow))
+  if (httpServer?.listening) return Promise.resolve()
+  if (binding) return binding
   httpServer = createServer((req, res) => {
     void handle(req, res)
   })
   let settle = (): void => {}
   const bound = new Promise<void>((resolve) => {
-    settle = resolve
+    settle = () => {
+      binding = undefined
+      resolve()
+    }
   })
+  binding = bound
   const onListening = (): void => {
     const addr = httpServer?.address()
     if (addr && typeof addr === 'object') serverPort = addr.port
@@ -3274,6 +3283,9 @@ export function startMcpServer(getWindow: () => BrowserWindow | undefined): Prom
     // a window is worse than both.
     httpServer?.once('error', (e) => {
       log('mcp-listen-failed', { error: (e as Error).message })
+      // Dropped, so the next spawn's rebind starts over instead of finding a
+      // server object that will never listen.
+      httpServer = undefined
       settle()
     })
     httpServer?.listen(0, '127.0.0.1', onListening)

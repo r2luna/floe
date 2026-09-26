@@ -10,7 +10,7 @@ import { logTurn } from './runtimeLog'
 import { markTurnStart, sendAgentEvent } from './agent'
 import { seedFor } from './handoff'
 import { lmStudioServerModels } from './localAgents'
-import { harnessMcp } from './mcpHarness'
+import { harnessMcp, mcpRebind } from './mcpHarness'
 import { forgetHouseRules, houseRulesFor } from './houseRules'
 import { forgetThreads, rememberThread, threadFor } from './threads'
 import { addUsage, cliRunUsage } from './usageLedger'
@@ -403,6 +403,7 @@ export async function runRuntime(
       // Floe's own tools plus its MCP registry, in opencode's dialect: a JSON
       // blob in the environment, merged over the user's own config rather than
       // replacing it (mcpHarness.ts).
+      await mcpRebind()
       const raw = await run('opencode', args, worktreePath, 3 * 60 * 1000, harnessMcp('opencode', key, worktreePath))
       const spent = cliRunUsage(raw)
       if (spent) addUsage(key, spent)
@@ -427,6 +428,7 @@ export async function runRuntime(
       // rather than an id we chose, so there is no way to name OUR session
       // among several open at once. Sending the transcript as context would be
       // the upgrade, once these panels can hand one over.
+      await mcpRebind()
       const raw = await run('gemini', args, worktreePath, 3 * 60 * 1000, harnessMcp('gemini', key, worktreePath))
       const spent = cliRunUsage(raw)
       if (spent) addUsage(key, spent)

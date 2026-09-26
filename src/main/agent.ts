@@ -24,6 +24,7 @@ import { getSystemPrompt } from './appSettings'
 // Circular with mcpServer (it imports sendToAgent/waitForTurn) — safe: both
 // sides only call the other's functions at runtime, never at module top level.
 import { emptyMcpConfigFor, mcpConfigFor } from './mcpServer'
+import { mcpRebind } from './mcpHarness'
 import { log } from './log'
 import { addCumulative, claudeRunningUsage } from './usageLedger'
 
@@ -742,6 +743,26 @@ export function sendToAgent(
   options: AgentRunOptions,
   images: ImageAttachment[] = [],
   files: FileAttachment[] = []
+): void {
+  // The control server went away (mcpHarness mcpRebind): get it back before a
+  // spawn bakes port 0 into this session's --mcp-config. A query carries no
+  // Floe url, so it has nothing to wait for.
+  const rebinding = isQueryKey(key) ? null : mcpRebind()
+  if (rebinding) {
+    void rebinding.then(() => sendNow(win, key, worktreePath, prompt, options, images, files))
+    return
+  }
+  sendNow(win, key, worktreePath, prompt, options, images, files)
+}
+
+function sendNow(
+  win: BrowserWindow,
+  key: string,
+  worktreePath: string,
+  prompt: string,
+  options: AgentRunOptions,
+  images: ImageAttachment[],
+  files: FileAttachment[]
 ): void {
   const optionsKey = optionsKeyFor(options)
   // Under every name this session answers to, not just the one the panel holds.

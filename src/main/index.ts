@@ -101,6 +101,7 @@ import {
   shutdown as shutdownMcpServer,
   startMcpServer
 } from './mcpServer'
+import { mcpRebind } from './mcpHarness'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
 import { listHarnessSessions, resumeHarnessSession, type HistoryHarness } from './harnessHistory'
@@ -867,6 +868,7 @@ export function registerViewStateIpc(): void {
 export function registerStatusIpc(): void {
   handle('slash:list', (_event, worktreePath: string) => discoverSlashCommands(worktreePath))
   handle('claude:info', async (_event, worktreePath: string) => {
+    await mcpRebind()
     const [info, codexUsage] = await Promise.all([
       // The merged --mcp-config makes the probe's /mcp report Floe's own
       // registry with live connection state — what the MCP panel shows.
@@ -2006,12 +2008,7 @@ app.on('window-all-closed', () => {
 let quitConfirmed = !app.isPackaged
 
 app.on('before-quit', (event) => {
-  if (quitConfirmed) {
-    // Dev quits skip the dialog, not the cleanup: a PTY left behind outlives
-    // the app either way.
-    if (!app.isPackaged) stopEverything()
-    return
-  }
+  if (quitConfirmed) return
   event.preventDefault()
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const opts = {
@@ -2025,9 +2022,18 @@ app.on('before-quit', (event) => {
   const choice = win ? dialog.showMessageBoxSync(win, opts) : dialog.showMessageBoxSync(opts)
   if (choice !== 1) return // cancelled — stay open
   quitConfirmed = true
-  stopEverything()
-  app.quit()
+  // Not app.quit() from in here: a quit started inside the handler that is
+  // cancelling this one gets cancelled with it once the handler returns. The
+  // windows still closed, macOS kept the process alive, and the teardown that
+  // used to run here had already shut the MCP server — every session spawned
+  // after the Dock reopened a window came up with `127.0.0.1:0`.
+  setImmediate(() => app.quit())
 })
+
+// The teardown waits for the quit to be real: will-quit only fires once every
+// window is closed and nothing can call the quit off any more. Dev quits skip
+// the dialog, not this — a PTY left behind outlives the app either way.
+app.on('will-quit', stopEverything)
 
 /** Everything spawned on this app's behalf, stopped. */
 function stopEverything(): void {

@@ -35,6 +35,24 @@ export function setMcpPort(value: number): void {
   serverPort = value
 }
 
+// How to get the control server back once it has gone (a failed bind, a
+// shutdown the process outlived). Set by mcpServer.ts when it starts, so an
+// app that never started one — the tests — has nothing to wait for.
+let rebind: (() => Promise<void>) | undefined
+
+export function setMcpRebind(fn: (() => Promise<void>) | undefined): void {
+  rebind = fn
+}
+
+/**
+ * What a spawn waits on before it writes a url: nothing while the port is
+ * known, the rebind while it is not. A url written with port 0 is a session
+ * whose every floe tool answers "connection failed" until it is restarted.
+ */
+export function mcpRebind(): Promise<void> | null {
+  return serverPort || !rebind ? null : rebind()
+}
+
 /** The url a session's tools answer on — the path carries the caller's token. */
 export function mcpUrlFor(key: string): string {
   return `http://127.0.0.1:${serverPort}/mcp/${encodeURIComponent(key)}`
