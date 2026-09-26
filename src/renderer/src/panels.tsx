@@ -113,6 +113,7 @@ import {
   routeChoice,
   speakerKey,
   storedChoice,
+  userMark,
   userNick,
   windowOf,
   type ModelChoice
@@ -122,6 +123,7 @@ import { HARNESSES, supportsMode } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
 import { handleRows, routeAll, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
 import { nickColor } from './nickColor'
+import { hasHarnessMark, HarnessMark } from './HarnessMark'
 // Whose header a line prints under. The rules live next to their test, not in
 // the panel that draws them — see speakers.ts.
 import {
@@ -2588,6 +2590,21 @@ export function TailEntry({ item, isNew }: { item: TranscriptItem; isNew: boolea
 }
 
 /**
+ * The face in front of a nick, drawn only by the `convo` layout (hidden in the
+ * rest): your greeting's penguin for you, the harness's logo for a harness.
+ * Anyone else — a subagent, another session — gets nothing here and keeps the
+ * layout's plain square.
+ */
+function SpeakerMark({ nick }: { nick: string }) {
+  if (nick === userNick()) {
+    const mark = userMark()
+    return <PenguinHead variant={mark.head} className={`irc-mark ${penguinTone(mark.color)}`} />
+  }
+  if (hasHarnessMark(nick)) return <HarnessMark harness={nick} className="irc-mark" />
+  return null
+}
+
+/**
  * Who is speaking, when, and what the run cost: `14:02 rafael …`.
  *
  * The clock comes first because it is the one part every line has in the same
@@ -2625,6 +2642,7 @@ function Head({
           put air between the name and its host and stop `claude@opus-5`
           reading as a single address. */}
       <span className="irc-nick" style={{ color: nickColor(who.nick) }}>
+        <SpeakerMark nick={who.nick} />
         {who.nick}
         {who.ident && <span className="irc-host">!{who.ident}</span>}
         {who.host && <span className="irc-host">@{who.host}</span>}

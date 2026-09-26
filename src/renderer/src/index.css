@@ -9441,7 +9441,7 @@ kbd {
    file references stay in the mono face. */
 
 :root[data-chat-layout='convo'] .chat {
-  --convo-mark: 16px;
+  --convo-mark: 12px;
   --convo-gap: 8px;
   --convo-indent: calc(var(--convo-mark) + var(--convo-gap));
   --convo-prose: -apple-system, system-ui, sans-serif;
@@ -9450,7 +9450,7 @@ kbd {
 /* Air above a speaker change, less above the same speaker continuing. */
 :root[data-chat-layout='convo'] .chat > .irc-entry,
 :root[data-chat-layout='convo'] .chat > .irc-head {
-  margin-top: 18px;
+  margin-top: 28px;
 }
 
 :root[data-chat-layout='convo'] .chat > .irc-entry[data-cont] {
@@ -9530,6 +9530,29 @@ kbd {
   margin-right: var(--convo-gap);
   border-radius: var(--radius);
   background: currentColor;
+}
+
+/* The speaker's face (SpeakerMark): only this layout draws it, and where it
+   does, it takes the square's place and size. */
+.irc-mark {
+  display: none;
+}
+
+:root[data-chat-layout='convo'] .irc-nick > .irc-mark {
+  display: block;
+  flex: none;
+  width: var(--convo-mark);
+  height: var(--convo-mark);
+  margin-right: var(--convo-gap);
+}
+
+:root[data-chat-layout='convo'] .irc-nick:has(> .irc-mark)::before {
+  content: none;
+}
+
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick > .irc-mark {
+  margin-right: 0;
+  margin-left: var(--convo-gap);
 }
 
 /* The separator lives in the head: a rule from the clock to the panel edge.

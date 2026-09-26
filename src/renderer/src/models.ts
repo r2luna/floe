@@ -5,7 +5,13 @@
 // resolves them to whatever the current release points at, which means this
 // list does not go stale every time a model ships.
 
-import { EFFORTS, type Effort, type PermissionMode } from '../../shared/types.ts'
+import {
+  EFFORTS,
+  type Effort,
+  type PenguinColorId,
+  type PenguinHeadId,
+  type PermissionMode
+} from '../../shared/types.ts'
 import { DEFAULT_MODE, MODES, modeFromLabel, modeLabel, nearestMode } from '../../shared/modes.ts'
 
 export interface ModelChoice {
@@ -58,6 +64,21 @@ export function setUserNick(name: string): void {
 /** The user's nick, for the `nick!ident@host` a transcript entry is headed by. */
 export function userNick(): string {
   return nick
+}
+
+// The greeting's penguin — `[appearance] penguin` and `penguin-color` — which
+// heads your own turns in the `convo` layout. Module state for the same reason
+// as the nick: the transcript draws it from a synchronous render path.
+let mark: { head: PenguinHeadId; color: PenguinColorId } = { head: 'classic', color: 'accent' }
+
+/** Install the user's penguin. Called from applyConfig, same as the nick. */
+export function setUserMark(head: PenguinHeadId, color: PenguinColorId): void {
+  mark = { head, color }
+}
+
+/** The penguin that heads your turns — the one the launcher greets you with. */
+export function userMark(): { head: PenguinHeadId; color: PenguinColorId } {
+  return mark
 }
 
 /** Install the configured default. Called at boot and whenever the file changes. */

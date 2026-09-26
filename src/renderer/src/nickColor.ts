@@ -21,7 +21,7 @@
 // reaching into panels.tsx for one function would pull the whole chat back into
 // that chunk.
 
-import { userNick } from './models.ts'
+import { userMark, userNick } from './models.ts'
 
 const NICK_HASH_SLOTS = 7
 
@@ -30,7 +30,9 @@ const NICK_HASH_SLOTS = 7
 const RESERVED_NICKS = ['claude', 'codex', 'gemini', 'opencode', 'lmstudio', 'ollama']
 
 export const nickColor = (nick: string): string => {
-  if (nick === userNick()) return 'var(--nick-you)'
+  // You wear the colour you picked for the greeting's penguin, so the name and
+  // the mark beside it are one colour. See `--pen-*` in index.css.
+  if (nick === userNick()) return `var(--pen-${userMark().color})`
   if (RESERVED_NICKS.includes(nick)) return `var(--nick-${nick})`
   let h = 0
   for (const ch of nick) h = (h * 31 + ch.charCodeAt(0)) >>> 0

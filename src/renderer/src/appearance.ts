@@ -9,7 +9,7 @@
 // `applyZoom` in main/index.ts.
 
 import { useEffect, useState } from 'react'
-import { setDefaultChoice, setHarnessDefaults, setUserNick } from './models'
+import { setDefaultChoice, setHarnessDefaults, setUserMark, setUserNick } from './models'
 import type { TransparencyId } from '../../shared/types'
 import {
   OMARCHY_CSS_VARS,
@@ -144,6 +144,7 @@ export async function applyConfig(): Promise<void> {
     setHarnessDefaults(config.harness)
     setDefaultChoice(config.agent)
     setVim(config.composer.vim)
+    setUserMark(config.appearance.penguin, config.appearance.penguinColor)
     // Resolved in main — config first, then git/system — so the chat's nick and
     // the launcher's greeting can never disagree about who you are. NOT awaited:
     // on cold start this path runs `git config` and `id -F` in main, and the
