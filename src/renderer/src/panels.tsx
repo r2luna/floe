@@ -305,16 +305,16 @@ export const KINDS = {
   // Narrow on purpose: the diff opens beside it and both must stay on screen
   // together, so the list spends as little width as it can.
   // The agent board — one column per agent profile, one card per task, one
-  // worktree per card. It sits LEFT of the session slot so the card's chat opens
-  // to its right (D1); below ~900px the columns squeeze past reading, and the
-  // lane scrolls rather than shrinking them further.
+  // worktree per card. It sits RIGHT of the session slot like every other rail
+  // panel, so the card's chat opens to its left; below ~900px the columns
+  // squeeze past reading, and the lane scrolls rather than shrinking them further.
   colony: {
     icon: IconLayoutColumns,
     title: 'colony',
     width: 1100,
     grow: true,
     min: 900,
-    order: 20,
+    order: 36,
     needsProject: true,
     // Deliberately NOT a "new task" button (D8): tasks are created by asking the
     // nanny, who already knows the base branch, which stage is full and what is
@@ -329,7 +329,7 @@ export const KINDS = {
     ]
   },
   // The board's own session, and the ONE panel that is about the whole board
-  // rather than about one card. It docks under the colony (order 21 puts it
+  // rather than about one card. It docks under the colony (order 37 puts it
   // immediately right of it, which is the column `dock: 'below'` joins), so
   // opening a card's chat narrows it instead of taking it away.
   //
@@ -343,7 +343,7 @@ export const KINDS = {
     width: 600,
     grow: true,
     min: 400,
-    order: 21,
+    order: 37,
     needsProject: true,
     // Its own slot, so a project switch replaces the nanny rather than leaving
     // the last project's board session sitting under the new project's board.

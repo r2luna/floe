@@ -223,11 +223,10 @@ test('a project switch leaves only the window panels', () => {
   )
 })
 
-// The colony board reads one repo root — its tasks, its stages, its nanny. It
-// sits left of the session, so position alone would carry it into the next
-// project and show that project a board that is not its own.
+// The colony board reads one repo root — its tasks, its stages, its nanny.
+// Carried into the next project it would show a board that is not its own.
 test('a project switch takes the colony board with it', () => {
-  const lane = laneWith('s1', panel('colony', 20))
+  const lane = laneWith('s1', panel('colony', 36), panel('nanny', 37))
   assert.deepEqual(
     withoutProject(lane).panels.map((p) => p.kind),
     ['projects', 'worktrees']
@@ -235,12 +234,23 @@ test('a project switch takes the colony board with it', () => {
 })
 
 test('the board a project had open is what comes back to it', () => {
-  assert.deepEqual(projectRailOf(laneWith('s1', panel('colony', 20))), ['colony'])
+  assert.deepEqual(projectRailOf(laneWith('s1', panel('colony', 36))), ['colony'])
   // Closed is an answer, not an absence: a project you left with no board must
   // not inherit one from the project you were in before it.
   assert.deepEqual(projectRailOf(laneWith('s1')), [])
   const rail = rememberRail(rememberRail({}, '/a', ['colony']), '/b', [])
   assert.deepEqual(rail, { '/a': ['colony'], '/b': [] })
+})
+
+// Opening a card swaps its chat into the session slot. The board sits right of
+// that slot, so it must not be filed under the session the card replaced.
+test('a session switch keeps the board and its nanny', () => {
+  const lane = laneWith('s1', panel('colony', 36), panel('nanny', 37), panel('changes', 40))
+  assert.deepEqual(scopedOf(lane).map((p) => p.kind), ['changes'])
+  assert.deepEqual(
+    withScoped(lane, []).panels.map((p) => p.kind),
+    ['projects', 'worktrees', 'chat', 'colony', 'nanny']
+  )
 })
 
 test('the focus never points past what the switch left standing', () => {

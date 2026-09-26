@@ -49,9 +49,7 @@ const PROJECT_PANELS = new Set(['merge', 'remove', 'setup'])
  *
  * The colony board is the case: its tasks, its stages and its nanny are all
  * keyed by repo root, so a board carried into another project would either sit
- * empty or — worse — read as that project's while showing nothing of it. It
- * sits left of the session (order 20) and so survives `withoutProject` on
- * position alone, which is exactly what has to stop.
+ * empty or — worse — read as that project's while showing nothing of it.
  *
  * Unlike PROJECT_PANELS these are remembered rather than dropped: which of them
  * a project had open is filed under its root, so leaving hides the board and
@@ -59,9 +57,18 @@ const PROJECT_PANELS = new Set(['merge', 'remove', 'setup'])
  */
 const PROJECT_RAIL = new Set(['colony'])
 
+/**
+ * The board and its nanny sit right of the session by `order`, but opening a
+ * card swaps the card's chat into the session slot, and filing them under the
+ * session would take the board away on every card you open.
+ */
+const BOARD = new Set(['colony', 'nanny'])
+
 /** Whether a panel is one the session opened, and so travels with it. */
 function sessionOwns(panel: Panel): boolean {
-  return (panel.order ?? 0) > SESSION_ORDER && !PROJECT_PANELS.has(panel.kind)
+  return (
+    (panel.order ?? 0) > SESSION_ORDER && !PROJECT_PANELS.has(panel.kind) && !BOARD.has(panel.kind)
+  )
 }
 
 // ponytail: newest 30 sessions. Unbounded, this grows a panel list per session
