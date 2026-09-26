@@ -236,6 +236,8 @@ const CHANNELS = [
   'claude:sessions',
   'claude:resumable',
   'sessions:resume',
+  'sessions:harnessHistory',
+  'sessions:resumeHarness',
   'claude:transcript',
   'sessions:setTitle',
   'sessions:setMode',

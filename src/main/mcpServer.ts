@@ -67,6 +67,7 @@ import { listPlans, readPlan } from './plans'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, summarize } from './draw/index'
 import { eraseElements, expandSkeletons, moveElements } from './draw/skeleton'
 import { loadClaudeTranscript, sessionHasUnansweredQuestion, type TranscriptItem } from './claudeSessions'
+import { listHarnessSessions, resumeHarnessSession } from './harnessHistory'
 import { recentSessions } from './sessionIndex'
 // Circular with codex (it emits through agent, which imports this file) — safe:
 // every side only calls the others' functions at runtime, never at module top.
@@ -1008,6 +1009,54 @@ function registerSessionTools(server: McpServer, token: string): void {
     async (a) => {
       try {
         return textResult(await recentSessions(a.limit))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  // `/resume`, for an agent: what a harness kept on its own disk, and pulling
+  // one of those conversations into Floe as a chat.
+  server.tool(
+    'list_harness_history',
+    "Conversations Claude Code and Codex kept on their own disk for a worktree that Floe does not hold yet — terminal sessions, closed chats, codex TUI threads. Newest first. Resume one with resume_harness_session.",
+    { worktree: z.string().describe('The worktree path.') },
+    async ({ worktree }) => {
+      try {
+        return textResult(listHarnessSessions(worktree))
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+
+  server.tool(
+    'resume_harness_session',
+    "Bring one of list_harness_history's conversations into Floe as a chat: the whole history shows in it and the next message continues the same harness thread. Idempotent — resuming the same one again returns the existing session.",
+    {
+      worktree: z.string().describe('The worktree path.'),
+      harness: z.enum(['claude', 'codex']).describe('Whose history it is.'),
+      id: z.string().describe("The harness's own id, as list_harness_history returned it."),
+      select: z
+        .boolean()
+        .optional()
+        .describe("Bring the chat on screen. Default false — only when the user asked to see it.")
+    },
+    async ({ worktree, harness, id, select }) => {
+      try {
+        const { sessionId, title } = resumeHarnessSession(worktree, harness, id)
+        pushEvent('sessions:changed')
+        if (select === true) {
+          pushCommand({
+            kind: 'select_session',
+            callerKey: token,
+            sessionId,
+            title,
+            worktreePath: worktree,
+            projectPath: projectFor(worktree) ?? undefined
+          })
+        }
+        return textResult({ sessionId, title })
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }

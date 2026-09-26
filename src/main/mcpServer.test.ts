@@ -90,6 +90,8 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'find_definition',
       'list_sessions',
       'recent_sessions',
+      'list_harness_history',
+      'resume_harness_session',
       'create_session',
       'send_message',
       'ask_peer',

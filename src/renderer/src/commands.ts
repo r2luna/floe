@@ -261,6 +261,11 @@ export interface CommandContext {
    */
   renameSession: () => void
   /**
+   * `/resume`: pick a conversation claude or codex kept on its own disk for
+   * this worktree and open it as a chat. In App because the picker is App's.
+   */
+  resumeSession: () => void
+  /**
    * Forget sessions, after asking: the open one, the rest of the worktree's,
    * all of them, the stale ones, the ones ticked in the worktrees list, or
    * everything the ticks did NOT name.

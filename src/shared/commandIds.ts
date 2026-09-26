@@ -148,6 +148,7 @@ export const COMMAND_IDS: string[] = [
   'session.deleteUnmarked',
   'session.unread',
   'session.recap',
+  'session.resume',
   // Queries (a side conversation running beside the chat)
   'query.open',
   'query.focus',

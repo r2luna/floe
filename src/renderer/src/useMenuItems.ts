@@ -106,6 +106,9 @@ export function useMenuItems(
     () => (trigger: Trigger) =>
       trigger.char === '/'
         ? [
+            // Floe's own command: resumes a harness's on-disk conversation
+            // (session.resume) instead of going out as text.
+            { id: '/resume', title: 'resume', detail: 'claude or codex session', group: 'floe' },
             // Floe's first, and named by scope: which skill you get when a
             // global and a project one share a name is a thing you should be
             // able to see before you pick.

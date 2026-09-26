@@ -505,6 +505,33 @@ export function resumeSession(s: {
   return id
 }
 
+// The same pull for a codex thread: the session answers as codex from the start
+// and holds the thread id, so its next turn resumes that thread. Deduped on the
+// thread id. Returns the Floe id and whether it was created by this call — only
+// a new one needs its history copied in.
+export function resumeCodexSession(s: {
+  worktreePath: string
+  threadId: string
+  title: string
+  mtime: number
+}): { id: string; created: boolean } {
+  const store = read()
+  const existing = store.created.find((x) => x.threads?.codex === s.threadId)
+  if (existing) return { id: existing.id, created: false }
+  const id = `codex:${s.threadId}`
+  store.created.push({
+    id,
+    worktreePath: s.worktreePath,
+    title: s.title,
+    createdAt: s.mtime,
+    usedAt: s.mtime,
+    provider: 'codex',
+    threads: { codex: s.threadId }
+  })
+  write(store)
+  return { id, created: true }
+}
+
 // The saved "where I was" state, restored on launch so the renderer can land the
 // user back on their last worktree/session per project.
 export function getViewState(): ViewState {

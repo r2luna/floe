@@ -2062,6 +2062,17 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // A conversation the harness kept on its own disk — a terminal
+        // session, a closed chat, a codex TUI thread — opened as a chat with
+        // its whole history. `/resume` in the composer runs this too.
+        id: 'session.resume',
+        title: 'Resume a claude or codex session…',
+        group: 'Sessions',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'open a worktree first',
+        run: (c) => c.resumeSession()
+      },
+      {
         // Sessions name themselves — "Session 3" until Claude has read enough
         // of the conversation to call it something. This is how you overrule
         // that, and it is permanent: a session you have named stops following

@@ -9,6 +9,7 @@ import type {
   LastCommit
 } from '../main/git'
 import type { ClaudeSessionMeta, ResumableSession, TranscriptItem } from '../main/claudeSessions'
+import type { HarnessSession, HistoryHarness } from '../main/harnessHistory'
 import type { ViewState, WorktreeView, ProjectUiState, WorktreeUiState } from '../main/sessionStore'
 import type { DevCommand, DevEvent } from '../main/devServer'
 import type { ProjectCommand, CommandScope, CommandPatch } from '../main/commands'
@@ -622,6 +623,16 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('claude:resumable', worktreePath),
       resume: (s: { worktreePath: string; claudeId: string; title: string; mtime: number }): Promise<string> =>
         ipcRenderer.invoke('sessions:resume', s),
+      /** What claude and codex kept on their own disk for this worktree — `/resume`'s list. */
+      harnessHistory: (worktreePath: string): Promise<HarnessSession[]> =>
+        ipcRenderer.invoke('sessions:harnessHistory', worktreePath),
+      /** Adopt one of them as a Floe session; resolves its Floe id. */
+      resumeHarness: (
+        worktreePath: string,
+        harness: HistoryHarness,
+        id: string
+      ): Promise<{ sessionId: string; title: string }> =>
+        ipcRenderer.invoke('sessions:resumeHarness', worktreePath, harness, id),
       transcript: (worktreePath: string, sessionId: string): Promise<TranscriptItem[]> =>
         ipcRenderer.invoke('claude:transcript', worktreePath, sessionId),
       setTitle: (claudeId: string, title: string): Promise<void> =>

@@ -103,6 +103,7 @@ import {
 } from './mcpServer'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
+import { listHarnessSessions, resumeHarnessSession, type HistoryHarness } from './harnessHistory'
 import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
 import {
   setSessionTitle,
@@ -801,6 +802,11 @@ export function registerSessionIpc(): void {
   handle('claude:resumable', (_event, worktreePath: string) => listResumableSessions(worktreePath))
   handle('sessions:resume', (_event, s: { worktreePath: string; claudeId: string; title: string; mtime: number }) =>
     resumeSession(s)
+  )
+  // `/resume`: both harnesses' own history for the worktree, and adopting one.
+  handle('sessions:harnessHistory', (_event, worktreePath: string) => listHarnessSessions(worktreePath))
+  handle('sessions:resumeHarness', (_event, worktreePath: string, harness: HistoryHarness, id: string) =>
+    resumeHarnessSession(worktreePath, harness, id)
   )
   // A session can have talked to several harnesses — Claude's own JSONL and our
   // log for whoever else answered — so the merge (and the stripping of the

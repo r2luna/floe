@@ -876,6 +876,7 @@ export function PanelBody({
     return (
       <Launcher
         onOpen={onOpen}
+        onCommand={onCommand}
         menuItems={menuItems}
         worktreePath={worktrees.currentPath}
         branch={
@@ -896,6 +897,7 @@ export function PanelBody({
         firstAttached={firstAttached}
         onUsage={onUsage}
         onOpen={onOpen}
+        onCommand={onCommand}
       />
     )
   // The same chat component the card chats use — she IS a session, and a second
@@ -1162,12 +1164,20 @@ function usePenguinMark(): { head: PenguinHeadId; color: PenguinColorId } {
 }
 
 /**
+ * `/resume` on its own is Floe's, not the harness's: it opens the picker of
+ * conversations claude and codex kept on disk (session.resume) instead of
+ * going out as a message nobody on the other side can act on.
+ */
+const isResume = (text: string): boolean => text.trim() === '/resume'
+
+/**
  * The empty state for a selected branch: one box, centred, that starts a
  * session. Everything it asks for is a decision you'd otherwise make in a modal
  * — mode, model, permission — so none of them get one.
  */
 function Launcher({
   onOpen,
+  onCommand,
   menuItems,
   worktreePath,
   branch,
@@ -1176,6 +1186,8 @@ function Launcher({
   onAddProject
 }: {
   onOpen: OpenFn
+  /** `/resume` is a command, not a first message — see isResume. */
+  onCommand?: (id: string) => void
   menuItems?: (trigger: Trigger) => PaletteItem[]
   worktreePath?: string
   /** The branch the session will be started on — absent when none is selected. */
@@ -1215,6 +1227,11 @@ function Launcher({
     // and what the session opens on is not what was typed.
     const typed = (message ?? text).trim()
     if (!typed) return
+    if (isResume(typed)) {
+      setText('')
+      onCommand?.('session.resume')
+      return
+    }
     const id = crypto.randomUUID()
     void window.floe.claude
       .createSession({ id, worktreePath: cwd, title: typed.slice(0, 60) })
@@ -1603,13 +1620,16 @@ function ChatPanel({
   firstChoice,
   firstAttached,
   onUsage,
-  onOpen
+  onOpen,
+  onCommand
 }: {
   session?: { id: string; worktreePath: string }
   menuItems?: (trigger: Trigger) => PaletteItem[]
   firstPrompt?: string
   firstChoice?: ModelChoice
   firstAttached?: Attached
+  /** `/resume` is a command, not a message — see isResume. */
+  onCommand?: (id: string) => void
   /**
    * How full this chat's context is. Reported upward because the gauge lives in
    * the panel header, which the lane draws — the chat is the only one that
@@ -2090,6 +2110,11 @@ function ChatPanel({
           // the box: a big paste reads as a rail and leaves as the text it
           // stands for (pastes.ts). Everything below routes on what is SAID.
           const said = message ?? text
+          if (isResume(said)) {
+            setText('')
+            onCommand?.('session.resume')
+            return
+          }
           // `!command` runs here instead of being said (bang.ts). Before any
           // routing: `!` addresses the shell, and a line that opens with it
           // never reaches a harness as words.

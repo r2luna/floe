@@ -2358,6 +2358,35 @@ export default function App() {
       openChat: setup.openChat
     },
     renameSession,
+    resumeSession: () => {
+      const worktreePath = here
+      if (!worktreePath) return
+      void window.floe.claude
+        .harnessHistory(worktreePath)
+        .then((found) => {
+          if (!found.length) return say('no claude or codex sessions to resume here')
+          setPicker({
+            placeholder: 'Resume which session?',
+            items: found.map((s) => ({
+              id: `${s.harness}:${s.id}`,
+              title: s.title,
+              detail: `${s.harness} · ${timeAgo(s.mtime)}${s.active ? ' · active' : ''}`
+            })),
+            onPick: (picked) => {
+              const s = found.find((f) => `${f.harness}:${f.id}` === picked)
+              if (!s) return
+              void window.floe.claude
+                .resumeHarness(worktreePath, s.harness, s.id)
+                .then(({ sessionId, title }) => {
+                  setLane((l) => open(l, mkPanel('chat', title, { id: sessionId, worktreePath })))
+                  worktrees.reload()
+                })
+                .catch((e: unknown) => say(`could not resume: ${(e as Error).message}`))
+            }
+          })
+        })
+        .catch((e: unknown) => say(`could not read session history: ${(e as Error).message}`))
+    },
     deleteSession,
     markedSessions: [...marks],
     markSession,
