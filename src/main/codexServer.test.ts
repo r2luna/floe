@@ -263,7 +263,7 @@ test('a known thread is resumed, and a mode change is pushed at it', async () =>
   // acceptEdits is workspace-write + the default collaboration mode.
   assert.deepEqual(sentParams('thread/settings/update'), {
     threadId: 'th-1',
-    sandboxPolicy: 'workspace-write',
+    sandboxPolicy: { type: 'workspaceWrite' },
     collaborationMode: { mode: 'default', settings: { model: 'gpt-5.5' } }
   })
   assert.equal(sentParams('turn/start').effort, undefined)
@@ -304,6 +304,22 @@ test('a rollout codex can no longer resume starts a fresh thread', async () => {
   push({ method: 'turn/completed', params: { threadId: 'th-2', turn: {} } })
   assert.deepEqual(kinds(events), ['done'])
   assert.equal((events[0] as { ok: boolean }).ok, true, 'a turn with no reply still closes cleanly')
+})
+
+test('a thread another codex process holds fails the turn instead of starting a stranger', async () => {
+  resetReplies('th-3')
+  replies['thread/resume'] = () => ({ error: { message: 'thread th-2 already has an active writer' } })
+  const startsBefore = server().sent.filter((m) => (m as { method?: string }).method === 'thread/start').length
+  const { win, events } = fakeWin()
+  await chatWithCodexServer(win, 'k-happy', '/work/tree', 'where were we?', 'gpt-5.5')
+
+  assert.deepEqual(kinds(events), ['error', 'done'])
+  assert.match((events[0] as { message: string }).message, /open in another codex process/)
+  assert.equal(
+    server().sent.filter((m) => (m as { method?: string }).method === 'thread/start').length,
+    startsBefore,
+    'no fresh thread in place of the held one'
+  )
 })
 
 test("a session's codex thread is written down, not just held", async () => {

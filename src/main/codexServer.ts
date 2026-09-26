@@ -57,6 +57,22 @@ const turnsByThread = new Map<string, TurnCtx>()
 // sandbox from thread/start, so a mode picked afterwards has to be pushed at it
 // — and pushing the same one on every turn would be a round trip per message.
 const modeByThread = new Map<string, PermissionMode>()
+
+// thread/start names the sandbox by mode (`read-only`); thread/settings/update
+// only takes it as a tagged policy object and rejects the string — which failed
+// every mode push, and so every first turn on a resumed thread.
+const SANDBOX_POLICY: Record<string, { type: string }> = {
+  'read-only': { type: 'readOnly' },
+  'workspace-write': { type: 'workspaceWrite' },
+  'danger-full-access': { type: 'dangerFullAccess' }
+}
+
+/**
+ * Codex lets one process write a thread at a time. A thread that is open in a
+ * codex terminal is still the conversation — starting a fresh one in its place
+ * would answer as a stranger with no word said about why.
+ */
+const HELD_ELSEWHERE = /active writer/i
 // A question the model is blocked on: the JSON-RPC request id to respond to,
 // the question ids in presentation order (the renderer answers by index), and
 // the display texts so the answered exchange can be written to the runtime log.
@@ -354,7 +370,12 @@ export async function chatWithCodexServer(
           model: slug,
           config: codexThreadConfig(key, worktreePath)
         })
-      } catch {
+      } catch (e) {
+        if (HELD_ELSEWHERE.test((e as Error).message)) {
+          throw new Error(
+            'This codex thread is open in another codex process (a terminal?). Close it there, then send again.'
+          )
+        }
         // Rollout gone (an old id from a previous machine state, a pruned
         // rollout) — drop it and start over rather than resume forever.
         threadId = undefined
@@ -392,7 +413,7 @@ export async function chatWithCodexServer(
       try {
         await request('thread/settings/update', {
           threadId,
-          sandboxPolicy: posture.sandbox,
+          sandboxPolicy: SANDBOX_POLICY[posture.sandbox],
           collaborationMode: { mode: posture.collaboration, settings: { model: slug } }
         })
         modeByThread.set(threadId, mode)
