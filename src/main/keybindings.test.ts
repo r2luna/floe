@@ -98,21 +98,32 @@ test('watchKeybindings collapses an edit into one debounced call, and stops when
   const stop = watchKeybindings(() => {
     fired++
   })
+  let before = 0
   try {
+    // FSEvents drops a change made before its stream is running, so a write
+    // straight after watch() can vanish and nothing ever fires. Touch the file
+    // until the watcher answers, let that go quiet, and count from there.
+    const deadline = Date.now() + 5000
+    while (fired === 0) {
+      if (Date.now() > deadline) throw new Error('the watcher never armed')
+      writeFileSync(path, generateKeybindings())
+      await waitFor(() => fired > 0, 300).catch(() => {})
+    }
+    before = await settle(() => fired)
     // A save is several fs events (truncate, write, close); the panel must
     // reload once, not three times.
     writeFileSync(path, generateKeybindings() + '\n# edited\n')
     // Wait for the reload, then for the event stream to go quiet: counting at
     // the first callback would miss a second one still in the debounce.
-    await waitFor(() => fired > 0, 5000, 'the debounced reload')
+    await waitFor(() => fired > before, 5000, 'the debounced reload')
     await settle(() => fired)
-    assert.equal(fired, 1)
+    assert.equal(fired - before, 1)
   } finally {
     stop()
   }
   writeFileSync(path, generateKeybindings() + '\n# edited again\n')
   await settle(() => fired)
-  assert.equal(fired, 1) // disposed: nothing more arrives
+  assert.equal(fired - before, 1) // disposed: nothing more arrives
 })
 
 // The watch is on the directory (editors replace-on-save), so every other config
