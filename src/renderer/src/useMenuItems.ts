@@ -34,6 +34,31 @@ export function sessionMentions(rows: WorktreeRow[]): PaletteItem[] {
 }
 
 /**
+ * Every folder that holds a file in the list, once each, with a trailing `/`.
+ *
+ * Read off the file paths rather than asked for: the list is already every
+ * tracked and untracked file, so the folders it names are exactly the ones
+ * worth pointing at, and an empty or ignored folder is not one of them. The
+ * slash is what tells the reader it is a folder and not a file without an
+ * extension.
+ */
+export function folderMentions(files: string[]): PaletteItem[] {
+  const seen = new Set<string>()
+  for (const relPath of files) {
+    let cut = relPath.lastIndexOf('/')
+    while (cut > 0) {
+      const dir = relPath.slice(0, cut + 1)
+      if (seen.has(dir)) break
+      seen.add(dir)
+      cut = relPath.lastIndexOf('/', cut - 1)
+    }
+  }
+  return [...seen]
+    .sort()
+    .map((dir) => ({ id: `#${dir}`, title: dir, detail: 'folder', group: 'folders' }))
+}
+
+/**
  * What `/` and `#` offer in the composer.
  *
  * `/` offers two kinds of skill and says which is which. FLOE skills come first:
@@ -42,7 +67,7 @@ export function sessionMentions(rows: WorktreeRow[]): PaletteItem[] {
  * skills follow, read from the CLI itself so the list is what that worktree
  * actually has rather than a copy to keep in step.
  *
- * `#` is sessions of the project you are in, then the worktree's files.
+ * `#` is sessions of the project you are in, then the worktree's folders and files.
  */
 export function useMenuItems(
   worktreePath: string | undefined,
@@ -91,14 +116,19 @@ export function useMenuItems(
   // `src/renderer/Composer.tsx` — and the whole path is what lands in the box:
   // which of four `index.ts` you picked is part of what you just said, and a
   // reference you cannot read is one you cannot check before sending.
+  //
+  // Folders before files for the same reason sessions come first: far fewer
+  // rows, and they would sink under a matching file otherwise.
   const paths = useMemo(
-    () =>
-      files.map((relPath) => ({
+    () => [
+      ...folderMentions(files),
+      ...files.map((relPath) => ({
         id: `#${relPath}`,
         title: relPath,
         detail: 'file',
         group: 'files'
-      })),
+      }))
+    ],
     [files]
   )
 

@@ -21,8 +21,11 @@ const REF = /^(.*?)(:\d+(?:-\d+)?)?$/
 // The anchored form comes first so `../a.b/infra` chips whole instead of
 // stopping at `../a.b`, and the trailing lookahead makes that a rule: a chip
 // never covers a prefix of the path that is written.
+//
+// A path ending in `/` is a folder the `#` menu wrote — `#src/main/`. Only with
+// the mark: `and/or/` in prose is not an address (see splitRefs).
 const TOKEN =
-  /(^|[\s([])([#@]?)((?:(?:\.{1,2}|~)?\/(?:[\w.-]+\/)*[\w.-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*)(?::\d+(?:-\d+)?)?)(?![\w\-/])/g
+  /(^|[\s([])([#@]?)((?:(?:\.{1,2}|~)?\/(?:[\w.-]+\/)*[\w.-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*|(?:[\w.-]+\/)+)(?::\d+(?:-\d+)?)?)(?![\w\-/])/g
 
 /**
  * Is this token a reference, or a word that merely looks like one?
@@ -50,7 +53,7 @@ export function splitRefs(text: string): TextPart[] {
   let last = 0
   for (const m of text.matchAll(TOKEN)) {
     const token = m[3]
-    if (!isFileRef(token)) continue
+    if (!isFileRef(token) || (token.endsWith('/') && m[2] !== '#')) continue
     const at = m.index + m[1].length
     if (at > last) out.push({ text: text.slice(last, at) })
     out.push({ ref: token })

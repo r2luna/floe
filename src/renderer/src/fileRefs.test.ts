@@ -57,3 +57,12 @@ test('a chip never covers only part of the path', () => {
     { text: '.' }
   ])
 })
+
+test('a folder the # menu wrote chips whole; an unmarked one stays prose', () => {
+  assert.deepEqual(splitRefs('look in #src/main/ now'), [
+    { text: 'look in ' },
+    { ref: 'src/main/' },
+    { text: ' now' }
+  ])
+  assert.deepEqual(splitRefs('look in src/main/ now'), [{ text: 'look in src/main/ now' }])
+})

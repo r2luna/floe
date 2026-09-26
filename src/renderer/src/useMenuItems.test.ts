@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { sessionMentions } from './useMenuItems.ts'
+import { folderMentions, sessionMentions } from './useMenuItems.ts'
 import type { WorktreeRow } from './useWorktrees.ts'
 
 const row = (branch: string, titles: string[]): WorktreeRow =>
@@ -29,4 +29,11 @@ test('a row carries the title and the branch it lives on', () => {
   assert.deepEqual(sessionMentions([row('master', ['Ship it'])]), [
     { id: '#Ship-it', title: 'Ship it', detail: 'master', group: 'sessions' }
   ])
+})
+
+test('every folder above a file is one row, with a trailing slash', () => {
+  assert.deepEqual(
+    folderMentions(['src/main/a.ts', 'src/main/b.ts', 'src/renderer/src/c.tsx', 'README.md']).map((m) => m.id),
+    ['#src/', '#src/main/', '#src/renderer/', '#src/renderer/src/']
+  )
 })
