@@ -72,9 +72,10 @@ export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
  * change rather than a component change.
  *
  * `classic` is the IRC log the app shipped with — one column, no air between
- * turns. The other six each pull one lever on it: a nick gutter, a surface per
+ * turns. The other seven each pull one lever on it: a nick gutter, a surface per
  * turn, a rule between turns, a timeline rail, work banded away from speech,
- * and the nick as a label line above the words.
+ * the nick as a label line above the words, and a head line per turn with
+ * your own turns on the right.
  */
 export const CHAT_LAYOUTS = [
   'classic',
@@ -83,7 +84,8 @@ export const CHAT_LAYOUTS = [
   'ruled',
   'rail',
   'split',
-  'labels'
+  'labels',
+  'convo'
 ] as const
 
 export type ChatLayoutId = (typeof CHAT_LAYOUTS)[number]

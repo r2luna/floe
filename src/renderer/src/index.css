@@ -9434,6 +9434,205 @@ kbd {
   line-height: 1.8;
 }
 
+/* --- convo: a head line per turn, the words under it, yours on the right ---
+   Mocked in mocks/chat-convo.html. The head is its own line — mark, nick,
+   model, clock — and a soft rule runs from it to the panel edge, which is what
+   separates two turns. The words sit in sans under the nick; code, pastes and
+   file references stay in the mono face. */
+
+:root[data-chat-layout='convo'] .chat {
+  --convo-mark: 16px;
+  --convo-gap: 8px;
+  --convo-indent: calc(var(--convo-mark) + var(--convo-gap));
+  --convo-prose: -apple-system, system-ui, sans-serif;
+}
+
+/* Air above a speaker change, less above the same speaker continuing. */
+:root[data-chat-layout='convo'] .chat > .irc-entry,
+:root[data-chat-layout='convo'] .chat > .irc-head {
+  margin-top: 18px;
+}
+
+:root[data-chat-layout='convo'] .chat > .irc-entry[data-cont] {
+  margin-top: 6px;
+}
+
+:root[data-chat-layout='convo'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* Words sit under the nick, not beside it. */
+:root[data-chat-layout='convo'] .chat .irc-body {
+  padding-left: var(--convo-indent);
+  font-family: var(--convo-prose);
+  font-size: 14px;
+}
+
+:root[data-chat-layout='convo'] .chat .irc-body .md-code,
+:root[data-chat-layout='convo'] .chat .irc-body .file-ref,
+:root[data-chat-layout='convo'] .chat .irc-body .md-block,
+:root[data-chat-layout='convo'] .chat .irc-body .chat-paste {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* The head is a row of its own, pulled back into the indent so the mark sits
+   in the column the words leave free. */
+:root[data-chat-layout='convo'] .irc-lead,
+:root[data-chat-layout='convo'] .chat > .irc-head,
+:root[data-chat-layout='convo'] .irc-entry > .irc-head {
+  float: none;
+  display: flex;
+  align-items: center;
+  gap: var(--convo-gap);
+  margin: 0 0 2px;
+  font-family: var(--convo-prose);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+:root[data-chat-layout='convo'] .irc-lead {
+  margin-left: calc(-1 * var(--convo-indent));
+}
+
+:root[data-chat-layout='convo'] .irc-lead .irc-time,
+:root[data-chat-layout='convo'] .irc-head .irc-time {
+  order: 2;
+  margin-right: 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+:root[data-chat-layout='convo'] .irc-lead .irc-peer {
+  order: 1;
+  margin-left: 0;
+}
+
+:root[data-chat-layout='convo'] .irc-lead .irc-nick,
+:root[data-chat-layout='convo'] .irc-head .irc-nick {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+:root[data-chat-layout='convo'] .irc-lead .irc-host,
+:root[data-chat-layout='convo'] .irc-head .irc-host {
+  margin-left: 6px;
+  color: var(--dim);
+}
+
+/* The speaker's mark: a square in the nick colour. */
+:root[data-chat-layout='convo'] .irc-lead .irc-nick::before,
+:root[data-chat-layout='convo'] .irc-head .irc-nick::before {
+  content: '';
+  width: var(--convo-mark);
+  height: var(--convo-mark);
+  margin-right: var(--convo-gap);
+  border-radius: var(--radius);
+  background: currentColor;
+}
+
+/* The separator lives in the head: a rule from the clock to the panel edge.
+   Only a head draws it, so a continuation or the work under a message never
+   gets one — those belong to the turn above them. */
+:root[data-chat-layout='convo'] .irc-lead::after,
+:root[data-chat-layout='convo'] .chat > .irc-head::after,
+:root[data-chat-layout='convo'] .irc-entry > .irc-head::after {
+  content: '';
+  order: 9;
+  flex: 1;
+  height: 1px;
+  margin-left: 4px;
+  background: var(--line-soft);
+}
+
+/* The turn's cost ends the head's row instead of floating over the rule: the
+   body becomes a wrapping row, the head and the cost share the first line and
+   everything else takes a full line below. */
+:root[data-chat-layout='convo'] .chat .irc-body:has(> .irc-cost) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+}
+
+:root[data-chat-layout='convo'] .chat .irc-body:has(> .irc-cost) > .irc-lead {
+  order: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+:root[data-chat-layout='convo'] .chat .irc-body > .irc-cost {
+  order: 1;
+  float: none;
+  margin: 0 0 2px;
+  padding-left: 0;
+  font-family: var(--mono);
+}
+
+:root[data-chat-layout='convo'] .chat .irc-body:has(> .irc-cost) > :not(.irc-lead, .irc-cost) {
+  order: 2;
+  flex: 1 0 100%;
+}
+
+/* Your own turns, mirrored: the block hugs the right edge, the mark sits in a
+   right-hand column, and the words stay left-aligned inside the block. */
+:root[data-chat-layout='convo'] .chat > .irc-entry[data-me] > .irc-body {
+  width: fit-content;
+  max-width: 75%;
+  margin-left: auto;
+  padding-left: 0;
+  padding-right: var(--convo-indent);
+}
+
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead {
+  flex-direction: row-reverse;
+  margin-left: 0;
+  margin-right: calc(-1 * var(--convo-indent));
+}
+
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick {
+  flex-direction: row-reverse;
+}
+
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick::before {
+  margin-right: 0;
+  margin-left: var(--convo-gap);
+}
+
+/* Your block ends short of the left edge, so its rule would too. It overshoots
+   instead, and the entry clips it at the panel's content edge — the same edge
+   the agents' rules end on at the right. */
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead::after {
+  margin-left: -100vw;
+  margin-right: 4px;
+}
+
+:root[data-chat-layout='convo'] .chat > .irc-entry[data-me] {
+  overflow-x: clip;
+}
+
+/* Everything that is not a message lines up with the words. */
+:root[data-chat-layout='convo'] .chat > .tool-run,
+:root[data-chat-layout='convo'] .chat > .ag-group,
+:root[data-chat-layout='convo'] .chat > .query-fold,
+:root[data-chat-layout='convo'] .chat > .fanout,
+:root[data-chat-layout='convo'] .chat > .irc-sys,
+:root[data-chat-layout='convo'] .chat > .irc-act,
+:root[data-chat-layout='convo'] .chat > .irc-typing,
+:root[data-chat-layout='convo'] .chat > .irc-queued {
+  margin-left: var(--convo-indent);
+}
+
+:root[data-chat-layout='convo'] .chat > .irc-act,
+:root[data-chat-layout='convo'] .chat > .ag-group .irc-body {
+  padding-left: 0;
+}
+
+:root[data-chat-layout='convo'] .chat > .tool-run {
+  margin-top: 4px;
+}
+
 /* --- the nanny: the board's log, and the board's session under it ---------
    One panel, two regions. The log is fixed and scrolls on its own; the chat
    below it takes the rest and behaves like any other chat, because it is one. */
