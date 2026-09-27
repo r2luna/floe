@@ -5215,22 +5215,31 @@ button {
    sits on the baseline, and is a hollow box when the face has no bullet. */
 /* A disc has no period to line up on, so it sits in the middle of its column
    instead of against the text. */
-.md-bullet[data-dot],
-.md-bullet[data-task] {
+.md-bullet[data-dot] {
   padding-right: 0;
   text-align: center;
 }
 
-/* A task's checkbox: a real box, drawn at the same size as the text it labels
-   so a list of tasks reads as a list of tasks at a glance. */
+/* A checkbox starts where the text of the lines around it starts, and the
+   rest of its column is the gap before the words. Centred, it floated a
+   little in from the edge with no air on the text side. */
+.md-bullet[data-task] {
+  padding-right: 0;
+  text-align: left;
+  color: var(--dim);
+}
+
+/* A task's checkbox: a real box at the text's x-height, in the dim ink of a
+   control you have not used yet rather than the list colour. */
 .md-bullet[data-task]::before {
   content: "";
   display: inline-block;
-  width: 9px;
-  height: 9px;
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
   border: 1px solid currentColor;
-  border-radius: 0;
-  vertical-align: middle;
+  border-radius: 2px;
+  vertical-align: -1px;
 }
 
 /* Done: filled, with the check cut out of it. The tick is a corner of a box
@@ -5247,16 +5256,17 @@ button {
   background: currentColor;
 }
 
+/* Centred on the box, which is the first 11px of the column, not the column. */
 .md-bullet[data-task="done"]::after {
   content: "";
   position: absolute;
   top: 50%;
-  left: 50%;
-  width: 2px;
-  height: 5px;
+  left: 5.5px;
+  width: 3px;
+  height: 6px;
   border: solid var(--bg);
   border-width: 0 1.5px 1.5px 0;
-  transform: translate(-50%, -60%) rotate(45deg);
+  transform: translate(-50%, -65%) rotate(45deg);
 }
 
 /* Everything a document says but does not mean for you to read as prose: front
