@@ -9491,6 +9491,16 @@ kbd {
   margin-left: calc(-1 * var(--convo-indent));
 }
 
+/* The reset above would also zero the air over a turn that opens with work
+   (a head on its own row), gluing it to the turn before. */
+:root[data-chat-layout='convo'] .chat > .irc-head {
+  margin-top: 28px;
+}
+
+:root[data-chat-layout='convo'] .chat > .irc-head:first-child {
+  margin-top: 0;
+}
+
 :root[data-chat-layout='convo'] .irc-lead .irc-time,
 :root[data-chat-layout='convo'] .irc-head .irc-time {
   order: 2;
