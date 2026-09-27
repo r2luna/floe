@@ -62,6 +62,11 @@ class FakeWebContents {
     // The plugin's onSend patch wraps this instance method and mirrors every
     // push to the connected remote clients; locally there is nobody to paint.
   }
+  // The file watchers guard every push with this (reviewWatch, plans, draw).
+  // Without it each push threw in a timer and no client ever heard a write.
+  isDestroyed(): boolean {
+    return false
+  }
   on(): void {}
   setZoomFactor(): void {}
   setWindowOpenHandler(): void {}
