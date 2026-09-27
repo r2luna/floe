@@ -9437,14 +9437,13 @@ kbd {
 /* --- convo: a head line per turn, the words under it, yours on the right ---
    Mocked in mocks/chat-convo.html. The head is its own line — mark, nick,
    model, clock — and a soft rule runs from it to the panel edge, which is what
-   separates two turns. The words sit in sans under the nick; code, pastes and
-   file references stay in the mono face. */
+   separates two turns. The words sit under the nick in the app's own face
+   (`--mono`), like every other layout. */
 
 :root[data-chat-layout='convo'] .chat {
   --convo-mark: 12px;
   --convo-gap: 8px;
   --convo-indent: calc(var(--convo-mark) + var(--convo-gap));
-  --convo-prose: -apple-system, system-ui, sans-serif;
 }
 
 /* Air above a speaker change, less above the same speaker continuing. */
@@ -9464,7 +9463,6 @@ kbd {
 /* Words sit under the nick, not beside it. */
 :root[data-chat-layout='convo'] .chat .irc-body {
   padding-left: var(--convo-indent);
-  font-family: var(--convo-prose);
   font-size: 14px;
 }
 
@@ -9472,7 +9470,6 @@ kbd {
 :root[data-chat-layout='convo'] .chat .irc-body .file-ref,
 :root[data-chat-layout='convo'] .chat .irc-body .md-block,
 :root[data-chat-layout='convo'] .chat .irc-body .chat-paste {
-  font-family: var(--mono);
   font-size: 13px;
 }
 
@@ -9486,7 +9483,6 @@ kbd {
   align-items: center;
   gap: var(--convo-gap);
   margin: 0 0 2px;
-  font-family: var(--convo-prose);
   font-size: 13px;
   line-height: 1.5;
 }
