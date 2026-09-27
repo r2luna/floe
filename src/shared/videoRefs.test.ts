@@ -28,10 +28,6 @@ test('a word that merely ends in the extension is not a path', () => {
   assert.deepEqual(findVideoRefs('renomeei pra .mp4'), [])
 })
 
-test('an image is left alone', () => {
-  assert.deepEqual(findVideoRefs('/tmp/shot.png e /tmp/shot.gif'), [])
-})
-
 test('the full stop after the path is not part of it', () => {
   assert.deepEqual(findVideoRefs('ta em /tmp/demo.mp4.'), ['/tmp/demo.mp4'])
 })
@@ -41,4 +37,10 @@ test('every video in a message, in order', () => {
     '/tmp/a.mov',
     '/tmp/b.mp4'
   ])
+})
+
+test('an image path, bare or in markdown image syntax, is found too', () => {
+  assert.deepEqual(findVideoRefs('salvei /tmp/shot.png'), ['/tmp/shot.png'])
+  assert.deepEqual(findVideoRefs('![tela](/tmp/shot-2.jpeg) e /tmp/c.webp'), ['/tmp/shot-2.jpeg', '/tmp/c.webp'])
+  assert.deepEqual(findVideoRefs('veja https://floe.dev/a.png'), [])
 })

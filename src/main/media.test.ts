@@ -9,6 +9,7 @@ import {
   mediaUrl,
   parseRange,
   pathFromMediaUrl,
+  probeFile,
   probeMedia,
   readMediaChunk,
   resolveMediaPath
@@ -136,4 +137,22 @@ test('a page and what it loads are served; probeMedia still only answers about m
   // The reader points an <iframe> at these; a message that names one is still
   // not something to put a player under.
   assert.equal(probeMedia(page), null)
+})
+
+test('probeFile answers for a page and what it loads, and still not for anything else', () => {
+  const page = join(dir, 'probe.html')
+  writeFileSync(page, '<html></html>')
+  const found = probeFile(page)
+  assert.equal(found?.mediaType, 'text/html; charset=utf-8')
+  assert.equal(found?.url, mediaUrl(page))
+  assert.equal(probeFile(join(dir, 'nope.css')), null)
+  writeFileSync(join(dir, 'secret.txt'), 'hi')
+  assert.equal(probeFile(join(dir, 'secret.txt')), null)
+})
+
+test('readMediaChunk hands out a page, so another machine can re-serve it', async () => {
+  const page = join(dir, 'remote.html')
+  writeFileSync(page, '<html>hi</html>')
+  const chunk = await readMediaChunk(page, 0, 64)
+  assert.equal(Buffer.from(chunk!.base64, 'base64').toString(), '<html>hi</html>')
 })

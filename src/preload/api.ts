@@ -900,6 +900,11 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       probe: (path: string, cwd?: string): Promise<MediaFile | null> =>
         ipcRenderer.invoke('media:probe', path, cwd),
       /**
+       * The address of any file the media scheme serves — a page and what it
+       * loads as well as a recording. Null when it is not there or not servable.
+       */
+      file: (path: string): Promise<MediaFile | null> => ipcRenderer.invoke('media:file', path),
+      /**
        * Put a picture on the system clipboard from its data URL — the keyboard
        * half of the right-click "Copy Image". False when the URL decoded to
        * nothing (so the caller can say it failed instead of lying).

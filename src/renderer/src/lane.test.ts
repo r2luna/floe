@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, closePanel, columnsOf, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -459,4 +459,28 @@ test('slotOf gives a query its own slot and leaves every other kind alone', () =
   assert.equal(slotOf('query', 'claude'), 'query:claude')
   assert.equal(slotOf('chat', 'x', 'session'), 'session', 'the kind table still decides')
   assert.equal(slotOf('files'), undefined, 'and most kinds name none at all')
+})
+
+test('a crowded lane hides the lists left of the session, not the focused one', () => {
+  const lane: Lane = {
+    panels: [
+      ranked('projects', 'projects', 0),
+      ranked('worktrees', 'worktrees', 10),
+      { ...ranked('chat', 'chat', 30), slot: 'session' },
+      ranked('files', 'files', 42),
+      ranked('browser', 'browser', 70)
+    ],
+    focus: 3
+  }
+  const cols = columnsOf(lane)
+  const floors = [220, 330, 400, 300, 460]
+  assert.deepEqual([...crowdedOut(cols, floors, 2000, 6, 3)], [])
+  assert.deepEqual([...crowdedOut(cols, floors, 1500, 6, 3)], ['projects', 'worktrees'])
+  assert.deepEqual([...crowdedOut(cols, floors, 1500, 6, 1)], ['projects'])
+  assert.deepEqual([...crowdedOut(cols, floors, 0, 6, 3)], [])
+})
+
+test('a crowded lane without a session hides nothing', () => {
+  const lane: Lane = { panels: [ranked('projects', 'projects', 0), ranked('files', 'files', 42)], focus: 1 }
+  assert.deepEqual([...crowdedOut(columnsOf(lane), [220, 300], 100, 6, 1)], [])
 })

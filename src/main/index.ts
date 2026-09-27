@@ -243,7 +243,7 @@ import {
   searchableFiles
 } from './files'
 import { saveDownload } from './downloads'
-import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeMedia, readMediaChunk } from './media'
+import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeFile, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
   boardFor,
@@ -1065,6 +1065,9 @@ export function registerFileIpc(): void {
   // never come back through IPC — only the `floe-media://` URL that streams
   // them (see media.ts).
   handle('media:probe', (_event, path: string, cwd?: string) => probeMedia(path, cwd))
+  // Any file the scheme serves, page types included: the reader's address for
+  // an `.html` file, and what a browser tab's `/media/…` route checks.
+  handle('media:file', (_event, path: string) => probeFile(path))
   // The exception to that: a browser tab can only fetch from the daemon that
   // served the page, so a recording on ANOTHER paired machine is pulled over
   // the gate in slices and re-served there. Nothing local calls this.

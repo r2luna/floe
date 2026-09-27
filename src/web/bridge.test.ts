@@ -191,6 +191,17 @@ test('media:probe comes back with a url the tab can fetch', async () => {
   socket.close()
 })
 
+test('media:file comes back with a url the tab can fetch', async () => {
+  answers.set('media:file', () => ({ url: 'floe-media://file/srv/wt/mocks/a.html' }))
+  const { ipc, socket } = createWebBridge(boot)
+  await settle()
+
+  assert.deepEqual(await ipc.invoke('media:file', '/srv/wt/mocks/a.html'), {
+    url: '/media/local/srv/wt/mocks/a.html'
+  })
+  socket.close()
+})
+
 test('a tab is never the machine the files are on', async () => {
   const { host, socket } = createWebBridge(boot)
   await settle()

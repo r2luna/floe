@@ -365,6 +365,18 @@ button {
   flex: var(--panel-grow, 1) 1 var(--panel-w, 380px);
 }
 
+/* A crowded lane (see crowdedOut in lane.ts): the lists left of the chat step
+   aside, and the chat stops growing at its tight width so the panels right of
+   it take the room. */
+.lane-col[data-hidden] {
+  display: none;
+}
+
+.lane-col[data-tight] {
+  flex: 0 0 var(--panel-tight);
+  min-width: var(--panel-tight);
+}
+
 .panel {
   display: flex;
   flex-direction: column;

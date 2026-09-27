@@ -11,20 +11,24 @@
     it may not ship: `.mkv`/`.avi` would draw a dead player far too often. */
 export const VIDEO_EXTS = ['mp4', 'mov', 'webm', 'm4v'] as const
 
-// A run of path-ish characters ending in a video extension. The leading class
+/** A picture named the same way — a screenshot the agent saved and pointed at,
+    or a markdown `![alt](/abs/shot.png)` — shows under the message too. */
+export const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const
+
+// A run of path-ish characters ending in a video or image extension. The leading class
 // is what proves the token starts a word — `notmp4` and `x.mp4v` are not it —
 // and the excluded characters are the ones that WRAP a path in prose: quotes,
 // backticks, brackets, so `[demo](/tmp/x.mp4)` yields the path and not the
 // markdown around it.
 const CANDIDATE =
-  /(?:^|[\s"'`([<])((?:file:\/\/)?[^\s"'`()[\]<>]*?\.(?:mp4|mov|webm|m4v))(?!\w)/gi
+  /(?:^|[\s"'`([<])((?:file:\/\/)?[^\s"'`()[\]<>]*?\.(?:mp4|mov|webm|m4v|png|jpe?g|gif|webp))(?!\w)/gi
 
 // An address is already a link (see links.ts) and is not ours to play: the file
 // is on someone else's machine, and the chat would be guessing at a local path.
 const REMOTE = /^(?!file:)[a-z][a-z0-9+.-]*:\/\//i
 
 /**
- * Every video path a message names, in the order it names them, without
+ * Every video or image path a message names, in the order it names them, without
  * repeats — a model that says the same file twice means one video.
  *
  * Deliberately generous: it only proposes. A candidate that does not exist on
