@@ -12,6 +12,7 @@ import {
   save,
   scopedOf,
   sessionKeyOf,
+  sessionOf,
   withoutProject,
   withScoped
 } from './laneStore.ts'
@@ -234,12 +235,51 @@ test('a project switch takes the colony board with it', () => {
 })
 
 test('the board a project had open is what comes back to it', () => {
-  assert.deepEqual(projectRailOf(laneWith('s1', panel('colony', 36))), ['colony'])
+  assert.deepEqual(projectRailOf(laneWith('s1', panel('colony', 36))).map((p) => p.kind), ['colony'])
   // Closed is an answer, not an absence: a project you left with no board must
   // not inherit one from the project you were in before it.
   assert.deepEqual(projectRailOf(laneWith('s1')), [])
-  const rail = rememberRail(rememberRail({}, '/a', ['colony']), '/b', [])
-  assert.deepEqual(rail, { '/a': ['colony'], '/b': [] })
+  const board = panel('colony', 36)
+  const rail = rememberRail(rememberRail({}, '/a', [board]), '/b', [])
+  assert.deepEqual(rail, { '/a': [board], '/b': [] })
+})
+
+// The tasks list, an open task and the chat about it live in the main checkout,
+// so you can keep thinking about a task while you work in other sessions.
+test('a session switch keeps the task panels', () => {
+  const chat = panel('taskchat', 35.6, {
+    sub: '001-idea',
+    session: { id: 't1', worktreePath: '/p' },
+    firstPrompt: 'read task.md'
+  })
+  const lane = laneWith('s1', panel('tasks', 35), panel('task', 35.5, { sub: '001-idea' }), chat)
+  assert.deepEqual(scopedOf(lane), [])
+  assert.equal(sessionKeyOf(lane), 's1', 'the task chat is not the session the lane shows')
+  assert.deepEqual(
+    withScoped(lane, []).panels.map((p) => p.kind),
+    ['projects', 'worktrees', 'chat', 'tasks', 'task', 'taskchat']
+  )
+  // They belong to the project: a project switch takes them, whole, to be put back.
+  assert.deepEqual(withoutProject(lane).panels.map((p) => p.kind), ['projects', 'worktrees'])
+  const rail = projectRailOf(lane)
+  assert.deepEqual(rail.map((p) => p.sub), [undefined, '001-idea', '001-idea'])
+  assert.equal(rail[2].session?.id, 't1')
+  assert.equal(rail[2].firstPrompt, undefined, 'the opener is sent once, never again')
+})
+
+// On the launcher the slot holds no chat, and the task chat beside it must not
+// be read as the session — `here` would jump to the main checkout.
+test('the task chat is never the lane’s session', () => {
+  const lane: Lane = {
+    panels: [
+      panel('worktrees', 10),
+      panel('branch', 30),
+      panel('taskchat', 35.6, { session: { id: 't1', worktreePath: '/p' } })
+    ],
+    focus: 1
+  }
+  assert.equal(sessionOf(lane), undefined)
+  assert.equal(sessionKeyOf(lane), null)
 })
 
 // Opening a card swaps its chat into the session slot. The board sits right of

@@ -49,13 +49,16 @@ const PROJECT_PANELS = new Set(['merge', 'remove', 'setup'])
  *
  * The colony board is the case: its tasks, its stages and its nanny are all
  * keyed by repo root, so a board carried into another project would either sit
- * empty or — worse — read as that project's while showing nothing of it.
+ * empty or — worse — read as that project's while showing nothing of it. The
+ * tasks list, an open task and the chat about it are the same: they live in the
+ * main checkout, so they stay up while you switch sessions and think about the
+ * task elsewhere in the project.
  *
  * Unlike PROJECT_PANELS these are remembered rather than dropped: which of them
  * a project had open is filed under its root, so leaving hides the board and
  * coming back puts it up again.
  */
-const PROJECT_RAIL = new Set(['colony'])
+const PROJECT_RAIL = new Set(['colony', 'tasks', 'task', 'taskchat'])
 
 /**
  * The board and its nanny sit right of the session by `order`, but opening a
@@ -67,7 +70,10 @@ const BOARD = new Set(['colony', 'nanny'])
 /** Whether a panel is one the session opened, and so travels with it. */
 function sessionOwns(panel: Panel): boolean {
   return (
-    (panel.order ?? 0) > SESSION_ORDER && !PROJECT_PANELS.has(panel.kind) && !BOARD.has(panel.kind)
+    (panel.order ?? 0) > SESSION_ORDER &&
+    !PROJECT_PANELS.has(panel.kind) &&
+    !BOARD.has(panel.kind) &&
+    !PROJECT_RAIL.has(panel.kind)
   )
 }
 
@@ -97,9 +103,11 @@ export interface LaneMemory {
   /**
    * The project-bound rail panels each project was left showing (PROJECT_RAIL),
    * keyed by project path. An empty array is a real answer — you closed the
-   * board — and is why this is not derived from "has any task".
+   * board — and is why this is not derived from "has any task". Whole panels,
+   * because a task and its chat need their `sub` and session back; a bare kind
+   * is a lane saved before that and still reads.
    */
-  railByProject: Record<string, string[]>
+  railByProject: Record<string, (string | Panel)[]>
   /**
    * The session each worktree was last left showing, keyed by worktree path.
    * `null` is a real answer — it means the launcher, i.e. you closed the chat
@@ -124,7 +132,15 @@ export interface LaneMemory {
  * order, everything past it belongs to the chat rather than being it.
  */
 export function sessionKeyOf(lane: Lane): string | null {
-  return lane.panels.find((p) => p.session && !sessionOwns(p))?.session?.id ?? null
+  return sessionOf(lane)?.id ?? null
+}
+
+/**
+ * The session in the lane's session slot — not any panel carrying one. A task's
+ * chat carries a session too, and it stays up while the slot shows the launcher.
+ */
+export function sessionOf(lane: Lane): Panel['session'] | undefined {
+  return lane.panels.find((p) => p.session && !sessionOwns(p) && !PROJECT_RAIL.has(p.kind))?.session
 }
 
 /** The panels the session opened: everything to the right of the session slot,
@@ -183,17 +199,17 @@ export function withoutProject(lane: Lane): Lane {
 }
 
 /** The project-bound rail panels a lane has open, in lane order — see PROJECT_RAIL. */
-export function projectRailOf(lane: Lane): string[] {
-  return lane.panels.filter((p) => PROJECT_RAIL.has(p.kind)).map((p) => p.kind)
+export function projectRailOf(lane: Lane): Panel[] {
+  return persistable(lane.panels.filter((p) => PROJECT_RAIL.has(p.kind)))
 }
 
 /** Record which project-bound rail panels a project was left showing. */
 export function rememberRail(
-  railByProject: Record<string, string[]>,
+  railByProject: Record<string, (string | Panel)[]>,
   project: string,
-  kinds: string[]
-): Record<string, string[]> {
-  return rememberIn(railByProject, project, kinds, MAX_PLACES)
+  panels: Panel[]
+): Record<string, (string | Panel)[]> {
+  return rememberIn(railByProject, project, panels, MAX_PLACES)
 }
 
 /**

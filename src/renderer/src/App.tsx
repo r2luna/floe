@@ -51,6 +51,7 @@ import {
   save as saveLane,
   scopedOf,
   sessionKeyOf,
+  sessionOf,
   withoutProject,
   withScoped
 } from './laneStore'
@@ -428,7 +429,8 @@ export default function App() {
       // ⌃W's other chat, captured on the way out — this is the one place that
       // sees both sides of a session switch. Landing on the alternate records
       // the one you just left, which is what makes the two ping-pong.
-      const leaving = l.panels.find((p) => p.session)
+      const slot = sessionOf(l)
+      const leaving = slot && l.panels.find((p) => p.session === slot)
       if (leaving)
         alternate.current = {
           panel: leaving,
@@ -493,7 +495,7 @@ export default function App() {
    * file list, git status and the terminal cannot disagree.
    */
   const here =
-    lane.panels.find((p) => p.session)?.session?.worktreePath ??
+    sessionOf(lane)?.worktreePath ??
     worktrees.currentPath ??
     projects.current?.path
   // What that tree has changed, watched so an agent editing behind the UI shows
@@ -808,7 +810,7 @@ export default function App() {
     // CHAT's own worktree, not the sidebar selection: for one render after a
     // switch the two disagree, and that render would file a session under the
     // wrong branch.
-    const chat = lane.panels.find((p) => p.session)?.session
+    const chat = sessionOf(lane)
     // A chat names its own branch, so it is always safe to file. Without one,
     // the selection is only trustworthy while the lists agree: a project switch
     // closes the chat a render before the worktree selection catches up, and
@@ -967,7 +969,7 @@ export default function App() {
    * renaming four chats to the same thing is not a thing anyone means.
    */
   const renameSession = (): void => {
-    const at = cursorSession() ?? lane.panels.find((p) => p.session)?.session
+    const at = cursorSession() ?? sessionOf(lane)
     if (!at) return say('put the cursor on a session, or open a chat')
     // A panel's key is `claudeId ?? id` and a row's is the store id, so the two
     // names for one session have to be collected before either can be matched
@@ -1299,7 +1301,7 @@ export default function App() {
       // were headed. With no list, focus is left where it is: the panel that
       // sent you here is still on screen, and the chat takes it when it opens.
       const back = (railByProject.current[path] ?? []).reduce(
-        (acc, kind) => open(acc, panelOf(kind as PanelKind)),
+        (acc, saved) => open(acc, typeof saved === 'string' ? panelOf(saved as PanelKind) : saved),
         base
       )
       return panel ? focusAt(back, back.panels.findIndex((p) => p.id === panel.id)) : back
@@ -1325,7 +1327,7 @@ export default function App() {
       // The saved lane is the authority on boot. Its chat names the branch when
       // the saved selection is gone, so a restored conversation is never left
       // sitting over the wrong sidebar row.
-      const chat = restored.current?.lane.panels.find((p) => p.session)?.session?.worktreePath
+      const chat = restored.current && sessionOf(restored.current.lane)?.worktreePath
       const path =
         row?.worktree.path ??
         worktrees.rows.find((r) => r.worktree.path === chat)?.worktree.path
@@ -1348,7 +1350,7 @@ export default function App() {
     if (!all.length) return
     // Where we are is the OPEN CHAT, not the sidebar selection: those differ
     // once you cycle across a branch, and the chat is what the keys move.
-    const here = lane.panels.find((p) => p.session)?.session
+    const here = sessionOf(lane)
     const at = all.findIndex(
       (s) => s.id === sessionKey && (!here?.worktreePath || s.path === here.worktreePath)
     )
