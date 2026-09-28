@@ -10124,3 +10124,17 @@ kbd {
   cursor: default;
   color: var(--dim);
 }
+
+/* "chat about it" sits at the end of the meta line — the one thing to do with
+   a task before it is ready, one key away. */
+.task-meta .task-chat {
+  margin-left: auto;
+  padding: 1px 8px;
+}
+
+.task-meta .task-chat kbd {
+  margin-left: 6px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--dim);
+}

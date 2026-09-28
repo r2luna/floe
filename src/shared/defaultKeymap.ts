@@ -319,8 +319,10 @@ file opens it where it belongs: html and links in the browser, drawings on the
 canvas, the rest in the reader.
 
 \`⌘⏎\` sends a ready task: the folder moves to \`specs/\`, the move is committed
-on the main branch, and its colony card starts. \`c\` shows the board, \`z\`
-shows or hides done tasks.`,
+on the main branch, and its colony card starts. \`b\` shows the board, \`z\`
+shows or hides done tasks. \`c\` opens a chat about the task, docked under it:
+the agent reads the task first, and its edits show in the panel above as it
+works.`,
     binds: [
       { key: 'n', command: 'tasks.new', when: 'panel in ["tasks", "task"]' },
       { key: ']', command: 'tasks.statusUp', when: 'panel in ["tasks", "task"]' },
@@ -331,7 +333,8 @@ shows or hides done tasks.`,
       { key: 'x', command: 'tasks.detach', when: 'panel == "task"' },
       { key: 'd', command: 'tasks.delete', when: 'panel in ["tasks", "task"]' },
       { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
-      { key: 'c', command: 'tasks.openCard', when: 'panel == "task"' },
+      { key: 'c', command: 'tasks.chat', when: 'panel in ["tasks", "task"]' },
+      { key: 'b', command: 'tasks.openCard', when: 'panel == "task"' },
       { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }
     ]
   },

@@ -35,6 +35,7 @@ import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
+import { taskChatOpener } from '../../shared/taskFolders.ts'
 import { downloadAndOpen } from './download.ts'
 import { identifiersOf } from './definition.ts'
 import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
@@ -1769,6 +1770,55 @@ export const REGISTRY: Map<string, Command> = new Map(
               if (yes) await window.floe.tasks.send(at.root, at.ref)
             })
             .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Talk the task through: a session in the project's main checkout — the
+        // task lives there, so the agent's edits land in the folder the panel
+        // is showing — docked under the task. The same task gets the same chat
+        // back while that session exists; the first press opens it on a message
+        // that has the agent read the task before you type.
+        id: 'tasks.chat',
+        title: 'Chat about the task',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          void (async () => {
+            const task = await window.floe.tasks.read(at.root, at.ref)
+            if (!c.lane.panels.some((p) => p.kind === 'task' && p.sub === task.name)) {
+              c.setLane((l) => open(l, c.makePanel('task', task.name, at.root)))
+            }
+            const key = `floe.taskChat:${at.root}:${task.name}`
+            const saved = localStorage.getItem(key)
+            const alive = saved && (await window.floe.claude.sessions(at.root)).some((m) => m.id === saved)
+            if (saved && alive) {
+              c.openTaskChat(task.name, { id: saved, worktreePath: at.root })
+            } else {
+              const id = crypto.randomUUID()
+              await window.floe.claude.createSession({ id, worktreePath: at.root, title: `task ${task.number} · ${task.title}` })
+              localStorage.setItem(key, id)
+              c.openTaskChat(task.name, { id, worktreePath: at.root }, taskChatOpener(task))
+            }
+            // Straight into the composer — `c` means "I want to say something".
+            // After the panel mounts: the composer does not exist on this frame.
+            // The live DOM, not `c.lane`: that is the lane from before the chat
+            // opened. Focus without scrolling, then bring the whole column into
+            // view once it has its width — focusing the box alone scrolled just
+            // far enough to show the box, leaving the task above it cut off.
+            setTimeout(() => {
+              document
+                .querySelector<HTMLTextAreaElement>('.panel[data-kind="taskchat"] .composer-input')
+                ?.focus({ preventScroll: true })
+              requestAnimationFrame(() =>
+                document
+                  .querySelector('.panel[data-kind="task"]')
+                  ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' })
+              )
+            }, 60)
+          })().catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

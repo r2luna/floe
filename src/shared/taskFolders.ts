@@ -76,3 +76,19 @@ export interface TaskFolderPatch {
   status?: TaskFolderStatus
   depends?: string[]
 }
+
+/**
+ * The first message of a chat about a task — what `c` sends as the session
+ * opens, so the agent starts with the task read instead of asking what it is.
+ * Short on purpose: the files are the context, this only points at them.
+ */
+export function taskChatOpener(task: Pick<TaskFolder, 'number' | 'title' | 'dir' | 'status'>): string {
+  const sent = task.status === 'in dev' || task.status === 'done'
+  return [
+    `Let's talk about task ${task.number}, "${task.title}". Its folder is ${task.dir}/: task.md is the idea (its header holds the status), plan.md is the plan, and any other files are its designs and drawings.`,
+    'Read task.md and plan.md (if there is one) now. Then reply in two lines: what the task is, and the biggest open question. Then wait for me.',
+    sent
+      ? `It is ${task.status} on the colony, so the folder is read-only: discuss it, do not edit it.`
+      : 'When we change the task, edit those files directly — the tasks panel shows the changes live. Never set `status: ready`; marking it ready is mine.'
+  ].join('\n\n')
+}

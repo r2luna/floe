@@ -29,6 +29,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     editPremise: () => {},
     openChat: () => {},
     openNanny: () => {},
+    openTaskChat: () => {},
     whyCannotOpen: () => 'not available',
     browser: {
       address: () => {},
@@ -126,7 +127,8 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       retry: () => {},
       cancel: () => {},
       openChat: () => {},
-      openNanny: () => {}
+      openNanny: () => {},
+      openTaskChat: () => {}
     }
   }
   return ctx

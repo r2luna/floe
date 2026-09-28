@@ -115,6 +115,7 @@ export const COMMAND_IDS: string[] = [
   'tasks.detach',
   'tasks.send',
   'tasks.delete',
+  'tasks.chat',
   'tasks.openCard',
   'tasks.toggleDone',
   // Colony

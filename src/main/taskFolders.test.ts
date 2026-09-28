@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
 import { makeGitRepo } from './gitFixture.test-helper.ts'
 import type { TaskCard } from '../shared/taskFolders.ts'
+import { taskChatOpener } from '../shared/taskFolders.ts'
 
 // The send test runs the REAL git helpers against a fixture, and they inherit
 // this process's environment — so the same walls git.test.ts puts up: no
@@ -342,4 +343,15 @@ test('d deletes an unsent task and its files; a sent task cannot be deleted', ()
   writeFileSync(join(root, 'specs/002-sent/task.md'), '# Sent\n')
   assert.throws(() => deleteTaskFolder(root, '2'), /read-only/)
   assert.equal(existsSync(join(root, 'specs/002-sent/task.md')), true)
+})
+
+test('c opens a chat that starts on the task: it points at the folder, and a sent task is discuss-only', () => {
+  const shaping = taskChatOpener({ number: '017', title: 'Tasks', dir: '.floe/tasks/017-tasks', status: 'shaping' })
+  assert.match(shaping, /task 017, "Tasks"/)
+  assert.match(shaping, /\.floe\/tasks\/017-tasks\//)
+  assert.match(shaping, /edit those files directly/)
+  assert.match(shaping, /Never set `status: ready`/)
+  const sent = taskChatOpener({ number: '017', title: 'Tasks', dir: 'specs/017-tasks', status: 'in dev' })
+  assert.match(sent, /read-only: discuss it, do not edit it/)
+  assert.doesNotMatch(sent, /edit those files directly/)
 })

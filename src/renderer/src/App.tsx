@@ -2129,6 +2129,15 @@ export default function App() {
     rowsOf,
     project: projects.current?.path,
     openChat: (session, firstPrompt) => setLane((l) => open(l, mkPanel('chat', undefined, session, firstPrompt))),
+    openTaskChat: (task, session, firstPrompt) =>
+      setLane((l) =>
+        open(l, {
+          ...mkPanel('taskchat', task, session, firstPrompt),
+          // Under the task, like the nanny under the board — and, like her, only
+          // as a first impression: a layout you changed is what comes back.
+          dock: 'below'
+        })
+      ),
     openNanny: (session, firstPrompt) =>
       setLane((l) =>
         open(l, {

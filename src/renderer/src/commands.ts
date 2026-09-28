@@ -140,6 +140,11 @@ export interface CommandContext {
    */
   openNanny: (session: { id: string; worktreePath: string }, firstPrompt?: string) => void
   /**
+   * A chat about one task, docked under the task panel. Its own seam for the
+   * nanny's reasons: it needs a session, and it lands in its own slot.
+   */
+  openTaskChat: (task: string, session: { id: string; worktreePath: string }, firstPrompt?: string) => void
+  /**
    * The worktree's registered processes.
    *
    * Passed whole rather than as eight callbacks: start, stop and restart are

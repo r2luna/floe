@@ -330,6 +330,20 @@ export const KINDS = {
     needsProject: true,
     action: { icon: IconPlus, title: 'New task… (n)', command: 'tasks.new' }
   },
+  // The chat about one task, docked under it: talk it through and watch the
+  // task above change as the agent edits its files. Its own slot, so `c` on
+  // another task replaces it instead of stacking a second chat.
+  taskchat: {
+    icon: IconMessage,
+    title: 'chat',
+    width: 620,
+    grow: true,
+    min: 400,
+    order: 35.6,
+    needsProject: true,
+    slot: 'taskchat',
+    dockHeight: '45%'
+  },
   // One task: the idea and the plan rendered in place, its files, and the
   // send. Contextual — you reach it from a row, never from the rail.
   task: {
@@ -656,7 +670,7 @@ export function panelForFile(relPath: string): PanelKind {
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen. The nanny
 // is one: she exists only for a board in use, and colony's `n` and ESC reach her.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'task', 'merge', 'remove', 'setup', 'provision', 'query', 'lane', 'nanny']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'task', 'taskchat', 'merge', 'remove', 'setup', 'provision', 'query', 'lane', 'nanny']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -947,6 +961,18 @@ export function PanelBody({
         onUsage={onUsage}
         onOpen={onOpen}
         onEnterWorktree={onEnterWorktree}
+      />
+    ) : null
+  // A plain chat — the task it is about is the panel docked above it.
+  if (kind === 'taskchat')
+    return session ? (
+      <ChatPanel
+        session={session}
+        menuItems={menuItems}
+        firstPrompt={firstPrompt}
+        firstChoice={firstChoice}
+        onUsage={onUsage}
+        onOpen={onOpen}
       />
     ) : null
   if (kind === 'tasks') return <TaskList root={projects.current?.path} onOpen={onOpen} onCommand={onCommand} find={find} />
@@ -5070,6 +5096,9 @@ function TaskItem({
         <span>{task.kind}</span>
         {task.created && <span>created {task.created}</span>}
         <span>{task.dir}/</span>
+        <button className="chip task-chat" onClick={() => onCommand?.('tasks.chat')}>
+          chat about it <kbd>c</kbd>
+        </button>
       </div>
       <div className="task-ladder">
         {TASK_FOLDER_STATUSES.map((s, i) => (
@@ -5090,7 +5119,7 @@ function TaskItem({
                 {[task.card.status, task.card.line, task.card.branch].filter(Boolean).join(' · ')}
               </span>
               <button className="chip" onClick={() => onCommand?.('tasks.openCard')}>
-                open card <kbd>c</kbd>
+                open card <kbd>b</kbd>
               </button>
             </>
           ) : (
