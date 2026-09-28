@@ -113,6 +113,26 @@ export function probeMedia(candidate: string, cwd?: string): MediaFile | null {
 }
 
 /**
+ * `probeMedia`'s answer for anything the scheme serves: a recording, or a page
+ * and what it loads (PAGE_MIME). This is what a browser tab's `/media/…` route
+ * checks before it hands a file out, and what the reader asks for the address
+ * of an `.html` file — neither is a chat message, so a `.css` is fair game.
+ */
+export function probeFile(candidate: string): MediaFile | null {
+  const path = resolveMediaPath(candidate)
+  if (!path) return null
+  const mediaType = MIME[extOf(path)] ?? PAGE_MIME[extOf(path)]
+  if (!mediaType) return null
+  try {
+    const stat = statSync(path)
+    if (!stat.isFile()) return null
+    return { url: mediaUrl(path), mediaType, size: stat.size, name: basename(path), path }
+  } catch {
+    return null
+  }
+}
+
+/**
  * The byte range the player asked for, clamped to the file, or null for "all of
  * it". Only the single-range form matters: it is the only one <video> sends.
  */
@@ -199,16 +219,16 @@ const clamp = (n: unknown, max: number): number =>
  * re-serves it (server plugin, `/media/<backend>/…`). Locally nothing calls it:
  * `floe-media://` and `/media/local/…` both read the file directly.
  *
- * Same policy as `probeMedia` — it answers for a video that is really there,
- * and null for anything else, so a caller cannot read `/etc/passwd` by naming
- * it here.
+ * Same policy as `probeFile` — it answers for a file the scheme would serve
+ * and that is really there, and null for anything else, so a caller cannot
+ * read `/etc/passwd` by naming it here.
  */
 export async function readMediaChunk(
   candidate: string,
   start: number,
   length: number
 ): Promise<MediaChunk | null> {
-  const media = probeMedia(candidate)
+  const media = probeFile(candidate)
   if (!media) return null
 
   const from = clamp(start, media.size)

@@ -17,6 +17,7 @@ import {
   close,
   closePanel,
   columnsOf,
+  crowdedOut,
   focusAt,
   laneOf,
   open,
@@ -761,6 +762,34 @@ export default function App() {
   }, [sessionKey])
   // How the lane is laid out: one entry per column, docked panels folded in.
   const columns = columnsOf(lane)
+  // The lane's inner width, watched: whether the columns fit is a question
+  // about the window, and the answer changes when you resize it.
+  const [laneWidth, setLaneWidth] = useState(0)
+  useEffect(() => {
+    const el = laneRef.current
+    if (!el) return
+    // 12 = the lane's padding on both sides; the columns get what is inside it.
+    const read = (): void => setLaneWidth(el.clientWidth - 12)
+    read()
+    const observer = new ResizeObserver(read)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  // With more open than fits, the lists left of the chat step aside and the
+  // chat drops to its tight width, so the work right of it gets the room.
+  const crowded = narrow
+    ? new Set<string>()
+    : crowdedOut(
+        columns,
+        columns.map(([{ panel: head }]) => {
+          const spec = KINDS[head.kind as PanelKind]
+          return head.width ?? ('min' in spec ? spec.min : spec.width)
+        }),
+        laneWidth,
+        6,
+        lane.focus
+      )
+  const tight = crowded.size > 0
   useEffect(() => {
     const by = sessionKey ? remember(bySession.current, sessionKey, scopedOf(lane)) : bySession.current
     bySession.current = by
@@ -3210,7 +3239,8 @@ export default function App() {
                     // not evenly: a chat and a query sharing the room evenly
                     // would end up nearly the same size, and the chat is the
                     // panel the extra pixels are for.
-                    '--panel-grow': `${headSpec.width / 100}`
+                    '--panel-grow': `${headSpec.width / 100}`,
+                    '--panel-tight': 'tight' in headSpec ? `${headSpec.tight}px` : undefined
                   } as React.CSSProperties
                 }
                 // A width you dragged to is a width you asked for: it wins over
@@ -3220,6 +3250,10 @@ export default function App() {
                   (head.width === undefined && 'grow' in headSpec && headSpec.grow) || undefined
                 }
                 data-sticky={('sticky' in headSpec && headSpec.sticky) || undefined}
+                data-hidden={crowded.has(head.id) || undefined}
+                data-tight={
+                  (tight && head.width === undefined && 'tight' in headSpec) || undefined
+                }
               >
                 <Splitter
                   axis="x"

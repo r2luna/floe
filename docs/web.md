@@ -79,8 +79,10 @@ vai pelo socket — e é assim que a página enxerga as outras máquinas. Ver
 Uma gravação nunca é carregada pelo IPC — é **servida** (`src/main/media.ts`).
 No desktop, num scheme que o Chromium aprendeu no boot (`floe-media://`); numa
 aba, ninguém ensinou nada, então vem da rota `/media/<backend>/…`, com os `206`
-que fazem a barra de seek funcionar antes do arquivo baixar. Imagens não
-precisam de nada: já são data URLs.
+que fazem a barra de seek funcionar antes do arquivo baixar. Imagens do
+transcript (o cache de `claudeSessions.ts`) e o `.html` do leitor de arquivos
+vão pelo mesmo caminho: o leitor pede `media:file`, que responde também pelos
+tipos de página (css, js, fontes), e a rota `/media` valida por ele.
 
 O `<backend>` na rota é o id da máquina que respondeu o `media:probe` — a aba
 tem uma origem só, e o arquivo só existe onde a sessão roda. `local` é o disco
@@ -89,7 +91,8 @@ os bytes pelo gate (`media:read`, em fatias de 1 MiB) e re-serve como resposta
 dele. Sem o id, o daemon procuraria a gravação de outra máquina no disco dele e
 responderia 404.
 
-A troca de endereço acontece **na volta do `media:probe`**, na ponte, não no
+A troca de endereço acontece **na volta do `media:probe`** (e de `media:file`,
+`claude:transcript` e `query:transcript`), na ponte, não no
 componente. Assim o renderer nunca fica sabendo que existe um build web:
 `Video.tsx` renderiza `file.url` e está certo nos dois hosts, porque quando ele
 vê a url ela já é a certa.

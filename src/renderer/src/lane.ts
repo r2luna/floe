@@ -378,3 +378,35 @@ export function clearSize(lane: Lane, index: number): Lane {
   if (!panel || (panel.width === undefined && panel.height === undefined)) return lane
   return patchPanel(lane, index, { width: undefined, height: undefined })
 }
+
+/**
+ * The columns that step aside when the lane runs out of room.
+ *
+ * `floors` is how narrow each column may get, in `columns` order. When they do
+ * not fit side by side in `width`, the lists left of the session slot —
+ * projects, active, worktrees — are hidden: they are where you navigate FROM,
+ * and the work opened right of the chat is what needs the pixels. The focused
+ * column is never hidden, so `h` and the rail still reach a list, and it steps
+ * back out once you leave it.
+ *
+ * The floors include the hidden columns, so hiding them cannot make the lane
+ * fit and flip the answer back on the next render.
+ */
+export function crowdedOut(
+  columns: { panel: Panel; index: number }[][],
+  floors: number[],
+  width: number,
+  gap: number,
+  focus: number
+): Set<string> {
+  const need = floors.reduce((sum, f) => sum + f, 0) + gap * Math.max(0, floors.length - 1)
+  if (width <= 0 || need <= width) return new Set()
+  const session = columns.findIndex((col) => col.some((c) => c.panel.slot === 'session'))
+  if (session === -1) return new Set()
+  return new Set(
+    columns
+      .slice(0, session)
+      .filter((col) => !col.some((c) => c.index === focus))
+      .map((col) => col[0].panel.id)
+  )
+}

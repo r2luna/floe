@@ -306,6 +306,7 @@ const CHANNELS = [
   'files:definition',
   'files:renderDoc',
   'media:probe',
+  'media:file',
   'media:read',
   'media:copyImage',
   'files:resolveLink',

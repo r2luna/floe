@@ -178,7 +178,6 @@ import { previewSound } from './sounds'
 import { omarchyAvailable } from './appearance'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
-import { mediaUrl } from '../../shared/mediaUrl.ts'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -273,6 +272,9 @@ export const KINDS = {
     grow: true,
     sticky: true,
     min: 400,
+    // The width it drops to when the lane is crowded (see crowdedOut): enough
+    // to read a reply, and the rest goes to what the session opened.
+    tight: 520,
     order: 30,
     slot: 'session',
     // Deliberately not the ✕ beside it: that closes the panel and leaves the
@@ -625,6 +627,8 @@ export const KINDS = {
     // How narrow this panel may get before the lane scrolls instead. Omitted
     // means "never shrink" — right for lists, wrong for anything holding prose.
     min?: number
+    /** The fixed width it takes while the lane is crowded. Unset keeps growing. */
+    tight?: number
     /**
      * Needs a project open. Nothing to list, read or diff without one.
      *
@@ -2788,7 +2792,12 @@ function Entry({
           <RefText text={item.text ?? ''} />
         )}
         {/* A recording the message named plays right here — see Video.tsx. */}
-        <VideoRefs text={item.text ?? ''} cwd={cwd} streaming={streaming} />
+        <VideoRefs
+          text={item.text ?? ''}
+          cwd={cwd}
+          streaming={streaming}
+          image={(file) => <Zoomable src={file.url} alt={file.name} />}
+        />
       </div>
     </div>
   )
@@ -4540,11 +4549,35 @@ function PdfView({ dataUrl, path }: { dataUrl: string; path: string }) {
  * author drew.
  */
 function HtmlPage({ root, path }: { root: string; path: string }) {
+  // Asked for, not built: the host decides what address serves a file. On the
+  // desktop it is `floe-media://`; a browser tab gets `/media/…` from the
+  // daemon (src/web/mediaRewrite.ts). Undefined while asking, null for "can't".
+  const [src, setSrc] = useState<string | null>()
+  useEffect(() => {
+    let live = true
+    setSrc(undefined)
+    window.floe.media
+      .file(`${root.replace(/\/+$/, '')}/${path}`)
+      .then((file) => live && setSrc(file?.url ?? null))
+      .catch(() => live && setSrc(null))
+    return () => {
+      live = false
+    }
+  }, [root, path])
+
+  if (src === undefined) return <p className="empty">Loading…</p>
+  if (src === null) return <p className="empty">This page can't be served.</p>
+  // A page served from this window's own origin (the tab's `/media/…`) must not
+  // get `allow-same-origin`: there it WOULD be this window, `window.floe` and all.
+  // Only an http(s) address can be: `floe-media://` and a `file://` window both
+  // read as origin "null", which is not the same place.
+  const url = new URL(src, location.href)
+  const sameOrigin = url.protocol.startsWith('http') && url.origin === location.origin
   return (
     <iframe
       className="file-page"
-      src={mediaUrl(`${root.replace(/\/+$/, '')}/${path}`)}
-      sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+      src={src}
+      sandbox={`allow-scripts ${sameOrigin ? '' : 'allow-same-origin '}allow-forms allow-popups allow-modals`}
       title={path}
     />
   )

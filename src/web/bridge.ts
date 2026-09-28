@@ -261,8 +261,8 @@ export function webIpc(
       // address means nothing to a tab. Rewritten here — with the machine that
       // answered, since that is the only one holding the file — so the renderer
       // never learns that a web build exists. See mediaRewrite.ts.
-      if (channel === 'media:probe') return answer.then((r) => rewriteProbe(r, on))
-      if (channel === 'claude:transcript') return answer.then((r) => rewriteTranscript(r, on))
+      if (channel === 'media:probe' || channel === 'media:file') return answer.then((r) => rewriteProbe(r, on))
+      if (channel === 'claude:transcript' || channel === 'query:transcript') return answer.then((r) => rewriteTranscript(r, on))
       return answer
     },
     on: (channel, listener) => {

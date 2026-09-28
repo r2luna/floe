@@ -18,10 +18,14 @@ import type { MediaFile } from '../../shared/types'
 export function VideoRefs({
   text,
   cwd,
-  streaming
+  streaming,
+  image
 }: {
   text: string
   cwd?: string
+  /** How a named picture draws — the transcript's own zoomable image, passed
+      in so this file does not import the panel that imports it. */
+  image: (file: MediaFile) => React.ReactNode
   /** A message still arriving: its paths are half-typed, so nothing is asked
       about them until it settles. */
   streaming?: boolean
@@ -57,9 +61,15 @@ export function VideoRefs({
   if (!found.length) return null
   return (
     <div className="irc-videos">
-      {found.map((file) => (
-        <VideoPlayer file={file} key={file.url} />
-      ))}
+      {found.map((file) =>
+        file.mediaType.startsWith('image/') ? (
+          <figure className="irc-video" key={file.url}>
+            {image(file)}
+          </figure>
+        ) : (
+          <VideoPlayer file={file} key={file.url} />
+        )
+      )}
     </div>
   )
 }
