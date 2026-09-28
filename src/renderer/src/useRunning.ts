@@ -105,7 +105,7 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
 
   useEffect(
     () =>
-      window.floe.agent.onEvent(({ key, event }: AgentEventEnvelope) => {
+      window.floe.agent.onEvent(({ key, event, colony }: AgentEventEnvelope) => {
         // A query's activity is the QUERY panel's business, not the session
         // list's. This is the ONE place the projection is filtered: the raw
         // APIs stay raw, because `useTranscript` uses `agent.active()` as its
@@ -124,8 +124,10 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
         noteActivity(key)
         const live = event.kind !== 'done' && event.kind !== 'error'
         // Any turn ending is the news the sound carries — including the session
-        // you are watching, since the window may be behind another app.
-        if (!live) playDoneSound(sound.current)
+        // you are watching, since the window may be behind another app. Colony
+        // sessions excepted: the board ends turns all day, and nobody is waiting
+        // on any single one of them.
+        if (!live && !colony) playDoneSound(sound.current)
         setBusy((prev) => {
           // Most events are text deltas in a session already known to be
           // working: returning the same Set keeps the list from re-rendering

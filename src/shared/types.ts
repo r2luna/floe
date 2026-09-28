@@ -1161,6 +1161,9 @@ export interface AgentEventEnvelope {
   // replay snapshot and uses this to drop the live events the snapshot already
   // contains (see agent.replay / useTranscript).
   seq: number
+  // Set on a turn's end when the session belongs to the colony (a lane or a
+  // nanny), so the done sound stays quiet for work nobody is waiting on.
+  colony?: boolean
 }
 
 // What a panel opening mid-turn missed: the turn in flight, replayed. Text and

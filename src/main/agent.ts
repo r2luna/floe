@@ -8,6 +8,7 @@ import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttac
 import { parseArtifactSpec } from '../shared/artifact'
 import { getCreatedSession } from './sessionStore'
 import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
+import { colonySessionIds } from './colony/store'
 // Who this key IS — session or query. Every alias lookup in this file goes
 // through it, so a conversation the session table does not hold still resolves
 // instead of silently answering `undefined`. See identity.ts.
@@ -220,7 +221,12 @@ export function sendAgentEvent(win: BrowserWindow, key: string, event: AgentEven
   const seq = (seqs.get(key) ?? 0) + 1
   seqs.set(key, seq)
   recordForReplay(key, event, seq)
-  if (!win.isDestroyed()) win.webContents.send('agent:event', { key, event, seq })
+  // A colony lane or nanny ending its turn is the board's news, not yours: the
+  // renderer keeps the done sound for sessions a person is waiting on. Only the
+  // turn's end is tagged, since that is the only event the sound reads.
+  const ends = event.kind === 'done' || event.kind === 'error'
+  const colony = ends && colonySessionIds().has(getCreatedSession(key)?.id ?? key)
+  if (!win.isDestroyed()) win.webContents.send('agent:event', { key, event, seq, ...(colony && { colony }) })
 }
 
 // What a conn-less runtime has said this turn, for waitForTurn to resolve with.
