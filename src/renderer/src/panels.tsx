@@ -5052,7 +5052,9 @@ function TaskItem({
   onCommand?: (id: string) => void
 }) {
   const { task, error } = useTaskFolder(root, name)
-  if (error) return <p className="empty error">{error}</p>
+  // A task deleted or renamed on disk while its panel was open — say so in
+  // words, not as the read that failed.
+  if (error) return <p className="empty">{error.startsWith('No task ') ? `${name} is gone — it was moved or deleted.` : error}</p>
   if (!task || !root) return <p className="empty">Loading…</p>
 
   const sent = task.status === 'in dev' || task.status === 'done'

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { TaskFolder, TaskFolderDetail } from '../../shared/taskFolders'
+import { reason } from './ipcError'
 
 /**
  * Re-read when anything that changes a task happens: the folders' own watcher
@@ -46,7 +47,7 @@ export function useTaskFolders(root?: string): { tasks: TaskFolder[]; loading: b
     window.floe.tasks
       .list(root)
       .then((t) => live && setTasks(t))
-      .catch((e: Error) => live && setError(e.message))
+      .catch((e: unknown) => live && setError(reason(e)))
       .finally(() => live && setLoading(false))
     // A late reply for the project you just left must not land in this one.
     return () => {
@@ -79,7 +80,7 @@ export function useTaskFolder(
         setTask(t)
         setError(undefined)
       })
-      .catch((e: Error) => live && setError(e.message))
+      .catch((e: unknown) => live && setError(reason(e)))
     return () => {
       live = false
     }
