@@ -9900,3 +9900,227 @@ kbd {
   cursor: default;
   color: var(--faint);
 }
+
+/* --- tasks (the ideas panel and the task beside it) ------------------------
+   mocks/task-panel.html is the design. Colour only where it means something:
+   ready (you can act) is the accept green, in dev (an agent is on it) the plan
+   blue. Everything else stays grey. */
+.task-no {
+  flex: none;
+  width: 3ch;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-row[data-dim] .row-name {
+  color: var(--dim);
+}
+
+/* The title wins the row: the counts give way first, and ellipsize. */
+.task-row .row-name {
+  flex: 1 1 auto;
+}
+
+.task-counts {
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.task-st {
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.task-st[data-s='ready'],
+.task-item[data-task-status='ready'] .task-rung[data-at] {
+  color: #93b8a1;
+  border-color: #283129;
+  background: #1b201d;
+}
+
+.task-st[data-s='in dev'],
+.task-item[data-task-status='in dev'] .task-rung[data-at] {
+  color: #95a6c0;
+  border-color: #282f3a;
+  background: #1b1e25;
+}
+
+:root[data-theme='light'] .task-st[data-s='ready'],
+:root[data-theme='light'] .task-item[data-task-status='ready'] .task-rung[data-at] {
+  color: #2f7d52;
+  border-color: #b6d9c3;
+  background: #eef6f1;
+}
+
+:root[data-theme='light'] .task-st[data-s='in dev'],
+:root[data-theme='light'] .task-item[data-task-status='in dev'] .task-rung[data-at] {
+  color: #3a64a8;
+  border-color: #c2d4ef;
+  background: #eef2f9;
+}
+
+.task-item {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 4px 12px;
+}
+
+.task-title {
+  font-size: 15px;
+  color: var(--text-strong);
+  margin: 2px 0;
+}
+
+.task-title .task-no {
+  margin-right: 8px;
+  font-size: 15px;
+}
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* The ladder: where the task is, and how far it has to go. The two rungs the
+   colony sets are italic — nobody moves a task there by hand. */
+.task-ladder {
+  display: flex;
+  margin-bottom: 14px;
+  border: 1px solid var(--line);
+}
+
+.task-rung {
+  flex: 1;
+  padding: 3px 0;
+  text-align: center;
+  font-size: 10px;
+  color: var(--dim);
+  border-right: 1px solid var(--line);
+}
+
+.task-rung:last-child {
+  border-right: 0;
+}
+
+.task-rung[data-done] {
+  color: var(--dimmest);
+}
+
+.task-rung[data-auto] {
+  font-style: italic;
+}
+
+.task-rung[data-at] {
+  color: var(--text-strong);
+  background: var(--wash-3, #ffffff10);
+}
+
+.task-sec {
+  margin-bottom: 14px;
+}
+
+.task-sec-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dimmest);
+}
+
+.task-sec-k {
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--dim);
+}
+
+/* The idea and the plan, drawn in place. A rule down the plan's left edge
+   separates what the task SAYS from the chrome around it. */
+.task-prose {
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+.task-empty {
+  margin: 2px 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* One left-aligned column: icon, name. The icon is the type. */
+.task-file-ic {
+  flex: none;
+  width: 14px;
+  text-align: center;
+  color: var(--dim);
+}
+
+.task-hand,
+.task-colony {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+}
+
+.task-colony {
+  border-style: solid;
+  margin-bottom: 14px;
+}
+
+.task-hand[data-live] {
+  border-color: #283129;
+}
+
+:root[data-theme='light'] .task-hand[data-live] {
+  border-color: #b6d9c3;
+}
+
+.task-hand-w,
+.task-colony-line {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.task-hand .chip kbd,
+.task-colony .chip kbd {
+  margin-left: 6px;
+  font: inherit;
+  font-size: 10px;
+  color: var(--dim);
+}
+
+.task-hand[data-live] .chip {
+  color: #93b8a1;
+  border-color: #283129;
+}
+
+:root[data-theme='light'] .task-hand[data-live] .chip {
+  color: #2f7d52;
+  border-color: #b6d9c3;
+}
+
+.task-hand .chip:disabled {
+  cursor: default;
+  color: var(--dim);
+}

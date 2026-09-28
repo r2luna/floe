@@ -326,6 +326,9 @@ export type McpCommand =
   // Open an .excalidraw scene in the drawing panel, rooted at its worktree —
   // how an agent puts the diagram it just drew on screen.
   | { kind: 'open_drawing'; callerKey: string; worktreePath: string; relPath: string }
+  // Show a task in the item panel. `root` is the project's main checkout — a
+  // task never lives in a worktree — and `ref` its folder name.
+  | { kind: 'open_task'; callerKey: string; root: string; ref: string }
   // Start the guided merge for a worktree: navigate to its project if needed,
   // then bring the checklist panel up (useMerge.start). Answered once the flow
   // starts — or with the refusal reason (main worktree, blocked, no project).

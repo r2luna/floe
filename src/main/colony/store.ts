@@ -162,6 +162,12 @@ export interface ColonyTask {
   warn?: string
   /** Present while the step report is tracking this card. */
   report?: TaskReport
+  /**
+   * Where the lanes write their documents, relative to the worktree. Unset is
+   * `specs/<branch>/`. A card sent from the tasks panel sets it inside the task's
+   * own folder, so the task and its lanes' work stay one folder.
+   */
+  specDir?: string
   createdAt: number
   updatedAt: number
   visits: TaskVisit[]
@@ -299,6 +305,8 @@ export interface NewTask {
   base?: string
   autonomous?: boolean
   cleanup?: boolean
+  /** See ColonyTask.specDir. */
+  specDir?: string
 }
 
 /** The optional per-task settings, only when stated — an unset one inherits the board's. */
@@ -324,6 +332,7 @@ export function addTask(task: NewTask): ColonyTask {
     // declared "depends on nothing", which is not a thing anybody stated.
     ...(task.dependsOn?.length ? { dependsOn: [...task.dependsOn] } : {}),
     ...taskSettings(task),
+    ...(task.specDir ? { specDir: task.specDir } : {}),
     stage: INBOX,
     status: 'holding',
     passes: 0,

@@ -76,6 +76,8 @@ import { splitByHits } from './findHits.ts'
 import { markAll } from './findMark'
 import { usePlans } from './usePlans'
 import { useDrawings } from './useDrawings'
+import { useTaskFolder, useTaskFolders } from './useTaskFolders'
+import { TASKS_TOGGLE_DONE } from './taskEvents'
 import { useSkills } from './useSkills'
 import { useMcpServers } from './useMcpServers'
 import { RowMenu, type MenuAction } from './RowMenu'
@@ -90,6 +92,12 @@ import { describePaste, pastePreview, splitMessage } from './pastes'
 import { splitSkills } from '../../shared/skills'
 import { resetsIn } from '../../shared/resets'
 import { renderMarkdown, type MdLine } from './markdown'
+import {
+  TASK_FOLDER_STATUSES,
+  type TaskFileType,
+  type TaskFolder,
+  type TaskFolderStatus
+} from '../../shared/taskFolders'
 import { bashGist, bashProgram, highlightShell } from './shell'
 import { bangPrompt, isBang, readBang } from './bang'
 import { PenguinHead, penguinTone, PENGUIN_COLOR_LABELS, PENGUIN_LABELS } from './PenguinHead'
@@ -310,6 +318,29 @@ export const KINDS = {
   // worktree per card. It sits RIGHT of the session slot like every other rail
   // panel, so the card's chat opens to its left; below ~900px the columns
   // squeeze past reading, and the lane scrolls rather than shrinking them further.
+  // Ideas, per project, on their way to the colony. A narrow list whose rows
+  // open the item beside it, like `draw`. Scoped to the project, not the
+  // worktree: a task lives in the main checkout whatever branch you are on.
+  tasks: {
+    icon: IconBookmark,
+    title: 'tasks',
+    width: 330,
+    min: 260,
+    order: 35,
+    needsProject: true,
+    action: { icon: IconPlus, title: 'New task… (n)', command: 'tasks.new' }
+  },
+  // One task: the idea and the plan rendered in place, its files, and the
+  // send. Contextual — you reach it from a row, never from the rail.
+  task: {
+    icon: IconBookmark,
+    title: 'task',
+    width: 620,
+    grow: true,
+    min: 460,
+    order: 35.5,
+    needsProject: true
+  },
   colony: {
     icon: IconLayoutColumns,
     title: 'colony',
@@ -625,7 +656,7 @@ export function panelForFile(relPath: string): PanelKind {
 // Contextual panels — you reach them by picking something, never from the rail.
 // Putting them there would offer "open a branch" with no branch chosen. The nanny
 // is one: she exists only for a board in use, and colony's `n` and ESC reach her.
-const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'merge', 'remove', 'setup', 'provision', 'query', 'lane', 'nanny']
+const CONTEXTUAL: PanelKind[] = ['branch', 'chat', 'diff', 'file', 'edit', 'cmdlog', 'plugin', 'drawing', 'task', 'merge', 'remove', 'setup', 'provision', 'query', 'lane', 'nanny']
 
 /**
  * The rail, grouped. A flat column of twelve icons is twelve things to read;
@@ -642,7 +673,7 @@ export const RAIL_GROUPS: PanelKind[][] = [
   // order they sit in the lane, because bare `h`/`l` walk the first three as
   // neighbours — a rail that disagreed with the lane would teach the wrong
   // direction.
-  ['projects', 'active', 'worktrees', 'colony'],
+  ['projects', 'active', 'worktrees', 'tasks', 'colony'],
   // What the work did to the tree — read it, review it, land it.
   ['changes', 'files', 'plans', 'draw'],
   // What the agents are made of: the skills they can run.
@@ -918,6 +949,9 @@ export function PanelBody({
         onEnterWorktree={onEnterWorktree}
       />
     ) : null
+  if (kind === 'tasks') return <TaskList root={projects.current?.path} onOpen={onOpen} onCommand={onCommand} find={find} />
+  if (kind === 'task')
+    return <TaskItem key={sub} root={root ?? projects.current?.path} name={sub} onOpen={onOpen} onCommand={onCommand} />
   if (kind === 'colony')
     return <ColonyBoard project={projects.current?.path} onOpen={onOpen} onCommand={onCommand} />
   if (kind === 'active')
@@ -4834,6 +4868,290 @@ function DrawList({
       })}
       {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
     </>
+  )
+}
+
+/** The list's groups, top to bottom: what you can act on first. */
+const TASK_GROUPS: TaskFolderStatus[] = ['ready', 'shaping', 'idea', 'in dev', 'done']
+
+/** The tasks panel keeps "show done" across restarts; `z` flips it from anywhere. */
+const TASKS_DONE_KEY = 'floe.tasks.showDone'
+
+/**
+ * The tasks panel: every idea of the project, grouped by status.
+ *
+ * Rows are buttons like every other list, so j/k, ⏎ and the find bar work with
+ * nothing added. What a key does to the row under the cursor is a command
+ * (`tasks.*` in the registry) reading `data-task` — handlers dispatch ids.
+ */
+function TaskList({
+  root,
+  onOpen,
+  onCommand,
+  find
+}: {
+  root?: string
+  onOpen: OpenFn
+  onCommand?: (id: string) => void
+  find?: string
+}) {
+  const { tasks, loading, error } = useTaskFolders(root)
+  const [showDone, setShowDone] = useState(() => localStorage.getItem(TASKS_DONE_KEY) === '1')
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
+
+  useEffect(() => {
+    const flip = (): void =>
+      setShowDone((on) => {
+        localStorage.setItem(TASKS_DONE_KEY, on ? '0' : '1')
+        return !on
+      })
+    window.addEventListener(TASKS_TOGGLE_DONE, flip)
+    return () => window.removeEventListener(TASKS_TOGGLE_DONE, flip)
+  }, [])
+
+  const closeMenu = useCallback(() => {
+    setMenu((open) => {
+      open?.row.focus()
+      return null
+    })
+  }, [])
+
+  if (error) return <p className="empty error">{error}</p>
+  if (loading && !tasks.length) return <p className="empty">Loading…</p>
+  if (!tasks.length) return <p className="empty">No tasks yet. Press n to capture an idea.</p>
+
+  const items: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    { label: 'Status up', keys: ']', run: () => onCommand?.('tasks.statusUp') },
+    { label: 'Status down', keys: '[', run: () => onCommand?.('tasks.statusDown') },
+    { label: 'Send to colony', keys: '⌘⏎', run: () => onCommand?.('tasks.send') },
+    { label: 'New task…', keys: 'n', run: () => onCommand?.('tasks.new') }
+  ]
+
+  return (
+    <>
+      {TASK_GROUPS.map((status) => {
+        const rows = tasks.filter((t) => t.status === status)
+        if (!rows.length) return null
+        if (status === 'done' && !showDone)
+          return (
+            <div className="group-label" key={status}>
+              DONE <span className="group-n">{rows.length} · z to show</span>
+            </div>
+          )
+        return (
+          <Fragment key={status}>
+            <div className="group-label">
+              {status.toUpperCase()} <span className="group-n">{rows.length}</span>
+            </div>
+            {rows.map((t) => (
+              <button
+                className="row task-row"
+                key={t.name}
+                title={t.dir}
+                data-task-ref={t.name}
+                data-task-status={t.status}
+                data-dim={t.status === 'done' || undefined}
+                onClick={() => onOpen({ kind: 'task', sub: t.name, root })}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  const row = e.currentTarget as HTMLElement
+                  row.focus()
+                  setMenu({ x: e.clientX, y: e.clientY, row })
+                }}
+              >
+                <span className="task-no">{t.number}</span>
+                <span className="row-name">{markAll(t.title, find)}</span>
+                {t.status === 'in dev' ? (
+                  <span className="task-st" data-s="in dev">
+                    {t.card?.stage ?? 'not on the board'}
+                  </span>
+                ) : (
+                  <span className="task-counts">{taskCounts(t)}</span>
+                )}
+              </button>
+            ))}
+          </Fragment>
+        )
+      })}
+      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
+    </>
+  )
+}
+
+/** "plan · 2 html · 1 draw" — what a task holds, at a glance. */
+function taskCounts(t: TaskFolder): string {
+  return [
+    t.hasPlan && 'plan',
+    t.counts.html && `${t.counts.html} html`,
+    t.counts.drawing && `${t.counts.drawing} draw`,
+    t.counts.link && `${t.counts.link} link${t.counts.link > 1 ? 's' : ''}`,
+    t.counts.other && `${t.counts.other} file${t.counts.other > 1 ? 's' : ''}`
+  ]
+    .filter(Boolean)
+    .join(' · ')
+}
+
+/** The icon a file row gets. The icon IS the type — no label beside it. */
+const TASK_FILE_GLYPH: Record<TaskFileType, string> = {
+  html: '◧',
+  drawing: '✎',
+  link: '↗',
+  markdown: '▤',
+  file: '▤'
+}
+
+/** Open a task's file in the panel its type calls for. */
+export function openTaskFile(onOpen: OpenFn, root: string, dir: string, type: TaskFileType, path: string): void {
+  if (type === 'link') {
+    onOpen({ kind: 'browser' })
+    void window.floe.browser.navigate(path)
+    return
+  }
+  const rel = `${dir}/${path}`
+  if (type === 'html') {
+    onOpen({ kind: 'browser' })
+    void window.floe.browser.navigate(`file://${encodeURI(`${root}/${rel}`)}`)
+    return
+  }
+  onOpen({ kind: type === 'drawing' ? 'drawing' : 'file', sub: rel, root })
+}
+
+/** Markdown drawn as prose: the reader's own line renderer, without its line numbers. */
+function TaskProse({ text }: { text: string }) {
+  const lines = useMemo(() => renderMarkdown(text), [text])
+  return (
+    <div className="task-prose">
+      {lines.map((line, i) => (
+        <div className="md-row" key={i} data-md={line.kind} data-level={line.level}>
+          <MarkdownText line={line} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * One task: title, the status ladder, the idea and the plan rendered in place,
+ * its files, and the send.
+ *
+ * The plan is never a row you open — reading it is the point of this panel.
+ * Only the files are rows, so j/k walks them and ⏎ opens one where its type
+ * belongs: html and links in the preview browser, drawings on the canvas, the
+ * rest in the reader.
+ */
+function TaskItem({
+  root,
+  name,
+  onOpen,
+  onCommand
+}: {
+  root?: string
+  name?: string
+  onOpen: OpenFn
+  onCommand?: (id: string) => void
+}) {
+  const { task, error } = useTaskFolder(root, name)
+  if (error) return <p className="empty error">{error}</p>
+  if (!task || !root) return <p className="empty">Loading…</p>
+
+  const sent = task.status === 'in dev' || task.status === 'done'
+  const at = TASK_FOLDER_STATUSES.indexOf(task.status)
+  return (
+    <div className="task-item" data-task-ref={task.name} data-task-status={task.status}>
+      <div className="task-title">
+        <span className="task-no">{task.number}</span>
+        {task.title}
+      </div>
+      <div className="task-meta">
+        <span>{task.kind}</span>
+        {task.created && <span>created {task.created}</span>}
+        <span>{task.dir}/</span>
+      </div>
+      <div className="task-ladder">
+        {TASK_FOLDER_STATUSES.map((s, i) => (
+          <span className="task-rung" key={s} data-at={i === at || undefined} data-done={i < at || undefined} data-auto={i > 2 || undefined}>
+            {s}
+          </span>
+        ))}
+      </div>
+
+      {sent && (
+        <div className="task-colony">
+          {task.card ? (
+            <>
+              <span className="task-st" data-s={task.status}>
+                {task.card.merged ? 'merged' : task.card.stage}
+              </span>
+              <span className="task-colony-line">
+                {[task.card.status, task.card.line, task.card.branch].filter(Boolean).join(' · ')}
+              </span>
+              <button className="chip" onClick={() => onCommand?.('tasks.openCard')}>
+                open card <kbd>c</kbd>
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="task-colony-line">not on the board — the send stopped halfway.</span>
+              <button className="chip" onClick={() => onCommand?.('tasks.send')}>
+                send again <kbd>⌘⏎</kbd>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="task-sec">
+        <div className="task-sec-h">
+          idea{!sent && <span className="task-sec-k">e edit</span>}
+        </div>
+        {task.idea.trim() ? <TaskProse text={task.idea} /> : <p className="task-empty">No idea written yet.</p>}
+      </div>
+
+      <div className="task-sec">
+        <div className="task-sec-h">
+          plan{!sent && <span className="task-sec-k">p {task.plan === null ? 'create' : 'edit'}</span>}
+        </div>
+        {task.plan?.trim() ? <TaskProse text={task.plan} /> : <p className="task-empty">No plan yet.</p>}
+      </div>
+
+      <div className="task-sec">
+        <div className="task-sec-h">
+          files
+          <span className="task-sec-k">{sent ? '⏎ open' : '⏎ open · a attach · x remove'}</span>
+        </div>
+        {task.files.length ? (
+          task.files.map((f) => (
+            <button
+              className="row task-file"
+              key={`${f.type}:${f.path}`}
+              data-task-file={f.path}
+              data-task-file-type={f.type}
+              title={f.path}
+              onClick={() => openTaskFile(onOpen, root, task.dir, f.type, f.path)}
+            >
+              <span className="task-file-ic">{TASK_FILE_GLYPH[f.type]}</span>
+              <span className="row-name">{f.path}</span>
+            </button>
+          ))
+        ) : (
+          <p className="task-empty">Nothing attached.</p>
+        )}
+      </div>
+
+      {!sent && (
+        <div className="task-hand" data-live={task.status === 'ready' || undefined}>
+          <span className="task-hand-w">
+            {task.status === 'ready'
+              ? `Ready. Sending moves the folder to specs/${task.name}/ on the main branch and starts it on the colony.`
+              : 'Not ready yet. ] moves it up once the plan is done.'}
+          </span>
+          <button className="chip" disabled={task.status !== 'ready'} onClick={() => onCommand?.('tasks.send')}>
+            send to colony <kbd>⌘⏎</kbd>
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

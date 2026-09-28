@@ -34,6 +34,7 @@ import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { reason } from './ipcError.ts'
+import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
 import { downloadAndOpen } from './download.ts'
 import { identifiersOf } from './definition.ts'
 import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
@@ -286,6 +287,51 @@ function drawRow(c: CommandContext): HTMLElement | null {
  * between them, and an index into "cards, ignoring band tags" is exactly the
  * arithmetic that archives the wrong task the day a band is added.
  */
+/**
+ * The task a tasks command acts on: the row under the cursor in the list, or
+ * the task the focused item panel shows. `root` is the project — a task never
+ * belongs to a worktree.
+ */
+function taskFolderAt(c: CommandContext): { root: string; ref: string } | null {
+  const root = c.project
+  const panel = c.lane.panels[c.lane.focus]
+  if (!root || !panel) return null
+  if (panel.kind === 'tasks') {
+    const ref = fileRow(c)?.dataset.taskRef
+    return ref ? { root, ref } : null
+  }
+  if (panel.kind === 'task') {
+    const ref = c.panelEl(c.lane.focus)?.querySelector<HTMLElement>('.task-item')?.dataset.taskRef
+    return ref ? { root: panel.root ?? root, ref } : null
+  }
+  return null
+}
+
+/** The file row the cursor is on in the task item panel. */
+function taskFileRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'task') return null
+  const row = fileRow(c)
+  return row?.dataset.taskFile ? row : null
+}
+
+function stepTask(c: CommandContext, delta: 1 | -1): void {
+  const at = taskFolderAt(c)
+  if (at) void window.floe.tasks.step(at.root, at.ref, delta).catch((err: unknown) => c.say(reason(err)))
+}
+
+/** What `a` was given, as an attachment — or null when it is none of the four. */
+export function attachmentFor(
+  text: string
+): { link: string } | { copyFrom: string } | { name: string; content: string } | null {
+  const t = text.trim()
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return { link: t }
+  if (t.startsWith('/') || t.startsWith('~/')) return { copyFrom: t }
+  if (/\.html?$/i.test(t)) return { name: t, content: `<!doctype html>\n<html>\n<head><meta charset="utf-8" /><title>${t}</title></head>\n<body>\n</body>\n</html>\n` }
+  if (/\.excalidraw$/i.test(t))
+    return { name: t, content: JSON.stringify({ type: 'excalidraw', version: 2, source: 'floe', elements: [], appState: {}, files: {} }, null, 2) }
+  return null
+}
+
 function taskRow(c: CommandContext): HTMLElement | null {
   if (c.lane.panels[c.lane.focus]?.kind !== 'colony') return null
   const row = fileRow(c)
@@ -1569,6 +1615,175 @@ export const REGISTRY: Map<string, Command> = new Map(
           const root = c.worktree?.path
           if (rel && root) void window.floe.draw.reveal(root, rel).catch((err: unknown) => c.say(reason(err)))
         }
+      },
+      {
+        // The list of ideas. Scoped to the project and not the worktree: a task
+        // lives in the main checkout whatever branch you are on.
+        id: 'tasks.open',
+        title: 'Tasks…',
+        group: 'Tasks',
+        enabled: (c) => c.canOpen('tasks'),
+        unavailable: (c) => c.whyCannotOpen('tasks'),
+        run: (c) => c.setLane((l) => toggleKind(l, 'tasks', () => c.makePanel('tasks')))
+      },
+      {
+        // One line — the title — and the idea is on disk. Straight into the
+        // item, so the next key can be `e` to write the rest.
+        id: 'tasks.new',
+        title: 'New task…',
+        group: 'Tasks',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'a task belongs to a project — open one first',
+        run: (c) => {
+          const root = c.project
+          if (!root) return
+          if (!c.lane.panels.some((p) => p.kind === 'tasks')) c.setLane((l) => open(l, c.makePanel('tasks')))
+          c.askText({
+            placeholder: 'What is the idea?',
+            verb: 'New task',
+            onDone: (title) => {
+              if (!title.trim()) return
+              void window.floe.tasks
+                .create(root, { title: title.trim() })
+                .then((t) => c.setLane((l) => open(l, c.makePanel('task', t.name, root))))
+                .catch((err: unknown) => c.say(reason(err)))
+            }
+          })
+        }
+      },
+      {
+        id: 'tasks.statusUp',
+        title: 'Task status up (idea → shaping → ready)',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => stepTask(c, 1)
+      },
+      {
+        id: 'tasks.statusDown',
+        title: 'Task status down',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => stepTask(c, -1)
+      },
+      {
+        // task.md in your editor: the idea is its body, the header its status.
+        id: 'tasks.editIdea',
+        title: 'Edit the task’s idea',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          void window.floe.tasks
+            .read(at.root, at.ref)
+            .then((t) => {
+              if (t.status === 'in dev' || t.status === 'done') return c.say(`${t.name} is in development — read-only now`)
+              c.setLane((l) => open(l, c.makePanel('edit', `${t.dir}/task.md`, at.root)))
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // plan.md in your editor, created on the first press.
+        id: 'tasks.editPlan',
+        title: 'Edit the task’s plan',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          void window.floe.tasks
+            .plan(at.root, at.ref)
+            .then((rel) => c.setLane((l) => open(l, c.makePanel('edit', rel, at.root))))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // One prompt for every kind of attachment, read off what you type: a
+        // URL is a link, a path is a file to copy in, a name ending .html or
+        // .excalidraw is a new empty design or drawing.
+        id: 'tasks.attach',
+        title: 'Attach to the task…',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          c.askText({
+            placeholder: 'URL, a file path to copy, or new.html / new.excalidraw',
+            verb: 'Attach',
+            onDone: (text) => {
+              const what = attachmentFor(text)
+              if (!what) return c.say('Attach takes a URL, a path starting with / or ~, or a name ending .html or .excalidraw')
+              void window.floe.tasks.attach(at.root, at.ref, what).catch((err: unknown) => c.say(reason(err)))
+            }
+          })
+        }
+      },
+      {
+        id: 'tasks.detach',
+        title: 'Remove this file from the task…',
+        group: 'Tasks',
+        enabled: (c) => !!taskFileRow(c),
+        unavailable: () => 'put the cursor on one of the task’s files first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          const target = taskFileRow(c)?.dataset.taskFile
+          if (!at || !target) return
+          const link = /^[a-z][a-z0-9+.-]*:\/\//i.test(target)
+          void c
+            .confirm({
+              question: `Remove "${target}"?`,
+              verb: link ? 'Remove link' : 'Delete file',
+              detail: link ? 'takes the link off the task' : 'deletes the file from the task folder'
+            })
+            .then(async (yes) => {
+              if (yes) await window.floe.tasks.detach(at.root, at.ref, target)
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Moves the folder to specs/, commits that on the main branch and starts
+        // the colony card — a commit and a worktree, so it asks first.
+        id: 'tasks.send',
+        title: 'Send the task to the colony',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          void c
+            .confirm({
+              question: `Send ${at.ref} to the colony?`,
+              verb: 'Send to colony',
+              detail: 'moves it to specs/, commits that on the main branch, starts its worktree'
+            })
+            .then(async (yes) => {
+              if (yes) await window.floe.tasks.send(at.root, at.ref)
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'tasks.openCard',
+        title: 'Show the task’s colony card',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c) && c.canOpen('colony'),
+        unavailable: (c) => (taskFolderAt(c) ? c.whyCannotOpen('colony') : 'put the cursor on a task first'),
+        run: (c) => c.setLane((l) => open(l, c.makePanel('colony')))
+      },
+      {
+        id: 'tasks.toggleDone',
+        title: 'Show or hide done tasks',
+        group: 'Tasks',
+        run: () => window.dispatchEvent(new Event(TASKS_TOGGLE_DONE))
       },
       {
         // The board's own session, DOCKED UNDER THE BOARD — not in the slot the

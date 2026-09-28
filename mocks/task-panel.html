@@ -1,0 +1,507 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — tasks panel concept (idea → plan → colony)</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  :focus { outline: none; }
+  b { color: var(--text-strong); font-weight: 400; }
+  code { color: var(--text-strong); }
+
+  /* --- page ------------------------------------------------------------- */
+  .page { padding: 24px 28px 60px; }
+  .page > h1 { font-size: 16px; font-weight: 400; color: var(--text-strong); margin: 0 0 4px; }
+  .page > .lede { color: var(--dim); margin: 0 0 22px; max-width: 900px; }
+  .part { margin: 0 0 40px; }
+  .part-h { display: flex; gap: 10px; align-items: baseline; color: var(--dimmer); font-size: 10px; letter-spacing: .1em;
+            text-transform: uppercase; border-bottom: 1px solid var(--line-soft); padding-bottom: 5px; margin-bottom: 12px; }
+  .part-h .ref { color: var(--accent); }
+  .note { color: var(--dim); max-width: 900px; margin: 10px 0 0; }
+  .note li { margin-bottom: 3px; }
+
+  /* --- lane shell ------------------------------------------------------- */
+  .lane { display: flex; gap: 8px; height: 800px; }
+  .lane-col { display: flex; min-width: 0; }
+  .w330 { flex: 0 0 330px; }
+  .w600 { flex: 1 1 600px; min-width: 560px; }
+  .w420 { flex: 0 0 420px; }
+  .panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+           background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px;
+                border-bottom: 1px solid var(--line-soft); flex: none; }
+  .panel-name { color: var(--text-strong); flex: none; }
+  .panel-sub { color: var(--dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; }
+  .glyph { color: var(--dim); flex: none; }
+
+  .act { border: 1px solid var(--edge); background: var(--wash-1); color: var(--text); border-radius: 1px;
+         font: inherit; font-size: 11px; padding: 2px 9px; cursor: pointer; }
+  .act[data-tone="go"] { color: var(--live); border-color: color-mix(in srgb, var(--live) 45%, transparent); }
+  .act[disabled] { color: var(--faint); border-color: var(--line); cursor: default; }
+  .act kbd, .k { color: var(--faint); font-size: 10px; margin-left: 6px; font-family: inherit; }
+
+  /* status chip. Colour only where it means something: ready = you can act,
+     in dev = an agent is on it. The rest stay grey. */
+  .st { font-size: 10px; letter-spacing: .04em; border: 1px solid var(--line); padding: 0 5px; color: var(--dimmer); flex: none; }
+  .st[data-s="ready"]  { color: var(--live);    border-color: color-mix(in srgb, var(--live) 45%, transparent); }
+  .st[data-s="in dev"] { color: var(--working); border-color: color-mix(in srgb, var(--working) 45%, transparent); }
+  .st[data-s="done"]   { color: var(--faint); }
+
+  /* --- list ------------------------------------------------------------- */
+  .filter { display: flex; align-items: center; gap: 6px; color: var(--faint); font-size: 11px;
+            border-bottom: 1px solid var(--line-soft); margin: -8px -8px 6px; padding: 6px 11px; }
+  .filter input { flex: 1; background: none; border: 0; color: var(--text); font: inherit; }
+  .grp { color: var(--dimmer); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; padding: 8px 6px 3px; display: flex; gap: 6px; }
+  .grp .n { color: var(--faint); }
+  .row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; position: relative; }
+  .row .no { color: var(--faint); flex: none; width: 26px; }
+  .row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .m { color: var(--faint); font-size: 10px; flex: none; display: flex; gap: 6px; }
+  .row[data-cursor] { background: var(--wash-3); }
+  .row[data-cursor]::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  .row[data-dim] .t { color: var(--dimmer); }
+
+  /* --- task item -------------------------------------------------------- */
+  .ti-title { font-size: 15px; color: var(--text-strong); margin: 4px 4px 2px; }
+  .ti-title .no { color: var(--faint); margin-right: 8px; }
+  .ti-meta { display: flex; gap: 10px; align-items: center; color: var(--faint); font-size: 11px; margin: 0 4px 10px; }
+  .ladder { display: flex; margin: 0 4px 14px; border: 1px solid var(--line-soft); }
+  .rung { flex: 1; text-align: center; padding: 3px 0; font-size: 10px; letter-spacing: .04em; color: var(--faint);
+          border-right: 1px solid var(--line-soft); }
+  .rung:last-child { border-right: 0; }
+  .rung[data-done] { color: var(--dimmer); }
+  .rung[data-at] { color: var(--text-strong); background: var(--wash-3); }
+  .rung[data-auto] { font-style: italic; }
+  .sec { margin: 0 4px 14px; }
+  .sec-h { display: flex; align-items: center; gap: 8px; color: var(--dimmer); font-size: 10px; letter-spacing: .09em;
+           text-transform: uppercase; padding-bottom: 4px; border-bottom: 1px solid var(--line-soft); margin-bottom: 6px; }
+  .sec-h .k { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .prose p { margin: 0 0 8px; }
+  /* the plan, rendered in place: no click to read it */
+  .plan { border-left: 1px solid var(--line); padding: 2px 0 2px 12px; }
+  .plan h3 { font-size: 12px; font-weight: 400; color: var(--text-strong); margin: 10px 0 4px; }
+  .plan h3:first-child { margin-top: 0; }
+  .plan ul, .plan ol { margin: 0 0 8px; padding-left: 18px; }
+  .plan li { margin-bottom: 2px; }
+  .plan code { color: var(--text-strong); background: var(--well); padding: 0 3px; }
+  .empty { color: var(--faint); font-size: 11px; padding: 4px 0; }
+  .att { display: flex; align-items: center; gap: 9px; padding: 4px 6px; position: relative; }
+  .att .ic { width: 14px; text-align: center; color: var(--dim); flex: none; }
+  .att .nm { flex: 1; min-width: 0; color: var(--text); }
+  .att[data-cursor] { background: var(--wash-3); }
+  .att[data-cursor]::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); }
+  .hand { display: flex; align-items: center; gap: 10px; margin: 18px 4px 4px; padding: 8px 10px; border: 1px dashed var(--line); }
+  .hand[data-live] { border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+  .hand .w { flex: 1; color: var(--dimmer); font-size: 11px; }
+  .colony { display: flex; gap: 10px; align-items: center; margin: 0 4px 14px; padding: 6px 8px; border: 1px solid var(--line-soft); }
+  .colony .w { flex: 1; color: var(--dimmer); font-size: 11px; }
+
+  /* --- browser stand-in ------------------------------------------------- */
+  .url { flex: 1; color: var(--dim); background: var(--well); padding: 2px 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .fake { margin: 18px; border: 1px solid var(--line); height: 70%; display: grid; grid-template-rows: 36px 1fr; }
+  .fake .bar { border-bottom: 1px solid var(--line); }
+  .fake .body { display: grid; grid-template-columns: 1fr 1.6fr; }
+  .fake .body div:first-child { border-right: 1px solid var(--line); }
+
+  .keybar { display: flex; align-items: center; gap: 16px; padding: 6px 2px 0; color: var(--faint); font-size: 11px; }
+  .keybar b { color: var(--dimmer); }
+
+  /* --- tables / diagrams ------------------------------------------------- */
+  table { border-collapse: collapse; min-width: 900px; }
+  th, td { text-align: left; padding: 5px 14px 5px 0; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  th { color: var(--dimmer); font-weight: 400; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  td.dim { color: var(--dim); }
+
+  .flow { display: flex; align-items: stretch; gap: 0; }
+  .box { border: 1px solid var(--line); padding: 10px 12px; min-width: 240px; background: var(--panel); }
+  .box h4 { margin: 0 0 6px; font-weight: 400; color: var(--text-strong); font-size: 12px; }
+  .box .where { color: var(--faint); font-size: 10px; margin-bottom: 8px; }
+  .box pre { margin: 0; color: var(--text); font-family: inherit; font-size: 11px; line-height: 1.6; }
+  .arrow { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 0 12px; color: var(--dim);
+           font-size: 10px; text-align: center; min-width: 150px; }
+  .arrow .line { color: var(--accent); font-size: 16px; }
+
+  .steps { counter-reset: s; list-style: none; padding: 0; margin: 0; max-width: 900px; }
+  .steps li { counter-increment: s; display: flex; gap: 12px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+  .steps li::before { content: counter(s); color: var(--accent); width: 14px; flex: none; }
+  .steps .d { color: var(--dim); }
+
+  .file { border: 1px solid var(--line); background: var(--well); padding: 10px 14px; max-width: 620px; }
+  .file pre { margin: 0; font-family: inherit; font-size: 11px; line-height: 1.6; }
+  .file .c { color: var(--faint); }
+  .grid2 { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Tasks panel — concept</h1>
+  <p class="lede">Per-project ideas that grow into plans and move into the colony. A task is a numbered folder, committed to git.
+    It lives in <code>.floe/tasks/</code> while it is being shaped and moves to <code>specs/</code> when it goes into development. One copy, always.</p>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C1</span> the panels — list, item, preview</div>
+    <div class="lane">
+
+      <div class="lane-col w330">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="glyph">☐</span><span class="panel-name">tasks</span><span class="panel-sub">floe</span>
+            <button class="act">+ new<kbd>n</kbd></button>
+          </div>
+          <div class="panel-body">
+            <div class="filter">/ <input placeholder="filter" /></div>
+
+            <div class="grp">ready <span class="n">3</span></div>
+            <div class="row" data-cursor><span class="no">017</span><span class="t">task panel for ideas</span><span class="m">plan · 2 html · 1 draw</span></div>
+            <div class="row"><span class="no">014</span><span class="t">keyboard-only merge picker</span><span class="m">plan · 1 html</span></div>
+            <div class="row"><span class="no">011</span><span class="t">colony report diff view</span><span class="m">plan</span></div>
+
+            <div class="grp">shaping <span class="n">2</span></div>
+            <div class="row"><span class="no">016</span><span class="t">remote session handoff</span><span class="m">1 draw</span></div>
+            <div class="row"><span class="no">012</span><span class="t">omarchy theme sync</span><span class="m"></span></div>
+
+            <div class="grp">idea <span class="n">4</span></div>
+            <div class="row"><span class="no">021</span><span class="t">voice notes into composer</span><span class="m"></span></div>
+            <div class="row"><span class="no">020</span><span class="t">per-project harness defaults</span><span class="m"></span></div>
+            <div class="row"><span class="no">019</span><span class="t">search across all transcripts</span><span class="m"></span></div>
+            <div class="row"><span class="no">018</span><span class="t">mobile push on blocked lane</span><span class="m"></span></div>
+
+            <div class="grp">in dev <span class="n">1</span></div>
+            <div class="row"><span class="no">009</span><span class="t">chat latency status line</span><span class="m"><span class="st" data-s="in dev">coder</span></span></div>
+
+            <div class="grp">done <span class="n">6</span> <span class="n">▸ z to show</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lane-col w600">
+        <div class="panel" data-focused>
+          <div class="panel-head">
+            <span class="glyph">☐</span><span class="panel-name">task</span><span class="panel-sub">.floe/tasks/017-task-panel-for-ideas/</span>
+            <span class="st" data-s="ready">ready</span>
+          </div>
+          <div class="panel-body">
+            <div class="ti-title"><span class="no">017</span>task panel for ideas</div>
+            <div class="ti-meta"><span>feat</span><span>created 3d ago</span><span>plan edited by claude 2h ago</span></div>
+
+            <div class="ladder">
+              <div class="rung" data-done>idea</div>
+              <div class="rung" data-done>shaping</div>
+              <div class="rung" data-at>ready</div>
+              <div class="rung" data-auto>in dev</div>
+              <div class="rung" data-auto>done</div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-h">idea <span class="k">e edit · task.md</span></div>
+              <div class="prose">
+                <p>A panel per project where half-baked ideas live until they are ready. One list, one item view.
+                   Each task is a folder so plans, designs and drawings sit beside the idea.</p>
+                <p>When it is ready, one key sends it to the colony.</p>
+              </div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-h">plan <span class="k">p edit · plan.md</span></div>
+              <div class="prose plan">
+                <h3>Storage</h3>
+                <ul>
+                  <li>One folder per task: <code>.floe/tasks/NNN-slug/</code>, committed.</li>
+                  <li><code>task.md</code> holds title, status and kind in its header, the idea in its body.</li>
+                </ul>
+                <h3>Panels</h3>
+                <ol>
+                  <li><code>tasks</code> list on the rail, <code>⌘K T</code>, grouped by status.</li>
+                  <li><code>task</code> item, opened from a row. Renders idea and plan in place.</li>
+                </ol>
+                <h3>Send</h3>
+                <ul>
+                  <li><code>git mv</code> the folder to <code>specs/</code>, commit, start the colony card.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div class="sec">
+              <div class="sec-h">files <span class="k">⏎ open · a attach · x detach</span></div>
+              <div class="att" data-cursor><span class="ic">◧</span><span class="nm">list-and-item.html</span></div>
+              <div class="att"><span class="ic">◧</span><span class="nm">status-ladder.html</span></div>
+              <div class="att"><span class="ic">✎</span><span class="nm">flow.excalidraw</span></div>
+              <div class="att"><span class="ic">↗</span><span class="nm">claude.ai/design/…/task-panel</span></div>
+              <div class="att"><span class="ic">▤</span><span class="nm">notes/research.md</span></div>
+            </div>
+
+            <div class="hand" data-live>
+              <span class="w">ready. sending moves the folder to <b>specs/017-…</b> on <b>master</b> and hands it to the nanny.</span>
+              <button class="act" data-tone="go">send to colony<kbd>⌘⏎</kbd></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="lane-col w420">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="glyph">◎</span><span class="panel-name">browser</span>
+            <span class="url">file:///…/floe/.floe/tasks/017-task-panel-for-ideas/list-and-item.html</span>
+          </div>
+          <div class="panel-body">
+            <div class="fake"><div class="bar"></div><div class="body"><div></div><div></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="keybar">
+      <span><b>j k</b> move</span><span><b>⏎</b> open</span><span><b>[ ]</b> status</span><span><b>e</b> edit idea</span>
+      <span><b>p</b> edit plan</span><span><b>a</b> attach</span><span><b>⌘⏎</b> send to colony</span>
+      <span><b>z</b> show done</span><span><b>⌘K T</b> tasks</span>
+    </div>
+    <ul class="note">
+      <li>The list reads <code>.floe/tasks/*</code> (idea → ready) and <code>specs/NNN-*</code> (in dev, done) from the project's main checkout. The number sorts nothing; groups sort by status, newest first inside a group.</li>
+      <li>The item view renders <code>plan.md</code> in place, under the idea. It is never a row you open. With no plan yet the section says so and <code>p</code> creates it.</li>
+      <li>Files are one left-aligned column: icon and name, nothing else. The icon says the type: <code>◧</code> html, <code>✎</code> drawing, <code>↗</code> link, <code>▤</code> any other file. <code>⏎</code> picks the panel from it: html and links → preview browser (<code>file://</code>), drawings → draw, the rest → reader.</li>
+      <li><code>n</code> opens a one-line prompt for the title. The task starts as <b>idea</b> with an empty body.</li>
+    </ul>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C2</span> a task still shaping, and the same task in dev</div>
+    <div class="lane" style="height: 440px">
+      <div class="lane-col w600">
+        <div class="panel" data-focused>
+          <div class="panel-head">
+            <span class="glyph">☐</span><span class="panel-name">task</span><span class="panel-sub">.floe/tasks/016-remote-session-handoff/</span>
+            <span class="st">shaping</span>
+          </div>
+          <div class="panel-body">
+            <div class="ti-title"><span class="no">016</span>remote session handoff</div>
+            <div class="ladder">
+              <div class="rung" data-done>idea</div><div class="rung" data-at>shaping</div>
+              <div class="rung">ready</div><div class="rung" data-auto>in dev</div><div class="rung" data-auto>done</div>
+            </div>
+            <div class="sec"><div class="sec-h">plan <span class="k">p create · plan.md</span></div>
+              <div class="empty">no plan yet.</div>
+            </div>
+            <div class="sec"><div class="sec-h">files</div>
+              <div class="att"><span class="ic">✎</span><span class="nm">handoff-flow.excalidraw</span></div>
+            </div>
+            <div class="hand">
+              <span class="w">not ready yet. <b>]</b> moves it to ready once the plan is done.</span>
+              <button class="act" disabled>send to colony<kbd>⌘⏎</kbd></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="lane-col w600">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="glyph">☐</span><span class="panel-name">task</span><span class="panel-sub">specs/017-task-panel-for-ideas/</span>
+            <span class="st" data-s="in dev">in dev</span>
+          </div>
+          <div class="panel-body">
+            <div class="ti-title"><span class="no">017</span>task panel for ideas</div>
+            <div class="ladder">
+              <div class="rung" data-done>idea</div><div class="rung" data-done>shaping</div>
+              <div class="rung" data-done>ready</div><div class="rung" data-at>in dev</div><div class="rung" data-auto>done</div>
+            </div>
+            <div class="colony">
+              <span class="st" data-s="in dev">coder</span>
+              <span class="w">working · ✓2 · feat/017-task-panel-for-ideas</span>
+              <button class="act">open card<kbd>c</kbd></button>
+            </div>
+            <div class="sec"><div class="sec-h">plan <span class="k">read-only · on master</span></div>
+              <div class="prose plan"><h3>Storage</h3><ul><li>One folder per task …</li></ul></div>
+            </div>
+            <div class="sec"><div class="sec-h">files</div>
+              <div class="att"><span class="ic">◧</span><span class="nm">list-and-item.html</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="note">
+      <li>In dev and done are never set by hand. They come from the colony card: in dev while the card is on the board, done once its branch is merged.</li>
+      <li>Once in dev the task is read-only in the panel: <code>e</code>, <code>p</code>, <code>a</code>, <code>x</code> and <code>[ ]</code> are off. The panel reads it from the main checkout, never from the worktree.</li>
+    </ul>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C3</span> statuses</div>
+    <table>
+      <tr><th>status</th><th>meaning</th><th>set by</th><th>where the folder is</th></tr>
+      <tr><td>idea</td><td class="dim">a title and maybe a line. Not thought through.</td><td>you, an agent</td><td class="dim">.floe/tasks/</td></tr>
+      <tr><td>shaping</td><td class="dim">being described: context, questions, research, sketches.</td><td>you, an agent</td><td class="dim">.floe/tasks/</td></tr>
+      <tr><td><span class="st" data-s="ready">ready</span></td><td class="dim">plan written and approved. The only status that can be sent.</td><td><b>you only</b></td><td class="dim">.floe/tasks/</td></tr>
+      <tr><td><span class="st" data-s="in dev">in dev</span></td><td class="dim">on the colony board.</td><td>send (⌘⏎ or task_send)</td><td class="dim">specs/</td></tr>
+      <tr><td><span class="st" data-s="done">done</span></td><td class="dim">branch merged.</td><td>the colony merge</td><td class="dim">specs/ (status written on master)</td></tr>
+    </table>
+    <ul class="note">
+      <li>An agent can write the plan but cannot move a task to ready. That keeps it from approving its own plan and sending it into development.</li>
+      <li>The status is a line in <code>task.md</code>, so it travels with git like the rest of the task.</li>
+    </ul>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C4</span> one task, one folder, always on master</div>
+    <div class="flow">
+      <div class="box">
+        <h4>while shaping</h4>
+        <div class="where">main checkout · master</div>
+        <pre>.floe/tasks/
+  017-task-panel-for-ideas/
+    task.md
+    plan.md
+    list-and-item.html
+    flow.excalidraw
+    notes/research.md</pre>
+      </div>
+      <div class="arrow"><span class="line">──── ⌘⏎ ───▶</span>git mv + commit<br/>on master</div>
+      <div class="box">
+        <h4>in dev</h4>
+        <div class="where">main checkout · master</div>
+        <pre>specs/
+  017-task-panel-for-ideas/
+    task.md      status: in dev
+    plan.md
+    list-and-item.html
+    flow.excalidraw
+    notes/research.md</pre>
+      </div>
+      <div class="arrow"><span class="line">── merged ──▶</span>status: done<br/>commit on master</div>
+      <div class="box">
+        <h4>done</h4>
+        <div class="where">main checkout · master</div>
+        <pre>specs/
+  017-task-panel-for-ideas/
+    task.md      status: done
+    plan.md
+    …</pre>
+      </div>
+    </div>
+    <ul class="note">
+      <li>The number is three digits, zero-padded, one higher than the highest number in either <code>.floe/tasks/</code> or <code>specs/</code>. It never gets reused.</li>
+      <li>Floe only ever writes task files in the main checkout, and only commits them on master. It never writes them in a worktree.</li>
+      <li>The colony branch is cut from master after the move commit, so the lanes can read <code>specs/017-…/</code>. Their brief says it is read-only.</li>
+      <li>The card's lanes write their own documents into <code>specs/017-…/colony/</code>, one folder per task. The card carries that folder as <code>specDir</code>, so no second <code>specs/feat-017-…/</code> folder appears.</li>
+      <li>Done is never written. A task in <code>specs/</code> shows done once its card is merged, so no commit lands on master after the merge (which would block the colony's undo).</li>
+    </ul>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C5</span> what ⌘⏎ does</div>
+    <ol class="steps">
+      <li><span>Refuse unless the status is <b>ready</b>. <span class="d">The button is greyed and says why.</span></span></li>
+      <li><span>Refuse unless the main checkout is on master. <span class="d">Other dirty files there are fine and stay untouched.</span></span></li>
+      <li><span>In the main checkout: <code>git mv .floe/tasks/017-… specs/017-…</code>, set status in dev, commit both paths: <code>chore(tasks): start 017-task-panel-for-ideas</code>.</span></li>
+      <li><span>Create the colony card and start it: name <code>017-task-panel-for-ideas</code>, kind from task.md, lanes writing in <code>specs/017-…/colony/</code>. <span class="d">After the commit, so the worktree is cut from a master that has the folder. Starting it straight away is what ships today. C8 would hand it to the nanny instead.</span></span></li>
+      <li><span>Sending again finishes whatever the last send did not: it creates a missing card, or starts one still in the backlog.</span></li>
+    </ol>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C6</span> the files</div>
+    <div class="grid2">
+      <div class="file"><pre><span class="c">.floe/tasks/017-task-panel-for-ideas/task.md</span>
+---
+title: task panel for ideas
+status: ready
+kind: feat
+created: 2026-09-27
+links:
+  - https://claude.ai/design/…/task-panel
+colony: <span class="c"># card id, written on send</span>
+---
+
+A panel per project where half-baked ideas live
+until they are ready. One list, one item view.
+Each task is a folder so plans, designs and
+drawings sit beside the idea.</pre></div>
+      <div class="file" style="max-width: 420px"><pre><span class="c">what the item view shows</span>
+
+plan.md           rendered in the item view,
+                  not listed. `p` edits it.
+*.html            designs. Hand-made, or
+                  exported from Claude Design.
+*.excalidraw      drawings. `a` → "new drawing"
+                  creates one in this folder.
+links: in task.md URLs, e.g. a Claude Design
+                  share link.
+anything else     listed as a plain file,
+                  subfolders included.</pre></div>
+    </div>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C7</span> keys and MCP</div>
+    <div class="grid2">
+      <table style="min-width: 420px">
+        <tr><th>key</th><th>where</th><th>does</th></tr>
+        <tr><td>⌘K T</td><td class="dim">anywhere</td><td>open the tasks panel</td></tr>
+        <tr><td>n</td><td class="dim">list</td><td>new task (title prompt)</td></tr>
+        <tr><td>⏎</td><td class="dim">list / files</td><td>open task / open file</td></tr>
+        <tr><td>[ ]</td><td class="dim">list / item</td><td>status down / up (idea, shaping, ready)</td></tr>
+        <tr><td>e</td><td class="dim">item</td><td>edit task.md in the editor panel</td></tr>
+        <tr><td>p</td><td class="dim">item</td><td>edit plan.md in the editor, creating it if missing</td></tr>
+        <tr><td>a</td><td class="dim">item</td><td>attach: link, file, new drawing, new html</td></tr>
+        <tr><td>x</td><td class="dim">files</td><td>remove the file or link</td></tr>
+        <tr><td>⌘⏎</td><td class="dim">list / item</td><td>send to colony</td></tr>
+        <tr><td>c</td><td class="dim">item (in dev)</td><td>open the colony card</td></tr>
+        <tr><td>z</td><td class="dim">list</td><td>show / hide done</td></tr>
+      </table>
+      <table style="min-width: 520px">
+        <tr><th>MCP tool</th><th>does</th></tr>
+        <tr><td>task_list</td><td class="dim">tasks of a project, with number, status, file counts</td></tr>
+        <tr><td>task_read</td><td class="dim">task.md + the file list (plan content optional)</td></tr>
+        <tr><td>task_add</td><td class="dim">title, idea, kind. Returns the number and folder</td></tr>
+        <tr><td>task_update</td><td class="dim">title, idea, kind, status (idea ↔ shaping only)</td></tr>
+        <tr><td>task_attach</td><td class="dim">add a link, or write/copy a file into the folder</td></tr>
+        <tr><td>task_send</td><td class="dim">same as ⌘⏎. Refuses unless ready</td></tr>
+        <tr><td>open_task</td><td class="dim">show a task in the panel of the calling chat</td></tr>
+      </table>
+    </div>
+    <ul class="note">
+      <li>Agents write plan.md and designs straight into the folder with their own file tools. task_attach exists for harnesses without file access to the main checkout and for links.</li>
+      <li>Tools always write to the project's main checkout, even when the calling agent runs in a worktree. Otherwise a task added from a worktree would only exist on that branch.</li>
+    </ul>
+  </div>
+
+  <!-- ================================================================== -->
+  <div class="part">
+    <div class="part-h"><span class="ref">C8</span> colony intake — the nanny checks every card, and follows up on every hand-off</div>
+    <ol class="steps">
+      <li><span><b>Every new card lands in inbox, not started.</b> <span class="d">The source does not matter: the task panel, <code>colony_add_task</code> from any agent, or <code>n</code> on the board. The board records an <code>added</code> event.</span></span></li>
+      <li><span><b>The board wakes the nanny.</b> <span class="d">Today it only wakes a nanny that already exists. Intake needs her always, so the board creates her when she is missing.</span></span></li>
+      <li><span><b>She triages the card</b>, reading the brief and the task folder, and does one of three things:<br/>
+        <span class="d">a) fits one worktree → <code>colony_start_task</code>.<br/>
+        b) too big → cuts a parent branch <code>feat/017-slug</code> from master, adds one child card per piece with base = that branch and <code>dependsOn</code> in order, starts them. The inbox card becomes the parent record: "split into 3".<br/>
+        c) unclear → asks you one question. The card stays in inbox.</span></span></li>
+      <li><span><b>She schedules a follow-up on herself</b> with <code>create_followup</code> (5 min): "verify the hand-off of cards X, Y". <span class="d">One pending follow-up per board. New cards join it instead of stacking a second one (<code>list_followups</code>).</span></span></li>
+      <li><span><b>The follow-up checks each card</b> against the table below. What she can fix she fixes. What she cannot, she tells you in one line.</span></li>
+      <li><span><b>Every later stage move repeats 4–5 for that card.</b> <span class="d">Each stage runs in a new session (D28), so every hand-off to a lane is a new chance for the brief not to arrive. The chain stops when no card has an unchecked hand-off.</span></span></li>
+      <li><span><b>Split tasks close on the parent.</b> <span class="d">When the last child merges into <code>feat/017-slug</code>, she merges the parent into master. Then the task shows done.</span></span></li>
+    </ol>
+    <table style="margin-top: 14px">
+      <tr><th>hand-off check</th><th>ok when</th><th>when it is not</th></tr>
+      <tr><td>card is in the lane</td><td class="dim">status <code>working</code> in the stage it was sent to</td><td>restart it (<code>colony_start_task</code>)</td></tr>
+      <tr><td>the lane has a session</td><td class="dim">the card's session exists, and is running or ended with a <code>COLONY:</code> line</td><td>restart it. If it fails again, tell you which harness is down.</td></tr>
+      <tr><td>the brief arrived</td><td class="dim">the session's first prompt names the stage skill and the spec folder (<code>read_session_output</code>)</td><td>tell you: the board sent the wrong input</td></tr>
+      <tr><td>holding</td><td class="dim">fine while the column is full. She reports the position.</td><td>free spot and still holding → restart it</td></tr>
+      <tr><td>blocked / warn</td><td class="dim">never ok</td><td>answer it if the brief already decides it, otherwise ask you</td></tr>
+    </table>
+    <ul class="note">
+      <li>Code changes this needs: an <code>added</code> board event, the board creating the nanny when she is missing, and intake + follow-up duties in the <code>colony-nanny</code> skill. The follow-up itself is the existing <code>create_followup</code>.</li>
+      <li>Cost: each follow-up is one nanny turn. Batching all open hand-offs into one pending follow-up keeps it to one turn per 5 min while cards are moving, and zero when the board is idle.</li>
+    </ul>
+  </div>
+</div>
+</body>
+</html>

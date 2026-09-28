@@ -104,6 +104,18 @@ export const COMMAND_IDS: string[] = [
   'draw.delete',
   'draw.reveal',
   'draw.promote',
+  // Tasks
+  'tasks.open',
+  'tasks.new',
+  'tasks.statusUp',
+  'tasks.statusDown',
+  'tasks.editIdea',
+  'tasks.editPlan',
+  'tasks.attach',
+  'tasks.detach',
+  'tasks.send',
+  'tasks.openCard',
+  'tasks.toggleDone',
   // Colony
   'colony.left',
   'colony.right',

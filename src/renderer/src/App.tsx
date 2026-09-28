@@ -2634,6 +2634,12 @@ export default function App() {
         )
         return
       }
+      case 'open_task': {
+        // Rooted at the project's main checkout, where every task lives,
+        // whichever worktree is on screen.
+        setLane((l) => open(l, mkPanel('task', command.ref, undefined, undefined, undefined, command.root)))
+        return
+      }
       case 'start_merge': {
         // The guided merge starts from a Worktree row of the OPEN project
         // (the panel shows the flow of the tree the app is in). On the right

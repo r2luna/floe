@@ -246,6 +246,22 @@ import { saveDownload } from './downloads'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeMedia, readMediaChunk } from './media'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
+  attachToTask,
+  createTaskFolder,
+  detachFromTask,
+  ensurePlan,
+  listTaskFolders,
+  readTaskFolder,
+  sendTaskFolder,
+  stepTaskStatus,
+  updateTaskFolder,
+  watchTaskFolders,
+  type Attachment,
+  type NewTaskFolder
+} from './taskFolders'
+import { cardLookup, sendDeps } from './taskFolderDeps'
+import type { TaskFolderPatch } from '../shared/taskFolders'
+import {
   boardFor,
   reconcileMerged,
   reconcileLanded,
@@ -596,6 +612,7 @@ export function registerIpc(): void {
   registerFileIpc()
   registerNotesIpc()
   registerColonyIpc()
+  registerTaskFoldersIpc()
   registerTerminalIpc()
   registerWorktreeIpc()
   registerWindowIpc()
@@ -1169,6 +1186,23 @@ export function registerNotesIpc(): void {
   handle('plans:implementPhases', (_event, worktreePath: string, branch?: string) =>
     readImplementPhases(worktreePath, branch)
   )
+}
+
+// The tasks panel. Every call here is the user at the keyboard — `user` is what
+// lets `]` mark a task ready, which the MCP tools refuse an agent.
+export function registerTaskFoldersIpc(): void {
+  handle('tasks:list', (_event, root: string) => listTaskFolders(root, cardLookup))
+  handle('tasks:read', (_event, root: string, ref: string) => readTaskFolder(root, ref, cardLookup))
+  handle('tasks:create', (_event, root: string, task: NewTaskFolder) => createTaskFolder(root, task, 'user'))
+  handle('tasks:update', (_event, root: string, ref: string, patch: TaskFolderPatch) =>
+    updateTaskFolder(root, ref, patch, 'user')
+  )
+  handle('tasks:step', (_event, root: string, ref: string, delta: 1 | -1) => stepTaskStatus(root, ref, delta, 'user'))
+  handle('tasks:plan', (_event, root: string, ref: string) => ensurePlan(root, ref))
+  handle('tasks:attach', (_event, root: string, ref: string, what: Attachment) => attachToTask(root, ref, what))
+  handle('tasks:detach', (_event, root: string, ref: string, target: string) => detachFromTask(root, ref, target))
+  handle('tasks:send', (event, root: string, ref: string) => sendTaskFolder(root, ref, sendDeps(winOf(event))))
+  handle('tasks:watch', (event, root: string) => watchTaskFolders(event.sender, root))
 }
 
 // The colony board.

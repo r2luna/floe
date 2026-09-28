@@ -153,9 +153,39 @@ export async function restoreBranch(root: string, branch: string, sha: string): 
   }
 }
 
-async function isDirty(path: string): Promise<boolean> {
+async function isDirty(path: string, ignore: string[] = []): Promise<boolean> {
   try {
-    return (await git(path, ['status', '--porcelain'])).trim().length > 0
+    const scope = ignore.length ? ['--', '.', ...ignore.map((p) => `:(exclude)${p}`)] : []
+    return (await git(path, ['status', '--porcelain', ...scope])).trim().length > 0
+  } catch {
+    return false
+  }
+}
+
+/**
+ * What a merge into the main checkout may leave uncommitted.
+ *
+ * The tasks panel edits `.floe/tasks/` in the main checkout all day, and those
+ * edits are yours to commit when you like. Refusing every colony merge until
+ * they are committed would make shaping an idea block landing unrelated work.
+ * A fast-forward that touches one of those files is still refused — by git.
+ */
+const MERGE_TOLERATES = ['.floe/tasks']
+
+/** The branch checked out in `path`, or null on a detached HEAD or no repository. */
+export async function checkedOutBranch(path: string): Promise<string | null> {
+  try {
+    const branch = (await git(path, ['rev-parse', '--abbrev-ref', 'HEAD'])).trim()
+    return branch && branch !== 'HEAD' ? branch : null
+  } catch {
+    return null
+  }
+}
+
+/** Whether git tracks anything at or under `rel` in `path`. */
+export async function isTracked(path: string, rel: string): Promise<boolean> {
+  try {
+    return (await git(path, ['ls-files', '--', rel])).trim().length > 0
   } catch {
     return false
   }
@@ -700,6 +730,7 @@ export async function undoMerge(
   }
   // Whichever tree has base checked out — the main one, or a feature's own.
   const holder = await holderOf(root, base)
+  // No MERGE_TOLERATES here: `reset --hard` would throw uncommitted task edits away.
   if (holder && (await isDirty(holder))) return { ok: false, message: dirtyHolderMessage(root, holder, base) }
 
   try {
@@ -733,7 +764,7 @@ export async function mergeWorktree(root: string, target: string): Promise<Merge
   // Base is moved from inside whichever tree has it checked out, so that tree is
   // the one that has to be clean. Checked out nowhere, no tree is touched.
   const holder = await holderOf(root, base)
-  if (holder && (await isDirty(holder))) return { ok: false, message: dirtyHolderMessage(root, holder, base) }
+  if (holder && (await isDirty(holder, MERGE_TOLERATES))) return { ok: false, message: dirtyHolderMessage(root, holder, base) }
 
   // Read BEFORE the fast-forward moves it. After the merge this commit is only
   // reachable through the reflog, and an undo that had to mine the reflog for

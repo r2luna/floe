@@ -17,6 +17,8 @@ import type { CommandEvent, CommandRun } from '../main/commandRunner'
 import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
 import type { Skill, SkillImport, WritableScope } from '../main/config/skills'
+import type { Attachment, NewTaskFolder } from '../main/taskFolders'
+import type { TaskFolder, TaskFolderDetail, TaskFolderPatch } from '../shared/taskFolders'
 import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
 import type { PluginPanelSection } from '../main/plugins/types'
@@ -1054,6 +1056,33 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, event: { project: string }): void => cb(event)
         ipcRenderer.on('colony:event', listener)
         return () => ipcRenderer.removeListener('colony:event', listener)
+      }
+    },
+    // The tasks panel: numbered idea folders in the project's main checkout.
+    // `root` is always the project root — a task never lives in a worktree.
+    tasks: {
+      list: (root: string): Promise<TaskFolder[]> => ipcRenderer.invoke('tasks:list', root),
+      read: (root: string, ref: string): Promise<TaskFolderDetail> => ipcRenderer.invoke('tasks:read', root, ref),
+      create: (root: string, task: NewTaskFolder): Promise<TaskFolderDetail> =>
+        ipcRenderer.invoke('tasks:create', root, task),
+      update: (root: string, ref: string, patch: TaskFolderPatch): Promise<TaskFolderDetail> =>
+        ipcRenderer.invoke('tasks:update', root, ref, patch),
+      // One rung along idea → shaping → ready, or back.
+      step: (root: string, ref: string, delta: 1 | -1): Promise<TaskFolderDetail> =>
+        ipcRenderer.invoke('tasks:step', root, ref, delta),
+      // plan.md's path relative to the root, created when missing.
+      plan: (root: string, ref: string): Promise<string> => ipcRenderer.invoke('tasks:plan', root, ref),
+      attach: (root: string, ref: string, what: Attachment): Promise<TaskFolderDetail> =>
+        ipcRenderer.invoke('tasks:attach', root, ref, what),
+      detach: (root: string, ref: string, target: string): Promise<TaskFolderDetail> =>
+        ipcRenderer.invoke('tasks:detach', root, ref, target),
+      // Move to specs/, commit on main, start the colony card.
+      send: (root: string, ref: string): Promise<TaskFolderDetail> => ipcRenderer.invoke('tasks:send', root, ref),
+      watch: (root: string): Promise<void> => ipcRenderer.invoke('tasks:watch', root),
+      onEvent: (cb: (event: { root: string }) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, event: { root: string }): void => cb(event)
+        ipcRenderer.on('tasks:event', listener)
+        return () => ipcRenderer.removeListener('tasks:event', listener)
       }
     },
     plans: {

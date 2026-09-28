@@ -71,6 +71,10 @@ function connKeyFor(id: string): string {
 /** The artifact directory a lane reads and writes — LANE-CONTRACT's `specs/<dir>/`. */
 export const taskDirFor = (branch: string): string => join('specs', branch.replace(/\//g, '-'))
 
+/** Where a card's lanes write: its own `specDir` when it has one, else `specs/<branch>/`. */
+export const specDirOf = (task: Pick<ColonyTask, 'specDir' | 'branch' | 'name'>): string =>
+  task.specDir ?? taskDirFor(task.branch ?? task.name)
+
 // ---------------------------------------------------------------------------
 // The board
 // ---------------------------------------------------------------------------
@@ -268,7 +272,7 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
 
   // LANE-CONTRACT points every lane at `specs/<dir>/`. The request has to be
   // there before the first one runs, or the specifier opens on an empty room.
-  const dir = join(worktreePath, taskDirFor(branch ?? task.name))
+  const dir = join(worktreePath, specDirOf({ ...task, branch }))
   mkdirSync(dir, { recursive: true })
   const file = join(dir, 'task.md')
   if (!existsSync(file)) {
@@ -317,7 +321,7 @@ async function baseOf(task: ColonyTask): Promise<string> {
  */
 async function fileArtifacts(task: ColonyTask, after: string): Promise<void> {
   if (!task.worktreePath) return
-  const dir = taskDirFor(task.branch ?? task.name)
+  const dir = specDirOf(task)
   await commitPaths(task.worktreePath, [dir], `docs(colony): ${after} artifacts for ${task.name}`).catch(() => false)
 }
 
@@ -943,7 +947,7 @@ function lanePrompt(task: ColonyTask, stage: ColonyStage): string {
     `/${stage.skill}`,
     '',
     `Task: ${task.name} (${task.kind})`,
-    `Artifacts: ${taskDirFor(task.branch ?? task.name)}/`,
+    `Artifacts: ${specDirOf(task)}/`,
     // LANE-CONTRACT diffs against this. Without it a lane on a feature's parent
     // branch reviews the whole feature as if this task wrote it.
     `Base: ${task.base ?? 'the default branch'}`,

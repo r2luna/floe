@@ -153,6 +153,7 @@ key applies in, so a key never points at the panel it is pressed in — which is
       { key: 'super+shift+e', command: 'panel.goto', arg: 'projects' },
       { key: 'super+y', command: 'panel.goto', arg: 'terminal' },
       { key: 'super+k b', command: 'panel.goto', arg: 'colony' },
+      { key: 'super+k t', command: 'panel.goto', arg: 'tasks' },
       { key: 'super+k g', command: 'panel.goto', arg: 'changes' },
       { key: 'super+k f', command: 'panel.goto', arg: 'files' },
       { key: 'super+k p', command: 'panel.goto', arg: 'plans' },
@@ -302,6 +303,34 @@ keymap.ts is for. \`⌃H\`/\`⌃L\` still get you out, because they hold a modif
       { key: 'd', command: 'draw.delete', when: 'panel == "draw"' },
       { key: 's', command: 'draw.promote', when: 'panel == "draw"' },
       { key: 'o', command: 'draw.reveal', when: 'panel == "draw"' }
+    ]
+  },
+  {
+    title: 'Tasks',
+    doc: `The tasks panel and the task beside it. \`n\` captures an idea as a new
+numbered folder in \`.floe/tasks/\`. \`]\` and \`[\` walk it through idea, shaping
+and ready — ready is yours alone to set, it is the approval the colony opens on.
+
+\`e\` edits the idea (task.md) and \`p\` the plan (plan.md, created on the first
+press) in your editor. \`a\` attaches a link, a file path to copy in, or a new
+\`.html\` / \`.excalidraw\`; \`x\` removes the file under the cursor. \`⏎\` on a
+file opens it where it belongs: html and links in the browser, drawings on the
+canvas, the rest in the reader.
+
+\`⌘⏎\` sends a ready task: the folder moves to \`specs/\`, the move is committed
+on the main branch, and its colony card starts. \`c\` shows the board, \`z\`
+shows or hides done tasks.`,
+    binds: [
+      { key: 'n', command: 'tasks.new', when: 'panel in ["tasks", "task"]' },
+      { key: ']', command: 'tasks.statusUp', when: 'panel in ["tasks", "task"]' },
+      { key: '[', command: 'tasks.statusDown', when: 'panel in ["tasks", "task"]' },
+      { key: 'e', command: 'tasks.editIdea', when: 'panel in ["tasks", "task"]' },
+      { key: 'p', command: 'tasks.editPlan', when: 'panel in ["tasks", "task"]' },
+      { key: 'a', command: 'tasks.attach', when: 'panel in ["tasks", "task"]' },
+      { key: 'x', command: 'tasks.detach', when: 'panel == "task"' },
+      { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
+      { key: 'c', command: 'tasks.openCard', when: 'panel == "task"' },
+      { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }
     ]
   },
   {

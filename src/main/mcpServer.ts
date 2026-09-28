@@ -35,6 +35,17 @@ import {
 } from './colony/runner'
 import { reportSummary } from './colony/report'
 import {
+  attachToTask,
+  createTaskFolder,
+  detachFromTask,
+  listTaskFolders,
+  readTaskFolder,
+  sendTaskFolder,
+  updateTaskFolder,
+  type Attachment
+} from './taskFolders'
+import { cardLookup, sendDeps } from './taskFolderDeps'
+import {
   addTask,
   dependencyProblem,
   getTask,
@@ -507,6 +518,7 @@ function registerTools(server: McpServer, token: string): void {
   registerColonyTools(server)
   registerColonyLandingTools(server)
   registerColonyReportTools(server)
+  registerTaskFolderTools(server, token)
   registerSkillTools(server)
   registerMcpRegistryTools(server)
   registerProjectTools(server, token)
@@ -1709,6 +1721,125 @@ function registerDrawingTools(server: McpServer, token: string): void {
         return textResult({ error: (e as Error).message })
       }
     }
+  )
+}
+
+// --- Tasks (the idea folders the tasks panel shows)
+//
+// Always the project's MAIN checkout: `project` may be a worktree path, and
+// projectRoot() turns it into the repo root, so a task an agent adds from a
+// worktree lands on master and not on its own branch. Every call is `agent`:
+// the one thing an agent cannot do is mark a task ready — that is the user
+// approving the plan, and the gate the colony opens on.
+
+const TASK_REF = z.string().describe('The task number (17 or 017) or its folder name (017-task-panel).')
+const TASK_PROJECT = z.string().describe('The repo root path of the project (a worktree path works too).')
+const AGENT_STATUS = z
+  .enum(['idea', 'shaping'])
+  .optional()
+  .describe('idea or shaping. Only the user can mark a task ready; in dev and done come from the colony.')
+
+async function taskToolResult(run: () => unknown): Promise<ToolResult> {
+  try {
+    return textResult(await run())
+  } catch (e) {
+    return textResult({ error: (e as Error).message })
+  }
+}
+
+function registerTaskFolderTools(server: McpServer, token: string): void {
+  server.tool(
+    'task_list',
+    "The project's tasks: number, title, status (idea, shaping, ready, in dev, done), where the folder is, and file counts. A task is a numbered folder in .floe/tasks/ (being shaped) or specs/ (sent to the colony).",
+    { project: TASK_PROJECT },
+    ({ project }) => taskToolResult(() => listTaskFolders(projectRoot(project), cardLookup))
+  )
+
+  server.tool(
+    'task_read',
+    "One task in full: the idea (task.md's body), the plan (plan.md), its files and links, and its colony card once sent. Its folder is `dir` under the project root — write plan.md and designs straight into it with your own file tools.",
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) => taskToolResult(() => readTaskFolder(projectRoot(project), task, cardLookup))
+  )
+
+  server.tool(
+    'task_add',
+    'Capture an idea as a new task: a numbered folder .floe/tasks/NNN-slug/ with task.md, in the main checkout. Not committed — the user commits task edits. Returns the task with its number and folder.',
+    {
+      project: TASK_PROJECT,
+      title: z.string().describe('A short title — it also names the folder.'),
+      idea: z.string().optional().describe("The rough idea, in the user's words."),
+      kind: z.enum(['feat', 'fix', 'chore']).optional().describe('feat, fix or chore. Defaults to feat.'),
+      status: AGENT_STATUS
+    },
+    ({ project, ...task }) => taskToolResult(() => createTaskFolder(projectRoot(project), task, 'agent'))
+  )
+
+  server.tool(
+    'task_update',
+    "Change a task that has not been sent: its title, idea, kind, status (idea or shaping) or depends (task numbers it waits on). A sent task is read-only.",
+    {
+      project: TASK_PROJECT,
+      task: TASK_REF,
+      title: z.string().optional(),
+      idea: z.string().optional().describe('The whole new idea. Replaces the old one.'),
+      kind: z.enum(['feat', 'fix', 'chore']).optional(),
+      status: AGENT_STATUS,
+      depends: z.array(z.string()).optional().describe('Task numbers this one waits on. Replaces the list.')
+    },
+    ({ project, task, ...patch }) => taskToolResult(() => updateTaskFolder(projectRoot(project), task, patch, 'agent'))
+  )
+
+  server.tool(
+    'task_attach',
+    'Add to a task: a link (e.g. a Claude Design URL), a file written from `content`, or a file copied from a path on this machine. Pass exactly one of link, content (with name) or copyFrom.',
+    {
+      project: TASK_PROJECT,
+      task: TASK_REF,
+      link: z.string().optional().describe('A URL to list on the task.'),
+      name: z.string().optional().describe('The file name inside the task folder, e.g. design.html or notes/research.md.'),
+      content: z.string().optional().describe('The file content to write under `name`.'),
+      copyFrom: z.string().optional().describe('An absolute path to copy into the folder (as `name`, or its own name).')
+    },
+    ({ project, task, link, name, content, copyFrom }) =>
+      taskToolResult(() => {
+        const what: Attachment | null = link
+          ? { link }
+          : copyFrom
+            ? { copyFrom, ...(name ? { name } : {}) }
+            : name !== undefined && content !== undefined
+              ? { name, content }
+              : null
+        if (!what) throw new Error('Pass link, copyFrom, or name with content')
+        return attachToTask(projectRoot(project), task, what)
+      })
+  )
+
+  server.tool(
+    'task_detach',
+    'Remove a link from a task, or delete a file from its folder. `target` is the URL or the path inside the folder.',
+    { project: TASK_PROJECT, task: TASK_REF, target: z.string() },
+    ({ project, task, target }) => taskToolResult(() => detachFromTask(projectRoot(project), task, target))
+  )
+
+  server.tool(
+    'task_send',
+    "Send a READY task to the colony: its folder moves to specs/NNN-slug/, the move is committed on the main branch, and a colony card is started with its lanes writing into specs/NNN-slug/colony/. Refuses unless the user marked it ready and the main checkout is on the main branch. Sending a task already in specs/ finishes whatever an earlier send did not.",
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) => taskToolResult(() => sendTaskFolder(projectRoot(project), task, sendDeps(getWindow())))
+  )
+
+  server.tool(
+    'open_task',
+    'Show a task in the tasks panel of the chat that asked, so the user sees it.',
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) =>
+      taskToolResult(() => {
+        const root = projectRoot(project)
+        const found = readTaskFolder(root, task, cardLookup)
+        pushCommand({ kind: 'open_task', callerKey: token, root, ref: found.name })
+        return { ok: true, task: found.name }
+      })
   )
 }
 
