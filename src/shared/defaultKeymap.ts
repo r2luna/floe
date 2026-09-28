@@ -313,7 +313,8 @@ and ready — ready is yours alone to set, it is the approval the colony opens o
 
 \`e\` edits the idea (task.md) and \`p\` the plan (plan.md, created on the first
 press) in your editor. \`a\` attaches a link, a file path to copy in, or a new
-\`.html\` / \`.excalidraw\`; \`x\` removes the file under the cursor. \`⏎\` on a
+\`.html\` / \`.excalidraw\`; \`x\` removes the file under the cursor, \`d\` deletes the whole task (after a
+confirm; a sent task cannot be deleted). \`⏎\` on a
 file opens it where it belongs: html and links in the browser, drawings on the
 canvas, the rest in the reader.
 
@@ -328,6 +329,7 @@ shows or hides done tasks.`,
       { key: 'p', command: 'tasks.editPlan', when: 'panel in ["tasks", "task"]' },
       { key: 'a', command: 'tasks.attach', when: 'panel in ["tasks", "task"]' },
       { key: 'x', command: 'tasks.detach', when: 'panel == "task"' },
+      { key: 'd', command: 'tasks.delete', when: 'panel in ["tasks", "task"]' },
       { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
       { key: 'c', command: 'tasks.openCard', when: 'panel == "task"' },
       { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }

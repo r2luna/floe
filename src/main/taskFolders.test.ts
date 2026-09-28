@@ -24,6 +24,7 @@ const {
   attachToTask,
   briefFor,
   createTaskFolder,
+  deleteTaskFolder,
   detachFromTask,
   ensurePlan,
   fileTypeOf,
@@ -327,4 +328,18 @@ test('the watcher tells the renderer when a task folder changes, once per burst,
   attachToTask(root, '1', { name: 'b.html', content: 'y' })
   await new Promise((r) => setTimeout(r, 300))
   assert.equal(sent.length, before, 'a closed window hears nothing')
+})
+
+test('d deletes an unsent task and its files; a sent task cannot be deleted', () => {
+  const root = project()
+  createTaskFolder(root, { title: 'Gone soon' }, 'user')
+  attachToTask(root, '1', { name: 'a.html', content: 'x' })
+  assert.deepEqual(deleteTaskFolder(root, '1'), { deleted: '001-gone-soon' })
+  assert.equal(existsSync(join(root, '.floe/tasks/001-gone-soon')), false)
+  assert.throws(() => deleteTaskFolder(root, '1'), /No task 1/)
+  // The number is not handed out again while nothing holds it — but a sent one is.
+  mkdirSync(join(root, 'specs/002-sent'), { recursive: true })
+  writeFileSync(join(root, 'specs/002-sent/task.md'), '# Sent\n')
+  assert.throws(() => deleteTaskFolder(root, '2'), /read-only/)
+  assert.equal(existsSync(join(root, 'specs/002-sent/task.md')), true)
 })

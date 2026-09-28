@@ -21,6 +21,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   watch,
@@ -391,6 +392,18 @@ export function stepTaskStatus(root: string, ref: string, delta: 1 | -1, by: Act
   const at = Math.max(0, SHAPING_STATUSES.indexOf(meta.status))
   const next = SHAPING_STATUSES[Math.min(SHAPING_STATUSES.length - 1, Math.max(0, at + delta))]
   return updateTaskFolder(root, ref, { status: next }, by)
+}
+
+/**
+ * Delete a task and everything in its folder. The keyboard's `d`, after a
+ * confirm. Only a task that has not been sent: a sent one is committed on
+ * master and its branch is being built from it. Nothing is committed here —
+ * a tracked task shows up as a deletion for you to commit, like any edit.
+ */
+export function deleteTaskFolder(root: string, ref: string): { deleted: string } {
+  const { abs, name } = editable(root, ref)
+  rmSync(abs, { recursive: true, force: true })
+  return { deleted: name }
 }
 
 /** plan.md's path relative to the project, created empty when missing — what `p` opens. */

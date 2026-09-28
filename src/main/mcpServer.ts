@@ -37,6 +37,7 @@ import { reportSummary } from './colony/report'
 import {
   attachToTask,
   createTaskFolder,
+  deleteTaskFolder,
   detachFromTask,
   listTaskFolders,
   readTaskFolder,
@@ -1820,6 +1821,13 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
     'Remove a link from a task, or delete a file from its folder. `target` is the URL or the path inside the folder.',
     { project: TASK_PROJECT, task: TASK_REF, target: z.string() },
     ({ project, task, target }) => taskToolResult(() => detachFromTask(projectRoot(project), task, target))
+  )
+
+  server.tool(
+    'task_delete',
+    "Delete a task that has not been sent, with every file in its folder. Irreversible unless the folder was committed — confirm with the user first. A sent task (in specs/) cannot be deleted.",
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) => taskToolResult(() => deleteTaskFolder(projectRoot(project), task))
   )
 
   server.tool(

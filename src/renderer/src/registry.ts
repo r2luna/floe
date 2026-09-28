@@ -1772,6 +1772,51 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The whole task, folder and all — so it asks, and says what goes.
+        // From the item panel the panel closes with it and the list takes focus.
+        id: 'tasks.delete',
+        title: 'Delete the task…',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          const fromItem = c.lane.panels[c.lane.focus]?.kind === 'task'
+          const list = (): HTMLElement | null | undefined =>
+            c.panelEl(c.lane.panels.findIndex((p) => p.kind === 'tasks'))
+          const rowsNow = (): HTMLElement[] => [...(list()?.querySelectorAll<HTMLElement>('.task-row') ?? [])]
+          const at0 = Math.max(0, rowsNow().findIndex((r) => r.dataset.taskRef === at.ref))
+          void c
+            .confirm({
+              question: `Delete ${at.ref}?`,
+              verb: 'Delete task',
+              detail: 'removes the task folder and every file in it'
+            })
+            .then(async (yes) => {
+              if (!yes) return
+              await window.floe.tasks.delete(at.root, at.ref)
+              if (fromItem) {
+                c.setLane((l) => {
+                  const i = l.panels.findIndex((p) => p.kind === 'task' && p.sub === at.ref)
+                  return i === -1 ? l : close(l, i)
+                })
+              }
+              // The row the cursor was on is gone — land on the one that took
+              // its place, once the list has re-read the folder.
+              for (let tries = 0; tries < 30; tries++) {
+                const rows = rowsNow()
+                if (!rows.some((r) => r.dataset.taskRef === at.ref)) {
+                  ;(rows[Math.min(at0, rows.length - 1)] ?? list())?.focus()
+                  return
+                }
+                await new Promise((r) => setTimeout(r, 50))
+              }
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'tasks.openCard',
         title: 'Show the task’s colony card',
         group: 'Tasks',

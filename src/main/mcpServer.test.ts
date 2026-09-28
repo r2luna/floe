@@ -136,6 +136,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'task_attach',
       'task_detach',
       'task_send',
+      'task_delete',
       'open_task',
       'support_stack',
       'list_skills',

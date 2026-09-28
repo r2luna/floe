@@ -1078,6 +1078,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('tasks:detach', root, ref, target),
       // Move to specs/, commit on main, start the colony card.
       send: (root: string, ref: string): Promise<TaskFolderDetail> => ipcRenderer.invoke('tasks:send', root, ref),
+      // Removes the folder. Refuses a task already sent to the colony.
+      delete: (root: string, ref: string): Promise<{ deleted: string }> => ipcRenderer.invoke('tasks:delete', root, ref),
       watch: (root: string): Promise<void> => ipcRenderer.invoke('tasks:watch', root),
       onEvent: (cb: (event: { root: string }) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, event: { root: string }): void => cb(event)

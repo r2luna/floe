@@ -4925,6 +4925,7 @@ function TaskList({
     { label: 'Status up', keys: ']', run: () => onCommand?.('tasks.statusUp') },
     { label: 'Status down', keys: '[', run: () => onCommand?.('tasks.statusDown') },
     { label: 'Send to colony', keys: '⌘⏎', run: () => onCommand?.('tasks.send') },
+    { label: 'Delete…', keys: 'd', run: () => onCommand?.('tasks.delete') },
     { label: 'New task…', keys: 'n', run: () => onCommand?.('tasks.new') }
   ]
 

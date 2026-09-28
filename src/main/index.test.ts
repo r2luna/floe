@@ -361,6 +361,7 @@ const CHANNELS = [
   'tasks:attach',
   'tasks:detach',
   'tasks:send',
+  'tasks:delete',
   'tasks:watch',
   'terminal:write',
   'terminal:resize',

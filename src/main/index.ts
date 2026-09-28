@@ -248,6 +248,7 @@ import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from '
 import {
   attachToTask,
   createTaskFolder,
+  deleteTaskFolder,
   detachFromTask,
   ensurePlan,
   listTaskFolders,
@@ -1202,6 +1203,7 @@ export function registerTaskFoldersIpc(): void {
   handle('tasks:attach', (_event, root: string, ref: string, what: Attachment) => attachToTask(root, ref, what))
   handle('tasks:detach', (_event, root: string, ref: string, target: string) => detachFromTask(root, ref, target))
   handle('tasks:send', (event, root: string, ref: string) => sendTaskFolder(root, ref, sendDeps(winOf(event))))
+  handle('tasks:delete', (_event, root: string, ref: string) => deleteTaskFolder(root, ref))
   handle('tasks:watch', (event, root: string) => watchTaskFolders(event.sender, root))
 }
 
