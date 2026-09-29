@@ -3264,7 +3264,17 @@ export default function App() {
                     const el = colRefs.current.get(head.id)
                     // Live: straight to the element. Committed: into the lane,
                     // which is what gets saved — see laneStore.
-                    if (!done) return el?.style.setProperty('--panel-w', `${Math.round(next)}px`)
+                    if (!done) {
+                      if (!el) return
+                      // Sized from the first move, as the commit will make it:
+                      // an unsized column still grows, shrinks or sits at its
+                      // tight width, so the first drag would not follow the
+                      // pointer. React sets the same attributes on commit.
+                      el.dataset.sized = 'true'
+                      delete el.dataset.grow
+                      delete el.dataset.tight
+                      return el.style.setProperty('--panel-w', `${Math.round(next)}px`)
+                    }
                     el?.style.removeProperty('--panel-w')
                     setLane((l) =>
                       next === 0
