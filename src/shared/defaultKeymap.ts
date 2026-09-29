@@ -113,7 +113,8 @@ has to work while the composer has focus, which is most of the time.
 scroll where there isn't — two entries sharing a chord, split by \`when\`, with
 the narrower one first. \`⌃1\`–\`⌃9\` jump straight to a panel by position, on the
 same modifier as everything else here — \`⌘1\`–\`⌘9\` are the worktrees now. \`⌘K /\`
-flips the focused panel between docked beside and docked below.`,
+flips the focused panel between docked beside and docked below. \`⌃=\` and \`⌃-\`
+make the focused panel bigger and smaller: wider in the lane, taller docked.`,
     binds: [
       { key: 'ctrl+h', command: 'panel.left' },
       { key: 'ctrl+l', command: 'panel.right' },
@@ -124,6 +125,8 @@ flips the focused panel between docked beside and docked below.`,
         command: 'panel.focusAt',
         arg: String(n)
       })),
+      { key: 'ctrl+=', command: 'panel.grow' },
+      { key: 'ctrl+-', command: 'panel.shrink' },
       { key: 'super+w', command: 'panel.close' },
       { key: 'super+k /', command: 'panel.dock' }
     ]
@@ -686,8 +689,6 @@ export const DEFAULT_KEYMAP: Keybind[] = KEYMAP_SECTIONS.flatMap((s) => s.binds)
  * the defaults above, because the user picking one is the point.
  */
 export const UNBOUND_SUGGESTIONS: Array<{ command: string; key?: string }> = [
-  { command: 'panel.grow', key: 'super+shift+.' },
-  { command: 'panel.shrink', key: 'super+shift+,' },
   { command: 'panel.resetSize', key: 'super+shift+0' },
   { command: 'project.move' },
   { command: 'group.create' },
