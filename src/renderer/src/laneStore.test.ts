@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  carrySizes,
   fileIntoSession,
   load,
   persistable,
@@ -300,7 +301,7 @@ test('the focus never points past what the switch left standing', () => {
 
 test('the saved focus never points past what was saved', () => {
   const lane = { panels: [panel('worktrees', 10), panel('setup', 41)], focus: 1 }
-  save({ lane, bySession: {}, byProject: {}, railByProject: {}, byWorktree: {} })
+  save({ lane, bySession: {}, byProject: {}, railByProject: {}, byWorktree: {}, sizes: {} })
   const back = load()
   assert.deepEqual(back?.lane.panels.map((p) => p.kind), ['worktrees'])
   assert.equal(back?.lane.focus, 0, 'the checklist it pointed at is gone')
@@ -324,4 +325,34 @@ test('a session with no saved set gets the panel under every name', () => {
 test('filing a panel twice keeps one', () => {
   const once = fileIntoSession({}, ['s1'], panel('browser', 50))
   assert.equal(fileIntoSession(once, ['s1'], panel('browser', 50)).s1.length, 1)
+})
+
+test('a dragged width is learned by the kind and handed to the next panel of it', () => {
+  const before = laneWith('a', panel('terminal', 50))
+  const dragged = { ...before, panels: before.panels.map((p) => (p.kind === 'terminal' ? { ...p, width: 520 } : p)) }
+  const { sizes } = carrySizes(before, dragged, {})
+  assert.deepEqual(sizes, { terminal: { width: 520 } })
+  // Closed, then reopened as a new panel: it comes back at the dragged width.
+  const reopened = laneWith('b', panel('terminal', 50, { sub: 'other' }))
+  const { lane } = carrySizes(laneWith('b'), reopened, sizes)
+  assert.equal(lane.panels.find((p) => p.kind === 'terminal')?.width, 520)
+})
+
+test('a docked height is learned apart from the width', () => {
+  const before = laneWith('a', panel('terminal', 50, { dock: 'below', width: 400 }))
+  const dragged = { ...before, panels: before.panels.map((p) => (p.kind === 'terminal' ? { ...p, height: 200 } : p)) }
+  assert.deepEqual(carrySizes(before, dragged, {}).sizes, { terminal: { height: 200 } })
+})
+
+test('a reset forgets the kind size', () => {
+  const before = laneWith('a', panel('terminal', 50, { width: 520 }))
+  const reset = { ...before, panels: before.panels.map((p) => (p.kind === 'terminal' ? { ...p, width: undefined } : p)) }
+  assert.deepEqual(carrySizes(before, reset, { terminal: { width: 520 } }).sizes, {})
+})
+
+test('a panel already in the lane keeps its size, and an unchanged lane is the same lane', () => {
+  const lane = laneWith('a', panel('terminal', 50, { width: 300 }))
+  const next = { ...lane, focus: 3 }
+  const carried = carrySizes(lane, next, { terminal: { width: 520 } })
+  assert.equal(carried.lane, next)
 })

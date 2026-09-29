@@ -41,6 +41,7 @@ import { useNeedsYouNotifier } from './useNotify'
 import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
+  carrySizes,
   fileIntoSession,
   load as loadLane,
   projectRailOf,
@@ -98,6 +99,7 @@ import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
 import { useBrowserCovered } from './browserCover'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
+import { byUsage, noteProjectUse } from './projectUsage'
 import {
   DEFAULT_GROUP,
   type ActiveSession,
@@ -397,6 +399,9 @@ export default function App() {
   // rather than left standing when you walk into another project.
   const railByProject = useRef(restored.current?.railByProject ?? {})
   const byWorktree = useRef(restored.current?.byWorktree ?? {})
+  // The size each panel kind was last dragged to, so a panel opened fresh
+  // arrives at it rather than at the default. See carrySizes.
+  const sizes = useRef(restored.current?.sizes ?? {})
   // The chat panel you were on before this one (vim's ⌃^). The whole panel, not
   // just an id: it carries the worktree the session lives in, so the jump works
   // even when that chat belongs to another branch than the one selected.
@@ -422,7 +427,11 @@ export default function App() {
    */
   const setLane = useCallback((update: (lane: Lane) => Lane) => {
     setLaneRaw((l) => {
-      const next = update(l)
+      const carried = carrySizes(l, withSession(l, update(l)), sizes.current)
+      sizes.current = carried.sizes
+      return carried.lane
+    })
+    function withSession(l: Lane, next: Lane): Lane {
       const before = sessionKeyOf(l)
       const after = sessionKeyOf(next)
       if (before === after) return next
@@ -440,7 +449,7 @@ export default function App() {
       const by = before ? remember(bySession.current, before, scopedOf(l)) : bySession.current
       bySession.current = by
       return withScoped(next, after ? (by[after] ?? []) : [])
-    })
+    }
   }, [])
   // This mount's identity, for the landing handoff: a remount makes a new one,
   // which is exactly the difference the handoff has to tell apart.
@@ -824,6 +833,7 @@ export default function App() {
       byProject: byProject.current,
       railByProject: railByProject.current,
       byWorktree: byWorktree.current,
+      sizes: sizes.current,
       project,
       worktree: worktrees.currentPath
     })
@@ -1283,6 +1293,8 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
+    // Counted for the "Switch project…" order, most used first.
+    if (projects.current?.path !== path) noteProjectUse(path)
     // Going somewhere on purpose ends the boot restore, which may still be
     // waiting on a remote list and would pull the selection back when it lands.
     landedProject.current = true
@@ -4096,7 +4108,7 @@ function keyTitle(command: string, arg?: string): string | null {
 
 function paletteItems(projects: ReturnType<typeof useProjects>): PaletteItem[] {
   return [
-    ...projects.all.map((p) => ({
+    ...byUsage(projects.all, (p) => p.path).map((p) => ({
       id: p.path,
       title: p.name,
       detail: p.home ? 'home' : p.group,

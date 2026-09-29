@@ -115,6 +115,49 @@ export interface LaneMemory {
    * here", which is a missing key and gets the launcher for a different reason.
    */
   byWorktree: Record<string, string | null>
+  /** The size each kind was last dragged to — see carrySizes. */
+  sizes: Sizes
+}
+
+/** A dragged size per panel kind: `width` standing in the lane, `height` docked. */
+export type Sizes = Record<string, { width?: number; height?: number }>
+
+/**
+ * Make a dragged size belong to the KIND, not to the one panel you dragged.
+ *
+ * A size lives on its panel, and panels come and go: a reopened terminal, the
+ * changes list of another session and a chat after a project switch are all
+ * new panels, and each arrived at its kind's default — so a width you set
+ * seemed never to stick. Every lane change passes through here: a panel whose
+ * size moved teaches its kind the new one (or forgets it, on a reset), and a
+ * panel entering the lane takes what its kind was taught.
+ */
+export function carrySizes(prev: Lane, next: Lane, sizes: Sizes): { lane: Lane; sizes: Sizes } {
+  const before = new Map(prev.panels.map((p) => [p.id, p]))
+  let learned = sizes
+  const learn = (kind: string, dim: 'width' | 'height', value: number | undefined): void => {
+    const size = { ...learned[kind], [dim]: value }
+    if (value === undefined) delete size[dim]
+    learned = { ...learned, [kind]: size }
+    if (size.width === undefined && size.height === undefined) delete learned[kind]
+  }
+  for (const p of next.panels) {
+    const was = before.get(p.id)
+    if (!was) continue
+    if (was.width !== p.width) learn(p.kind, 'width', p.width)
+    if (was.height !== p.height) learn(p.kind, 'height', p.height)
+  }
+  let moved = false
+  const panels = next.panels.map((p) => {
+    const size = before.has(p.id) ? undefined : learned[p.kind]
+    if (!size) return p
+    const width = size.width ?? p.width
+    const height = size.height ?? p.height
+    if (width === p.width && height === p.height) return p
+    moved = true
+    return { ...p, width, height }
+  })
+  return { lane: moved ? { ...next, panels } : next, sizes: learned }
 }
 
 /**
@@ -330,7 +373,8 @@ export function load(): LaneMemory | null {
       bySession: parsed.bySession ?? {},
       byProject: parsed.byProject ?? {},
       railByProject: parsed.railByProject ?? {},
-      byWorktree: parsed.byWorktree ?? {}
+      byWorktree: parsed.byWorktree ?? {},
+      sizes: parsed.sizes ?? {}
     }
   } catch {
     // A corrupt lane is not worth a broken launch — start fresh.
