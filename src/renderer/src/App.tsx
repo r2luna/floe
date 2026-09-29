@@ -801,6 +801,11 @@ export default function App() {
         lane.focus
       )
   const tight = crowded.size > 0
+  // Whether some visible column already takes the lane's leftover width.
+  const laneGrows = columns.some(([{ panel: head }]) => {
+    const spec = KINDS[head.kind as PanelKind]
+    return head.width === undefined && 'grow' in spec && !!spec.grow && !crowded.has(head.id)
+  })
   useEffect(() => {
     const by = sessionKey ? remember(bySession.current, sessionKey, scopedOf(lane)) : bySession.current
     bySession.current = by
@@ -3221,6 +3226,11 @@ export default function App() {
           {columns.map((column) => {
             const [{ panel: head }] = column
             const headSpec = KINDS[head.kind as PanelKind]
+            // A dragged width is kept over growing only while something else
+            // takes the leftover. With nothing growing beside it, a sized grow
+            // panel (the chat or launcher left alone) would sit at that width
+            // with empty lane beside it, so it takes the room after all.
+            const fill = head.width !== undefined && 'grow' in headSpec && headSpec.grow && !laneGrows
             // A growing column grows wherever it sits, not only at the lane's
             // end: with a query or a lane panel open beside the chat, stopping
             // the chat from growing left a strip of empty lane on the right.
@@ -3260,6 +3270,7 @@ export default function App() {
                 // A width you dragged to is a width you asked for: it wins over
                 // growing, or the lane would take it straight back.
                 data-sized={head.width !== undefined || undefined}
+                data-fill={fill || undefined}
                 data-grow={
                   (head.width === undefined && 'grow' in headSpec && headSpec.grow) || undefined
                 }
@@ -3283,6 +3294,7 @@ export default function App() {
                       // tight width, so the first drag would not follow the
                       // pointer. React sets the same attributes on commit.
                       el.dataset.sized = 'true'
+                      delete el.dataset.fill
                       delete el.dataset.grow
                       delete el.dataset.tight
                       return el.style.setProperty('--panel-w', `${Math.round(next)}px`)

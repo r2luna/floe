@@ -365,6 +365,13 @@ button {
   flex: var(--panel-grow, 1) 1 var(--panel-w, 380px);
 }
 
+/* A sized grow column with nothing growing beside it (App's `fill`): the width
+   you dragged to stays its floor, and the leftover it would otherwise leave
+   empty is its own. */
+.lane-col[data-fill] {
+  flex: var(--panel-grow, 1) 1 var(--panel-w);
+}
+
 /* A crowded lane (see crowdedOut in lane.ts): the lists left of the chat step
    aside, and the chat stops growing at its tight width so the panels right of
    it take the room. */
@@ -413,12 +420,35 @@ button {
 }
 
 .panel-head {
+  container: panel-head / inline-size;
   display: flex;
   align-items: center;
   gap: 7px;
   height: var(--head-h);
   padding-inline: 12px;
   border-bottom: 1px solid var(--line-soft);
+}
+
+/* Every header item is flex: none, so a narrow chat pushed its buttons past the
+   panel edge. The extras step aside instead, least useful first: the context
+   bar (its number stays), the changes +/- (the count stays), then the meter. */
+@container panel-head (max-width: 460px) {
+  .ctx-bar {
+    display: none;
+  }
+}
+
+@container panel-head (max-width: 340px) {
+  .head-changes .stat-add,
+  .head-changes .stat-del {
+    display: none;
+  }
+}
+
+@container panel-head (max-width: 300px) {
+  .ctx-wrap {
+    display: none;
+  }
 }
 
 .panel-icon {
@@ -3294,14 +3324,23 @@ button {
    same left margin as a real entry and carries their nick colour. */
 .irc-typing {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 2px 6px;
+  /* Each piece wraps as a whole: a narrow panel otherwise squeezed every flex
+     item into its own column ("is / typing", "(10m 37s · / tokens)"). */
+  white-space: nowrap;
   margin-top: 12px;
   color: var(--dim);
 }
 
 .irc-typing .irc-nick {
   font-weight: 700;
+}
+
+/* The status is free text and can outgrow any panel: it wraps onto its own line. */
+.irc-typing .irc-status {
+  white-space: normal;
 }
 
 /* The spinner sits in a sentence here, not in a row's mark column, so it takes
