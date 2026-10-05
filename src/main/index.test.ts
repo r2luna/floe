@@ -426,6 +426,7 @@ const CHANNELS = [
   'app:getLoginItem',
   'app:setLoginItem',
   'user:name',
+  'presence:ping',
   'settings:probe',
   'settings:getSystemPrompt',
   'settings:setSystemPrompt',

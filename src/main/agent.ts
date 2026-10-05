@@ -227,6 +227,33 @@ export function sendAgentEvent(win: BrowserWindow, key: string, event: AgentEven
   const ends = event.kind === 'done' || event.kind === 'error'
   const colony = ends && colonySessionIds().has(getCreatedSession(key)?.id ?? key)
   if (!win.isDestroyed()) win.webContents.send('agent:event', { key, event, seq, ...(colony && { colony }) })
+  notifyTaps(key, event)
+}
+
+type EventTap = (key: string, event: AgentEvent) => void
+const taps: EventTap[] = []
+
+/**
+ * Watch every agent event, whichever runtime sent it — the Telegram bot's feed.
+ * Returns the unsubscribe.
+ */
+export function tapAgentEvents(fn: EventTap): () => void {
+  taps.push(fn)
+  return () => {
+    const i = taps.indexOf(fn)
+    if (i >= 0) taps.splice(i, 1)
+  }
+}
+
+// A tap that throws must not cost the window its event: the send already went.
+function notifyTaps(key: string, event: AgentEvent): void {
+  for (const tap of taps) {
+    try {
+      tap(key, event)
+    } catch (e) {
+      log('agent-tap-failed', { key, error: (e as Error).message })
+    }
+  }
 }
 
 // What a conn-less runtime has said this turn, for waitForTurn to resolve with.

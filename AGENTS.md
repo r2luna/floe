@@ -80,3 +80,4 @@ Buttons use the **outline-chip pattern** (never solid fills) and every tinted el
 - [docs/http-client.md](docs/http-client.md) — embedded `.http` client.
 - [docs/draw.md](docs/draw.md) — the Excalidraw panel; read before touching `src/main/draw/` (two writers share one file).
 - [docs/web.md](docs/web.md) — the browser build (`floe.pinguim.io`): `src/web` + `src/main/webServer.ts`.
+- [docs/telegram.md](docs/telegram.md) — the per-machine Telegram bot: setup, the away gate (`presence:ping`), reply routing.
