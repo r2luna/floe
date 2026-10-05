@@ -1,0 +1,136 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions: current vs proposed</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+  .col { flex: 0 0 360px; display: flex; flex-direction: column; gap: 8px; }
+  .cap { color: var(--dim); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; }
+  .notes b { color: var(--text); font-weight: normal; }
+  .panel { display: flex; flex-direction: column; background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); }
+  .panel-body { padding: 8px 0; }
+
+  .group-label { padding: 4px 12px; color: var(--dim); font-size: 11px; letter-spacing: 0.08em; }
+  .group-label[data-ask] { color: var(--accent); }
+  .group-label .n { color: var(--dimmest); letter-spacing: 0; }
+
+  .sx { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 5px 12px; border: 0; border-left: 2px solid transparent;
+        background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
+  .sx:hover { background: var(--hover, rgba(255,255,255,0.04)); }
+  .sx-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .sx-bot { display: flex; align-items: center; gap: 6px; min-width: 0; padding-left: 14px; color: var(--dimmest); }
+  .sx-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-age { flex: none; color: var(--dim); }
+  .sx-where { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sx-sep { color: var(--line); }
+  .sx-host { flex: none; padding: 0 5px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--dim); font-size: 10px; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .mark-ask { flex: none; display: grid; place-items: center; width: 6px; height: 6px; color: var(--accent); font-size: 11px; font-weight: 700; }
+  .spin { flex: none; display: grid; place-items: center; width: 6px; height: 6px; color: var(--dim); font-size: 11px; }
+
+  /* proposed only */
+  .v2 .sx[data-open] { border-left-color: var(--accent); }
+  .v2 .sx[data-open] .sx-name { color: var(--text-strong); }
+  .v2 .sx[data-unread] .sx-name { color: var(--text-strong); }
+  .v2 .sx[data-old] .sx-name { color: var(--dim); }
+  .v2 .rule { height: 1px; margin: 6px 12px; background: var(--line-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== CURRENT: what the real 10 rows render as today ===== -->
+  <div class="col">
+    <div class="cap">CURRENT · real data, 2026-09-29</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <div class="group-label">WORKING <span class="n">1</span></div>
+        <button class="sx"><span class="sx-top"><span class="spin">⠹</span><span class="sx-name">pode analisar o painel de active sessions.. ainda está clunk</span><span class="sx-age">now</span></span>
+          <span class="sx-bot"><span class="sx-where">floe <span class="sx-sep">/</span> master</span></span></button>
+
+        <div class="group-label">RECENT <span class="n">2</span></div>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">Okay, I got Jev API key. I'm gonna give it to you so we can</span><span class="sx-age">now</span></span>
+          <span class="sx-bot"><span class="sx-where">floe <span class="sx-sep">/</span> jev</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: presentation</span><span class="sx-age">1m</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+
+        <div class="group-label">IDLE <span class="n">7</span></div>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: poc</span><span class="sx-age">23m</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">pga os logs de erros de produção mais recentes e ssh ds.os e</span><span class="sx-age">48m</span></span>
+          <span class="sx-bot"><span class="sx-where">os <span class="sx-sep">/</span> develop</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">o que temos de teste skipped no projeot?</span><span class="sx-age">1h</span></span>
+          <span class="sx-bot"><span class="sx-where">os <span class="sx-sep">/</span> develop</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: skills</span><span class="sx-age">1h</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">Okay, so let's add a new feature or a new enhancement to the</span><span class="sx-age">6h</span></span>
+          <span class="sx-bot"><span class="sx-where">os <span class="sx-sep">/</span> develop</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">no replan image 01 .. eu ndnao consigo ver o nome da pessoa</span><span class="sx-age">6h</span></span>
+          <span class="sx-bot"><span class="sx-where">os <span class="sx-sep">/</span> develop</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: rename</span><span class="sx-age">15h</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li>3 headers for 10 rows. RECENT vs IDLE is a clock cutoff, not a state.</li>
+      <li>Every stopped row has the same hollow dot. "Finished, not read" is invisible.</li>
+      <li>The chat you are in sits at the top as WORKING.</li>
+      <li>"/ master", "/ develop" repeated on 5 rows says nothing.</li>
+    </ol>
+  </div>
+
+  <!-- ===== PROPOSED ===== -->
+  <div class="col v2">
+    <div class="cap">PROPOSED · same rows (unread on 2 is illustrative)</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <div class="group-label" data-ask>NEEDS YOU <span class="n">2</span></div>
+        <button class="sx" data-unread><span class="sx-top"><span class="dot dot-unread"></span><span class="sx-name">Okay, I got Jev API key. I'm gonna give it to you so we can…</span><span class="sx-age">now</span></span>
+          <span class="sx-bot"><span class="sx-where">floe <span class="sx-sep">/</span> jev</span></span></button>
+        <button class="sx" data-unread><span class="sx-top"><span class="dot dot-unread"></span><span class="sx-name">squadra: presentation</span><span class="sx-age">1m</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+
+        <div class="rule"></div>
+
+        <button class="sx" data-open><span class="sx-top"><span class="spin">⠹</span><span class="sx-name">pode analisar o painel de active sessions.. ainda está clunk…</span><span class="sx-age">now</span></span>
+          <span class="sx-bot"><span class="sx-where">floe</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: poc</span><span class="sx-age">23m</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+        <button class="sx"><span class="sx-top"><span class="dot"></span><span class="sx-name">pga os logs de erros de produção mais recentes e ssh ds.os e…</span><span class="sx-age">48m</span></span>
+          <span class="sx-bot"><span class="sx-where">os</span></span></button>
+        <button class="sx" data-old><span class="sx-top"><span class="dot"></span><span class="sx-name">o que temos de teste skipped no projeot?</span><span class="sx-age">1h</span></span>
+          <span class="sx-bot"><span class="sx-where">os</span></span></button>
+        <button class="sx" data-old><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: skills</span><span class="sx-age">1h</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+        <button class="sx" data-old><span class="sx-top"><span class="dot"></span><span class="sx-name">Okay, so let's add a new feature or a new enhancement to the…</span><span class="sx-age">6h</span></span>
+          <span class="sx-bot"><span class="sx-where">os</span></span></button>
+        <button class="sx" data-old><span class="sx-top"><span class="dot"></span><span class="sx-name">no replan image 01 .. eu ndnao consigo ver o nome da pessoa…</span><span class="sx-age">6h</span></span>
+          <span class="sx-bot"><span class="sx-where">os</span></span></button>
+        <button class="sx" data-old><span class="sx-top"><span class="dot"></span><span class="sx-name">squadra: rename</span><span class="sx-age">15h</span></span>
+          <span class="sx-bot"><span class="sx-where">00.life-os <span class="sx-sep">/</span> devsquad-new-flow</span></span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>One header max.</b> NEEDS YOU = blocked on you + finished-unread. Everything else is one list by recency.</li>
+      <li><b>State lives in the mark:</b> ? blocked · filled dot unread · spinner working · hollow dot seen.</li>
+      <li><b>Open chat</b> gets the accent edge instead of a status band.</li>
+      <li><b>Branch only on worktrees.</b> Main checkouts show the project alone.</li>
+      <li><b>Older than 1h dims</b> instead of getting its own band.</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>

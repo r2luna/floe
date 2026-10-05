@@ -1,0 +1,148 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions: three directions</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .wrap { display: flex; gap: 16px; padding: 16px; align-items: flex-start; }
+  .col { flex: 0 0 360px; width: 360px; max-width: 360px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .cap { color: var(--text-strong); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; }
+  .panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); }
+  .panel-body { padding: 6px 0; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .ask { flex: none; width: 6px; display: grid; place-items: center; color: var(--accent); font-size: 11px; font-weight: 700; }
+  .spin { flex: none; width: 6px; display: grid; place-items: center; color: var(--dim); font-size: 11px; }
+
+  /* one-line row, shared by A and B */
+  .r { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; border: 0; border-left: 2px solid transparent;
+       background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; min-width: 0; }
+  .r:hover { background: rgba(255,255,255,0.04); }
+  .r[data-open] { border-left-color: var(--accent); }
+  .r[data-open] .t, .r[data-unread] .t, .r[data-ask] .t { color: var(--text-strong); }
+  .r[data-old] .t { color: var(--dim); }
+  .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .age { flex: none; color: var(--dimmest); width: 26px; text-align: right; }
+  .proj { flex: none; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmest); }
+
+  /* A: project heads */
+  .ph { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px 2px; color: var(--dim); }
+  .ph:first-child { padding-top: 2px; }
+  .ph .pn { color: var(--text); }
+  .ph .br { color: var(--dimmest); }
+  .ph .need { margin-left: auto; color: var(--accent); font-size: 11px; }
+
+  /* C: attention cards + compact rest */
+  .card { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 8px 12px; border: 0; border-bottom: 1px solid var(--line-soft);
+          background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; }
+  .card:hover { background: rgba(255,255,255,0.04); }
+  .card .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .card .t { color: var(--text-strong); }
+  .card .say { padding-left: 14px; color: var(--dim); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .say[data-ask] { color: var(--accent); }
+  .card .where { padding-left: 14px; color: var(--dimmest); font-size: 11px; }
+  .more { padding: 8px 12px 2px; color: var(--dimmest); font-size: 11px; letter-spacing: 0.08em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== A: grouped by project ===== -->
+  <div class="col">
+    <div class="cap">A · GROUPED BY PROJECT</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions.. ainda está clunk…</span><span class="age">now</span></button>
+        <button class="r" data-unread><span class="dot dot-unread"></span><span class="t">jev · Okay, I got Jev API key. I'm gonna give it to you…</span><span class="age">now</span></button>
+
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span><span class="need">1 unread</span></div>
+        <button class="r" data-unread><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="age">1m</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span><span class="age">23m</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: skills</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: rename</span><span class="age">15h</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">pga os logs de erros de produção mais recentes e ssh ds.os e…</span><span class="age">48m</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new enhancement to the…</span><span class="age">6h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver o nome da pessoa…</span><span class="age">6h</span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li>Project said once. Rows are one line.</li>
+      <li>Projects ordered by their newest session.</li>
+      <li>Answers "what's going on in each project".</li>
+    </ol>
+  </div>
+
+  <!-- ===== B: flat one-line list ===== -->
+  <div class="col">
+    <div class="cap">B · FLAT, ONE LINE PER SESSION</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <button class="r" data-unread><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key. I'm gonna give it to you…</span><span class="proj">floe·jev</span><span class="age">now</span></button>
+        <button class="r" data-unread><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="proj">life-os</span><span class="age">1m</span></button>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions..</span><span class="proj">floe</span><span class="age">now</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span><span class="proj">life-os</span><span class="age">23m</span></button>
+        <button class="r"><span class="dot"></span><span class="t">pga os logs de erros de produção mais rece…</span><span class="proj">os</span><span class="age">48m</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="proj">os</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: skills</span><span class="proj">life-os</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="proj">os</span><span class="age">6h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="proj">os</span><span class="age">6h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: rename</span><span class="proj">life-os</span><span class="age">15h</span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li>No headers at all. Half the height of today.</li>
+      <li>Attention rows sort to the top. The mark says why.</li>
+      <li>Project is a dim right-hand tag.</li>
+    </ol>
+  </div>
+
+  <!-- ===== C: attention cards + compact rest ===== -->
+  <div class="col">
+    <div class="cap">C · WHAT IT LAST SAID</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <button class="card"><span class="top"><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key…</span><span class="age">now</span></span>
+          <span class="say">Key saved to .env as JEV_API_KEY. Routing test passes against the live endpoint. Ready to wire the panel.</span>
+          <span class="where">floe · jev</span></button>
+        <button class="card"><span class="top"><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="age">1m</span></span>
+          <span class="say">Slides 1–8 drafted in presentation.md. Slide 5 still needs the Q3 numbers from you.</span>
+          <span class="where">00.life-os · devsquad-new-flow</span></button>
+        <button class="card"><span class="top"><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions…</span><span class="age">now</span></span>
+          <span class="say">Writing mocks/active-sessions-v3.html…</span>
+          <span class="where">floe</span></button>
+
+        <div class="more">EARLIER</div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span><span class="proj">life-os</span><span class="age">23m</span></button>
+        <button class="r"><span class="dot"></span><span class="t">pga os logs de erros de produção mais rece…</span><span class="proj">os</span><span class="age">48m</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="proj">os</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: skills</span><span class="proj">life-os</span><span class="age">1h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="proj">os</span><span class="age">6h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="proj">os</span><span class="age">6h</span></button>
+        <button class="r" data-old><span class="dot"></span><span class="t">squadra: rename</span><span class="proj">life-os</span><span class="age">15h</span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li>Sessions that need you or are running show the agent's last line. The first prompt doesn't tell you what to do next.</li>
+      <li>Everything else collapses to B's one-liners.</li>
+      <li>Needs a backend change: return the last assistant line with each row.</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>

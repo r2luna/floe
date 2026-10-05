@@ -1,0 +1,112 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions: a switcher that never moves</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .wrap { display: flex; gap: 24px; padding: 16px; align-items: flex-start; }
+  .col { flex: 0 0 340px; width: 340px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .cap { color: var(--text-strong); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; }
+  .panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); }
+  .panel-body { padding: 4px 0 6px; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .ask { flex: none; width: 6px; display: grid; place-items: center; color: var(--accent); font-size: 11px; font-weight: 700; }
+  .spin { flex: none; width: 6px; display: grid; place-items: center; color: var(--dim); font-size: 11px; }
+
+  .ph { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px 2px; }
+  .ph .pn { color: var(--dim); }
+  .ph .br { color: var(--dimmest); }
+
+  .r { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; border: 0; border-left: 2px solid transparent;
+       background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; min-width: 0; }
+  .r:hover { background: rgba(255,255,255,0.04); }
+  .r[data-open] { border-left-color: var(--accent); }
+  .r[data-open] .t, .r[data-hot] .t { color: var(--text-strong); }
+  .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .k { flex: none; width: 10px; color: var(--dimmest); text-align: right; font-size: 11px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--dim); font-size: 11px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== snapshot 1 ===== -->
+  <div class="col">
+    <div class="cap">NOW</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">9</span></div>
+      <div class="panel-body">
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span></div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: skills</span><span class="k">1</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span><span class="k">2</span></button>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="k">3</span></button>
+
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">jev · Okay, I got Jev API key…</span><span class="k">4</span></button>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions…</span><span class="k">5</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="k">6</span></button>
+        <button class="r"><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="k">7</span></button>
+        <button class="r"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="k">8</span></button>
+        <button class="r"><span class="dot"></span><span class="t">pga os logs de erros de produção mais rece…</span><span class="k">9</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== snapshot 2: same list ten minutes later ===== -->
+  <div class="col">
+    <div class="cap">10 MINUTES LATER · same positions</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">9</span></div>
+      <div class="panel-body">
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span></div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: skills</span><span class="k">1</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span><span class="k">2</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: presentation</span><span class="k">3</span></button>
+
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">jev · Okay, I got Jev API key…</span><span class="k">4</span></button>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">pode analisar o painel de active sessions…</span><span class="k">5</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="k">6</span></button>
+        <button class="r"><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="k">7</span></button>
+        <button class="r"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="k">8</span></button>
+        <button class="r" data-hot><span class="ask">?</span><span class="t">pga os logs de erros de produção mais rece…</span><span class="k">9</span></button>
+      </div>
+    </div>
+    <div class="legend">
+      <span><span class="ask">?</span> waiting on you</span>
+      <span><span class="dot dot-unread"></span> done, unread</span>
+      <span><span class="spin">⠹</span> working</span>
+      <span><span class="dot"></span> seen</span>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">RULES</div>
+    <ol class="notes">
+      <li>A row's position never depends on time or status. Only the mark changes.</li>
+      <li>Projects in alphabetical order. Inside a project, chats in the order they were created, new ones at the bottom, like tabs.</li>
+      <li>No ages, no status bands. Those are what made rows jump.</li>
+      <li>A chat is listed while it has been touched in the last 12h. Rows only leave from where they are, they never reorder.</li>
+      <li>Number on the right = position, so it can become a jump key later.</li>
+      <li>Accent edge = the chat open in the lane.</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>
