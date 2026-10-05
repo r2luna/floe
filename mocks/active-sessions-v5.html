@@ -1,0 +1,138 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions: favorites on top</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .wrap { display: flex; gap: 24px; padding: 16px; align-items: flex-start; }
+  .col { flex: 0 0 340px; width: 340px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .cap { color: var(--text-strong); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; }
+  .notes b { color: var(--text); font-weight: normal; }
+  .panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); }
+  .panel-body { padding: 4px 0 6px; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .ask { flex: none; width: 6px; display: grid; place-items: center; color: var(--accent); font-size: 11px; font-weight: 700; }
+  .spin { flex: none; width: 6px; display: grid; place-items: center; color: var(--dim); font-size: 11px; }
+
+  .ph { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px 2px; }
+  .ph .pn { color: var(--dim); }
+  .ph .br { color: var(--dimmest); }
+  .ph[data-fav] .pn { color: var(--dim); letter-spacing: 0.08em; font-size: 11px; }
+  .sep { height: 1px; margin: 6px 12px 0; background: var(--line-soft); }
+
+  .r { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; border: 0; border-left: 2px solid transparent;
+       background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; min-width: 0; }
+  .r[data-hover], .r:hover { background: rgba(255,255,255,0.04); }
+  .r[data-focus] { background: rgba(255,255,255,0.07); }
+  .r[data-open] { border-left-color: var(--accent); }
+  .r[data-open] .t, .r[data-hot] .t { color: var(--text-strong); }
+  .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { flex: none; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmest); }
+  .fav { flex: none; display: grid; place-items: center; color: var(--accent); }
+  .fav svg { display: block; transform: translateY(3px); }
+  .x { flex: none; color: var(--dim); width: 10px; text-align: center; }
+  .k { flex: none; width: 10px; color: var(--dimmest); text-align: right; font-size: 11px; }
+
+  .keybar { display: flex; gap: 14px; padding: 5px 11px; border-top: 1px solid var(--line-soft); color: var(--dimmest); font-size: 11px; }
+  .keybar b { color: var(--dim); font-weight: normal; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--dim); font-size: 11px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="bm" viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+</svg>
+<div class="wrap">
+
+  <!-- ===== before: cursor on "squadra: poc" ===== -->
+  <div class="col">
+    <div class="cap">CURSOR ON "squadra: poc" · PRESS f</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">9</span></div>
+      <div class="panel-body">
+        <div class="ph" data-fav><span class="pn">FAVORITES</span></div>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions…</span><span class="tag">floe</span><span class="fav"><svg width="11" height="11"><use href="#bm"/></svg></span><span class="k">1</span></button>
+        <div class="sep"></div>
+
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span></div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: skills</span><span class="k">2</span></button>
+        <button class="r" data-focus><span class="dot"></span><span class="t">squadra: poc</span><span class="k">3</span></button>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="k">4</span></button>
+
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key…</span><span class="tag">jev</span><span class="k">5</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="k">6</span></button>
+        <button class="r" data-hover><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="x">×</span><span class="k">7</span></button>
+        <button class="r"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="k">8</span></button>
+        <button class="r"><span class="dot"></span><span class="t">pga os logs de erros de produção mais rece…</span><span class="k">9</span></button>
+      </div>
+      <div class="keybar"><span><b>f</b> favorite</span><span><b>x</b> remove</span><span><b>↵</b> open</span></div>
+    </div>
+    <ol class="notes">
+      <li>The row under the mouse shows <b>×</b> (remove from the list). The keyboard equivalent is <b>x</b>.</li>
+    </ol>
+  </div>
+
+  <!-- ===== after ===== -->
+  <div class="col">
+    <div class="cap">AFTER f</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">9</span></div>
+      <div class="panel-body">
+        <div class="ph" data-fav><span class="pn">FAVORITES</span></div>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions…</span><span class="tag">floe</span><span class="fav"><svg width="11" height="11"><use href="#bm"/></svg></span><span class="k">1</span></button>
+        <button class="r" data-focus><span class="dot"></span><span class="t">squadra: poc</span><span class="tag">00.life-os</span><span class="fav"><svg width="11" height="11"><use href="#bm"/></svg></span><span class="k">2</span></button>
+        <div class="sep"></div>
+
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span></div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: skills</span><span class="k">3</span></button>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">squadra: presentation</span><span class="k">4</span></button>
+
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key…</span><span class="tag">jev</span><span class="k">5</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver…</span><span class="k">6</span></button>
+        <button class="r"><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new…</span><span class="k">7</span></button>
+        <button class="r"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span><span class="k">8</span></button>
+        <button class="r"><span class="ask">?</span><span class="t">pga os logs de erros de produção mais rece…</span><span class="k">9</span></button>
+      </div>
+      <div class="keybar"><span><b>f</b> unfavorite</span><span><b>x</b> remove</span><span><b>↵</b> open</span></div>
+    </div>
+    <div class="legend">
+      <span><span class="ask">?</span> waiting on you</span>
+      <span><span class="dot dot-unread"></span> done, unread</span>
+      <span><span class="spin">⠹</span> working</span>
+      <span><span class="dot"></span> seen</span>
+      <span><span class="fav"><svg width="11" height="11"><use href="#bm"/></svg></span> favorite</span>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap">RULES</div>
+    <ol class="notes">
+      <li><b>Favorites first.</b> They stay in the order you starred them. A favorite leaves its project group, so it never shows twice, and carries its project as a tag.</li>
+      <li><b>f</b> toggles, the same key and bookmark mark as the skills panel. The mark shows only on starred rows. Unstarring puts the row back in its project group.</li>
+      <li><b>Favorites never expire.</b> They leave only when you unstar them, remove them, or close the chat.</li>
+      <li><b>Everything else:</b> projects A→Z. Inside a project, chats in creation order. Position never depends on time or status.</li>
+      <li><b>Joins</b> when you send a message or create the chat. <b>Leaves</b> when you close it, remove it (× / x), or after 24h idle. That cleanup runs only while the panel is off screen.</li>
+      <li>A chat <b>waiting on you</b> shows even if it isn't in your list. It goes where its project group would put it.</li>
+      <li>Numbers = position, for a jump key later.</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>
