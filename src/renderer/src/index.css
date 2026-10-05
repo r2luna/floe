@@ -1115,71 +1115,85 @@ button {
 }
 
 /* --- active sessions ------------------------------------------------------
-   The one list that spans machines. Its row is two lines rather than the flat
-   `.row` every other panel uses, because it answers three questions the sidebar
-   never has to — which machine, which project, which branch — and on one line
-   those three ellipsis away the title, which is the part you actually read. */
+   A switcher, so one flat line per chat: the mark, the title, and a dim tag
+   only when the group header does not already say where it lives. */
 
-.sx {
+.ax {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 1px;
-  /* Full width, the `.row` rule: bleeds through the body's 8px inset. */
+  align-items: center;
+  gap: 8px;
+  /* Full width, the `.row` rule: bleeds through the body's 8px inset. The
+     left border is the open-chat edge, so the padding gives its 2px back. */
   width: calc(100% + 16px);
   margin-inline: -8px;
-  padding: 5px 12px;
+  padding: 3px 12px 3px 10px;
+  border-left: 2px solid transparent;
   border-radius: 0;
   text-align: left;
 }
 
-.sx-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+/* The chat the lane has open: the accent edge, and the title at full strength. */
+.ax[data-open] {
+  border-left-color: var(--accent);
 }
 
-/* Indented under the title by exactly the mark's width plus its gap, so the
-   two lines read as one row with a hanging glyph rather than as two rows. */
-.sx-bot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.ax[data-open] .ax-name {
+  color: var(--text-strong);
+}
+
+.ax-name {
+  flex: 1;
   min-width: 0;
-  padding-left: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ax-tag {
+  flex: none;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--dimmest);
 }
 
-.sx-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* Remove, under the pointer only — `x` is the keyboard's way. Hidden rather
+   than unmounted so the title never reflows as the pointer passes. */
+.ax-x {
+  flex: none;
+  width: 10px;
+  text-align: center;
+  color: var(--dim);
+  visibility: hidden;
 }
 
-.sx-age {
-  flex: none;
+.ax:hover .ax-x {
+  visibility: visible;
+}
+
+.ax-x:hover {
+  color: var(--text-strong);
+}
+
+/* The project head: dim name, dimmer branch when the whole group is on one. */
+.ax-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-inline: -8px;
+  padding: 8px 12px 2px;
   color: var(--dim);
 }
 
-.sx-where {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.ax-branch {
+  color: var(--dimmest);
 }
 
-.sx-sep {
-  color: var(--line);
-}
-
-/* The chat the lane already has open. Same tint the sidebar marks it with —
-   the two lists must not disagree about which conversation you are in. */
-.sx[data-active] .sx-name {
-  color: var(--text-strong);
+/* Favourites end on a hairline, so the project groups read as a second list. */
+.ax-group[data-fav] {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 /* The machine. Smaller than `.badge` because it sits on the dim second line and
@@ -1191,12 +1205,6 @@ button {
   border-radius: var(--radius);
   color: var(--dim);
   font-size: 10px;
-}
-
-/* The band heads. NEEDS YOU takes the accent — the same warm mark the `?` on
-   its rows uses, and `--accent` flips with the theme, so no light override. */
-.group-label[data-ask] {
-  color: var(--accent);
 }
 
 .group-label .group-n {

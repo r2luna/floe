@@ -141,8 +141,8 @@ stay free everywhere else.
 \`⌘K B\` is the colony board — b for board, because \`⌘K C\` is already the
 commands panel and the two are the pair you would most easily confuse.
 
-\`⌘A\` is the active panel: every machine's most recent sessions, so a question
-waiting for you in a project you are not in is one key away. It gets a bare
+\`⌘A\` is the active panel: the chats you are working on, on every machine, so
+a question waiting for you in a project you are not in is one key away. It gets a bare
 chord rather than a \`⌘K\` one because it is a place you go BETWEEN things, like
 the two lists it sits between — not something you set up once.
 
@@ -257,6 +257,22 @@ On a directory it does nothing: the tree walks folders with \`l\` and \`.\`, and
 handing one to a file manager would be leaving the app to do what the panel
 already does.`,
     binds: [{ key: 'o', command: 'file.open', when: 'panel in ["files", "changes"]' }]
+  },
+  {
+    title: 'Active',
+    doc: `The active panel lists the chats you are working on. A chat joins when you
+send to it, and leaves when it is closed, removed, or idle for a day. Rows never
+move on their own: favourites on top, then projects A→Z, chats in the order
+they were created.
+
+\`f\` stars the chat under the cursor, the same key and mark as the skills
+panel. A favourite stays on top until you unstar it. \`x\` takes the chat off
+the list, which the \`×\` on a hovered row does too. A chat waiting on you
+shows anyway.`,
+    binds: [
+      { key: 'f', command: 'active.favorite', when: 'panel == "active"' },
+      { key: 'x', command: 'active.remove', when: 'panel == "active"' }
+    ]
   },
   {
     title: 'Skills',

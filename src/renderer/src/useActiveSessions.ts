@@ -1,21 +1,29 @@
-// The `active` panel's data: the most recent sessions across every project on
-// every attached machine, in one list.
+// The `active` panel's data: every attached machine's candidates for the list,
+// in one union, plus the membership that decides which of them show.
 //
 // Same shape as the projects union (backends.ts) and for the same reason — a
-// machine that is down must not hold the panel blank — but with a step the
-// project list does not need: each machine answers with its OWN top `limit`, and
-// those answers are merged and re-sliced here. That is correct without any
-// coordination, because a machine's own top ten is always a superset of whatever
-// it contributes to the global top ten.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// machine that is down must not hold the panel blank. Each machine answers with
+// its own candidates (sessionIndex.activeSessions) and the answers are merged
+// here; which rows show and where is activeStore.ts's business.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
+  activeSessionsOn,
   backendIds,
   backendLabel,
   backendState,
   currentBackend,
-  LOCAL,
   recentSessionsOn
 } from './backends.ts'
+import {
+  activeState,
+  expire,
+  idsFor,
+  prune,
+  seed,
+  subscribeActive,
+  updateActive,
+  type ActiveState
+} from './activeStore.ts'
 import type { ActiveSession } from '../../shared/types'
 
 /** How long one machine gets to answer. The projects union's number, its reason. */
@@ -51,50 +59,13 @@ export interface OfflineBackend {
 export const unreachable = (state: 'connecting' | 'open' | 'closed'): boolean => state !== 'open'
 
 export interface ActiveSessions {
+  /** Every candidate from every machine — not yet filtered by membership. */
   rows: ActiveSession[]
+  membership: ActiveState
   /** Only this machine being slow blanks the panel — see the projects union. */
   loading: boolean
   offline: OfflineBackend[]
   reload: () => void
-}
-
-/** A session id is unique per machine, not across them — so the row's identity is both. */
-export const rowKey = (s: ActiveSession): string => `${s.backend ?? LOCAL}:${s.sessionId}`
-
-/**
- * The rank each row keeps for as long as it stays on the list.
- *
- * Sorting by the live clock means every touch of a transcript re-orders the
- * panel under the pointer: open a chat, the machine writes, and the row you
- * just left jumps over three others while you read them. The information is
- * real and the movement is not worth it — you already know which session you
- * just touched.
- *
- * So a row is ranked by the activity it had when it ENTERED the list, and keeps
- * that rank until it leaves. New rows still arrive ranked by their real clock,
- * which puts them where they belong, and a row that drops out of the answer
- * loses its stamp — coming back is entering again, and it comes back at the top.
- */
-export function freezeOrder(
-  rows: ActiveSession[],
-  stamps: ReadonlyMap<string, number>
-): Map<string, number> {
-  const next = new Map<string, number>()
-  for (const s of rows) {
-    const key = rowKey(s)
-    next.set(key, stamps.get(key) ?? s.lastActivityAt)
-  }
-  return next
-}
-
-/** Newest first, then cut. The cut is what makes it "the last ten". */
-export function topSessions(
-  rows: ActiveSession[],
-  limit: number,
-  stamps?: ReadonlyMap<string, number>
-): ActiveSession[] {
-  const at = (s: ActiveSession): number => stamps?.get(rowKey(s)) ?? s.lastActivityAt
-  return [...rows].sort((a, b) => at(b) - at(a)).slice(0, Math.max(0, limit))
 }
 
 /**
@@ -123,10 +94,26 @@ export function mergeSlice(
  */
 let lastRows: ActiveSession[] = []
 let lastOffline: OfflineBackend[] = []
-/** Ranks outlive the mount for the same reason: a remount must not re-sort. */
-let ranks: ReadonlyMap<string, number> = new Map()
 
-export function useActiveSessions(limit = 10): ActiveSessions {
+/** How many rows a daemon too old for `sessions:active` is asked for instead. */
+const FALLBACK_LIMIT = 50
+
+/**
+ * One machine's candidates. A daemon older than this desktop has no
+ * `sessions:active`; it gets the old recent-sessions read, and `full: false`
+ * says the answer cannot tell a closed chat from one it just did not list.
+ */
+async function candidatesOn(id: string, ids: string[]): Promise<{ slice: ActiveSession[]; full: boolean }> {
+  try {
+    return { slice: await activeSessionsOn(id, ids), full: true }
+  } catch (err) {
+    if (unreachable(backendState(id))) throw err
+    return { slice: await recentSessionsOn(id, FALLBACK_LIMIT), full: false }
+  }
+}
+
+export function useActiveSessions(): ActiveSessions {
+  const membership = useSyncExternalStore(subscribeActive, activeState)
   const [rows, setRows] = useState<ActiveSession[]>(lastRows)
   const [offline, setOffline] = useState<OfflineBackend[]>(lastOffline)
   const [pending, setPending] = useState<string[]>(() => backendIds())
@@ -142,6 +129,20 @@ export function useActiveSessions(limit = 10): ActiveSessions {
   // question. Its rows are still true, but which load they belong to decides
   // whether "pending" and "offline" are still about them.
   const gen = useRef(0)
+  // The machines whose 24h sweep this mount already ran. The sweep only runs
+  // on rows that are not on screen: at mount for the machines whose rows are
+  // cached (that is the moment before they are painted), and on the first
+  // answer for the rest (nothing of theirs was painted before it).
+  const swept = useRef(new Set<string>())
+  useLayoutEffect(() => {
+    const now = Date.now()
+    for (const id of new Set(lastRows.map((s) => s.backend ?? ''))) {
+      if (!id) continue
+      const mine = lastRows.filter((s) => s.backend === id)
+      updateActive((st) => expire(st, id, mine, now))
+      swept.current.add(id)
+    }
+  }, [])
 
   const load = useCallback(() => {
     if (busy.current) {
@@ -169,11 +170,20 @@ export function useActiveSessions(limit = 10): ActiveSessions {
         setOffline((o) => (o.some((b) => b.id === id) ? o : [...o, { id, label: backendLabel(id) }]))
         setPending((p) => p.filter((x) => x !== id))
       }, SLICE_MS)
-      void recentSessionsOn(id, limit)
-        .then((slice) => {
+      const asked = idsFor(activeState(), id)
+      void candidatesOn(id, asked)
+        .then(({ slice, full }) => {
           clearTimeout(late)
           finish(id)
           if (gen.current !== mine) return
+          const tagged = slice.map((s) => ({ ...s, backend: id }))
+          const first = !swept.current.has(id)
+          swept.current.add(id)
+          updateActive((st) => {
+            let next = seed(st, id, tagged)
+            if (full) next = prune(next, id, asked, tagged)
+            return first ? expire(next, id, tagged) : next
+          })
           // A late answer reports the machine back as up — it is the same
           // evidence that took it down, arriving.
           setOffline((o) => o.filter((b) => b.id !== id))
@@ -199,7 +209,7 @@ export function useActiveSessions(limit = 10): ActiveSessions {
     }
     // Nothing to wait for — no machines attached at all.
     if (!left.size) busy.current = false
-  }, [limit])
+  }, [])
   loadRef.current = load
 
   useEffect(() => {
@@ -223,10 +233,8 @@ export function useActiveSessions(limit = 10): ActiveSessions {
   }, [rows, offline])
 
   return {
-    rows: useMemo(() => {
-      ranks = freezeOrder(rows, ranks)
-      return topSessions(rows, limit, ranks)
-    }, [rows, limit]),
+    rows,
+    membership,
     // The remotes are reported under the list instead, so this machine's
     // sessions are readable while the network is not.
     loading: pending.includes(currentBackend()),

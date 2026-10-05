@@ -234,6 +234,13 @@ export const recentSessionsOn = (backend: string, limit: number): Promise<Active
   window.floe.backends.invokeOn(backend, 'sessions:recent', limit) as Promise<ActiveSession[]>
 
 /**
+ * One machine's candidates for the `active` panel: sessions touched in the last
+ * day, the ones asked for by id, and any that may be waiting on you.
+ */
+export const activeSessionsOn = (backend: string, ids: string[]): Promise<ActiveSession[]> =>
+  window.floe.backends.invokeOn(backend, 'sessions:active', ids) as Promise<ActiveSession[]>
+
+/**
  * Every session on one machine, whatever project — ⌘P's chat index.
  *
  * Unlimited where `recentSessionsOn` is capped, and cheaper per row for it:

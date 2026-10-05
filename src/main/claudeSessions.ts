@@ -41,6 +41,9 @@ export interface ClaudeSessionMeta {
   claudeId?: string
   title: string
   mtime: number
+  // When the session was opened in Floe (or resumed into it). The `active`
+  // panel orders by it, so activity never moves a row.
+  createdAt?: number
   active: boolean
   // A turn is in flight on the backend right now (set by the claude:sessions
   // handler from the live agent conns) — for callers that read the list and
@@ -397,6 +400,7 @@ export function listClaudeSessions(worktreePath: string): ClaudeSessionMeta[] {
       claudeId: c.claudeId,
       title: sessionTitle(c, meta),
       mtime,
+      createdAt: c.createdAt,
       active,
       permissionMode: c.permissionMode,
       model: c.model,

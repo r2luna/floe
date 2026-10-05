@@ -89,10 +89,10 @@ import {
 } from './queries'
 import type { Route } from '../shared/mentions'
 import { ensureAgentHookInstalled } from './hooks'
-import { allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions } from './sessionIndex'
+import { activeSessions, allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions } from './sessionIndex'
 // Re-exported because they used to live here: the IPC handlers below call them,
 // and so does index.test.ts, which is the test that covers the walk.
-export { allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions }
+export { activeSessions, allSessions, needsYouSessions, projectsActivity, recentSessions, waitingSessions }
 import {
   installGlobal as installMcpGlobal,
   mcpConfigFor,
@@ -672,6 +672,7 @@ export function registerProjectsIpc(): void {
   handle('sessions:needsYou', () => needsYouSessions())
   handle('sessions:all', () => allSessions())
   handle('sessions:recent', (_event, limit?: number) => recentSessions(limit))
+  handle('sessions:active', (_event, ids?: string[]) => activeSessions({ ids }))
 
   // Rail visibility + the per-project hide list (both persisted in prefs).
   handle('rail:get', () => getRailVisible())

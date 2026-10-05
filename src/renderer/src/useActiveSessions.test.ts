@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { freezeOrder, mergeSlice, topSessions, unreachable } from './useActiveSessions.ts'
+import { mergeSlice, unreachable } from './useActiveSessions.ts'
 import type { ActiveSession } from '../../shared/types'
 
 const row = (id: string, at: number, backend?: string): ActiveSession => ({
@@ -16,23 +16,14 @@ const row = (id: string, at: number, backend?: string): ActiveSession => ({
   backend
 })
 
-test('the union is cut AFTER it is sorted, or the newest rows are what it drops', () => {
-  const rows = [row('old', 1), row('new', 3), row('mid', 2)]
-  assert.deepEqual(
-    topSessions(rows, 2).map((s) => s.sessionId),
-    ['new', 'mid']
-  )
-  assert.deepEqual(topSessions(rows, 0), [])
-})
-
 test("a machine's answer replaces its own rows and leaves every other machine's", () => {
   const prev = [row('a1', 5, 'local'), row('b1', 4, 'link')]
   // link answered again, and its old session is gone from the answer: a session
   // that ended has to leave the list, not linger as the newest thing there.
   const next = mergeSlice(prev, [row('b2', 6)], 'link')
   assert.deepEqual(
-    topSessions(next, 10).map((s) => s.sessionId),
-    ['b2', 'a1']
+    next.map((s) => s.sessionId),
+    ['a1', 'b2']
   )
   // The slice is tagged with the machine that answered — nothing else knows.
   assert.equal(next.find((s) => s.sessionId === 'b2')?.backend, 'link')
@@ -52,35 +43,4 @@ test('only the socket says a machine is offline — an error from a connected on
   assert.equal(unreachable('open'), false)
   assert.equal(unreachable('closed'), true)
   assert.equal(unreachable('connecting'), true)
-})
-
-test('a row keeps the rank it entered with, so a touched session does not jump the list', () => {
-  const rows = [row('old', 1), row('new', 3), row('mid', 2)]
-  const ranks = freezeOrder(rows, new Map())
-  // `old` was just written to and is now the newest thing on the machine. The
-  // list still reads the way it did a second ago.
-  const touched = [row('old', 9), row('new', 3), row('mid', 2)]
-  assert.deepEqual(
-    topSessions(touched, 3, freezeOrder(touched, ranks)).map((s) => s.sessionId),
-    ['new', 'mid', 'old']
-  )
-})
-
-test('a session that leaves the answer loses its rank and comes back at the top', () => {
-  const ranks = freezeOrder([row('a', 5), row('b', 4)], new Map())
-  // `a` dropped out of one answer...
-  const gone = freezeOrder([row('b', 4)], ranks)
-  assert.equal(gone.has('local:a'), false)
-  // ...and returning is entering, which its real clock ranks.
-  const back = [row('b', 4), row('a', 9)]
-  assert.deepEqual(
-    topSessions(back, 2, freezeOrder(back, gone)).map((s) => s.sessionId),
-    ['a', 'b']
-  )
-})
-
-test('a rank is per machine: two machines can hold the same session id', () => {
-  const rows = [row('s', 5, 'local'), row('s', 1, 'link')]
-  const ranks = freezeOrder(rows, new Map())
-  assert.equal(ranks.size, 2)
 })

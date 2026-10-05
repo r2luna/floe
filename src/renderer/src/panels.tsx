@@ -989,6 +989,7 @@ export function PanelBody({
       <ActiveSessionsList
         openSession={openSession ?? undefined}
         onJump={(s) => onJumpSession?.(s)}
+        onCommand={onCommand}
         find={find}
       />
     )

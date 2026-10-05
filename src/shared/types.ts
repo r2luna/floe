@@ -270,6 +270,9 @@ export interface JumpSession {
   claudeId?: string
   title: string
   lastActivityAt: number // session mtime (epoch ms) — drives "12m" and the sort
+  // When the session was opened in Floe. Optional because an older daemon on a
+  // paired machine does not send it.
+  createdAt?: number
   running: boolean
 }
 

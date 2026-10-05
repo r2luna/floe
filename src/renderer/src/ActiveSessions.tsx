@@ -1,49 +1,19 @@
-// The `active` panel: every machine's most recent sessions in one list, so
-// "which of these is waiting on me" is a question you ask once instead of once
-// per project.
+// The `active` panel: a switcher between the chats you are working on, across
+// every project on every attached machine.
 //
-// The sidebar answers it for the worktree you are in; this answers it for
-// everything you are not — including the machines you are not attached to.
-import type { ReactNode } from 'react'
-import { backendLabel, LOCAL } from './backends'
+// Rows never move on their own. Favourites sit on top in starring order; the
+// rest are grouped by project A→Z, in creation order inside each. What a chat is
+// doing is shown by its mark alone — see activeStore.ts for who is on the list.
+import { useState, useSyncExternalStore, type ReactNode } from 'react'
+import { backendLabel, currentBackend, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { markAll } from './findMark'
-import { rowKey, useActiveSessions } from './useActiveSessions'
+import { IconBookmark } from './icons'
+import { RowMenu, type MenuAction } from './RowMenu'
+import { useActiveSessions } from './useActiveSessions'
+import { arrange, isFavorite, keysOf, leave, onWorktree, updateActive } from './activeStore'
+import { isUnread, subscribeUnread, unreadMarks } from './unreadStore'
 import type { ActiveSession } from '../../shared/types'
-
-/** How many rows the panel asks each machine for, and keeps after the merge. */
-export const ACTIVE_LIMIT = 10
-
-/** A stopped session touched within this window is still one you are working on. */
-export const RECENT_MS = 15 * 60_000
-
-/**
- * Status first, recency inside it.
- *
- * Sorting by the clock alone answers "what happened last", which is not the
- * question — a session that has been blocked on you for twenty minutes belongs
- * above one that printed a line five seconds ago. The rows arrive newest-first,
- * so partitioning keeps that order inside each band for free.
- *
- * Stopped sessions split at RECENT_MS: the ones from the last few minutes are
- * the ones you are bouncing between, and they drown in a single IDLE band.
- */
-export function bandsOf(
-  rows: ActiveSession[],
-  now = Date.now()
-): Array<{ label: string; rows: ActiveSession[]; ask?: boolean }> {
-  const ask = rows.filter((s) => s.needsYou)
-  const work = rows.filter((s) => !s.needsYou && s.running)
-  const stopped = rows.filter((s) => !s.needsYou && !s.running)
-  const recent = stopped.filter((s) => now - s.lastActivityAt < RECENT_MS)
-  const idle = stopped.filter((s) => now - s.lastActivityAt >= RECENT_MS)
-  return [
-    { label: 'NEEDS YOU', rows: ask, ask: true },
-    { label: 'WORKING', rows: work },
-    { label: 'RECENT', rows: recent },
-    { label: 'IDLE', rows: idle }
-  ].filter((b) => b.rows.length > 0)
-}
 
 /**
  * Which panel key this session's chat opens under.
@@ -54,7 +24,7 @@ export function bandsOf(
  */
 export const sessionKeyOf = (s: ActiveSession): string => s.claudeId ?? s.sessionId
 
-/** The sidebar's three marks, on a row that had to cross a machine to get here. */
+/** Waiting on you, working, unread, seen — the sidebar's marks, in that order. */
 function Mark({ session }: { session: ActiveSession }): ReactNode {
   if (session.needsYou)
     return (
@@ -63,69 +33,117 @@ function Mark({ session }: { session: ActiveSession }): ReactNode {
       </span>
     )
   if (session.running) return <Spinner />
+  const ids = [session.sessionId, session.claudeId].filter(Boolean) as string[]
+  if (isUnread(ids)) return <span className="dot dot-unread" title="done, unread" />
   return <span className="dot" />
-}
-
-function ago(ms: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000))
-  if (s < 60) return 'now'
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h`
-  return `${Math.floor(h / 24)}d`
 }
 
 export function ActiveSessionsList({
   openSession,
   onJump,
+  onCommand,
   find
 }: {
   /** The session key the lane currently has open, so the row can say so. */
   openSession?: string
   onJump: (session: ActiveSession) => void
+  onCommand?: (id: string) => void
   find?: string
 }): ReactNode {
-  const { rows, loading, offline, reload } = useActiveSessions(ACTIVE_LIMIT)
+  const { rows, membership, loading, offline, reload } = useActiveSessions()
+  // The marks re-render the list; the value itself is read inside Mark.
+  useSyncExternalStore(subscribeUnread, unreadMarks)
+  const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
 
   if (loading && !rows.length) return <p className="empty">Loading…</p>
-  if (!rows.length && !offline.length) return <p className="empty">No sessions yet.</p>
+  const { favorites, groups } = arrange(rows, membership)
+  if (!favorites.length && !groups.length && !offline.length)
+    return <p className="empty">No chats yet — send a message and it shows up here.</p>
+
+  const here = currentBackend()
+  const isOpen = (s: ActiveSession): boolean =>
+    !!openSession &&
+    (s.backend ?? LOCAL) === here &&
+    (s.sessionId === openSession || s.claudeId === openSession)
+
+  const row = (s: ActiveSession, tag: ReactNode, host = false): ReactNode => {
+    const keys = keysOf(s)
+    const fav = isFavorite(membership, s)
+    return (
+      <button
+        className="ax"
+        key={keys[0]}
+        title={`${s.worktreePath} · ${s.title}`}
+        // What `f`, `x` and the row menu read — see activeRow in registry.ts.
+        data-active-key={keys[0]}
+        data-active-keys={keys.join(' ')}
+        data-active-fav={fav ? 'on' : undefined}
+        data-open={isOpen(s) || undefined}
+        onClick={() => onJump(s)}
+        // Focus first: the menu's commands act on the row the cursor is on.
+        onContextMenu={(e) => {
+          e.preventDefault()
+          const el = e.currentTarget as HTMLElement
+          el.focus()
+          setMenu({ x: e.clientX, y: e.clientY, row: el })
+        }}
+      >
+        <Mark session={s} />
+        <span className="ax-name">{markAll(s.title, find)}</span>
+        {tag}
+        {host && s.backend && s.backend !== LOCAL && <span className="sx-host">{backendLabel(s.backend)}</span>}
+        {fav && (
+          <span className="skill-fav ax-fav" title="Favourite">
+            <IconBookmark size={11} />
+          </span>
+        )}
+        {/* Hover only, and a span rather than a button: `x` is the keyboard
+            way, and a button here would be a second cursor stop per row. */}
+        <span
+          className="ax-x"
+          title="Remove from the list (x)"
+          onClick={(e) => {
+            e.stopPropagation()
+            updateActive((st) => leave(st, keys))
+          }}
+        >
+          ×
+        </span>
+      </button>
+    )
+  }
+
+  const tagOf = (s: ActiveSession, project: boolean): ReactNode => {
+    const text = [project ? s.projectName : '', onWorktree(s) ? s.branch : ''].filter(Boolean).join(' / ')
+    return text ? <span className="ax-tag">{markAll(text, find)}</span> : null
+  }
+
+  const items: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    {
+      label: menu?.row.dataset.activeFav === 'on' ? 'Unfavourite' : 'Favourite',
+      keys: 'f',
+      run: () => onCommand?.('active.favorite')
+    },
+    { label: 'Remove from the list', keys: 'x', run: () => onCommand?.('active.remove') }
+  ]
 
   return (
     <>
-      {bandsOf(rows).map((band) => (
-        <div className="group" key={band.label}>
-          <div className="group-label" data-ask={band.ask || undefined}>
-            {band.label} <span className="group-n">{band.rows.length}</span>
+      {favorites.length > 0 && (
+        <div className="ax-group" data-fav>
+          <div className="group-label">FAVORITES</div>
+          {favorites.map((s) => row(s, tagOf(s, true), true))}
+        </div>
+      )}
+      {groups.map((g) => (
+        <div className="ax-group" key={g.key}>
+          <div className="ax-head">
+            <span className="ax-project">{markAll(g.project, find)}</span>
+            {g.branch && <span className="ax-branch">{markAll(g.branch, find)}</span>}
+            {g.backend !== LOCAL && <span className="sx-host">{backendLabel(g.backend)}</span>}
           </div>
-          {band.rows.map((s) => (
-            <button
-              className="sx"
-              // The hook's identity for a row, and it has to be the same one:
-              // that key is what carries the row's frozen rank.
-              key={rowKey(s)}
-              title={`${s.worktreePath} · ${s.title}`}
-              data-active={(sessionKeyOf(s) === openSession) || undefined}
-              onClick={() => onJump(s)}
-            >
-              <span className="sx-top">
-                <Mark session={s} />
-                <span className="sx-name">{markAll(s.title, find)}</span>
-                <span className="sx-age">{ago(s.lastActivityAt)}</span>
-              </span>
-              <span className="sx-bot">
-                <span className="sx-where">
-                  {markAll(s.projectName, find)} <span className="sx-sep">/</span>{' '}
-                  {markAll(s.branch, find)}
-                </span>
-                {/* Local is the default and gets no badge — naming this machine
-                    on every row answers nothing. The projects list's rule. */}
-                {s.backend && s.backend !== LOCAL && (
-                  <span className="sx-host">{backendLabel(s.backend)}</span>
-                )}
-              </span>
-            </button>
-          ))}
+          {g.rows.map((s) => row(s, g.branch ? null : tagOf(s, false)))}
         </div>
       ))}
       {/* A machine that did not answer is named rather than counted: with one
@@ -144,6 +162,17 @@ export function ActiveSessionsList({
             </div>
           ))}
         </div>
+      )}
+      {menu && (
+        <RowMenu
+          at={menu}
+          items={items}
+          onClose={() => {
+            const back = menu.row
+            setMenu(null)
+            if (back.isConnected) back.focus()
+          }}
+        />
       )}
     </>
   )

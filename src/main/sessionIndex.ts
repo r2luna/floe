@@ -104,6 +104,7 @@ export async function allSessions(): Promise<JumpSession[]> {
           claudeId: s.claudeId,
           title: s.title,
           lastActivityAt: s.mtime,
+          createdAt: s.createdAt,
           // A turn in flight — NOT "the child is alive", which a session that
           // answered an hour ago still is: the CLI child is kept for the next
           // --resume, so that read left every session it had ever run marked as
@@ -162,4 +163,42 @@ export async function recentSessions(limit = 10): Promise<ActiveSession[]> {
     .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
     .slice(0, Math.max(0, limit))
     .map((s) => ({ ...s, needsYou: sessionNeedsYou(s, waiting) }))
+}
+
+/** A session untouched for this long has left the `active` panel. */
+export const ACTIVE_PANEL_WINDOW_MS = 24 * 60 * 60_000
+
+/** How many of the recently touched sessions one machine hands the panel. */
+export const ACTIVE_PANEL_CAP = 100
+
+/**
+ * The `active` panel's candidates on this machine: every session the panel
+ * could show, so the renderer can decide which of them it does.
+ *
+ * Membership lives in the renderer (who sent to what, what is starred), so this
+ * answers with a superset: sessions touched in the last 24h (capped, newest
+ * kept), every session the renderer asked for by id — a favourite older than a
+ * day still has to be drawn — and any that could be blocked on the user. The
+ * transcript read behind `needsYou` is paid for that set only, never the store.
+ */
+export async function activeSessions(opts: { ids?: string[]; now?: number } = {}): Promise<ActiveSession[]> {
+  const now = opts.now ?? Date.now()
+  const asked = new Set(opts.ids ?? [])
+  const waiting = new Set(waitingKeys())
+  const colony = colonySessionIds()
+  const all = (await allSessions()).filter((s) => !colony.has(s.sessionId))
+  const named = (s: JumpSession): boolean =>
+    asked.has(s.sessionId) || (!!s.claudeId && asked.has(s.claudeId))
+  // Could it be waiting on you? The cheap half of sessionNeedsYou: a question
+  // only counts on a live session, so an old dead one cannot be blocked.
+  const maybeAsking = (s: JumpSession): boolean =>
+    waiting.has(s.sessionId) ||
+    (!!s.claudeId && (waiting.has(s.claudeId) || isClaudeIdConnected(s.claudeId)))
+  const recent = all
+    .filter((s) => now - s.lastActivityAt < ACTIVE_PANEL_WINDOW_MS)
+    .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+    .slice(0, ACTIVE_PANEL_CAP)
+  const keep = new Set(recent)
+  for (const s of all) if (named(s) || maybeAsking(s)) keep.add(s)
+  return [...keep].map((s) => ({ ...s, needsYou: sessionNeedsYou(s, waiting) }))
 }

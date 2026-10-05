@@ -203,6 +203,7 @@ const CHANNELS = [
   'sessions:needsYou',
   'sessions:all',
   'sessions:recent',
+  'sessions:active',
   'rail:get',
   'rail:set',
   'projects:getHidden',
@@ -521,6 +522,37 @@ test('the project scans walk a real project and report what is on disk', async (
     assert.equal(active.length, 1)
     assert.equal(active[0]?.sessionId, 'sess-1')
     assert.equal(active[0]?.needsYou, false)
+  } finally {
+    repo.cleanup()
+  }
+})
+
+test('activeSessions answers the last day, plus what it is asked for by id, with createdAt', async () => {
+  const repo = makeGitRepo('floe-index-active-')
+  try {
+    repo.write('README.md', '# active\n')
+    repo.commit('init')
+    await addProjectByPath(repo.dir)
+    for (const id of ['first', 'second']) {
+      addCreatedSession({ id, worktreePath: repo.dir, title: id })
+      touchCreatedSession(id)
+      await new Promise((r) => setTimeout(r, 2))
+    }
+
+    const today = await index.activeSessions()
+    const mine = today.filter((s) => s.worktreePath === repo.dir)
+    assert.deepEqual(mine.map((s) => s.sessionId).sort(), ['first', 'second'])
+    // The panel orders by creation, so the answer has to carry it.
+    assert.ok(mine.every((s) => typeof s.createdAt === 'number' && s.needsYou === false))
+
+    // A day later both are idle: only the one asked for by id comes back — a
+    // favourite older than a day still has to be drawn.
+    const later = Date.now() + 25 * 60 * 60_000
+    const old = await index.activeSessions({ ids: ['first'], now: later })
+    assert.deepEqual(
+      old.filter((s) => s.worktreePath === repo.dir).map((s) => s.sessionId),
+      ['first']
+    )
   } finally {
     repo.cleanup()
   }

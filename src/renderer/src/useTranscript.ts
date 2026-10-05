@@ -25,6 +25,8 @@ import type { Queued } from './queue'
 import { claimBatch, queueOf, releaseBoundary, subscribeQueue, updateQueue } from './queueStore'
 import { liveReducer } from './transcriptState'
 import { subscribeTurns } from './activeTurns.ts'
+import { join, updateActive } from './activeStore.ts'
+import { currentBackend } from './backends.ts'
 
 export type { Queued }
 
@@ -762,6 +764,8 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       addressed?: { shown: string; route: Route }
     ) => {
       if (!worktreePath || !sessionId || !prompt.trim()) return
+      // Sending to a chat is what puts it on the `active` list.
+      updateActive((st) => join(st, `${currentBackend()}:${sessionId}`))
       // While a question is up, ⏎ answers it — free text is the "Other" lane.
       // There is no way to say something PAST an open question, same as the
       // Claude Code TUI.

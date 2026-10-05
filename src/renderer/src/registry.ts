@@ -33,6 +33,7 @@ import { skillsChanged } from './useSkills.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
+import { leave, toggleFavorite, updateActive } from './activeStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
 import { taskChatOpener } from '../../shared/taskFolders.ts'
@@ -265,6 +266,33 @@ function skillRow(c: CommandContext): HTMLElement | null {
   if (c.lane.panels[c.lane.focus]?.kind !== 'skills') return null
   const row = fileRow(c)
   return row?.dataset.skill ? row : null
+}
+
+/** The `active` panel row under the cursor — same contract as skillRow. */
+function activeRow(c: CommandContext): HTMLElement | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'active') return null
+  const row = fileRow(c)
+  return row?.dataset.activeKey ? row : null
+}
+
+/**
+ * Change the row under the cursor, then put the cursor back: on the same row
+ * (a star moves it between sections) or, when it left the list, on the row
+ * that took its place.
+ */
+function editActiveRow(c: CommandContext, gone: boolean, fn: (keys: string[]) => void): void {
+  const row = activeRow(c)
+  const keys = row?.dataset.activeKeys?.split(' ')
+  if (!row || !keys) return
+  const panel = c.panelEl(c.lane.focus)
+  const rows = c.rowsOf(panel)
+  const at = rows.indexOf(row)
+  const land = gone ? (rows[at + 1] ?? rows[at - 1])?.dataset.activeKey : row.dataset.activeKey
+  fn(keys)
+  requestAnimationFrame(() => {
+    if (!land) return
+    panel?.querySelector<HTMLElement>(`[data-active-key="${CSS.escape(land)}"]`)?.focus()
+  })
 }
 
 /** The MCP server row under the cursor — same contract as skillRow. */
@@ -1470,6 +1498,23 @@ export const REGISTRY: Map<string, Command> = new Map(
             .then(() => skillsChanged())
             .catch((err: unknown) => c.say(reason(err)))
         }
+      },
+      {
+        // Star / unstar the chat under the cursor in the `active` panel.
+        id: 'active.favorite',
+        title: 'Favourite chat in the active list',
+        group: 'Active',
+        enabled: (c) => !!activeRow(c),
+        run: (c) => editActiveRow(c, false, (keys) => updateActive((st) => toggleFavorite(st, keys)))
+      },
+      {
+        // Take the chat under the cursor off the `active` list. A chat waiting
+        // on you still shows — that rule is the list's, not membership's.
+        id: 'active.remove',
+        title: 'Remove chat from the active list',
+        group: 'Active',
+        enabled: (c) => !!activeRow(c),
+        run: (c) => editActiveRow(c, true, (keys) => updateActive((st) => leave(st, keys)))
       },
       {
         // Copy the project's harness skills into its `.floe/skills`. A name Floe
