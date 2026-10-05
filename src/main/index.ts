@@ -192,6 +192,8 @@ import { floeConfig, setFloeValue } from './config/floe'
 import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
 import { recapSession } from './recap'
 import { handle } from './plugins/handleMap'
+import { startTelegram } from './telegram/index'
+import { markSeen } from './telegram/presence'
 import { loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
 import { launchEditor } from './editors'
 import type { TomlValue } from './config/toml'
@@ -1527,6 +1529,9 @@ export function registerSettingsIpc(): void {
   // version. Best-effort; anything missing comes back null so the UI shows a
   // "not detected" state.
   handle('user:name', () => userDisplayName())
+  // A window had input. Every window pings every backend it shows, so this is
+  // "someone is at Floe here" — the Telegram bot stays quiet while it is true.
+  handle('presence:ping', () => markSeen())
   handle('settings:probe', () => probeClaudeBinary())
 
   // Settings → Advanced: system prompt appended to every spawned Claude session
@@ -2005,6 +2010,8 @@ void app.whenReady().then(async () => {
   // Watchdog: log any turn that gets stuck "Thinking…" (never emits done) so a
   // 40-min hang can be diagnosed from <userData>/logs/agent.log after the fact.
   startAgentWatchdog()
+  // Relays your chats to Telegram while nobody is at Floe — see telegram/index.ts.
+  startTelegram()
   // A colony task that was mid-lane when the app went away has nobody left to
   // read its hand-off line. Put it back at its stage's door so the scheduler
   // runs it again — see reconcileColony.
