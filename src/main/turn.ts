@@ -173,7 +173,8 @@ export function startTurn(
       options.effort,
       options.permissionMode,
       options.shown,
-      options.panel
+      options.panel,
+      images
     )
     return
   }

@@ -306,6 +306,19 @@ test('a rollout codex can no longer resume starts a fresh thread', async () => {
   assert.equal((events[0] as { ok: boolean }).ok, true, 'a turn with no reply still closes cleanly')
 })
 
+test('pasted images go to codex as data urls beside the text', async () => {
+  resetReplies('th-img')
+  const { win } = fakeWin()
+  const images = [{ id: 'i1', mediaType: 'image/png', data: 'AAAA' }]
+  await chatWithCodexServer(win, 'k-img', '/work/tree', 'look', 'gpt-5.5', undefined, 'plan', images)
+
+  assert.deepEqual(sentParams('turn/start').input, [
+    { type: 'text', text: 'look' },
+    { type: 'image', url: 'data:image/png;base64,AAAA' }
+  ])
+  push({ method: 'turn/completed', params: { threadId: 'th-img', turn: {} } })
+})
+
 test('a thread another codex process holds fails the turn instead of starting a stranger', async () => {
   resetReplies('th-3')
   replies['thread/resume'] = () => ({ error: { message: 'thread th-2 already has an active writer' } })

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
-import type { AgentQuestion, PermissionMode } from '../shared/types'
+import type { AgentQuestion, ImageAttachment, PermissionMode } from '../shared/types'
 import { dropSettled, sendAgentEvent } from './agent'
 import { codexThreadConfig, mcpRebind } from './mcpHarness'
 import { codexPosture, resolveModel } from './codex'
@@ -350,7 +350,8 @@ export async function chatWithCodexServer(
   prompt: string,
   model: string | undefined,
   effort?: string,
-  mode: PermissionMode = 'plan'
+  mode: PermissionMode = 'plan',
+  images: ImageAttachment[] = []
 ): Promise<void> {
   const slug = resolveModel(model)
   const posture = codexPosture(mode)
@@ -429,7 +430,12 @@ export async function chatWithCodexServer(
     armTimer(ctx)
     await request('turn/start', {
       threadId,
-      input: [{ type: 'text', text: prompt }],
+      // Images ride as data urls — app-server's UserInput takes them inline,
+      // so nothing has to be written to disk first.
+      input: [
+        { type: 'text', text: prompt },
+        ...images.map((img) => ({ type: 'image', url: `data:${img.mediaType};base64,${img.data}` }))
+      ],
       effort: mapEffort(effort)
     })
     // Completion arrives as the turn/completed notification → finishTurn.

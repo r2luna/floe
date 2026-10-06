@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { BrowserWindow } from 'electron'
-import type { AgentEvent, PermissionMode } from '../shared/types'
+import type { AgentEvent, ImageAttachment, PermissionMode } from '../shared/types'
 import { DEFAULT_MODE, nearestMode } from '../shared/modes'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -323,7 +323,9 @@ export async function runRuntime(
   /** The line as typed, when the handle addressing this runtime came off it. */
   shown?: string,
   /** The panel that typed it — it is already showing the line (AgentRunOptions). */
-  panel?: string
+  panel?: string,
+  /** Pasted screenshots. Only codex takes them; the other runtimes are text-only. */
+  images: ImageAttachment[] = []
 ): Promise<void> {
   // These runtimes write no transcript, so nothing on disk would say this
   // session was ever used. Stamp it, or the sidebar sorts it by the day it was
@@ -358,7 +360,7 @@ export async function runRuntime(
   // flag for, and that fails the whole turn.
   const allowed = nearestMode(mode, runtime)
   if (runtime === 'codex')
-    return chatWithCodexServer(win, key, worktreePath, prompt, model, effort, allowed)
+    return chatWithCodexServer(win, key, worktreePath, prompt, model, effort, allowed, images)
 
   const thread = threads.get(key) ?? {}
   threads.set(key, thread)
