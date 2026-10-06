@@ -12,7 +12,7 @@
 //  - It LEAVES when it is closed (the machine stops returning it), when you
 //    remove it (× or `x`), or after 24h idle. The idle sweep runs only while the
 //    panel is off screen, so a row never vanishes in front of you.
-//  - A favourite (`f`) never expires. It sits on top, in starring order.
+//  - A favourite (`f`) never expires. It sits on top, in the same tree.
 //  - A chat waiting on you shows whether or not it is a member.
 //
 // Keys are `${backend}:${id}` — a session id is unique per machine, not across
@@ -124,17 +124,25 @@ export function prune(st: ActiveState, backend: string, asked: readonly string[]
   return gone.length ? leave(st, gone) : st
 }
 
+/** One worktree's chats, under a header of its own. */
+export interface ActiveWorktree {
+  key: string
+  branch: string
+  /** The project's own checkout, which the header labels "main". */
+  main: boolean
+  rows: ActiveSession[]
+}
+
 export interface ActiveGroup {
   key: string
   project: string
   backend: string
-  /** Set when every row in the group is on one non-main worktree. */
-  branch?: string
-  rows: ActiveSession[]
+  worktrees: ActiveWorktree[]
 }
 
+/** Favourites and the rest, both as the same project → worktree → chat tree. */
 export interface ActiveLayout {
-  favorites: ActiveSession[]
+  favorites: ActiveGroup[]
   groups: ActiveGroup[]
 }
 
@@ -159,37 +167,48 @@ function dedupe(rows: ActiveSession[]): ActiveSession[] {
 }
 
 /**
- * Favourites first, in starring order; then projects A→Z, chats in creation
- * order inside each. Nothing here reads the clock or the status.
+ * Projects A→Z; inside each, the main checkout first and the other worktrees
+ * A→Z by branch; inside each worktree, chats in creation order. Every worktree
+ * gets its header even when it is the only one, so a second worktree joining
+ * adds a header instead of reshaping the group.
  */
-export function arrange(all: ActiveSession[], st: ActiveState): ActiveLayout {
-  const rows = dedupe(all)
-  const byKey = new Map<string, ActiveSession>()
-  for (const s of rows) for (const k of keysOf(s)) byKey.set(k, s)
-  const favorites: ActiveSession[] = []
-  for (const k of st.favorites) {
-    const s = byKey.get(k)
-    if (s && !favorites.includes(s)) favorites.push(s)
-  }
+function tree(rows: ActiveSession[]): ActiveGroup[] {
   const groups = new Map<string, ActiveGroup>()
   for (const s of rows) {
-    if (favorites.includes(s) || !(s.needsYou || isMember(st, s))) continue
     const backend = s.backend ?? 'local'
     const key = `${backend}:${s.projectPath}`
-    const g = groups.get(key) ?? { key, project: s.projectName, backend, rows: [] }
-    g.rows.push(s)
+    const g = groups.get(key) ?? { key, project: s.projectName, backend, worktrees: [] }
     groups.set(key, g)
+    const wkey = `${key}:${s.worktreePath}`
+    let w = g.worktrees.find((x) => x.key === wkey)
+    if (!w) {
+      w = { key: wkey, branch: s.branch, main: !onWorktree(s), rows: [] }
+      g.worktrees.push(w)
+    }
+    w.rows.push(s)
   }
   const created = (s: ActiveSession): number => s.createdAt ?? 0
   const out = [...groups.values()].sort(
     (a, b) => a.project.localeCompare(b.project) || a.backend.localeCompare(b.backend)
   )
   for (const g of out) {
-    g.rows.sort((a, b) => created(a) - created(b) || a.sessionId.localeCompare(b.sessionId))
-    const wt = g.rows[0].worktreePath
-    if (onWorktree(g.rows[0]) && g.rows.every((s) => s.worktreePath === wt)) g.branch = g.rows[0].branch
+    g.worktrees.sort((a, b) => Number(b.main) - Number(a.main) || a.branch.localeCompare(b.branch))
+    for (const w of g.worktrees)
+      w.rows.sort((a, b) => created(a) - created(b) || a.sessionId.localeCompare(b.sessionId))
   }
-  return { favorites, groups: out }
+  return out
+}
+
+/**
+ * Favourites first, then everything else, both as the same tree. A favourite
+ * leaves the lower tree, so it never shows twice. Nothing here reads the clock
+ * or the status.
+ */
+export function arrange(all: ActiveSession[], st: ActiveState): ActiveLayout {
+  const rows = dedupe(all)
+  const favorites = rows.filter((s) => isFavorite(st, s))
+  const rest = rows.filter((s) => !favorites.includes(s) && (s.needsYou || isMember(st, s)))
+  return { favorites: tree(favorites), groups: tree(rest) }
 }
 
 // --- the store -----------------------------------------------------------------

@@ -702,6 +702,15 @@ button {
   padding: 8px;
 }
 
+/* Every panel but a conversation reads a step smaller than the body's 12.5px.
+   The chat is the one place you read at length, so it alone keeps the size
+   Settings picks. The rest are lists and tools, where the extra characters are
+   worth more than the size. Explicit px sizes inside a panel still win. */
+.panel:not([data-kind='chat'], [data-kind='query']) > .panel-body {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* A conversation's body carries no inset of its own, because its footer has to
    reach the panel's edges the way the header does. Inside the 8px the composer
    was 582px wide against a 598px header — 8px of panel showing down each side
@@ -1115,18 +1124,20 @@ button {
 }
 
 /* --- active sessions ------------------------------------------------------
-   A switcher, so one flat line per chat: the mark, the title, and a dim tag
-   only when the group header does not already say where it lives. */
+   A switcher, so one flat line per chat under a project → worktree tree. The
+   text size is the shared 11px panel body rule. */
 
 .ax {
   display: flex;
   align-items: center;
   gap: 8px;
   /* Full width, the `.row` rule: bleeds through the body's 8px inset. The
-     left border is the open-chat edge, so the padding gives its 2px back. */
+     left border is the open-chat edge, so the padding gives its 2px back.
+     Indented to the worktree head's icon, not past it: a deeper step would
+     spend the width the smaller text just bought. */
   width: calc(100% + 16px);
   margin-inline: -8px;
-  padding: 3px 12px 3px 10px;
+  padding: 2px 12px 2px 20px;
   border-left: 2px solid transparent;
   border-radius: 0;
   text-align: left;
@@ -1149,15 +1160,6 @@ button {
   white-space: nowrap;
 }
 
-.ax-tag {
-  flex: none;
-  max-width: 120px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--dimmest);
-}
-
 /* Remove, under the pointer only — `x` is the keyboard's way. Hidden rather
    than unmounted so the title never reflows as the pointer passes. */
 .ax-x {
@@ -1176,18 +1178,44 @@ button {
   color: var(--text-strong);
 }
 
-/* The project head: dim name, dimmer branch when the whole group is on one. */
+/* The project head, then one head per worktree a step in. Every worktree gets
+   one, even a project's only one, so a second joining adds a line instead of
+   reshaping the group. */
 .ax-head {
   display: flex;
   align-items: baseline;
   gap: 6px;
   margin-inline: -8px;
-  padding: 8px 12px 2px;
+  padding: 7px 12px 1px;
+}
+
+.ax-project:first-child .ax-head {
+  padding-top: 2px;
+}
+
+.ax-wt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline: -8px;
+  padding: 2px 12px 1px 20px;
   color: var(--dim);
 }
 
-.ax-branch {
+.ax-wt svg {
+  flex: none;
   color: var(--dimmest);
+}
+
+.ax-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ax-main {
+  flex: none;
 }
 
 /* Favourites end on a hairline, so the project groups read as a second list. */

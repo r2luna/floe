@@ -11,6 +11,7 @@ import {
   prune,
   seed,
   toggleFavorite,
+  type ActiveGroup,
   type ActiveState
 } from './activeStore.ts'
 import type { ActiveSession } from '../../shared/types'
@@ -34,6 +35,8 @@ const row = (id: string, over: Partial<ActiveSession> = {}): ActiveSession => ({
 })
 
 const ids = (rows: ActiveSession[]): string[] => rows.map((s) => s.sessionId)
+/** Every chat in a group, worktree by worktree. */
+const all = (g: ActiveGroup): ActiveSession[] => g.worktrees.flatMap((w) => w.rows)
 const members = (...keys: string[]): ActiveState =>
   keys.reduce((st, k) => join(st, k, NOW), EMPTY)
 
@@ -47,7 +50,7 @@ test('projects sort A→Z and chats inside by creation, never by activity or sta
   const { favorites, groups } = arrange(rows, members('local:late', 'local:os1', 'local:early', 'local:a1'))
   assert.deepEqual(favorites, [])
   assert.deepEqual(
-    groups.map((g) => [g.project, ids(g.rows)]),
+    groups.map((g) => [g.project, ids(all(g))]),
     [
       ['00.life', ['a1']],
       ['floe', ['early', 'late']],
@@ -59,7 +62,7 @@ test('projects sort A→Z and chats inside by creation, never by activity or sta
 test('only members show, plus anything waiting on you', () => {
   const rows = [row('in', { createdAt: 1 }), row('out', { createdAt: 2 }), row('asking', { needsYou: true, createdAt: 3 })]
   const { groups } = arrange(rows, members('local:in'))
-  assert.deepEqual(ids(groups[0].rows), ['in', 'asking'])
+  assert.deepEqual(ids(all(groups[0])), ['in', 'asking'])
 })
 
 test('a member matches under either of its ids', () => {
@@ -84,24 +87,51 @@ test('a chat listed under two projects shows once, under the one whose folder ho
   ]
   const { groups } = arrange(rows, members('local:s'))
   assert.deepEqual(
-    groups.map((g) => [g.project, ids(g.rows)]),
+    groups.map((g) => [g.project, ids(all(g))]),
     [['floe', ['s']]]
   )
 })
 
-test('a group on one worktree names its branch in the header; a mixed group does not', () => {
-  const wt = { worktreePath: '/p/floe/.worktrees/jev', branch: 'jev' }
-  assert.equal(arrange([row('a', wt), row('b', wt)], members('local:a', 'local:b')).groups[0].branch, 'jev')
-  assert.equal(arrange([row('a', wt), row('b')], members('local:a', 'local:b')).groups[0].branch, undefined)
+test('every worktree gets its own head: main first, then the others A→Z by branch', () => {
+  const jev = { worktreePath: '/p/floe/.worktrees/jev', branch: 'jev' }
+  const abc = { worktreePath: '/p/floe/.worktrees/abc', branch: 'abc' }
+  const rows = [row('j', jev), row('m', { createdAt: 2 }), row('a', abc), row('m0', { createdAt: 1 })]
+  const [g] = arrange(rows, members('local:j', 'local:m', 'local:a', 'local:m0')).groups
+  assert.deepEqual(
+    g.worktrees.map((w) => [w.branch, w.main, ids(w.rows)]),
+    [
+      ['main', true, ['m0', 'm']],
+      ['abc', false, ['a']],
+      ['jev', false, ['j']]
+    ]
+  )
 })
 
-test('favourites sit on top in starring order and leave their project group', () => {
-  let st = members('local:a', 'local:b', 'local:c')
+test('a lone worktree still gets its head', () => {
+  const [g] = arrange([row('a')], members('local:a')).groups
+  assert.deepEqual(
+    g.worktrees.map((w) => w.branch),
+    ['main']
+  )
+})
+
+test('favourites sit on top in the same tree and leave the lower one', () => {
+  let st = members('local:a', 'local:b', 'local:c', 'local:o')
   st = toggleFavorite(st, ['local:c'], NOW)
-  st = toggleFavorite(st, ['local:a'], NOW)
-  const { favorites, groups } = arrange([row('a'), row('b'), row('c')], st)
-  assert.deepEqual(ids(favorites), ['c', 'a'])
-  assert.deepEqual(ids(groups[0].rows), ['b'])
+  st = toggleFavorite(st, ['local:o'], NOW)
+  const os = { projectPath: '/p/os', projectName: 'os', worktreePath: '/p/os' }
+  const { favorites, groups } = arrange([row('a'), row('b'), row('c'), row('o', os)], st)
+  assert.deepEqual(
+    favorites.map((g) => [g.project, ids(all(g))]),
+    [
+      ['floe', ['c']],
+      ['os', ['o']]
+    ]
+  )
+  assert.deepEqual(
+    groups.map((g) => [g.project, ids(all(g))]),
+    [['floe', ['a', 'b']]]
+  )
 })
 
 test('unstarring puts the row back in its group; starring a non-member makes it one', () => {
@@ -109,7 +139,7 @@ test('unstarring puts the row back in its group; starring a non-member makes it 
   assert.ok('local:a' in st.members)
   st = toggleFavorite(st, ['local:a', 'local:cli'], NOW)
   assert.deepEqual(st.favorites, [])
-  assert.deepEqual(ids(arrange([row('a')], st).groups[0].rows), ['a'])
+  assert.deepEqual(ids(all(arrange([row('a')], st).groups[0])), ['a'])
 })
 
 test('remove takes a chat off the list and off the favourites, under every name', () => {

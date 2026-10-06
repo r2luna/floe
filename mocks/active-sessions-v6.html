@@ -1,0 +1,135 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — active sessions: project › worktree › chat, smaller text</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .wrap { display: flex; gap: 24px; padding: 16px; align-items: flex-start; }
+  .col { flex: 0 0 340px; width: 340px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .cap { color: var(--text-strong); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; }
+  .notes b { color: var(--text); font-weight: normal; }
+  .panel { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--panel-focused); border: 1px solid var(--line); border-radius: var(--radius); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px; border-bottom: 1px solid var(--line-soft); }
+  .panel-name { color: var(--text-strong); }
+  .panel-sub { color: var(--dim); }
+  .panel-body { padding: 4px 0 6px; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .ask { flex: none; width: 6px; display: grid; place-items: center; color: var(--accent); font-weight: 700; }
+  .spin { flex: none; width: 6px; display: grid; place-items: center; color: var(--dim); }
+  .fav { flex: none; display: grid; place-items: center; color: var(--accent); }
+  .fav svg { display: block; }
+  .x { flex: none; color: var(--dim); width: 10px; text-align: center; }
+
+  .r { display: flex; align-items: center; gap: 8px; width: 100%; padding: 3px 12px; border: 0; border-left: 2px solid transparent;
+       background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; min-width: 0; }
+  .r:hover, .r[data-hover] { background: rgba(255,255,255,0.04); }
+  .r[data-open] { border-left-color: var(--accent); }
+  .r[data-open] .t, .r[data-hot] .t { color: var(--text-strong); }
+  .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag { flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmest); }
+  .sep { height: 1px; margin: 6px 12px 0; background: var(--line-soft); }
+  .fh { padding: 6px 12px 2px; color: var(--dim); letter-spacing: 0.08em; font-size: 11px; }
+
+  /* --- v5: flat project groups, 12px ------------------------------------ */
+  .v5 .ph { display: flex; align-items: baseline; gap: 6px; padding: 8px 12px 2px; }
+  .v5 .ph .pn { color: var(--dim); }
+  .v5 .ph .br { color: var(--dimmest); }
+
+  /* --- v6: project › worktree › chat, 11px ------------------------------- */
+  .v6 .panel-body { font-size: 11px; line-height: 1.5; }
+  .v6 .r { padding-block: 2px; }
+  .v6 .p { padding: 7px 12px 1px; color: var(--text); }
+  .v6 .p:first-child { padding-top: 2px; }
+  .v6 .w { display: flex; align-items: center; gap: 6px; padding: 2px 12px 1px 20px; color: var(--dim); }
+  .v6 .w .glyph { color: var(--dimmest); display: grid; place-items: center; }
+  .v6 .w .glyph svg { display: block; }
+  .v6 .w .main { color: var(--dimmest); }
+  .v6 .r.c { padding-left: 22px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="bm" viewBox="0 0 24 24"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="br" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="7" r="2.5"/><path d="M6 7.5v9M18 9.5c0 5-12 3-12 7"/></g></symbol>
+</svg>
+<div class="wrap">
+
+  <!-- ===== v5 as approved ===== -->
+  <div class="col v5">
+    <div class="cap">v5 · APPROVED · 12px, flat</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <div class="fh">FAVORITES</div>
+        <button class="r" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions.. ainda está clunky</span><span class="tag">floe</span><span class="fav"><svg width="11" height="11"><use href="#bm"/></svg></span></button>
+        <div class="sep"></div>
+
+        <div class="ph"><span class="pn">00.life-os</span><span class="br">devsquad-new-flow</span></div>
+        <button class="r"><span class="dot"></span><span class="t">squadra: skills</span></button>
+        <button class="r"><span class="dot"></span><span class="t">squadra: poc</span></button>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">squadra: presentation</span></button>
+
+        <div class="ph"><span class="pn">floe</span></div>
+        <button class="r" data-hot><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key. I'm gonna give it to you so we can</span><span class="tag">jev</span></button>
+        <button class="r"><span class="dot"></span><span class="t">fix lane drag snapping on narrow panels</span></button>
+
+        <div class="ph"><span class="pn">os</span></div>
+        <button class="r"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver o nome da pessoa</span></button>
+        <button class="r"><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new enhancement to the</span></button>
+        <button class="r"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span></button>
+        <button class="r"><span class="ask">?</span><span class="t">pga os logs de erros de produção mais recentes e ssh ds.os e</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== v6 ===== -->
+  <div class="col v6">
+    <div class="cap">v6 · 11px · SAME TREE IN FAVORITES</div>
+    <div class="panel">
+      <div class="panel-head"><span class="panel-name">active</span><span class="panel-sub">10</span></div>
+      <div class="panel-body">
+        <div class="fh">FAVORITES</div>
+        <div class="p">00.life-os</div>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>devsquad-new-flow</div>
+        <button class="r c"><span class="dot"></span><span class="t">squadra: poc</span><span class="fav"><svg width="10" height="10"><use href="#bm"/></svg></span></button>
+        <div class="p">floe</div>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>master <span class="main">main</span></div>
+        <button class="r c" data-open><span class="spin">⠹</span><span class="t">pode analisar o painel de active sessions.. ainda está clunky</span><span class="fav"><svg width="10" height="10"><use href="#bm"/></svg></span></button>
+        <div class="sep"></div>
+
+        <div class="p">00.life-os</div>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>devsquad-new-flow</div>
+        <button class="r c"><span class="dot"></span><span class="t">squadra: skills</span></button>
+        <button class="r c" data-hot><span class="dot dot-unread"></span><span class="t">squadra: presentation</span></button>
+
+        <div class="p">floe</div>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>master <span class="main">main</span></div>
+        <button class="r c" data-hover><span class="dot"></span><span class="t">fix lane drag snapping on narrow panels</span><span class="x">×</span></button>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>jev</div>
+        <button class="r c" data-hot><span class="dot dot-unread"></span><span class="t">Okay, I got Jev API key. I'm gonna give it to you so we can</span></button>
+
+        <div class="p">os</div>
+        <div class="w"><span class="glyph"><svg width="10" height="10"><use href="#br"/></svg></span>develop <span class="main">main</span></div>
+        <button class="r c"><span class="dot"></span><span class="t">no replan image 01 .. eu ndnao consigo ver o nome da pessoa</span></button>
+        <button class="r c"><span class="dot"></span><span class="t">Okay, so let's add a new feature or a new enhancement to the</span></button>
+        <button class="r c"><span class="dot"></span><span class="t">o que temos de teste skipped no projeot?</span></button>
+        <button class="r c"><span class="ask">?</span><span class="t">pga os logs de erros de produção mais recentes e ssh ds.os e</span></button>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><b>Three levels:</b> project, then worktree (branch, "main" on the main checkout), then chats.</li>
+      <li><b>Every worktree gets its header,</b> even when it's the only one. Collapsing single-worktree projects would make the layout shift when a second worktree's chat joins.</li>
+      <li><b>Worktrees</b> in the sidebar's order (main first, then A→Z). Chats in creation order. Nothing reorders on activity.</li>
+      <li><b>Text 11px</b> (was 12px), rows 2px tighter. Chats indent 10px, the same as their worktree, so the smaller font buys title width instead of spending it on indentation. Favorites use the same project › worktree › chat tree, with no tags. A starred chat leaves the lower tree, so it never shows twice.</li>
+    </ol>
+  </div>
+
+</div>
+</body>
+</html>

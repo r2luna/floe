@@ -1,17 +1,18 @@
 // The `active` panel: a switcher between the chats you are working on, across
 // every project on every attached machine.
 //
-// Rows never move on their own. Favourites sit on top in starring order; the
-// rest are grouped by project A→Z, in creation order inside each. What a chat is
-// doing is shown by its mark alone — see activeStore.ts for who is on the list.
-import { useState, useSyncExternalStore, type ReactNode } from 'react'
+// Rows never move on their own. Favourites sit on top; they and the rest share
+// one shape — project A→Z, then worktree, then chats in creation order. What a
+// chat is doing is shown by its mark alone — see activeStore.ts for who is on
+// the list.
+import { Fragment, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { backendLabel, currentBackend, LOCAL } from './backends'
 import { Spinner } from './Spinner'
 import { markAll } from './findMark'
-import { IconBookmark } from './icons'
+import { IconBookmark, IconGitBranch } from './icons'
 import { RowMenu, type MenuAction } from './RowMenu'
 import { useActiveSessions } from './useActiveSessions'
-import { arrange, isFavorite, keysOf, leave, onWorktree, updateActive } from './activeStore'
+import { arrange, isFavorite, keysOf, leave, updateActive, type ActiveGroup } from './activeStore'
 import { isUnread, subscribeUnread, unreadMarks } from './unreadStore'
 import type { ActiveSession } from '../../shared/types'
 
@@ -66,7 +67,7 @@ export function ActiveSessionsList({
     (s.backend ?? LOCAL) === here &&
     (s.sessionId === openSession || s.claudeId === openSession)
 
-  const row = (s: ActiveSession, tag: ReactNode, host = false): ReactNode => {
+  const row = (s: ActiveSession): ReactNode => {
     const keys = keysOf(s)
     const fav = isFavorite(membership, s)
     return (
@@ -90,8 +91,6 @@ export function ActiveSessionsList({
       >
         <Mark session={s} />
         <span className="ax-name">{markAll(s.title, find)}</span>
-        {tag}
-        {host && s.backend && s.backend !== LOCAL && <span className="sx-host">{backendLabel(s.backend)}</span>}
         {fav && (
           <span className="skill-fav ax-fav" title="Favourite">
             <IconBookmark size={11} />
@@ -113,10 +112,24 @@ export function ActiveSessionsList({
     )
   }
 
-  const tagOf = (s: ActiveSession, project: boolean): ReactNode => {
-    const text = [project ? s.projectName : '', onWorktree(s) ? s.branch : ''].filter(Boolean).join(' / ')
-    return text ? <span className="ax-tag">{markAll(text, find)}</span> : null
-  }
+  const group = (g: ActiveGroup): ReactNode => (
+    <div className="ax-project" key={g.key}>
+      <div className="ax-head">
+        <span>{markAll(g.project, find)}</span>
+        {g.backend !== LOCAL && <span className="sx-host">{backendLabel(g.backend)}</span>}
+      </div>
+      {g.worktrees.map((w) => (
+        <Fragment key={w.key}>
+          <div className="ax-wt">
+            <IconGitBranch size={10} />
+            <span className="ax-branch">{markAll(w.branch, find)}</span>
+            {w.main && <span className="ax-main">main</span>}
+          </div>
+          {w.rows.map(row)}
+        </Fragment>
+      ))}
+    </div>
+  )
 
   const items: MenuAction[] = [
     { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
@@ -129,23 +142,14 @@ export function ActiveSessionsList({
   ]
 
   return (
-    <>
+    <div className="ax-list">
       {favorites.length > 0 && (
         <div className="ax-group" data-fav>
           <div className="group-label">FAVORITES</div>
-          {favorites.map((s) => row(s, tagOf(s, true), true))}
+          {favorites.map(group)}
         </div>
       )}
-      {groups.map((g) => (
-        <div className="ax-group" key={g.key}>
-          <div className="ax-head">
-            <span className="ax-project">{markAll(g.project, find)}</span>
-            {g.branch && <span className="ax-branch">{markAll(g.branch, find)}</span>}
-            {g.backend !== LOCAL && <span className="sx-host">{backendLabel(g.backend)}</span>}
-          </div>
-          {g.rows.map((s) => row(s, g.branch ? null : tagOf(s, false)))}
-        </div>
-      ))}
+      {groups.map(group)}
       {/* A machine that did not answer is named rather than counted: with one
           remote down the question is which one, and the list above is already
           usable. Same treatment the projects panel gives it. */}
@@ -174,6 +178,6 @@ export function ActiveSessionsList({
           }}
         />
       )}
-    </>
+    </div>
   )
 }
