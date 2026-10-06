@@ -322,6 +322,12 @@ export function pluginTools(): PluginToolSpec[] {
   return tools
 }
 
+/** The machine a plugin registered under this id — where the media scheme
+    fetches a remote file from (main/remoteMedia.ts). */
+export function backendById(id: string): BackendEntry | undefined {
+  return backends.find((b) => b.id === id)
+}
+
 export function loadedPlugins(): PluginInfo[] {
   return loaded
 }

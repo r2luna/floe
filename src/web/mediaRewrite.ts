@@ -18,6 +18,8 @@
 // points at, and the file only exists THERE. Without the id the daemon would
 // look for someone else's recording on its own disk and answer 404.
 
+import { mapProbeUrl, mapTranscriptUrls } from '../shared/mediaUrl.ts'
+
 const SCHEME_PREFIX = 'floe-media://file'
 
 /**
@@ -29,30 +31,13 @@ export function toHttpMediaUrl(url: string, backendId: string): string {
   return `/media/${encodeURIComponent(backendId)}${url.slice(SCHEME_PREFIX.length)}`
 }
 
-/**
- * `media:probe`'s answer with its url made fetchable.
- *
- * Null and malformed answers pass through untouched — this is a rewrite, not a
- * validator, and inventing a shape here would hide a real bug from the caller.
- */
+/** `media:probe`'s answer with its url made fetchable. */
 export function rewriteProbe(result: unknown, backendId: string): unknown {
-  if (!result || typeof result !== 'object') return result
-  const file = result as { url?: unknown }
-  if (typeof file.url !== 'string') return result
-  return { ...file, url: toHttpMediaUrl(file.url, backendId) }
+  return mapProbeUrl(result, (url) => toHttpMediaUrl(url, backendId))
 }
 
-/**
- * `claude:transcript`'s answer with every served image made fetchable — the
- * same rewrite as the probe's, applied to each `image` row's `src`. Anything
- * that is not a list, or a row without one, passes through untouched.
- */
+/** `claude:transcript`'s answer with every served image made fetchable — the
+    same rewrite as the probe's, applied to each `image` row's `src`. */
 export function rewriteTranscript(result: unknown, backendId: string): unknown {
-  if (!Array.isArray(result)) return result
-  return result.map((item: unknown) => {
-    if (!item || typeof item !== 'object') return item
-    const row = item as { src?: unknown }
-    if (typeof row.src !== 'string') return item
-    return { ...row, src: toHttpMediaUrl(row.src, backendId) }
-  })
+  return mapTranscriptUrls(result, (url) => toHttpMediaUrl(url, backendId))
 }

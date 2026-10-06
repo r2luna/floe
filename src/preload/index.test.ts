@@ -85,7 +85,11 @@ class FakeSocket {
       return
     }
     this.invokes.push({ channel: msg.channel, args: msg.args })
-    this.deliver({ kind: 'result', id: msg.id, ok: true, value: { on: this.url, channel: msg.channel } })
+    const value =
+      msg.channel === 'media:probe'
+        ? { url: `floe-media://file${msg.args[0] as string}`, mediaType: 'image/png' }
+        : { on: this.url, channel: msg.channel }
+    this.deliver({ kind: 'result', id: msg.id, ok: true, value })
   }
 
   /** Push a frame the way a remote backend would. */
@@ -199,6 +203,12 @@ test('the pointer steers workspace calls; a pinned channel never leaves this win
   await api.config.get()
   assert.deepEqual(state.invokes.at(-1), ['config:get', []])
   assert.equal(opened[1].invokes.at(-1)!.channel, 'settings:getSystemPrompt')
+})
+
+test('a media address from a machine comes back tagged with that machine', async () => {
+  assert.equal(api.backends.current(), 'nas')
+  const found = await api.media.probe('/tmp/demo.png')
+  assert.equal(found?.url, 'floe-media://remote/nas/tmp/demo.png')
 })
 
 test('invokeOn runs on the machine it names, pins what is pinned, and refuses ghosts', async () => {

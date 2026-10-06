@@ -192,7 +192,7 @@ import { floeConfig, setFloeValue } from './config/floe'
 import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
 import { recapSession } from './recap'
 import { handle } from './plugins/handleMap'
-import { loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
+import { backendById, loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
 import { launchEditor } from './editors'
 import type { TomlValue } from './config/toml'
 import {
@@ -244,6 +244,8 @@ import {
 } from './files'
 import { saveDownload } from './downloads'
 import { SCHEME as MEDIA_SCHEME, mediaResponse, pathFromMediaUrl, probeFile, probeMedia, readMediaChunk } from './media'
+import { remoteMediaResponse } from './remoteMedia'
+import { parseRemoteMediaUrl } from '../shared/mediaUrl'
 import { copyPlan, listPlans, readImplementPhases, readPlan, watchPlans } from './plans'
 import {
   attachToTask,
@@ -1977,7 +1979,12 @@ void app.whenReady().then(async () => {
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
   buildAppMenu(openNewInstance)
-  protocol.handle(MEDIA_SCHEME, (req) => mediaResponse(req.url, req.headers.get('Range')))
+  protocol.handle(MEDIA_SCHEME, (req) => {
+    // A file on another paired machine is fetched from it (remoteMedia.ts).
+    const remote = parseRemoteMediaUrl(req.url)
+    if (!remote) return mediaResponse(req.url, req.headers.get('Range'))
+    return remoteMediaResponse(backendById(remote.backendId), remote.path, req.headers.get('Range'), app.getVersion())
+  })
   registerIpc()
   ensureAgentHookInstalled()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. First

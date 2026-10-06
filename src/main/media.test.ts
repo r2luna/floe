@@ -14,6 +14,7 @@ import {
   readMediaChunk,
   resolveMediaPath
 } from './media.ts'
+import { mapMediaAnswer, parseRemoteMediaUrl, remoteMediaUrl } from '../shared/mediaUrl.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'floe-media-'))
 const video = join(dir, 'demo.mp4')
@@ -155,4 +156,29 @@ test('readMediaChunk hands out a page, so another machine can re-serve it', asyn
   writeFileSync(page, '<html>hi</html>')
   const chunk = await readMediaChunk(page, 0, 64)
   assert.equal(Buffer.from(chunk!.base64, 'base64').toString(), '<html>hi</html>')
+})
+
+test('a remote address names its machine and path, and is never read off this disk', () => {
+  const local = mediaUrl('/tmp/my demo #2.png')
+  const remote = remoteMediaUrl(local, 'Gtt/1')
+  assert.equal(remote, 'floe-media://remote/Gtt%2F1/tmp/my%20demo%20%232.png')
+  assert.deepEqual(parseRemoteMediaUrl(remote), { backendId: 'Gtt/1', path: '/tmp/my demo #2.png' })
+  assert.equal(pathFromMediaUrl(remote), null)
+  assert.equal(mediaResponse(remote, null).status, 400)
+  // Only a local address is re-addressed, and only a remote one parses.
+  assert.equal(remoteMediaUrl('data:image/png;base64,AA', 'gtt'), 'data:image/png;base64,AA')
+  assert.equal(parseRemoteMediaUrl(local), null)
+  assert.equal(parseRemoteMediaUrl('floe-media://remote/gtt'), null)
+  assert.equal(parseRemoteMediaUrl('floe-media://remote/%E0/tmp/a.png'), null)
+})
+
+test('only the media answers are re-addressed', () => {
+  const to = (url: string): string => remoteMediaUrl(url, 'gtt')
+  const probe = { url: mediaUrl('/tmp/a.png'), mediaType: 'image/png' }
+  assert.deepEqual(mapMediaAnswer('media:probe', probe, to), { ...probe, url: 'floe-media://remote/gtt/tmp/a.png' })
+  assert.deepEqual(mapMediaAnswer('claude:transcript', [{ src: mediaUrl('/c/a.png') }, { text: 'x' }], to), [
+    { src: 'floe-media://remote/gtt/c/a.png' },
+    { text: 'x' }
+  ])
+  assert.deepEqual(mapMediaAnswer('settings:get', probe, to), probe)
 })
