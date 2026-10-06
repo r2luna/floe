@@ -267,11 +267,13 @@ they were created.
 
 \`f\` stars the chat under the cursor, the same key and mark as the skills
 panel. A favourite stays on top until you unstar it. \`x\` takes the chat off
-the list, which the \`×\` on a hovered row does too. A chat waiting on you
-shows anyway.`,
+the list, which the \`×\` on a hovered row does too. \`c\` clears the whole
+list but the favourites, as the header button does, so only chats you send to
+from then on show. A chat waiting on you shows anyway.`,
     binds: [
       { key: 'f', command: 'active.favorite', when: 'panel == "active"' },
-      { key: 'x', command: 'active.remove', when: 'panel == "active"' }
+      { key: 'x', command: 'active.remove', when: 'panel == "active"' },
+      { key: 'c', command: 'active.clear', when: 'panel == "active"' }
     ]
   },
   {

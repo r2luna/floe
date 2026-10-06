@@ -12,6 +12,8 @@
 //  - It LEAVES when it is closed (the machine stops returning it), when you
 //    remove it (× or `x`), or after 24h idle. The idle sweep runs only while the
 //    panel is off screen, so a row never vanishes in front of you.
+//  - Clearing (`c`) empties the list at once. Only favourites stay, and from
+//    then on only chats you send to (or create) join.
 //  - A favourite (`f`) never expires. It sits on top, in the same tree.
 //  - A chat waiting on you shows whether or not it is a member.
 //
@@ -63,6 +65,13 @@ export function leave(st: ActiveState, keys: readonly string[]): ActiveState {
   const members = { ...st.members }
   for (const k of keys) delete members[k]
   return { ...st, members, favorites: st.favorites.filter((k) => !keys.includes(k)) }
+}
+
+/** Everything off the list but the favourites; what joins after is new. */
+export function clear(st: ActiveState): ActiveState {
+  const members: Record<string, number> = {}
+  for (const k of st.favorites) if (k in st.members) members[k] = st.members[k]
+  return { ...st, members }
 }
 
 /**

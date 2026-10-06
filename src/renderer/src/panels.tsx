@@ -230,8 +230,9 @@ export const KINDS = {
     title: 'active',
     width: 340,
     min: 260,
-    // No header action: the list re-reads itself every few seconds, so a
-    // reload button would be a control for something that already happened.
+    // Not a reload: the list re-reads itself every few seconds. Clearing is
+    // the one thing the list cannot do on its own.
+    action: { icon: IconTrash, title: 'Clear the list (c)', command: 'active.clear' },
     order: 5
   },
   worktrees: {
@@ -6391,17 +6392,6 @@ function WorktreesList({
     }
   ]
 
-  // Which branches are folded shut. Click/Enter/Space on a branch that is
-  // ALREADY current toggles it — the first press is "take me here", the next
-  // one is "hide this", the way a folder behaves.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
-  const toggle = (path: string): void =>
-    setCollapsed((c) => {
-      const next = new Set(c)
-      if (!next.delete(path)) next.add(path)
-      return next
-    })
-
   // The form renders above every state, the empty ones included: a project
   // with no worktrees yet is exactly where ⌘N gets used.
   const form = creating ? <NewWorktreeForm {...creating} /> : null
@@ -6439,31 +6429,20 @@ function WorktreesList({
             // worktree above it does not slide the cursor onto another row.
             data-key={worktree.path}
             data-active={worktree.path === worktrees.currentPath || undefined}
-            aria-expanded={!collapsed.has(worktree.path)}
             onClick={() => {
               // Entering restores the chat this branch was left in, when it has
-              // one. The launcher is only offered for a branch with nothing to
-              // fold: it autoFocuses its composer, so offering it here would
-              // make every fold throw you into a new chat. ⌘T is how you ask.
+              // one. The launcher is only offered for a branch with no sessions:
+              // it autoFocuses its composer, so offering it on every click would
+              // throw you into a new chat. ⌘T is how you ask.
               if (onEnter) {
-                if (onEnter(worktree.path, sessions.length === 0) === 'chat') return
-                if (sessions.length) toggle(worktree.path)
+                onEnter(worktree.path, sessions.length === 0)
                 return
               }
               worktrees.select(worktree.path)
-              if (sessions.length) return toggle(worktree.path)
-              onOpen({ kind: 'branch', sub: worktree.branch })
+              if (!sessions.length) onOpen({ kind: 'branch', sub: worktree.branch })
             }}
           >
-            {sessions.length ? (
-              collapsed.has(worktree.path) ? (
-                <IconChevronRight size={13} stroke={1.6} />
-              ) : (
-                <IconChevronDown size={13} stroke={1.6} />
-              )
-            ) : (
-              <IconGitBranch size={13} stroke={1.6} />
-            )}
+            <IconGitBranch size={13} stroke={1.6} />
             {/* No session count and no spinner: the sessions are listed right
                 underneath, each with its own mark, so a tally on the branch
                 only repeats what the next three rows already say. */}
@@ -6471,7 +6450,7 @@ function WorktreesList({
             <GitDirt status={worktrees.status[worktree.path]} />
           </button>
 
-          {(collapsed.has(worktree.path) ? [] : nestSpawned(sessions)).map(({ s, under }) => {
+          {nestSpawned(sessions).map(({ s, under }) => {
             // Both names, everywhere: the agent conn is filed under whichever
             // the session last spawned with, so its events arrive tagged with
             // one or the other and a lookup on a single id misses half of them.

@@ -33,7 +33,7 @@ import { skillsChanged } from './useSkills.ts'
 import { toggleSubagentDock } from './useSubagents.ts'
 import { startMcpDraft } from './mcpDraft.ts'
 import { isUnread, markRead, markUnread } from './unreadStore.ts'
-import { leave, toggleFavorite, updateActive } from './activeStore.ts'
+import { clear, leave, toggleFavorite, updateActive } from './activeStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
 import { taskChatOpener } from '../../shared/taskFolders.ts'
@@ -1515,6 +1515,20 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Active',
         enabled: (c) => !!activeRow(c),
         run: (c) => editActiveRow(c, true, (keys) => updateActive((st) => leave(st, keys)))
+      },
+      {
+        // Empty the `active` list but for the favourites: from here on only
+        // the chats you send to join. A chat waiting on you still shows.
+        id: 'active.clear',
+        title: 'Clear the active list',
+        group: 'Active',
+        run: (c) => {
+          updateActive(clear)
+          const at = c.lane.panels.findIndex((p) => p?.kind === 'active')
+          if (at === -1) return
+          const panel = c.panelEl(at)
+          requestAnimationFrame(() => c.rowsOf(panel)[0]?.focus())
+        }
       },
       {
         // Copy the project's harness skills into its `.floe/skills`. A name Floe

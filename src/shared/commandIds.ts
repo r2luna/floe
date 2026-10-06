@@ -100,6 +100,7 @@ export const COMMAND_IDS: string[] = [
   'skill.import',
   'active.favorite',
   'active.remove',
+  'active.clear',
   'draw.open',
   'draw.new',
   'draw.rename',

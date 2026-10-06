@@ -1193,6 +1193,12 @@ button {
   padding-top: 2px;
 }
 
+/* The worktrees panel's gap between groups: 11px here plus the head's 7px is
+   its 14px plus the label's 4px. */
+.ax-project + .ax-project {
+  margin-top: 11px;
+}
+
 .ax-wt {
   display: flex;
   align-items: center;

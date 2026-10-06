@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   arrange,
+  clear,
   expire,
   IDLE_MS,
   idsFor,
@@ -146,6 +147,17 @@ test('remove takes a chat off the list and off the favourites, under every name'
   let st = toggleFavorite(members('local:a', 'local:cli'), ['local:a'], NOW)
   st = leave(st, ['local:a', 'local:cli'])
   assert.deepEqual(st, { ...EMPTY, members: {}, favorites: [] })
+})
+
+test('clear empties the list but keeps the favourites; a later send joins again', () => {
+  let st = toggleFavorite(members('local:a', 'local:b', 'local:c'), ['local:b'], NOW)
+  st = clear(st)
+  assert.deepEqual(st.members, { 'local:b': NOW })
+  assert.deepEqual(st.favorites, ['local:b'])
+  const rows = [row('a'), row('b'), row('c'), row('d', { needsYou: true })]
+  const layout = arrange(rows, join(st, 'local:c', NOW))
+  assert.deepEqual(ids(all(layout.favorites[0])), ['b'])
+  assert.deepEqual(ids(all(layout.groups[0])), ['c', 'd'])
 })
 
 test('24h idle drops a member, but not a favourite, a running chat or a fresh one', () => {
