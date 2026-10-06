@@ -58,7 +58,6 @@ import {
 } from './laneStore'
 import { setKeymap } from './keys'
 import { useAppearance } from './appearance'
-import { usePresence } from './usePresence'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { KeysHelp } from './KeysHelp'
@@ -630,8 +629,6 @@ export default function App() {
   // when a rebind (or an edit to the file) changes them.
   // The font from floe.toml, live. The size is a window zoom applied in main.
   useAppearance()
-  // Keeps each machine's Telegram bot quiet while you are here.
-  usePresence()
   // The one line the app can say to a keyboard user. A key press has no row to
   // dim and no tooltip to hover, so a refused command would otherwise be
   // indistinguishable from a broken binding — which is exactly how ⌘K F read
