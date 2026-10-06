@@ -143,9 +143,7 @@ import { clearReview, commitFileDiff, hasReviewCheckpoint, restoreReview, review
 import { localUsage } from './localAgents'
 import { copyPlan, PLANS_DIR, readImplementPhases } from './plans'
 import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort, setMcpRebind } from './mcpHarness'
-import { DEFAULT_MODE, HARNESSES, MODES, modeFromLabel, nearestMode } from '../shared/modes'
-import { floeConfig } from './config/floe'
-import { setupTelegram, telegramStatus } from './telegram/index'
+import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import { diagnoseWorktreeFailure } from '../shared/worktreeError'
 import {
@@ -284,7 +282,7 @@ function awaitCommand(command: McpCommand & { requestId: string }, timeoutMs = 1
 // A session id from a caller can be the Floe id, the current Claude id, or a
 // past Claude id (resume forks a new one every respawn) — accept them all, the
 // same way sessionStore's findByKey does.
-export function findSessionAny(id: string): CreatedSession | undefined {
+function findSessionAny(id: string): CreatedSession | undefined {
   const created = getAllCreatedSessions()
   return (
     created.find((s) => s.id === id) ??
@@ -534,7 +532,6 @@ function registerTools(server: McpServer, token: string): void {
   registerPlanExtraTools(server)
   registerBrowserTools(server, token)
   registerSupportTools(server)
-  registerTelegramTools(server)
   registerPluginToolsOn(server)
 }
 
@@ -953,30 +950,6 @@ async function sendMessageTool(args: SendMessageArgs): Promise<ToolResult> {
   } catch (e) {
     return textResult({ error: (e as Error).message })
   }
-}
-
-/**
- * A message the USER sent from outside the window — the Telegram bot. The same
- * door as send_message, with one difference: a chat with no stored mode runs on
- * floe.toml's, as the composer would, not on bypass. Bypass is the default for
- * a session an agent drives; this one has a person behind it.
- */
-export function sendAsUser(sessionId: string, prompt: string): string | undefined {
-  const target = findSessionAny(sessionId)
-  if (!target) return `Unknown session: ${sessionId}`
-  const win = getWindow()
-  if (!win) return 'No window available to run the session.'
-  const mode = target.permissionMode ?? modeFromLabel(floeConfig().agent.mode) ?? DEFAULT_MODE
-  const sent = sendOptions(target, prompt, { mode })
-  return dispatchTurn({
-    win,
-    parentKey: connKeyFor(target),
-    worktreePath: target.worktreePath,
-    prompt,
-    route: sent.route,
-    origin: 'user',
-    options: sent.options
-  }).error
 }
 
 async function askPeerTool(token: string, spec: PeerSpec): Promise<ToolResult> {
@@ -2381,50 +2354,6 @@ function registerSkillTools(server: McpServer): void {
 // --- The shared support stack (container-mode infrastructure) ---------------
 // Floe has no server CLI, so the stack's lifecycle is a tool + a palette command
 // rather than `floe server support up` — same two principles as everything else.
-// The Telegram bot (telegram/index.ts). Circular with it — it sends through
-// sendAsUser here — safe for the usual reason: neither runs the other at import.
-function registerTelegramTools(server: McpServer): void {
-  server.tool(
-    'telegram_setup',
-    [
-      "Configure this machine's Telegram bot, which relays the user's chats to Telegram while nobody is at Floe here",
-      '(finished turns, permission prompts, questions) and sends replies back into the chat.',
-      'Each machine needs its own bot token from @BotFather. After setting a token, the user sends `/pair <pairCode>`',
-      'to the bot from their Telegram account. Returns the same shape as telegram_status.'
-    ].join(' '),
-    {
-      token: z.string().optional().describe('The bot token from @BotFather. Checked with Telegram before it is saved.'),
-      away_after_minutes: z
-        .number()
-        .optional()
-        .describe('Minutes without input in any Floe window before the user counts as away. Default 3.'),
-      enabled: z.boolean().optional().describe('Turn the bot on or off without forgetting the token.'),
-      unpair: z.boolean().optional().describe('Forget the paired chat and issue a new pairing code.')
-    },
-    async (a) => {
-      try {
-        return textResult(
-          await setupTelegram({
-            token: a.token,
-            awayAfterMinutes: a.away_after_minutes,
-            enabled: a.enabled,
-            unpair: a.unpair
-          })
-        )
-      } catch (e) {
-        return textResult({ error: (e as Error).message })
-      }
-    }
-  )
-
-  server.tool(
-    'telegram_status',
-    "This machine's Telegram bot: configured, running, paired, the pending pairing code, whether the user counts as away right now, and the last error.",
-    {},
-    async () => textResult(telegramStatus())
-  )
-}
-
 function registerSupportTools(server: McpServer): void {
   server.tool(
     'support_stack',
@@ -2826,7 +2755,7 @@ function registerCommandRunTools(server: McpServer): void {
  * its conn (permissions and questions both); codex keeps its questions on the
  * app-server thread, and nothing else can ask at all.
  */
-export function promptsFor(key: string): PendingPrompt[] {
+function promptsFor(key: string): PendingPrompt[] {
   const codex = codexPendingQuestion(key)
   return codex
     ? [{ requestId: codex.requestId, kind: 'question', questions: codex.texts.map((q) => ({ question: q, options: [] })) }]

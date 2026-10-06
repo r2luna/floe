@@ -196,19 +196,6 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // so an attached window raises itself on the user's desk even when the command
     // Resolves false when there's no window to raise.
     focus: (): Promise<boolean> => ipcRenderer.invoke('window:focus'),
-    // Someone is at this window. Told to EVERY machine it shows, because each
-    // runs its own Telegram bot and stays quiet only while you are at Floe
-    // (main/telegram/presence.ts). A backend too old to know the channel
-    // rejects, and that is fine.
-    presence: (): void => {
-      const ids = host.backendsCtl?.list().map((b) => b.id) ?? ['local']
-      for (const id of ids) {
-        const sent = host.backendsCtl
-          ? host.backendsCtl.invokeOn(id, 'presence:ping')
-          : ipcRenderer.invoke('presence:ping')
-        void sent.catch(() => {})
-      }
-    },
     // The machines this window can run on. Workspace calls follow `use`'s
     // pointer; PINNED channels always stay on this machine (remoteProtocol.ts).
     backends: {
