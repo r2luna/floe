@@ -14,7 +14,7 @@ import {
   readMediaChunk,
   resolveMediaPath
 } from './media.ts'
-import { mapMediaAnswer, parseRemoteMediaUrl, remoteMediaUrl } from '../shared/mediaUrl.ts'
+import { mapMediaAnswer, parseRemoteMediaUrl, remoteFileUrl, remoteMediaUrl } from '../shared/mediaUrl.ts'
 
 const dir = mkdtempSync(join(tmpdir(), 'floe-media-'))
 const video = join(dir, 'demo.mp4')
@@ -181,4 +181,13 @@ test('only the media answers are re-addressed', () => {
     { text: 'x' }
   ])
   assert.deepEqual(mapMediaAnswer('settings:get', probe, to), probe)
+})
+
+test("a file:// page becomes the same path on the machine it names", () => {
+  const url = remoteFileUrl('file:///tmp/my%20demo%20%232.html#end', 'gtt')
+  assert.equal(url, 'floe-media://remote/gtt/tmp/my%20demo%20%232.html#end')
+  assert.deepEqual(parseRemoteMediaUrl(url.split('#')[0]), { backendId: 'gtt', path: '/tmp/my demo #2.html' })
+  assert.equal(remoteFileUrl('https://example.com', 'gtt'), 'https://example.com')
+  assert.equal(remoteFileUrl('file://~/a.html', 'gtt'), 'file://~/a.html')
+  assert.equal(remoteFileUrl('file:///bad%E0.html', 'gtt'), 'file:///bad%E0.html')
 })

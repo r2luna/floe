@@ -81,10 +81,11 @@ export async function load(url, context, next) {
       "export const shell = { openExternal: (u) => (g.__floeOpened ??= []).push(u), openPath(){}, showItemInFolder(){} }",
       "export const nativeImage = { createFromDataURL: () => ({ isEmpty: () => true }) }",
       "export const protocol = { registerSchemesAsPrivileged(){}, handle(){} }",
+      "export const session = { fromPartition: () => ({ protocol }) }",
       "export const dialog = { showMessageBoxSync: () => 0 }",
       "export const Menu = { setApplicationMenu(){}, buildFromTemplate: (items) => ({ popup: () => (g.__floeMenus ??= []).push(items) }) }",
       "export const safeStorage = { isEncryptionAvailable: () => false }",
-      "export default { app, BrowserWindow, ipcMain, Notification, nativeTheme, clipboard, shell, nativeImage, protocol, dialog, Menu, safeStorage }"
+      "export default { app, BrowserWindow, ipcMain, Notification, nativeTheme, clipboard, shell, nativeImage, protocol, session, dialog, Menu, safeStorage }"
     ].join('\\n')
     return { format: 'module', shortCircuit: true, source: src }
   }

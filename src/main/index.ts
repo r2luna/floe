@@ -9,6 +9,7 @@ import {
   clipboard,
   nativeImage,
   protocol,
+  session,
   type IpcMainInvokeEvent
 } from 'electron'
 import { join, basename } from 'path'
@@ -206,6 +207,7 @@ import {
   notifyTerminalsTheme
 } from './terminal'
 import {
+  BROWSER_PARTITION,
   browserBack,
   browserForward,
   browserReload,
@@ -1979,12 +1981,19 @@ void app.whenReady().then(async () => {
   // Kill any command groups orphaned by a previous unclean quit before we spawn anew.
   reapOrphanCommands()
   buildAppMenu(openNewInstance)
-  protocol.handle(MEDIA_SCHEME, (req) => {
-    // A file on another paired machine is fetched from it (remoteMedia.ts).
+  const remoteMedia = (req: Request): Promise<Response> | null => {
     const remote = parseRemoteMediaUrl(req.url)
-    if (!remote) return mediaResponse(req.url, req.headers.get('Range'))
+    if (!remote) return null
     return remoteMediaResponse(backendById(remote.backendId), remote.path, req.headers.get('Range'), app.getVersion())
-  })
+  }
+  // A file on another paired machine is fetched from it (remoteMedia.ts).
+  protocol.handle(MEDIA_SCHEME, (req) => remoteMedia(req) ?? mediaResponse(req.url, req.headers.get('Range')))
+  // The browser panel's own session: a `file://` page on that machine arrives
+  // re-addressed (preload). Only remote ones: a local page loads as `file://`,
+  // and a site open in the panel has no business reading this disk.
+  session
+    .fromPartition(BROWSER_PARTITION)
+    .protocol.handle(MEDIA_SCHEME, (req) => remoteMedia(req) ?? new Response('not found', { status: 404 }))
   registerIpc()
   ensureAgentHookInstalled()
   // The in-app MCP control server: agents drive Floe over /mcp/<token>. First

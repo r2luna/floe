@@ -217,7 +217,12 @@ export const protocol = {
   handle: (): void => {}
 }
 
+// The browser panel's partition gets the media scheme too (main/index.ts).
+export const session = {
+  fromPartition: () => ({ protocol })
+}
+
 // Type-only names (IpcMainInvokeEvent, WebContents, MenuItemConstructorOptions)
 // erase at compile time and need no runtime value.
 
-export default { app, BrowserWindow, WebContentsView, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, nativeImage, shell, safeStorage, protocol }
+export default { app, BrowserWindow, WebContentsView, ipcMain, dialog, Notification, nativeTheme, Menu, clipboard, nativeImage, shell, safeStorage, protocol, session }

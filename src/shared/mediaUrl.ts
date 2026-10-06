@@ -46,6 +46,20 @@ export function remoteMediaUrl(url: string, backendId: string): string {
   return REMOTE_PREFIX + encodeURIComponent(backendId) + url.slice(LOCAL_PREFIX.length)
 }
 
+/** A `file://` page on another machine as a remote address, so the browser
+    panel loads it from there instead of this disk. Anything else passes
+    through. The query is dropped: the scheme serves a path, not a request. */
+export function remoteFileUrl(url: string, backendId: string): string {
+  if (!url.startsWith('file:///')) return url
+  try {
+    const parsed = new URL(url)
+    const path = parsed.pathname.split('/').map(decodeURIComponent).join('/')
+    return remoteMediaUrl(mediaUrl(path), backendId) + parsed.hash
+  } catch {
+    return url
+  }
+}
+
 /** The machine and path a remote address names, or null if it is not one. */
 export function parseRemoteMediaUrl(url: string): { backendId: string; path: string } | null {
   if (!url.startsWith(REMOTE_PREFIX)) return null

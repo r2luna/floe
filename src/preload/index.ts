@@ -4,7 +4,7 @@ import pkg from '../../package.json'
 import { buildFloeApi, type BackendInfo, type FloeHost, type IpcLike } from './api'
 import { createSocketIpc, type SocketIpc } from './socketIpc'
 import { PINNED_CHANNELS } from '../shared/remoteProtocol'
-import { mapMediaAnswer, remoteMediaUrl } from '../shared/mediaUrl'
+import { mapMediaAnswer, remoteFileUrl, remoteMediaUrl } from '../shared/mediaUrl'
 
 // The worktree this app instance runs in: explicit env, else the segment after
 // `.worktrees/` in the launch path. Null on the main checkout.
@@ -35,6 +35,10 @@ const subscriptions: Array<{ channel: string; listener: Listener }> = []
 const router: IpcLike = {
   invoke: (channel: string, ...args: any[]): Promise<any> => {
     const on = current
+    // The browser is this window's, but a `file://` page an agent on another
+    // machine opens names a file on ITS disk: loaded from there (remoteMedia.ts).
+    if (channel === 'browser:navigate' && remotes.has(on) && typeof args[0] === 'string')
+      return ipcRenderer.invoke(channel, remoteFileUrl(args[0], on))
     const remote = on !== 'local' && !PINNED_CHANNELS.has(channel) ? remotes.get(on) : undefined
     if (!remote) return ipcRenderer.invoke(channel, ...args)
     // A media address from another machine names a file on ITS disk: tagged

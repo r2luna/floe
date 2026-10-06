@@ -144,13 +144,17 @@ function shortcut(session: Session, event: Electron.Event, input: Electron.Input
   session.win.webContents.send('browser:shortcut', command)
 }
 
+/** The browser panel's cookie jar, apart from Floe's own (main/index.ts serves
+    a remote machine's pages into it). */
+export const BROWSER_PARTITION = 'persist:floe-browser'
+
 function createSession(win: BrowserWindow, key: string): Session {
   const view = new WebContentsView({
     webPreferences: {
       sandbox: true,
       contextIsolation: true,
       nodeIntegration: false,
-      partition: 'persist:floe-browser'
+      partition: BROWSER_PARTITION
     }
   })
   // Match a normal browser canvas. Many local fixtures and generated previews

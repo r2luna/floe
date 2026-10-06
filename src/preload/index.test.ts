@@ -211,6 +211,14 @@ test('a media address from a machine comes back tagged with that machine', async
   assert.equal(found?.url, 'floe-media://remote/nas/tmp/demo.png')
 })
 
+test("a file:// page opened while on a machine loads from that machine, in this window's browser", async () => {
+  assert.equal(api.backends.current(), 'nas')
+  await api.browser.navigate('file:///tmp/my%20demo.html#top')
+  assert.deepEqual(state.invokes.at(-1), ['browser:navigate', ['floe-media://remote/nas/tmp/my%20demo.html#top']])
+  await api.browser.navigate('https://example.com')
+  assert.deepEqual(state.invokes.at(-1), ['browser:navigate', ['https://example.com']])
+})
+
 test('invokeOn runs on the machine it names, pins what is pinned, and refuses ghosts', async () => {
   await api.backends.invokeOn('mac', 'projects:probe', '/srv/repo')
   assert.deepEqual(opened[2].invokes.at(-1), { channel: 'projects:probe', args: ['/srv/repo'] })
