@@ -338,3 +338,15 @@ test('a line said before the turn is never taken for a steer', () => {
   )
   assert.deepEqual(shown(s).map((i) => [i.text, i.at]), [['anda', 1000], ['anda', 5500]])
 })
+
+test('the turn ending leaves a background workflow row running', () => {
+  const s = run(
+    { type: 'push', item: start('t1', 'Explore') },
+    { type: 'push', item: { ...start('w1#1', 'workflow'), background: true } },
+    { type: 'finish', ms: 1000, tokens: 100 }
+  )
+  assert.deepEqual(rows(s).map((r) => [r.toolUseId, r.running]), [
+    ['t1', false],
+    ['w1#1', true]
+  ])
+})

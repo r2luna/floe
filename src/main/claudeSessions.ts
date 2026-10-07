@@ -160,6 +160,8 @@ export interface TranscriptItem {
   running?: boolean
   lastTool?: string
   agentTokens?: number
+  // A Workflow agent, still running after the turn that launched it ended.
+  background?: boolean
 }
 
 function extractText(message: unknown): string {

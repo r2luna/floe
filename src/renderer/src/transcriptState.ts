@@ -224,14 +224,16 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
       // the answer is printed would be the panel telling a story the session
       // has already ended. `base` too: a panel that opened mid-turn read those
       // rows off disk as running, and nothing else will ever close them.
+      // A background row is the exception: a workflow agent keeps working after
+      // the turn that launched it, and agent.ts closes it when it ends.
       const base = [...state.base]
       for (let i = 0; i < base.length; i++) {
-        if (base[i].role === 'subagent' && base[i].running) {
+        if (base[i].role === 'subagent' && base[i].running && !base[i].background) {
           base[i] = { ...base[i], running: false, lastTool: '' }
         }
       }
       for (let i = 0; i < live.length; i++) {
-        if (live[i].role === 'subagent' && live[i].running) {
+        if (live[i].role === 'subagent' && live[i].running && !live[i].background) {
           live[i] = { ...live[i], running: false, lastTool: '' }
         }
       }

@@ -39,6 +39,7 @@ export interface Conn {
   pendingPerms: Map<string, unknown> // requestId → tool input, awaiting allow/deny
   permSuggestions: Map<string, unknown[]> // requestId → the CLI's permission_suggestions, saved on "don't ask again"
   subagents: Set<string> // active Task/Agent tool_use ids → emit `done` when their result returns
+  workflowRows: Map<string, boolean> // `<Workflow tool_use id>#<agent index>` → row still open (see handleWorkflowProgress)
   // The MCP control server reads these so another session can watch this one:
   transcriptBuffer: string[] // recent human-readable lines (assistant text + tool summaries), capped
   lastAssistantText: string // assistant text accumulated this turn, returned to a waiting send_message(wait)
@@ -601,6 +602,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     pendingPerms: new Map(),
     permSuggestions: new Map(),
     subagents: new Set(),
+    workflowRows: new Map(),
     transcriptBuffer: [],
     lastAssistantText: '',
     pendingDeltas: [],
@@ -691,6 +693,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
     conn.turnClosed = true
     log('child-close', { key, code, turnMs: conn.turnStartedAt ? Date.now() - conn.turnStartedAt : 0, subagents: conn.subagents.size })
     flushDeltas(win, key, conn)
+    closeWorkflowRows(win, key, conn)
     if (code && code !== 0 && conn.stderr.trim()) send(win, key, { kind: 'error', message: conn.stderr.trim() })
     send(win, key, { kind: 'done', ok: !code })
     resolveWaiters(key, conn.lastAssistantText)
@@ -1081,6 +1084,7 @@ export function stopAgent(win: BrowserWindow, key: string): void {
     subagents: conn.subagents.size
   })
   flushDeltas(win, connKey, conn) // surface whatever text had streamed before the stop
+  closeWorkflowRows(win, connKey, conn)
   resolveWaiters(connKey, conn.lastAssistantText)
   if (connKey !== key) resolveWaiters(key, conn.lastAssistantText)
   // A wedged child may ignore SIGTERM. We already deregistered, so a survivor is
@@ -1680,9 +1684,62 @@ function handleBackgroundTasks(win: BrowserWindow, key: string, conn: Conn, msg:
   setStatus(win, key, conn, text)
 }
 
+// The Workflow tool runs its agents inside the CLI as well, but nothing they do
+// is tagged with parent_tool_use_id: the CLI reports them as `task_progress`
+// system lines whose `workflow_progress` lists every agent with its state. Each
+// agent gets a row of its own, keyed `<tool_use id>#<index>`. They are
+// background rows: a workflow outlives the turn that launched it, so that
+// turn's end must not close them — the agent's own terminal state does, and
+// `task_notification` sweeps whatever the workflow left open.
+const WORKFLOW_AGENT_ENDED = new Set(['done', 'failed', 'error', 'cancelled', 'killed'])
+
+function handleWorkflowProgress(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
+  const workflow = typeof msg.tool_use_id === 'string' ? msg.tool_use_id : ''
+  if (!workflow || !Array.isArray(msg.workflow_progress)) return
+  for (const agent of msg.workflow_progress as Array<Record<string, unknown>>) {
+    if (agent.type !== 'workflow_agent' || typeof agent.index !== 'number') continue
+    const id = `${workflow}#${agent.index}`
+    // Every snapshot lists every agent, finished ones included: a closed row
+    // is never reopened.
+    if (conn.workflowRows.get(id) === false) continue
+    if (!conn.workflowRows.has(id)) {
+      conn.workflowRows.set(id, true)
+      send(win, key, {
+        kind: 'subagent-start',
+        toolUseId: id,
+        agentType: 'workflow',
+        description: typeof agent.label === 'string' ? agent.label : '',
+        harness: 'claude',
+        background: true
+      })
+    }
+    if (typeof agent.tokens === 'number') send(win, key, { kind: 'subagent-progress', toolUseId: id, tokens: agent.tokens })
+    if (typeof agent.state !== 'string' || !WORKFLOW_AGENT_ENDED.has(agent.state)) continue
+    conn.workflowRows.set(id, false)
+    send(win, key, {
+      kind: 'subagent-done',
+      toolUseId: id,
+      ms: typeof agent.durationMs === 'number' ? agent.durationMs : undefined
+    })
+  }
+}
+
+// Close the workflow rows still open — one workflow's when it names one, every
+// workflow's when the CLI itself is gone and none of them will report again.
+function closeWorkflowRows(win: BrowserWindow, key: string, conn: Conn, workflow?: string): void {
+  for (const [id, open] of conn.workflowRows) {
+    if (!open || (workflow && !id.startsWith(`${workflow}#`))) continue
+    conn.workflowRows.set(id, false)
+    send(win, key, { kind: 'subagent-done', toolUseId: id })
+  }
+}
+
 function handleSystemLine(win: BrowserWindow, key: string, conn: Conn, msg: Record<string, unknown>): void {
   if (msg.subtype === 'api_retry') return handleApiRetry(win, key, conn, msg)
   if (msg.subtype === 'background_tasks_changed') return handleBackgroundTasks(win, key, conn, msg)
+  if (msg.subtype === 'task_progress') return handleWorkflowProgress(win, key, conn, msg)
+  if (msg.subtype === 'task_notification' && typeof msg.tool_use_id === 'string')
+    return closeWorkflowRows(win, key, conn, msg.tool_use_id)
   if (msg.subtype !== 'init' || typeof msg.session_id !== 'string') return
   send(win, key, {
     kind: 'session',

@@ -411,6 +411,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
           agentType: event.agentType,
           summary: event.description,
           harness: event.harness ?? 'claude',
+          background: event.background,
           running: true,
           at: Date.now()
         }

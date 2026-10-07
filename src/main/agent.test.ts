@@ -119,6 +119,7 @@ function fakeConn(over: Partial<Conn> = {}): Conn {
     pendingPerms: new Map(),
     permSuggestions: new Map(),
     subagents: new Set(),
+    workflowRows: new Map(),
     transcriptBuffer: [],
     lastAssistantText: '',
     pendingDeltas: [],
@@ -382,6 +383,53 @@ test('handleLine: subagent activity routes to its row, never the parent gauge', 
   assert.deepEqual(kinds(events), ['subagent-progress'])
   assert.equal((events[0] as { toolUseId: string }).toolUseId, 't1')
   assert.equal((events[0] as { tool?: string }).tool, 'Grep')
+})
+
+// The shape the CLI streams for a Workflow run (captured from claude 2.x).
+const wfAgent = (index: number, state: string, extra: Record<string, unknown> = {}) => ({
+  type: 'workflow_agent',
+  index,
+  label: `job ${index}`,
+  state,
+  ...extra
+})
+const wfProgress = (...agents: unknown[]) => ({
+  type: 'system',
+  subtype: 'task_progress',
+  tool_use_id: 'w1',
+  workflow_progress: agents
+})
+
+test('handleLine: each workflow agent opens one background row', () => {
+  const conn = fakeConn()
+  const { win, events } = fakeWin()
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(wfAgent(1, 'start'), wfAgent(2, 'start'))))
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(wfAgent(1, 'start'), wfAgent(2, 'start'))))
+  assert.deepEqual(only(events, 'subagent-start'), [
+    { kind: 'subagent-start', toolUseId: 'w1#1', agentType: 'workflow', description: 'job 1', harness: 'claude', background: true },
+    { kind: 'subagent-start', toolUseId: 'w1#2', agentType: 'workflow', description: 'job 2', harness: 'claude', background: true }
+  ])
+})
+
+test('handleLine: a finished workflow agent closes once with its cost', () => {
+  const conn = fakeConn()
+  const { win, events } = fakeWin()
+  const done = wfAgent(1, 'done', { tokens: 14633, durationMs: 1375 })
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(wfAgent(1, 'start'))))
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(done)))
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(done)))
+  assert.deepEqual(only(events, 'subagent-progress'), [{ kind: 'subagent-progress', toolUseId: 'w1#1', tokens: 14633 }])
+  assert.deepEqual(only(events, 'subagent-done'), [{ kind: 'subagent-done', toolUseId: 'w1#1', ms: 1375 }])
+})
+
+test('handleLine: task_notification closes only its own workflow rows', () => {
+  const conn = fakeConn()
+  const { win, events } = fakeWin()
+  handleLine(win, 'k', conn, JSON.stringify(wfProgress(wfAgent(1, 'start'), wfAgent(2, 'done'))))
+  handleLine(win, 'k', conn, JSON.stringify({ ...wfProgress(wfAgent(1, 'start')), tool_use_id: 'w2' }))
+  events.length = 0
+  handleLine(win, 'k', conn, JSON.stringify({ type: 'system', subtype: 'task_notification', tool_use_id: 'w1' }))
+  assert.deepEqual(events, [{ kind: 'subagent-done', toolUseId: 'w1#1' }])
 })
 
 test('handleLine: a tracked subagent result marks it done and clears tracking', () => {

@@ -1133,6 +1133,9 @@ export type AgentEvent =
       agentType: string
       description: string
       harness?: string
+      // A Workflow agent: it outlives the turn that launched it, so the turn's
+      // end does not close its row — its own `subagent-done` does.
+      background?: boolean
     }
   | { kind: 'subagent-progress'; toolUseId: string; tokens: number; tool?: string }
   // `reply` is what the agent came back to say — the Task's tool_result, an
