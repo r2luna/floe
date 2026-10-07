@@ -146,6 +146,7 @@ export const COMMAND_IDS: string[] = [
   'mcp.auth',
   'mcp.delete',
   'composer.vim',
+  'appearance.keyHints',
   'keybindings.reset',
   'update.check',
   'update.install',

@@ -72,6 +72,8 @@ export interface FloeConfig {
      * on it stays readable over a busy wallpaper.
      */
     transparencyAmount: number
+    /** A footer under every panel naming that panel's own keys. */
+    keyHints: boolean
   }
   agent: {
     model: (typeof MODELS)[number]
@@ -144,7 +146,10 @@ export const DEFAULTS: FloeConfig = {
     // Opaque until asked: the glass is a choice about the desktop behind the
     // window, and nobody's app should turn see-through on an update.
     transparency: 'off',
-    transparencyAmount: 18
+    transparencyAmount: 18,
+    // Off until asked: the footer costs every panel a line, and `?` already
+    // answers "what can I press here" for anyone who knows to ask.
+    keyHints: false
   },
   agent: {
     model: 'opus',
@@ -300,7 +305,8 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
           d.appearance.transparency,
         transparencyAmount:
           appearance?.num('transparency-amount', d.appearance.transparencyAmount, { min: 0, max: 60 }) ??
-          d.appearance.transparencyAmount
+          d.appearance.transparencyAmount,
+        keyHints: appearance?.bool('key-hints', d.appearance.keyHints) ?? d.appearance.keyHints
       },
       agent: {
         model: agent?.oneOf('model', MODELS, d.agent.model) ?? d.agent.model,

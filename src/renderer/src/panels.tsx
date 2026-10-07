@@ -7215,6 +7215,14 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           max: 60,
           suffix: '%',
           hint: 'how much of the desktop comes through — nothing unless transparency is on'
+        },
+        {
+          kind: 'bool',
+          table: 'appearance',
+          key: 'key-hints',
+          label: 'Panel key hints',
+          value: config.appearance.keyHints,
+          hint: 'a footer under every panel naming the keys only that panel answers to'
         }
       ]
     },

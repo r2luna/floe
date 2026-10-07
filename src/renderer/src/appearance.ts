@@ -144,6 +144,7 @@ export async function applyConfig(): Promise<void> {
     setHarnessDefaults(config.harness)
     setDefaultChoice(config.agent)
     setVim(config.composer.vim)
+    setKeyHints(config.appearance.keyHints)
     setUserMark(config.appearance.penguin, config.appearance.penguinColor)
     // Resolved in main — config first, then git/system — so the chat's nick and
     // the launcher's greeting can never disagree about who you are. NOT awaited:
@@ -177,6 +178,29 @@ export function useVimEnabled(): boolean {
     setOn(vim)
     vimWatchers.add(setOn)
     return () => void vimWatchers.delete(setOn)
+  }, [])
+  return on
+}
+
+// Whether every panel carries its key footer. Module state like `vim`: the
+// footer renders under each panel on every lane change, and a per-render fetch
+// would make it blink in and out.
+let keyHints = false
+const keyHintWatchers = new Set<(on: boolean) => void>()
+
+function setKeyHints(on: boolean): void {
+  if (on === keyHints) return
+  keyHints = on
+  for (const w of keyHintWatchers) w(on)
+}
+
+/** The key footer under every panel — `[appearance] key-hints` in floe.toml. */
+export function useKeyHintsEnabled(): boolean {
+  const [on, setOn] = useState(keyHints)
+  useEffect(() => {
+    setOn(keyHints)
+    keyHintWatchers.add(setOn)
+    return () => void keyHintWatchers.delete(setOn)
   }, [])
   return on
 }

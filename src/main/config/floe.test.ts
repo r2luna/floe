@@ -135,6 +135,13 @@ test('transparency names the themes that get glass, and defaults to off', () => 
   assert.equal(absent.config.appearance.transparency, 'off', 'an existing app stays solid')
 })
 
+test('key-hints is off until asked for', () => {
+  assert.equal(parseFloeConfig('', 'floe.toml').config.appearance.keyHints, false)
+  const on = parseFloeConfig('[appearance]\nkey-hints = true\n', 'floe.toml')
+  assert.equal(on.config.appearance.keyHints, true)
+  assert.equal(on.errors.length, 0)
+})
+
 test('transparency-amount is clamped to what stays readable', () => {
   const set = parseFloeConfig('[appearance]\ntransparency-amount = 35\n', 'floe.toml')
   assert.equal(set.config.appearance.transparencyAmount, 35)

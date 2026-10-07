@@ -5180,6 +5180,27 @@ button {
   outline: none;
 }
 
+/* The key footer — `[appearance] key-hints`. One quiet line under the panel
+   naming the keys only it answers to; it wraps rather than hiding a key. */
+.panel-keys {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  padding: 4px 11px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.panel-keys kbd {
+  padding: 0;
+  border: 0;
+  color: var(--dimmer);
+  font-family: inherit;
+  font-size: inherit;
+}
+
 /* The find bar, at the foot of the panel it searches. Sits over the content
    rather than resizing it: a search that reflowed the rows you are reading
    would move the match out from under the cursor as you typed. */

@@ -36,7 +36,7 @@ import { resolveKey } from './keys'
 import { useNarrow, useTouch } from './useNarrow'
 import { RailMenu } from './RailMenu'
 import { installPluginCommands, runCommand, type CommandContext, type CommandRow } from './commands'
-import { keyHint } from './keyHints'
+import { keyHint, panelKeys } from './keyHints'
 import { useNeedsYouNotifier } from './useNotify'
 import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
@@ -57,7 +57,7 @@ import {
   withScoped
 } from './laneStore'
 import { setKeymap } from './keys'
-import { useAppearance } from './appearance'
+import { useAppearance, useKeyHintsEnabled } from './appearance'
 import { compileKeymap, formatChord, type Keybind } from '../../shared/keymap'
 import { listCommands } from './commands'
 import { KeysHelp } from './KeysHelp'
@@ -629,6 +629,7 @@ export default function App() {
   // when a rebind (or an edit to the file) changes them.
   // The font from floe.toml, live. The size is a window zoom applied in main.
   useAppearance()
+  const keyHintsOn = useKeyHintsEnabled()
   // The one line the app can say to a keyboard user. A key press has no row to
   // dim and no tooltip to hover, so a refused command would otherwise be
   // indistinguishable from a broken binding — which is exactly how ⌘K F read
@@ -3663,6 +3664,7 @@ export default function App() {
                     }
                   />
                 </div>
+                {keyHintsOn && !bare && <PanelKeys binds={binds} kind={kind} />}
                 {/* The find bar belongs to the panel it searches, not to the
                     window: what `/` means is "in here", and a bar floating over
                     the lane would have to say which panel it meant. */}
@@ -4104,6 +4106,25 @@ const FINDER_SCOPES = [
  * binding — you reach for the palette when the project you want isn't open, and
  * sometimes that is because it isn't added yet.
  */
+/**
+ * The footer under a panel: the keys only that panel answers to, when
+ * `[appearance] key-hints` is on. Nothing at all for a panel with none — an
+ * empty strip would cost the line and say nothing.
+ */
+function PanelKeys({ binds, kind }: { binds: readonly Keybind[]; kind: string }) {
+  const keys = useMemo(() => panelKeys(binds, kind, keyTitle), [binds, kind])
+  if (!keys.length) return null
+  return (
+    <footer className="panel-keys">
+      {keys.map((k) => (
+        <span key={k.label}>
+          <kbd>{k.keys}</kbd> {k.label}
+        </span>
+      ))}
+    </footer>
+  )
+}
+
 /**
  * A binding's name in the keys help: the registry's title, or null for a command
  * the palette does not offer either. `panel.goto` and the position jumps take an

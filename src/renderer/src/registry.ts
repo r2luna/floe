@@ -1175,6 +1175,19 @@ export const REGISTRY: Map<string, Command> = new Map(
         }
       },
       {
+        // The key footer under every panel — same flip as the Settings row.
+        id: 'appearance.keyHints',
+        title: 'Toggle panel key hints',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then((config) => window.floe.config.set('appearance', 'key-hints', !config.appearance.keyHints))
+            .then((config) => c.say(config.appearance.keyHints ? 'Panel key hints on' : 'Panel key hints off'))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'keybindings.reset',
         title: 'Reset keybindings to defaults…',
         group: 'App',

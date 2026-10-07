@@ -71,6 +71,10 @@ export const FLOE_TOML = `# ====================================================
 # | the surfaces solid over the window's own blur; past 40 the wallpaper starts
 # | reading through the text. 18 is the value the interface is drawn at.
 # |
+# | \`key-hints\` puts a footer under every panel that names the keys only that
+# | panel answers to — \`n\` new, \`e\` edit and the like — read from
+# | keybindings.toml, so a rebind shows there too. \`?\` lists every key either way.
+# |
 # ------------------------------------------------------------------------------
 
 [appearance]
@@ -82,6 +86,7 @@ penguin-color       = "accent"
 chat-layout         = "classic"
 transparency        = "off"
 transparency-amount = 18
+key-hints           = false
 
 
 # ------------------------------------------------------------------------------

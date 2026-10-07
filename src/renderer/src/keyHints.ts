@@ -69,3 +69,85 @@ export function keyHint(binds: readonly Keybind[], id: string, arg?: string): Ke
   }
   return { chip: labels[0], all: labels.join(' / ') }
 }
+
+/** One entry of a panel's key footer: the keys, and what they do there. */
+export interface PanelKey {
+  keys: string
+  label: string
+}
+
+/**
+ * Whether a `when` clause holds in a panel of this kind, and only there.
+ *
+ * Only a bare panel scope counts — `panel == "files"`, `panel in [...]`, or an
+ * `or` of them. A clause that also needs a flag (`and selecting`, `and marked`)
+ * is a key that is off most of the time, and a footer that names a key the
+ * panel then ignores is worse than one that leaves it to `?`.
+ */
+export function scopedTo(when: string | undefined, kind: string): boolean {
+  if (!when) return false
+  return when.split(/\s+or\s+/).some((part) => {
+    const t = part.trim()
+    let m = /^panel\s*==\s*["']([^"']+)["']$/.exec(t)
+    if (m) return m[1] === kind
+    m = /^panel\s+in\s*\[([^\]]*)\]$/.exec(t)
+    if (m) return m[1].split(',').some((v) => v.trim().replace(/^["']|["']$/g, '') === kind)
+    return false
+  })
+}
+
+/**
+ * The footer under a panel: the keys that panel alone answers to.
+ *
+ * Read from the bindings in force, like the `?` overlay, so a rebind shows up
+ * here too. Global keys are left out on purpose — they mean the same thing in
+ * every panel, and repeating them under each one would bury the few that do
+ * not. Two binds for one command share an entry (`j k`), and a command the
+ * palette does not offer (`titleOf` returns null) is not advertised either.
+ */
+export function panelKeys(
+  binds: readonly Keybind[],
+  kind: string,
+  titleOf: (command: string, arg?: string) => string | null
+): PanelKey[] {
+  const out: PanelKey[] = []
+  const byLabel = new Map<string, PanelKey>()
+  for (const b of binds) {
+    if (!scopedTo(b.when, kind)) continue
+    const title = titleOf(b.command, b.arg)
+    if (!title) continue
+    const label = shortTitle(title)
+    const keys = footerChord(b.key)
+    const had = byLabel.get(label)
+    if (had) {
+      if (!had.keys.split(' ').includes(keys)) had.keys += ` ${keys}`
+      continue
+    }
+    const entry = { keys, label }
+    byLabel.set(label, entry)
+    out.push(entry)
+  }
+  return out
+}
+
+/**
+ * A chord the way the footer prints it. A bare letter stays lower case, as it
+ * is typed — `formatChord` capitalises it, which next to a shifted `H` would
+ * make `n` and `⇧N` look like the same key. `shift+?` reads as `?`, since shift
+ * is how that key is typed, not part of a chord.
+ */
+function footerChord(key: string): string {
+  if (/^[a-z]$/.test(key)) return key
+  if (/^shift\+[a-z]$/.test(key)) return key.slice(-1).toUpperCase()
+  return formatChord(/^shift\+[^a-z]$/.test(key) ? key.slice('shift+'.length) : key)
+}
+
+/**
+ * A palette title cut to footer size: the aside in brackets goes, and the
+ * sentence case with it — `Task status up (idea → shaping → ready)` is
+ * `task status up`. An acronym keeps its capital (`MCP…`).
+ */
+export function shortTitle(title: string): string {
+  const t = title.replace(/\s*\([^)]*\)\s*$/, '').replace(/…$/, '').trim()
+  return /^[A-Z][a-z]/.test(t) ? t[0].toLowerCase() + t.slice(1) : t
+}
