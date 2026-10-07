@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ChangedFile, SubmoduleState } from '../../shared/types'
 
 export interface Changes {
@@ -27,8 +27,13 @@ export function useChanges(worktreePath?: string): Changes {
   const [repos, setRepos] = useState<SubmoduleState[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
+  // Only the newest request may land. Switching chats moves `worktreePath`
+  // through more than one tree, and a clean tree answering last would leave the
+  // list empty — with no file event coming to correct it once the agent is done.
+  const latest = useRef(0)
 
   const reload = useCallback(() => {
+    const seq = ++latest.current
     if (!worktreePath) {
       setFiles([])
       setRepos([])
@@ -41,12 +46,13 @@ export function useChanges(worktreePath?: string): Changes {
       window.floe.review.submodules(worktreePath).catch((): SubmoduleState[] => [])
     ])
       .then(([list, subs]) => {
+        if (seq !== latest.current) return
         setFiles(list)
         setRepos(subs)
         setError(undefined)
       })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false))
+      .catch((e: Error) => seq === latest.current && setError(e.message))
+      .finally(() => seq === latest.current && setLoading(false))
   }, [worktreePath])
 
   useEffect(reload, [reload])
