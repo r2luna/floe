@@ -31,6 +31,13 @@ export interface KeyContext {
   chord?: boolean
   /** The kind of the focused panel — some bare keys only apply in a few. */
   kind?: string
+  /**
+   * The tab the focused panel is showing, for a panel that has tabs (the
+   * colony). One letter means a different thing on two tabs of one panel — `n`
+   * is a new idea on ideas and a new task on the board — so `panel` alone
+   * cannot tell the two bindings apart.
+   */
+  tab?: string
   /** A line selection is open, which changes what Escape means. */
   selecting?: boolean
   /** A project is being moved between groups, so j/k carry it instead of the cursor. */
@@ -201,7 +208,7 @@ export const WHEN_FLAGS = Object.keys(FLAGS)
 /**
  * Compile a `when` expression.
  *
- * Deliberately small: flags, `panel ==` / `!=` / `in`, joined by `and`/`or` with
+ * Deliberately small: flags, `panel` and `tab` with `==` / `!=` / `in`, joined by `and`/`or` with
  * `not`, and `and` binding tighter. No parentheses — the moment a condition needs
  * them it is clearer as two entries, and a grammar with no nesting is one whose
  * error messages can stay specific.
@@ -222,28 +229,33 @@ export function parseWhen(expr: string): { ok: true; predicate: WhenPredicate } 
     }
     const token = tokens![i++]
     if (token === undefined) return 'expected a condition'
-    if (token === 'panel') {
+    // `panel` compares the focused panel's kind, `tab` the tab it is showing.
+    // Same three operators, so they share one reader.
+    if (token === 'panel' || token === 'tab') {
+      const read = (ctx: KeyContext): string | undefined => (token === 'panel' ? ctx.kind : ctx.tab)
+      const what = token === 'panel' ? 'panel kind' : 'tab name'
       const op = tokens![i++]
       if (op === '==' || op === '!=') {
         const value = unquote(tokens![i++])
-        if (value === null) return 'panel == expects a quoted panel kind'
-        return (ctx) => (op === '==' ? ctx.kind === value : ctx.kind !== value)
+        if (value === null) return `${token} == expects a quoted ${what}`
+        return (ctx) => (op === '==' ? read(ctx) === value : read(ctx) !== value)
       }
       if (op === 'in') {
         const values: string[] = []
-        if (tokens![i++] !== '[') return 'panel in expects a list, like ["projects", "worktrees"]'
+        const hint = `${token} in expects a list, like ["projects", "worktrees"]`
+        if (tokens![i++] !== '[') return hint
         while (tokens![i] !== ']') {
-          if (i >= tokens!.length) return 'panel in expects a list, like ["projects", "worktrees"]'
+          if (i >= tokens!.length) return hint
           const value = unquote(tokens![i++])
           if (value !== null) values.push(value)
         }
         i++
-        return (ctx) => values.includes(ctx.kind ?? '')
+        return (ctx) => values.includes(read(ctx) ?? '')
       }
-      return 'panel expects ==, != or in'
+      return `${token} expects ==, != or in`
     }
     const flag = FLAGS[token]
-    if (!flag) return `unknown condition "${token}" — try ${WHEN_FLAGS.join(', ')} or panel`
+    if (!flag) return `unknown condition "${token}" — try ${WHEN_FLAGS.join(', ')}, panel or tab`
     return flag
   }
 

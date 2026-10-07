@@ -70,7 +70,17 @@ agent ran is often the one you want to run yourself.`,
   },
   {
     title: 'The colony board',
-    doc: `The board is two axes: \`h\`/\`l\` cross columns and \`j\`/\`k\` walk the cards
+    doc: `The colony has three tabs, and \`[\`/\`]\` step through them: the overview
+(what is running, what needs you, what is about to land), the ideas board and
+the implementation board.
+
+The ideas board is the tasks list drawn as columns — idea, shaping, ready — and
+every tasks key works on it: \`n\` a new idea, \`e\`/\`p\` the idea and the plan,
+\`c\` a chat about it, \`t\` its kind, \`a\` attach, \`d\` delete. \`>\`/\`<\` move an
+idea along (the tasks list's \`]\`/\`[\`, which here change the tab), and \`⌘⏎\` sends
+a ready one to the implementation board.
+
+The implementation board is two axes: \`h\`/\`l\` cross columns and \`j\`/\`k\` walk the cards
 inside one. The cursor drives the panel to its right, so moving is reading;
 \`⏎\` forces the card's chat open and takes you into it.
 
@@ -92,6 +102,20 @@ first stage has each step's tokens, findings and diff recorded, and gets an HTML
 report in \`.floe/colony/reports/\` when it reaches done. \`r\` writes the report
 for the card under the cursor now and opens it.`,
     binds: [
+      // The ideas tab first: on it these letters are the tasks list's, and the
+      // first binding whose condition holds is the one that runs.
+      { key: 'n', command: 'tasks.new', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'e', command: 'tasks.editIdea', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'p', command: 'tasks.editPlan', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'a', command: 'tasks.attach', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'd', command: 'tasks.delete', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'c', command: 'tasks.chat', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 't', command: 'tasks.cycleKind', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'shift+>', command: 'tasks.statusUp', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'shift+<', command: 'tasks.statusDown', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'super+enter', command: 'tasks.send', when: 'panel == "colony" and tab == "ideas"' },
+      { key: ']', command: 'colony.tabNext', when: 'panel == "colony"' },
+      { key: '[', command: 'colony.tabPrev', when: 'panel == "colony"' },
       { key: 'h', command: 'colony.left', when: 'panel == "colony"' },
       { key: 'l', command: 'colony.right', when: 'panel == "colony"' },
       { key: 's', command: 'colony.start', when: 'panel == "colony"' },
@@ -339,6 +363,8 @@ confirm; a sent task cannot be deleted). \`⏎\` on a
 file opens it where it belongs: html and links in the browser, drawings on the
 canvas, the rest in the reader.
 
+\`t\` changes its kind, feat → fix → chore — the prefix its branch gets.
+
 \`⌘⏎\` sends a ready task: the folder moves to \`specs/\`, the move is committed
 on the main branch, and its colony card starts. \`b\` shows the board, \`z\`
 shows or hides done tasks. \`c\` opens a chat about the task, docked under it:
@@ -355,6 +381,7 @@ works.`,
       { key: 'd', command: 'tasks.delete', when: 'panel in ["tasks", "task"]' },
       { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
       { key: 'c', command: 'tasks.chat', when: 'panel in ["tasks", "task"]' },
+      { key: 't', command: 'tasks.cycleKind', when: 'panel in ["tasks", "task"]' },
       { key: 'b', command: 'tasks.openCard', when: 'panel == "task"' },
       { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }
     ]

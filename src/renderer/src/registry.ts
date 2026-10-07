@@ -36,7 +36,8 @@ import { isUnread, markRead, markUnread } from './unreadStore.ts'
 import { clear, leave, toggleFavorite, updateActive } from './activeStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
-import { taskChatOpener } from '../../shared/taskFolders.ts'
+import { taskChatOpener, type TaskFolderKind } from '../../shared/taskFolders.ts'
+import { colonyTab, setColonyTab, stepTab, type ColonyTab } from './colonyTab.ts'
 import { downloadAndOpen } from './download.ts'
 import { identifiersOf } from './definition.ts'
 import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
@@ -333,7 +334,40 @@ function taskFolderAt(c: CommandContext): { root: string; ref: string } | null {
     const ref = c.panelEl(c.lane.focus)?.querySelector<HTMLElement>('.task-item')?.dataset.taskRef
     return ref ? { root: panel.root ?? root, ref } : null
   }
+  // The colony's ideas tab is the same list drawn as a board: its cards carry
+  // the row's own `data-task-ref`, so every tasks command works on it as is.
+  if (panel.kind === 'colony' && colonyTab(root) === 'ideas') {
+    const ref = fileRow(c)?.dataset.taskRef
+    return ref ? { root, ref } : null
+  }
   return null
+}
+
+/** The kinds `t` cycles through, in order. */
+const TASK_KIND_CYCLE: TaskFolderKind[] = ['feat', 'fix', 'chore']
+
+/**
+ * Show a colony tab, opening the board when it is not up.
+ *
+ * Opening goes through `open`, which only focuses a board that is already in
+ * the lane — so the same command switches tabs from inside the board and brings
+ * the board up from anywhere else.
+ */
+function showColonyTab(c: CommandContext, tab: ColonyTab): void {
+  const project = c.project
+  if (!project) return
+  setColonyTab(project, tab)
+  c.setLane((l) => {
+    const next = open(l, c.makePanel('colony'))
+    return patchPanel(next, next.focus, { cursor: 0 })
+  })
+  // The row that had focus belonged to the tab that just went away, so focus
+  // would fall to the document. Land on the new tab's first row instead —
+  // after it has rendered.
+  requestAnimationFrame(() => {
+    const body = document.querySelector<HTMLElement>('.panel[data-kind="colony"] .panel-body')
+    ;(body?.querySelector<HTMLElement>('[data-task], [data-task-ref]') ?? body)?.focus()
+  })
 }
 
 /** The file row the cursor is on in the task item panel. */
@@ -1710,7 +1744,10 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => {
           const root = c.project
           if (!root) return
-          if (!c.lane.panels.some((p) => p.kind === 'tasks')) c.setLane((l) => open(l, c.makePanel('tasks')))
+          // From the colony's ideas tab the board IS the list, so a second one
+          // would only take room from it.
+          const fromBoard = c.lane.panels[c.lane.focus]?.kind === 'colony'
+          if (!fromBoard && !c.lane.panels.some((p) => p.kind === 'tasks')) c.setLane((l) => open(l, c.makePanel('tasks')))
           c.askText({
             placeholder: 'What is the idea?',
             verb: 'New task',
@@ -1905,9 +1942,14 @@ export const REGISTRY: Map<string, Command> = new Map(
           const at = taskFolderAt(c)
           if (!at) return
           const fromItem = c.lane.panels[c.lane.focus]?.kind === 'task'
+          // The list the cursor lands back in: the colony's ideas board when the
+          // delete came from there, the tasks list otherwise.
+          const listKind = c.lane.panels[c.lane.focus]?.kind === 'colony' ? 'colony' : 'tasks'
           const list = (): HTMLElement | null | undefined =>
-            c.panelEl(c.lane.panels.findIndex((p) => p.kind === 'tasks'))
-          const rowsNow = (): HTMLElement[] => [...(list()?.querySelectorAll<HTMLElement>('.task-row') ?? [])]
+            c.panelEl(c.lane.panels.findIndex((p) => p.kind === listKind))
+          const rowsNow = (): HTMLElement[] => [
+            ...(list()?.querySelectorAll<HTMLElement>('button[data-task-ref]') ?? [])
+          ]
           const at0 = Math.max(0, rowsNow().findIndex((r) => r.dataset.taskRef === at.ref))
           void c
             .confirm({
@@ -1945,6 +1987,27 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!taskFolderAt(c) && c.canOpen('colony'),
         unavailable: (c) => (taskFolderAt(c) ? c.whyCannotOpen('colony') : 'put the cursor on a task first'),
         run: (c) => c.setLane((l) => open(l, c.makePanel('colony')))
+      },
+      {
+        // feat → fix → chore → feat. The kind is the branch prefix the colony
+        // cuts (`fix/<name>`), so it is settled before the task is sent — main
+        // refuses the edit on a sent task, and that refusal is what you hear.
+        id: 'tasks.cycleKind',
+        title: 'Change the task\u2019s kind (feat → fix → chore)',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const at = taskFolderAt(c)
+          if (!at) return
+          void window.floe.tasks
+            .read(at.root, at.ref)
+            .then((t) => {
+              const next = TASK_KIND_CYCLE[(TASK_KIND_CYCLE.indexOf(t.kind) + 1) % TASK_KIND_CYCLE.length]
+              return window.floe.tasks.update(at.root, at.ref, { kind: next })
+            })
+            .catch((err: unknown) => c.say(reason(err)))
+        }
       },
       {
         id: 'tasks.toggleDone',
@@ -2081,6 +2144,49 @@ export const REGISTRY: Map<string, Command> = new Map(
             })
             .catch((err: unknown) => c.say(reason(err)))
         }
+      },
+      {
+        // `[` and `]` on the board: overview → ideas → implementation, wrapping.
+        id: 'colony.tabNext',
+        title: 'Next colony tab',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'the colony belongs to a project — open one first',
+        run: (c) => showColonyTab(c, stepTab(colonyTab(c.project), 1))
+      },
+      {
+        id: 'colony.tabPrev',
+        title: 'Previous colony tab',
+        group: 'Colony',
+        enabled: (c) => !!c.project,
+        unavailable: () => 'the colony belongs to a project — open one first',
+        run: (c) => showColonyTab(c, stepTab(colonyTab(c.project), -1))
+      },
+      {
+        // One per tab, so the palette and an agent can name the tab they want
+        // instead of stepping to it.
+        id: 'colony.overview',
+        title: 'Colony overview',
+        group: 'Colony',
+        enabled: (c) => c.canOpen('colony'),
+        unavailable: (c) => c.whyCannotOpen('colony'),
+        run: (c) => showColonyTab(c, 'overview')
+      },
+      {
+        id: 'colony.ideas',
+        title: 'Colony ideas board',
+        group: 'Colony',
+        enabled: (c) => c.canOpen('colony'),
+        unavailable: (c) => c.whyCannotOpen('colony'),
+        run: (c) => showColonyTab(c, 'ideas')
+      },
+      {
+        id: 'colony.board',
+        title: 'Colony implementation board',
+        group: 'Colony',
+        enabled: (c) => c.canOpen('colony'),
+        unavailable: (c) => c.whyCannotOpen('colony'),
+        run: (c) => showColonyTab(c, 'board')
       },
       {
         id: 'colony.left',

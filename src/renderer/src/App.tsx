@@ -100,6 +100,8 @@ import { nickColor } from './nickColor'
 import { useBrowserCovered } from './browserCover'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import { byUsage, noteProjectUse } from './projectUsage'
+import { colonyTab } from './colonyTab'
+import { ColonyTabs } from './ColonyBoard'
 import {
   DEFAULT_GROUP,
   type ActiveSession,
@@ -2792,6 +2794,9 @@ export default function App() {
           raw,
           chord: chord.current,
           kind: lane.panels[lane.focus]?.kind,
+          // Read at press time, not from state: the tab lives in its own store
+          // and this listener is not re-bound when it changes.
+          tab: lane.panels[lane.focus]?.kind === 'colony' ? colonyTab(ctxRef.current.project) : undefined,
           selecting: !!lane.panels[lane.focus]?.selection,
           moving: moving !== null,
           marked: marks.size > 0,
@@ -3436,6 +3441,17 @@ export default function App() {
                             ? sub.split('/').pop()?.replace(/\.excalidraw$/, '')
                             : sub}
                       </span>
+                    )}
+                    {/* The colony's tabs, in its head so the body is all board.
+                        Each runs the same command its key does. */}
+                    {kind === 'colony' && (
+                      <ColonyTabs
+                        project={projects.current?.path}
+                        onCommand={(id) => {
+                          const res = runCommand(REGISTRY, ctxRef.current, id)
+                          if (!res.ok) say(res.error)
+                        }}
+                      />
                     )}
                     {/* Which machine's tree this is. The projects panel badges
                         the row you picked; without this the list you land on

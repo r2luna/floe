@@ -1,0 +1,501 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — colony with tabs: overview · ideas · implementation</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  :focus { outline: none; }
+
+  /* --- lane shell: colony beside its right-hand slot --------------------- */
+  .lane { display: flex; gap: 8px; height: 100vh; padding: 8px; box-sizing: border-box; }
+  .lane-col { display: flex; min-width: 0; }
+  .lane-col[data-grow] { flex: 1 1 1000px; min-width: 900px; }
+  .lane-col[data-w="440"] { flex: 0 0 440px; }
+  .panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; width: 100%;
+           background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); }
+  .panel[data-focused] { background: var(--panel-focused); border-color: var(--line); }
+  .panel-head { display: flex; align-items: center; gap: 7px; height: var(--head-h); padding-inline: 11px;
+                border-bottom: 1px solid var(--line-soft); flex: none; }
+  .panel-name { color: var(--text-strong); flex: none; }
+  .panel-sub { color: var(--dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; }
+  .panel-foot { flex: none; display: flex; gap: 14px; padding: 4px 11px; border-top: 1px solid var(--line-soft);
+                color: var(--faint); font-size: 10px; }
+  .panel-foot b { color: var(--dimmer); font-weight: 400; }
+  .glyph { color: var(--dim); }
+
+  /* --- the tab strip ------------------------------------------------------
+     In the panel head, right of the project: three words, the active one in
+     strong text over a 1px rule. `[` and `]` step through them, from any tab.
+     A count rides each tab so the strip doubles as a summary. */
+  .tabs { display: flex; align-items: stretch; height: 100%; margin-left: 14px; gap: 2px; }
+  .tab { display: flex; align-items: center; gap: 6px; padding: 0 9px; color: var(--dim); cursor: pointer;
+         border-bottom: 1px solid transparent; margin-bottom: -1px; }
+  .tab:hover { color: var(--text); }
+  .tab[data-on] { color: var(--text-strong); border-bottom-color: var(--text-strong); }
+  .tab .n { color: var(--faint); font-size: 10px; }
+  .tab .ask { color: var(--accent); font-size: 10px; }
+  .tabkeys { margin-left: auto; color: var(--faint); font-size: 10px; }
+  .tabkeys b { color: var(--dimmer); font-weight: 400; border: 1px solid var(--line); padding: 0 4px; }
+
+  .view { flex: 1; min-height: 0; flex-direction: column; }
+  .view:not([data-on]) { display: none !important; }
+
+  /* --- OVERVIEW ----------------------------------------------------------- */
+  .ov { display: flex; flex-direction: column; gap: 10px; overflow-y: auto; overflow-x: hidden; }
+  .sec-h { display: flex; align-items: baseline; gap: 8px; color: var(--faint); font-size: 10px; letter-spacing: .08em;
+           text-transform: uppercase; margin-bottom: 4px; }
+  .sec-h .k { margin-left: auto; text-transform: none; letter-spacing: 0; }
+  .sec-h[data-tone="ask"] { color: var(--accent); }
+
+  /* Stat tiles: a number, what it counts, and the split behind it. Bordered,
+     flat — the app separates with lines, never with shadows. The number wears
+     text ink; a small status mark beside the label carries the colour. */
+  .tiles { display: grid; grid-template-columns: repeat(6, 1fr); border: 1px solid var(--line); }
+  .tile { padding: 8px 10px 9px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tile:last-child { border-right: 0; }
+  .tile-l { display: flex; align-items: center; gap: 6px; color: var(--dim); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--edge); }
+  .dot[data-s="work"] { background: var(--working); }
+  .dot[data-s="ask"] { background: var(--accent); }
+  .dot[data-s="land"] { background: var(--live); }
+  .tile-n { color: var(--text-strong); font-size: 22px; line-height: 1.2; display: flex; align-items: flex-end; gap: 8px; }
+  .tile-n small { font-size: 11px; color: var(--dim); }
+  .tile-s { color: var(--faint); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .spark { height: 20px; width: 70px; margin-bottom: 4px; }
+  .spark polyline { fill: none; stroke: var(--live); stroke-width: 1.5; }
+  .spark circle { fill: var(--live); }
+
+  /* Pipeline map: ideas flow into implementation, one node per step, left to
+     right. Each node says how full it is; a jam is the node in accent with
+     someone waiting at its door. */
+  /* A node never shrinks below its own text: it grows to fill the row, and when
+     the row runs out, implementation drops under ideas, then its stages wrap. */
+  .pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px 0; border: 1px solid var(--line); padding: 8px 10px; }
+  .pipe-grp:last-child { flex: 1 1 auto; }
+  .pipe-grp:last-child .node { flex: 1 0 auto; }
+  .node * { white-space: nowrap; }
+  .pipe-grp { display: flex; flex-direction: column; gap: 5px; }
+  .pipe-grp-l { color: var(--faint); font-size: 10px; letter-spacing: .06em; }
+  .pipe-row { display: flex; flex-wrap: wrap; align-items: center; row-gap: 6px; }
+  .node { display: flex; flex-direction: column; gap: 3px; padding: 4px 7px; border: 1px solid var(--line); min-width: 58px; }
+  .node[data-live] { border-color: var(--edge); }
+  .node[data-jam] { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .node-n { color: var(--dimmer); font-size: 10px; letter-spacing: .04em; white-space: nowrap; }
+  .node[data-live] .node-n { color: var(--text-strong); }
+  .node-c { color: var(--dim); font-size: 10px; display: flex; gap: 6px; white-space: nowrap; }
+  .node-c .door { color: var(--text); }
+  .node[data-jam] .node-c .cap { color: var(--accent); }
+  .meter { display: flex; gap: 2px; height: 3px; }
+  .meter i { width: 7px; background: var(--edge); border-radius: var(--radius-sm); }
+  .meter i[data-on] { background: var(--working); }
+  .meter i[data-ask] { background: var(--accent); }
+  .arrow { color: var(--faint); padding: 0 5px; align-self: center; }
+  .handoff { color: var(--dim); padding: 0 12px; align-self: center; font-size: 10px; text-align: center; line-height: 1.3; }
+  .handoff b { display: block; color: var(--text); font-weight: 400; font-size: 13px; }
+
+  .box { border: 1px solid var(--line); padding: 7px 0 5px; min-width: 0; }
+  .box .sec-h { padding-inline: 10px; }
+  .sec-h.gap { margin-top: 8px; }
+
+  /* The table's columns, shared by the header, needs-you and running rows. */
+  .thead, .row { display: grid; grid-template-columns: 40px minmax(0, 1fr) 84px 110px 64px 50px; gap: 10px; padding-inline: 10px; }
+  .thead { color: var(--faint); font-size: 10px; padding-bottom: 5px; margin-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+  .thead .r { text-align: right; }
+
+  /* A row: what, where, how long. Same cursor as every list row in the app. */
+  .row { align-items: center; padding-block: 4px; color: var(--text); cursor: pointer; }
+  .row:hover, .row2:hover { background: var(--wash-1); }
+  .row[data-cursor] { background: var(--wash-3); box-shadow: inset 2px 0 0 #55688f; }
+  .row .k, .row2 .k { font-size: 10px; color: var(--dim); align-self: start; padding-top: 2px; }
+  .row .nm, .row2 .nm { display: flex; flex-direction: column; min-width: 0; }
+  .row .nm b { font-weight: 400; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .nm small, .row2 .nm small { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row[data-tone="ask"] .nm small { color: var(--text); }
+  .row .st { color: var(--dimmer); font-size: 11px; }
+  .row .r, .row2 .r { text-align: right; color: var(--faint); font-size: 11px; white-space: nowrap; }
+  .row .w { color: var(--working); }
+  .row[data-tone="ask"] .st { color: var(--accent); }
+
+  .trio { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .row2 { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; padding: 4px 10px; color: var(--text-strong); }
+  .row2[data-one] .nm { flex-direction: row; gap: 8px; align-items: baseline; }
+  .row2[data-one] .k { padding-top: 0; align-self: center; }
+
+  /* The card's road so far, six lanes wide: grey passed, blue where it is,
+     amber where it is asking, dots ahead. A ↩ is a lane that sent it back. */
+  .trk { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; align-items: center; height: 10px; position: relative; }
+  .trk i { height: 3px; background: none; border-radius: var(--radius-sm); position: relative; }
+  .trk i::after { content: ''; position: absolute; left: 50%; top: 0; width: 3px; height: 3px; margin-left: -1.5px; border-radius: 50%; background: var(--edge); }
+  .trk i[data-s] ::after, .trk i[data-s]::after { display: none; }
+  .trk i[data-s="p"] { background: var(--dimmer); }
+  .trk i[data-s="w"] { background: var(--working); }
+  .trk i[data-s="a"] { background: var(--accent); }
+  .trk i[data-s="l"] { background: var(--live); }
+  .trk i[data-back]::before { content: '↩'; position: absolute; top: -9px; left: 50%; transform: translateX(-50%); font-size: 8px; color: var(--text); }
+
+  .muted { color: var(--faint); font-size: 11px; padding: 2px 10px 4px; }
+  .undo { color: var(--dim); font-size: 10px; border: 1px solid var(--edge); padding: 0 5px; }
+
+  /* --- IDEAS: the tasks panel, drawn as a board ---------------------------
+     Same columns, cards and cursor as the implementation board — real
+     .fcol/.fcard from index.css — so the two tabs read as one machine. */
+  .num { color: var(--faint); font-size: 10px; margin-left: auto; }
+  .imeta { display: flex; gap: 8px; color: var(--faint); font-size: 10px; }
+  .imeta .plan { color: var(--dimmer); }
+  .imeta .plan[data-none] { color: var(--faint); text-decoration: line-through; }
+  .sendband { margin-top: auto; border-top: 1px dashed var(--line); padding: 6px 6px 2px; color: var(--dim); font-size: 10.5px; line-height: 1.4; }
+  .sendband b { color: var(--text); font-weight: 400; }
+  .exit { flex: 0 0 120px !important; }
+  .exit .fcol-body { padding: 8px; color: var(--faint); font-size: 10.5px; line-height: 1.5; }
+  .exit .fcol-body b { color: var(--dimmer); font-weight: 400; }
+
+  /* --- right slot stubs --------------------------------------------------- */
+  .chat { padding: 10px 11px; color: var(--text); font-size: 12px; }
+  .chat p { margin: 0 0 10px; }
+  .nick { color: var(--accent); } .nick2 { color: var(--dim); } .t { color: var(--time-dim); font-size: 10px; }
+  .item { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+  .item-title { color: var(--text-strong); font-size: 13px; }
+  .item-title span { color: var(--faint); margin-right: 8px; }
+  .item-meta { display: flex; gap: 12px; color: var(--faint); font-size: 10.5px; }
+  .ladder { display: flex; gap: 2px; }
+  .rung { flex: 1; text-align: center; font-size: 10px; color: var(--faint); border-top: 2px solid var(--edge); padding-top: 3px; }
+  .rung[data-done] { color: var(--dimmer); border-top-color: var(--dimmer); }
+  .rung[data-at] { color: var(--text-strong); border-top-color: var(--text-strong); }
+  .rung[data-auto] { border-top-style: dashed; }
+  .prose { color: var(--text); font-size: 11.5px; line-height: 1.6; }
+  .prose li { margin: 0 0 2px; }
+  .att { color: var(--dimmer); font-size: 11px; }
+  .hand { border: 1px solid var(--line); padding: 7px 9px; display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 11px; }
+  .hand b { color: var(--text); font-weight: 400; }
+  .go { margin-left: auto; border: 1px solid color-mix(in srgb, var(--live) 50%, transparent); color: var(--live); background: var(--wash-1);
+        font: inherit; font-size: 11px; padding: 2px 8px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="lane">
+  <div class="lane-col" data-grow>
+    <section class="panel" data-focused>
+      <header class="panel-head">
+        <span class="glyph">⊞</span>
+        <span class="panel-name">colony</span>
+        <span class="panel-sub">rookery · base master</span>
+        <nav class="tabs" id="tabs">
+          <span class="tab" data-tab="overview">overview <span class="ask">2 need you</span></span>
+          <span class="tab" data-tab="ideas">ideas <span class="n">9</span></span>
+          <span class="tab" data-tab="impl">implementation <span class="n">13</span></span>
+        </nav>
+        <span class="tabkeys"><b>[</b> <b>]</b> tab</span>
+      </header>
+
+      <!-- ===================== OVERVIEW ===================== -->
+      <div class="panel-body view" data-view="overview">
+        <div class="fatt">
+          <span class="fatt-tag">ATTENTION</span>
+          <span class="fatt-item"><b>tactical-persistence</b> — the specifier asks whether the old format still has to be read</span>
+          <span class="fatt-key">⏎ answer · 2 waiting</span>
+        </div>
+        <div class="ov">
+          <div class="tiles">
+            <div class="tile"><span class="tile-l"><i class="dot" data-s="work"></i>running</span>
+              <span class="tile-n">6</span><span class="tile-s">specifier 4 · coder 1 · cleaner 1</span></div>
+            <div class="tile"><span class="tile-l"><i class="dot" data-s="ask"></i>needs you</span>
+              <span class="tile-n">2</span><span class="tile-s">oldest waiting 2m</span></div>
+            <div class="tile"><span class="tile-l"><i class="dot"></i>ending</span>
+              <span class="tile-n">1</span><span class="tile-s">done, waits for merge</span></div>
+            <div class="tile"><span class="tile-l"><i class="dot" data-s="land"></i>landed today</span>
+              <span class="tile-n">4
+                <svg class="spark" viewBox="0 0 70 20" aria-label="landed per day, last 14 days"><title>landed per day, 14 days: 1 0 2 3 1 0 0 2 4 3 2 1 5 4</title>
+                  <polyline points="0,16 5.4,19 10.8,13 16.2,10 21.6,16 27,19 32.4,19 37.8,13 43.2,7 48.6,10 54,13 59.4,16 64.8,4 70,7" />
+                  <circle cx="70" cy="7" r="2" />
+                </svg></span>
+              <span class="tile-s">23 in 14 days · median 41m idea→merge</span></div>
+            <div class="tile"><span class="tile-l"><i class="dot"></i>ideas</span>
+              <span class="tile-n">9</span><span class="tile-s">idea 4 · shaping 2 · ready 3</span></div>
+            <div class="tile"><span class="tile-l"><i class="dot"></i>spent today</span>
+              <span class="tile-n">1.24M <small>tok</small></span><span class="tile-s">41 steps · 30k a step</span></div>
+          </div>
+
+          <div>
+            <div class="sec-h">pipeline <span class="k">idea → landed, where everything is right now</span></div>
+            <div class="pipe" id="pipe"></div>
+          </div>
+
+          <!-- One table for the two lists that cost something now: same columns,
+               so a card's stage, road and clock line up whichever list it is in.
+               Two lines a row — the second line is the sentence, and it gets the
+               full width instead of four characters. -->
+          <div class="box">
+            <div class="thead"><span></span><span>task</span><span>stage</span><span>road so far</span><span class="r">elapsed</span><span class="r">tokens</span></div>
+            <div class="sec-h" data-tone="ask">needs you 2 <span class="k">⏎ answer</span></div>
+            <div id="ask"></div>
+            <div class="sec-h gap">running 6 <span class="k">⏎ open chat · g go to its card</span></div>
+            <div id="run"></div>
+          </div>
+
+          <!-- The short lists, in the order a card meets them: waiting, about to
+               land, landed. -->
+          <div class="trio">
+            <div class="box">
+              <div class="sec-h">up next 3 <span class="k">why it is not moving</span></div>
+              <div class="row2"><span class="k">fix</span><span class="nm">thrust-clamp<small>cleaner is full 1/1</small></span><span class="r">#1</span></div>
+              <div class="row2"><span class="k">feat</span><span class="nm">signal-fade<small>specifier is full 5/5</small></span><span class="r">#1</span></div>
+              <div class="row2"><span class="k">feat</span><span class="nm">geometry-lod<small>after entity-identity merges</small></span><span class="r">dep</span></div>
+            </div>
+            <div class="box">
+              <div class="sec-h">ending 1 <span class="k">m merge</span></div>
+              <div class="row2"><span class="k">feat</span><span class="nm">static-orbit<small>done · passed 6/6 · waits for merge</small></span><span class="r">20m</span></div>
+            </div>
+            <div class="box">
+              <div class="sec-h">landed today 4 <span class="k">u undo the last</span></div>
+              <div class="row2" data-one><span class="k">feat</span><span class="nm">epoch-roll<small>→ master</small></span><span class="r">14:02 <span class="undo">undo</span></span></div>
+              <div class="row2" data-one><span class="k">fix</span><span class="nm">orbit-decay<small>→ master</small></span><span class="r">12:47</span></div>
+              <div class="row2" data-one><span class="k">chore</span><span class="nm">lint-sweep<small>→ master</small></span><span class="r">11:10</span></div>
+              <div class="row2" data-one><span class="k">feat</span><span class="nm">burn-planner<small>→ master</small></span><span class="r">09:33</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===================== IDEAS ===================== -->
+      <div class="panel-body view" data-view="ideas">
+        <div class="fpolicy">
+          <span class="fpolicy-text">ideas live in .floe/tasks/ on master · ready + ⌘⏎ sends one to implementation's inbox</span>
+        </div>
+        <div class="board" id="ideas"></div>
+      </div>
+
+      <!-- ===================== IMPLEMENTATION ===================== -->
+      <div class="panel-body view" data-view="impl">
+        <div class="fpolicy">
+          <span class="fpolicy-text">a card that reaches done waits for you to merge it</span>
+          <button class="fpolicy-act">automerge: off</button>
+          <button class="fpolicy-act" data-on>report: on</button>
+        </div>
+        <div class="fatt">
+          <span class="fatt-tag">ATTENTION</span>
+          <span class="fatt-item"><b>tactical-persistence</b> — the specifier asks whether the old format still has to be read</span>
+          <span class="fatt-key">⏎ answer · 2 waiting</span>
+        </div>
+        <div class="board" id="impl"></div>
+      </div>
+
+      <footer class="panel-foot" id="foot"></footer>
+    </section>
+  </div>
+
+  <div class="lane-col" data-w="440">
+    <section class="panel" id="right"></section>
+  </div>
+</div>
+
+<script>
+const LANES = [
+  { name: 'specifier', cap: 5, skill: 'colony-specify', model: 'opus' },
+  { name: 'coder', cap: 5, skill: 'colony-implement', model: 'opus' },
+  { name: 'cleaner', cap: 1, skill: 'colony-refactor', model: 'opus' },
+  { name: 'architect', cap: 1, skill: 'colony-architect', model: 'opus' },
+  { name: 'hardener', cap: 1, skill: 'colony-harden', model: 'sonnet' },
+  { name: 'qa', cap: 5, skill: 'colony-verify', model: 'haiku' }
+]
+// road: one letter per lane — p passed, w working, a asking, '' not reached. b = sent back from here once.
+const CARDS = [
+  { kind: 'fix', name: 'tactical-persistence', stage: 'specifier', s: 'blocked', line: 'asks whether the old format still has to be read', t: '2m 00s', tok: '19k', pass: 0 },
+  { kind: 'fix', name: 'distance-instrumentation', stage: 'qa', s: 'blocked', line: 'suite green, the web build fails on import', t: '1m 36s', tok: '31k', pass: 5 },
+  { kind: 'feat', name: 'entity-identity', stage: 'coder', s: 'working', line: 'reading the store before it touches the schema', t: '12m 53s', tok: '107k', pass: 1, back: ['coder'], cursor: true },
+  { kind: 'chore', name: 'targeting-policy', stage: 'cleaner', s: 'working', line: 'second CRAP pass on the resolver', t: '3m 34s', tok: '54k', pass: 2, back: ['cleaner'] },
+  { kind: 'feat', name: 'shot-acquisition', stage: 'specifier', s: 'working', line: 'reading the project spec', t: '1m 04s', tok: '12k', pass: 0 },
+  { kind: 'feat', name: 'adaptive-polling', stage: 'specifier', s: 'working', line: 'writing the acceptance criteria', t: '31s', tok: '7k', pass: 0 },
+  { kind: 'chore', name: 'inbox-digest', stage: 'specifier', s: 'working', line: 'surveying what already exists', t: '12s', tok: '3k', pass: 0 },
+  { kind: 'feat', name: 'orbit-cache', stage: 'specifier', s: 'working', line: 'first read of the repo', t: '5s', tok: '1k', pass: 0 },
+  { kind: 'fix', name: 'thrust-clamp', stage: 'cleaner', s: 'holding', pass: 2 },
+  { kind: 'feat', name: 'signal-fade', stage: 'specifier', s: 'holding', pass: 0 },
+  { kind: 'feat', name: 'geometry-lod', stage: 'inbox', s: 'holding', pass: 0 },
+  { kind: 'chore', name: 'stats-export', stage: 'inbox', s: 'holding', pass: 0 },
+  { kind: 'feat', name: 'static-orbit', stage: 'done', s: 'settled', line: 'waits for you to merge', pass: 6 }
+]
+const IDEAS = [
+  { col: 'idea', no: '021', kind: 'feat', title: 'voice notes into composer', age: '2h', files: '' },
+  { col: 'idea', no: '020', kind: 'feat', title: 'per-project harness defaults', age: '1d', files: '' },
+  { col: 'idea', no: '019', kind: 'feat', title: 'search across all transcripts', age: '3d', files: '1 link' },
+  { col: 'idea', no: '018', kind: 'fix', title: 'mobile push on blocked lane', age: '5d', files: '' },
+  { col: 'shaping', no: '016', kind: 'feat', title: 'remote session handoff', age: '4h', files: '1 draw', talking: true },
+  { col: 'shaping', no: '012', kind: 'chore', title: 'omarchy theme sync', age: '2d', files: '' },
+  { col: 'ready', no: '017', kind: 'feat', title: 'task panel for ideas', age: '3d', files: '2 html · 1 draw', plan: true, cursor: true },
+  { col: 'ready', no: '014', kind: 'feat', title: 'keyboard-only merge picker', age: '6d', files: '1 html', plan: true, dep: '017' },
+  { col: 'ready', no: '011', kind: 'feat', title: 'colony report diff view', age: '1w', files: '', plan: true }
+]
+
+const $ = (s) => document.querySelector(s)
+const h = (tag, attrs = {}, html = '') => {
+  const e = document.createElement(tag)
+  for (const [k, v] of Object.entries(attrs)) if (v !== undefined && v !== false) e.setAttribute(k, v === true ? '' : v)
+  e.innerHTML = html
+  return e
+}
+
+// ---- overview: pipeline map ----
+const pipe = $('#pipe')
+const ideasGrp = h('div', { class: 'pipe-grp' }, '<span class="pipe-grp-l">ideas</span>')
+const ideasRow = h('div', { class: 'pipe-row' })
+;['idea', 'shaping', 'ready'].forEach((c, i) => {
+  const n = IDEAS.filter((x) => x.col === c).length
+  if (i) ideasRow.append(h('span', { class: 'arrow' }, '›'))
+  ideasRow.append(h('div', { class: 'node', 'data-live': c === 'shaping' }, `<span class="node-n">${c}</span><span class="node-c">${n}</span>`))
+})
+ideasGrp.append(ideasRow)
+pipe.append(ideasGrp, h('div', { class: 'handoff' }, '<b>⇒</b>⌘⏎ send'))
+const implGrp = h('div', { class: 'pipe-grp' }, '<span class="pipe-grp-l">implementation</span>')
+const implRow = h('div', { class: 'pipe-row' })
+const stagesAll = [{ name: 'inbox' }, ...LANES, { name: 'done' }]
+stagesAll.forEach((s, i) => {
+  const here = CARDS.filter((c) => c.stage === s.name)
+  const busy = here.filter((c) => c.s === 'working' || c.s === 'blocked')
+  const door = here.filter((c) => c.s === 'holding').length
+  if (i) implRow.append(h('span', { class: 'arrow' }, '›'))
+  const full = s.cap && busy.length >= s.cap
+  const node = h('div', { class: 'node', 'data-live': busy.some((c) => c.s === 'working'), 'data-jam': full && door > 0 })
+  node.append(h('span', { class: 'node-n' }, s.name))
+  if (s.cap) {
+    const m = h('span', { class: 'meter' })
+    for (let k = 0; k < s.cap; k++) {
+      const c = busy[k]
+      m.append(h('i', c ? { [c.s === 'blocked' ? 'data-ask' : 'data-on']: true } : {}))
+    }
+    node.append(m)
+    node.append(h('span', { class: 'node-c' }, `<span class="cap">${busy.length}/${s.cap}</span>${door ? `<span class="door">+${door} door</span>` : ''}`))
+  } else node.append(h('span', { class: 'node-c' }, `${here.length}`))
+  implRow.append(node)
+})
+implGrp.append(implRow)
+pipe.append(implGrp)
+
+// ---- overview: rows ----
+function track(c) {
+  const at = LANES.findIndex((l) => l.name === c.stage)
+  const t = h('span', { class: 'trk' })
+  LANES.forEach((l, i) => {
+    let s
+    if (i < at) s = 'p'
+    else if (i === at) s = c.s === 'blocked' ? 'a' : 'w'
+    t.append(h('i', { 'data-s': s, 'data-back': c.back?.includes(l.name) && i !== at ? true : undefined, title: l.name }))
+  })
+  return t
+}
+for (const c of CARDS.filter((c) => c.s === 'blocked' || c.s === 'working')) {
+  const row = h('div', { class: 'row', 'data-cursor': c.cursor, 'data-tone': c.s === 'blocked' ? 'ask' : undefined })
+  row.append(h('span', { class: 'k' }, c.kind), h('span', { class: 'nm' }, `<b>${c.name}</b><small>${c.line}</small>`))
+  row.append(h('span', { class: 'st' }, c.stage), track(c), h('span', { class: 'r' + (c.s === 'working' ? ' w' : '') }, c.t), h('span', { class: 'r' }, c.tok))
+  ;(c.s === 'blocked' ? $('#ask') : $('#run')).append(row)
+}
+
+// ---- ideas board ----
+const ideas = $('#ideas')
+for (const col of ['idea', 'shaping', 'ready']) {
+  const list = IDEAS.filter((x) => x.col === col)
+  const sec = h('section', { class: 'fcol', 'data-live': col === 'shaping' })
+  sec.append(h('header', { class: 'fcol-head' },
+    `<span class="fcol-name">${col}</span><span class="fcol-n">${list.length}</span>` +
+    `<div class="fcol-def"><span class="fcol-skill">${{ idea: 'a line, in your words', shaping: 'talk it through · plan.md', ready: 'has a plan · you said ready' }[col]}</span></div>`))
+  const body = h('div', { class: 'fcol-body', 'data-nav-group': true })
+  for (const x of list) {
+    const card = h('button', { class: 'fcard', 'data-cursor': x.cursor })
+    card.append(h('div', { class: 'fcard-top' }, `<span class="fkind">${x.kind}</span><span class="num">${x.no}</span>`))
+    card.append(h('div', { class: 'fcard-name' }, x.title))
+    if (x.talking) card.append(h('div', { class: 'fcard-line' }, 'claude is editing plan.md'))
+    if (x.dep) card.append(h('div', { class: 'fcard-line' }, `⤷ after ${x.dep}`))
+    card.append(h('div', { class: 'imeta' },
+      `${col === 'idea' ? '' : `<span class="plan" ${x.plan ? '' : 'data-none'}>plan</span>`}${x.files ? `<span>${x.files}</span>` : ''}<span style="margin-left:auto">${x.age}</span>`))
+    body.append(card)
+  }
+  if (col === 'ready') body.append(h('div', { class: 'sendband' }, '<b>⌘⏎</b> sends the card to implementation · it lands in <b>inbox</b> with its folder moved to specs/'))
+  sec.append(body)
+  ideas.append(sec)
+}
+const exit = h('section', { class: 'fcol exit' })
+exit.append(h('header', { class: 'fcol-head' }, '<span class="fcol-name">sent</span><span class="fcol-n">4</span>'))
+exit.append(h('div', { class: 'fcol-body' }, '<div>on implementation</div><div>&nbsp;</div><div><b>009</b> coder</div><div><b>010</b> qa</div><div><b>013</b> done</div><div><b>015</b> inbox</div><div>&nbsp;</div><div><b>]</b> to follow them</div>'))
+ideas.append(exit)
+
+// ---- implementation board (the board as it is today) ----
+const impl = $('#impl')
+for (const s of stagesAll) {
+  const here = CARDS.filter((c) => c.stage === s.name)
+  const blocked = here.filter((c) => c.s === 'blocked'), working = here.filter((c) => c.s === 'working')
+  const held = here.filter((c) => c.s === 'holding' || c.s === 'settled')
+  const empty = !here.length
+  const sec = h('section', { class: 'fcol', 'data-empty': empty, 'data-collapsed': empty, 'data-live': working.length > 0 })
+  const busy = blocked.length + working.length
+  sec.append(h('header', { class: 'fcol-head' },
+    `<span class="fcol-name">${s.name}</span><span class="fcol-n">${here.length || ''}</span>` +
+    (s.cap ? `<span class="fcol-cap" ${busy >= s.cap ? 'data-full' : ''}>${busy}/${s.cap}</span>` : '') +
+    (s.skill ? `<div class="fcol-def"><span class="fcol-skill">${s.skill}</span><span class="fcol-model">${s.model}</span></div>` : '')))
+  const body = h('div', { class: 'fcol-body', 'data-nav-group': true })
+  const card = (c, asking) => {
+    const b = h('button', { class: 'fcard', 'data-cursor': c.cursor })
+    b.append(h('div', { class: 'fcard-top' }, `${asking ? '<span class="hmark">?</span>' : ''}<span class="fkind">${c.kind}</span>${c.back ? '<span class="freturn">↩1</span>' : ''}<span class="fpass">✓${c.pass}</span>`))
+    b.append(h('div', { class: 'fcard-name' }, c.name))
+    if (c.line) b.append(h('div', { class: 'fcard-line' }, c.line))
+    if (c.t) b.append(h('div', { class: 'fcard-foot' }, `<span>${c.t}</span><span class="fcard-report">report · ${c.tok} tok</span>`))
+    return b
+  }
+  if (blocked.length) {
+    const band = h('div', { class: 'fband' }, `<span class="fband-tag" data-tone="ask">needs you ${blocked.length}</span>`)
+    blocked.forEach((c) => band.append(card(c, true)))
+    body.append(band)
+  }
+  working.forEach((c) => body.append(card(c)))
+  if (held.length) {
+    const label = s.cap ? `holding ${held.length}${busy >= s.cap ? ' · no spot' : ''}` : `${s.name === 'done' ? 'landed' : 'backlog'} ${held.length}`
+    const band = h('div', { class: 'fband', 'data-hold': true, 'data-pin': s.cap ? true : undefined }, `<span class="fband-tag">${label}</span>`)
+    held.forEach((c, i) => band.append(h('button', { class: 'fq' }, `<span class="fkind">${c.kind}</span><span class="fq-name">${c.name}</span><span class="fq-pos">#${i + 1}</span>`)))
+    body.append(band)
+  }
+  sec.append(body)
+  impl.append(sec)
+}
+
+// ---- tabs, footer, right slot ----
+const TABS = ['overview', 'ideas', 'impl']
+const FOOT = {
+  overview: '<span><b>[ ]</b> tab</span><span><b>j k</b> row</span><span><b>⏎</b> open chat</span><span><b>g</b> go to its card</span><span><b>m</b> merge</span><span><b>u</b> undo last merge</span><span><b>n</b> new idea</span><span><b>esc</b> nanny</span>',
+  ideas: '<span><b>[ ]</b> tab</span><span><b>h l</b> column</span><span><b>j k</b> idea</span><span><b>H L</b> move idea · shaping · ready</span><span><b>c</b> chat about it</span><span><b>e</b> edit</span><span><b>p</b> plan</span><span><b>n</b> new idea</span><span><b>⌘⏎</b> send</span><span><b>esc</b> nanny</span>',
+  impl: '<span><b>[ ]</b> tab</span><span><b>h l</b> column</span><span><b>j k</b> card</span><span><b>⏎</b> open chat</span><span><b>H L</b> move stage</span><span><b>r</b> report</span><span><b>n</b> new task → nanny</span><span><b>x</b> archive</span><span><b>esc</b> nanny</span>'
+}
+const CHAT = `<header class="panel-head"><span class="glyph">▸</span><span class="panel-name">chat</span><span class="panel-sub">entity-identity · coder</span></header>
+  <div class="panel-body chat"><p><span class="nick">r2luna</span> <span class="t">14:21</span><br>why did it go back to specifier?</p>
+  <p><span class="nick2">claude</span> <span class="t">14:21</span><br>Coder found the spec putting holding in the source column, which contradicts D4. Specifier rewrote section 3 and passed it again.</p></div>`
+const ITEM = `<header class="panel-head"><span class="glyph">☐</span><span class="panel-name">task</span><span class="panel-sub">.floe/tasks/017-task-panel-for-ideas/</span></header>
+  <div class="panel-body item">
+    <div class="item-title"><span>017</span>task panel for ideas</div>
+    <div class="item-meta"><span>feat</span><span>created 3d ago</span><span>plan edited by claude 2h ago</span></div>
+    <div class="ladder"><div class="rung" data-done>idea</div><div class="rung" data-done>shaping</div><div class="rung" data-at>ready</div><div class="rung" data-auto>in dev</div><div class="rung" data-auto>done</div></div>
+    <div><div class="sec-h">idea <span class="k">e edit · task.md</span></div><div class="prose">Ideas per project that grow into a plan and then move into the colony. A task is a numbered folder committed to git, so the history of an idea is the history of its files.</div></div>
+    <div><div class="sec-h">plan <span class="k">p edit · plan.md</span></div><div class="prose"><ol><li>folder model + reader</li><li>list and item panels</li><li>send to colony, the folder moves to specs/</li></ol></div></div>
+    <div><div class="sec-h">files <span class="k">⏎ open</span></div><div class="att">◧ list-and-item.html<br>◧ status-ladder.html<br>✎ flow.excalidraw</div></div>
+    <div class="hand"><span>ready. sending moves it to <b>specs/017-…</b> and drops a card in implementation's <b>inbox</b>.</span><button class="go">send ⌘⏎</button></div>
+  </div>`
+function show(tab) {
+  document.querySelectorAll('.tab').forEach((t) => (t.dataset.on = t.dataset.tab === tab ? '' : t.removeAttribute('data-on')))
+  document.querySelectorAll('.tab').forEach((t) => { if (t.dataset.tab !== tab) t.removeAttribute('data-on') })
+  document.querySelectorAll('.view').forEach((v) => (v.dataset.view === tab ? v.setAttribute('data-on', '') : v.removeAttribute('data-on')))
+  $('#foot').innerHTML = FOOT[tab]
+  $('#right').innerHTML = tab === 'ideas' ? ITEM : CHAT
+  history.replaceState(null, '', '#' + tab + (document.documentElement.dataset.theme === 'light' ? '-light' : ''))
+}
+const [want, theme] = (location.hash.slice(1) || 'overview').split('-')
+if (theme === 'light') document.documentElement.dataset.theme = 'light'
+let cur = TABS.includes(want) ? want : 'overview'
+show(cur)
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => show((cur = t.dataset.tab))))
+addEventListener('keydown', (e) => {
+  if (e.key === ']') show((cur = TABS[(TABS.indexOf(cur) + 1) % TABS.length]))
+  if (e.key === '[') show((cur = TABS[(TABS.indexOf(cur) + TABS.length - 1) % TABS.length]))
+  if (e.key === 't') { const r = document.documentElement; r.dataset.theme = r.dataset.theme === 'light' ? 'dark' : 'light' }
+})
+</script>
+</body>
+</html>
