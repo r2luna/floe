@@ -26,6 +26,19 @@ test('panel compares against the focused panel kind', () => {
   assert.equal(ok('panel in ["projects", "worktrees"]')({ kind: 'diff' }), false)
 })
 
+test('tab compares against the tab the focused panel shows', () => {
+  const ideas = ok('panel == "colony" and tab == "ideas"')
+  assert.equal(ideas({ kind: 'colony', tab: 'ideas' }), true)
+  assert.equal(ideas({ kind: 'colony', tab: 'board' }), false)
+  assert.equal(ideas({ kind: 'tasks', tab: 'ideas' }), false)
+  assert.equal(ok('tab != "ideas"')({ tab: 'board' }), true)
+  assert.equal(ok('tab in ["overview", "board"]')({ tab: 'overview' }), true)
+  assert.equal(ok('tab in ["overview", "board"]')({}), false)
+  const r = parseWhen('tab is "ideas"')
+  assert.equal(r.ok, false)
+  if (!r.ok) assert.match(r.reason, /tab expects ==, != or in/)
+})
+
 test('and binds tighter than or, as documented', () => {
   // `a and b or c` is `(a and b) or c` — c alone is enough.
   const p = ok('typing and selecting or stack-below')

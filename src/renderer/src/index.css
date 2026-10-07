@@ -9994,6 +9994,593 @@ kbd {
   color: var(--faint);
 }
 
+/* --- colony tabs: overview · ideas · implementation ----------------------
+   mocks/colony-tabs.html is the design. The strip sits in the panel head; the
+   body is a flex column whose last row is the tab's own keys. */
+.panel-body:has(> .cv-keys) {
+  display: flex;
+  flex-direction: column;
+}
+
+.cv-tabs {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.cv-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cv-tab:hover {
+  color: var(--text);
+}
+
+.cv-tab[data-on] {
+  color: var(--text-strong);
+  border-bottom-color: var(--text-strong);
+}
+
+.cv-tab-n {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.cv-tab-n[data-tone='ask'] {
+  color: var(--accent);
+}
+
+.cv-tab-keys {
+  align-self: center;
+  margin-left: 4px;
+  color: var(--faint);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* The tab's keys. Text, never buttons: a hint is not a cursor stop. */
+.cv-keys {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin: 8px -8px -8px;
+  padding: 4px 11px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.cv-keys b {
+  color: var(--dimmer);
+  font-weight: 400;
+}
+
+/* --- ideas tab: the tasks list as columns, on the board's own cards ------- */
+.cv-num {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-imeta {
+  display: flex;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.cv-plan {
+  color: var(--dimmer);
+}
+
+.cv-plan[data-none] {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.cv-age {
+  margin-left: auto;
+}
+
+.cv-empty,
+.cv-send {
+  margin: 4px 6px;
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.cv-send {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+
+.cv-send b {
+  color: var(--text);
+  font-weight: 400;
+}
+
+.fcol.cv-sent {
+  flex: 0 0 120px;
+}
+
+.cv-sent .fcol-body {
+  padding: 6px 8px;
+}
+
+.cv-sent-row {
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-sent-row b {
+  color: var(--dimmer);
+  font-weight: 400;
+}
+
+/* --- overview ----------------------------------------------------------- */
+.cv-ov {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cv-sec {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-inline: 10px;
+  margin: 2px 0 4px;
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cv-ov > div:not(.cv-box) > .cv-sec {
+  padding-inline: 0;
+}
+
+.cv-sec[data-tone='ask'] {
+  color: var(--accent);
+}
+
+.cv-sec-k {
+  min-width: 0;
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Stat tiles: a number, what it counts, the split behind it. Bordered, flat —
+   the number wears text ink and a dot beside the label carries the status. */
+.cv-tiles {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border: 1px solid var(--line);
+}
+
+.cv-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px 9px;
+  border-right: 1px solid var(--line);
+}
+
+.cv-tile:last-child {
+  border-right: 0;
+}
+
+.cv-tile-l {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.cv-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--edge);
+}
+
+.cv-dot[data-s='work'] {
+  background: var(--working);
+}
+
+.cv-dot[data-s='ask'] {
+  background: var(--accent);
+}
+
+.cv-dot[data-s='land'] {
+  background: var(--live);
+}
+
+.cv-tile-n {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  color: var(--text-strong);
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.cv-tile-s {
+  color: var(--faint);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-spark {
+  margin-bottom: 4px;
+}
+
+.cv-spark polyline {
+  fill: none;
+  stroke: var(--live);
+  stroke-width: 1.5;
+}
+
+.cv-spark circle {
+  fill: var(--live);
+}
+
+/* Pipeline: a node never shrinks below its own text. It grows to fill the
+   row, and when the row runs out implementation drops under ideas, then its
+   stages wrap. */
+.cv-pipe {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+}
+
+.cv-pipe-grp {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.cv-pipe-grp[data-grow] {
+  flex: 1 1 auto;
+}
+
+.cv-pipe-l {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.cv-pipe-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+}
+
+.cv-pipe-step {
+  display: flex;
+  align-items: center;
+  flex: 1 0 auto;
+}
+
+.cv-pipe-grp:not([data-grow]) .cv-pipe-step {
+  flex: none;
+}
+
+.cv-arrow {
+  padding: 0 5px;
+  color: var(--faint);
+}
+
+.cv-handoff {
+  align-self: center;
+  padding: 0 12px;
+  color: var(--dim);
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.cv-handoff b {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.cv-node {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 58px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.cv-node[data-live] {
+  border-color: var(--edge);
+}
+
+.cv-node[data-jam] {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+:root[data-theme='light'] .cv-node[data-jam] {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.cv-node[data-retired] {
+  opacity: 0.5;
+}
+
+.cv-node-n {
+  color: var(--dimmer);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.cv-node[data-live] .cv-node-n {
+  color: var(--text-strong);
+}
+
+.cv-node-c {
+  display: flex;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.cv-cap[data-full] {
+  color: var(--accent);
+}
+
+.cv-door {
+  color: var(--text);
+}
+
+.cv-meter {
+  display: flex;
+  gap: 2px;
+  height: 3px;
+}
+
+.cv-meter i {
+  width: 7px;
+  background: var(--edge);
+  border-radius: var(--radius-sm);
+}
+
+.cv-meter i[data-s='work'] {
+  background: var(--working);
+}
+
+.cv-meter i[data-s='ask'] {
+  background: var(--accent);
+}
+
+.cv-box {
+  min-width: 0;
+  padding: 7px 0 5px;
+  border: 1px solid var(--line);
+}
+
+/* One set of columns for the head and both lists, so they line up. */
+.cv-thead,
+.cv-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 90px 110px 64px 50px;
+  gap: 10px;
+  padding-inline: 10px;
+}
+
+.cv-thead {
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.cv-row,
+.cv-row2 {
+  position: relative;
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cv-row {
+  align-items: center;
+  padding-block: 4px;
+}
+
+.cv-row2 {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 10px;
+  padding: 4px 10px;
+}
+
+.cv-row2[data-one] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  cursor: default;
+}
+
+.cv-row2[data-one] .cv-nm {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cv-row:hover,
+button.cv-row2:hover {
+  background: var(--wash-1);
+}
+
+.cv-k {
+  align-self: start;
+  padding-top: 2px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.cv-nm {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cv-nm b {
+  color: var(--text-strong);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-nm small {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-row[data-tone='ask'] .cv-nm small {
+  color: var(--text);
+}
+
+.cv-st {
+  color: var(--dimmer);
+  font-size: 11px;
+}
+
+.cv-row[data-tone='ask'] .cv-st {
+  color: var(--accent);
+}
+
+.cv-r {
+  color: var(--faint);
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.cv-r[data-s='work'] {
+  color: var(--working);
+}
+
+/* The lanes a card has been through: grey passed, blue here, accent asking,
+   a dot ahead, ↩ over a lane that sent it back. */
+.cv-road {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 2px;
+  align-items: center;
+  height: 10px;
+}
+
+.cv-road i {
+  position: relative;
+  height: 3px;
+  border-radius: var(--radius-sm);
+}
+
+.cv-road i:not([data-s])::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: var(--edge);
+}
+
+.cv-road i[data-s='pass'] {
+  background: var(--dimmer);
+}
+
+.cv-road i[data-s='work'] {
+  background: var(--working);
+}
+
+.cv-road i[data-s='ask'] {
+  background: var(--accent);
+}
+
+.cv-road i[data-back]::before {
+  content: '↩';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text);
+  font-size: 8px;
+}
+
+.cv-trio {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+
+.cv-none {
+  margin: 2px 10px 4px;
+  color: var(--faint);
+  font-size: 11px;
+}
+
 /* --- tasks (the ideas panel and the task beside it) ------------------------
    mocks/task-panel.html is the design. Colour only where it means something:
    ready (you can act) is the accept green, in dev (an agent is on it) the plan
