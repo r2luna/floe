@@ -1735,7 +1735,8 @@ export const REGISTRY: Map<string, Command> = new Map(
       },
       {
         // One line — the title — and the idea is on disk. Straight into the
-        // item, so the next key can be `e` to write the rest.
+        // item and its chat, composer focused, so typing what the task is
+        // is the very next thing you do.
         id: 'tasks.new',
         title: 'New task…',
         group: 'Tasks',
@@ -1755,7 +1756,26 @@ export const REGISTRY: Map<string, Command> = new Map(
               if (!title.trim()) return
               void window.floe.tasks
                 .create(root, { title: title.trim() })
-                .then((t) => c.setLane((l) => open(l, c.makePanel('task', t.name, root))))
+                .then(async (t) => {
+                  c.setLane((l) => open(l, c.makePanel('task', t.name, root)))
+                  const task = await window.floe.tasks.read(root, t.name)
+                  const id = crypto.randomUUID()
+                  await window.floe.claude.createSession({ id, worktreePath: root, title: `task ${task.number} · ${task.title}` })
+                  localStorage.setItem(`floe.taskChat:${root}:${task.name}`, id)
+                  c.openTaskChat(task.name, { id, worktreePath: root }, taskChatOpener(task))
+                  // Same reasoning as tasks.chat: the panel does not exist on
+                  // this frame yet.
+                  setTimeout(() => {
+                    document
+                      .querySelector<HTMLTextAreaElement>('.panel[data-kind="taskchat"] .composer-input')
+                      ?.focus({ preventScroll: true })
+                    requestAnimationFrame(() =>
+                      document
+                        .querySelector('.panel[data-kind="task"]')
+                        ?.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' })
+                    )
+                  }, 60)
+                })
                 .catch((err: unknown) => c.say(reason(err)))
             }
           })
