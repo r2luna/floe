@@ -59,21 +59,32 @@ export function useMcpServers(worktreePath?: string): McpServers {
 
   // The probe spawns a claude CLI with the same merged --mcp-config a session
   // gets, so its init event reports OUR servers with their live state.
+  //
+  // Debounced: `worktreePath` can flip through several values in quick
+  // succession when the project list resyncs (a remote host reconnecting is
+  // the real-world case — up to 5 probes fired within ~10s chasing a cwd that
+  // kept changing underneath them). Each is a fresh `claude` spawn that reads
+  // the OAuth keychain item, and macOS prompts per process, so a churn of
+  // probes becomes a churn of keychain dialogs. Waiting for the path to settle
+  // collapses that burst into the one probe that actually matters.
   useEffect(() => {
     let live = true
-    setProbing(true)
-    window.floe.claude
-      .info(worktreePath ?? window.floe.homeDir)
-      .then((info) => {
-        if (!live) return
-        const next: Record<string, string> = {}
-        for (const s of info.mcpServers) next[s.name] = s.status
-        setStatus(next)
-      })
-      .catch(() => {})
-      .finally(() => live && setProbing(false))
+    const timer = setTimeout(() => {
+      setProbing(true)
+      window.floe.claude
+        .info(worktreePath ?? window.floe.homeDir)
+        .then((info) => {
+          if (!live) return
+          const next: Record<string, string> = {}
+          for (const s of info.mcpServers) next[s.name] = s.status
+          setStatus(next)
+        })
+        .catch(() => {})
+        .finally(() => live && setProbing(false))
+    }, 400)
     return () => {
       live = false
+      clearTimeout(timer)
     }
   }, [worktreePath, probeTick])
 
