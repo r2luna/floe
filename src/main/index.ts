@@ -1639,7 +1639,7 @@ export async function captureWindow(win: BrowserWindow): Promise<void> {
 
 // The opaque window background for the current OS appearance — mirrors --bg in
 // index.css for each theme.
-const solidBg = (): string => (nativeTheme.shouldUseDarkColors ? '#131315' : '#fcfdfe')
+const solidBg = (): string => (nativeTheme.shouldUseDarkColors ? '#16171b' : '#fcfdfe')
 
 /**
  * Whether the window should be non-opaque at all — `[appearance] transparency`

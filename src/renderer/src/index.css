@@ -45,16 +45,16 @@
     "CommitMonoPinguim", "Maple Mono NF", ui-monospace, SFMono-Regular, Menlo,
     "Cascadia Code", monospace;
 
-  --bg: #0d0e11;
+  --bg: #16171b;
   /* The three stacked surfaces are spelled as channels so the glass block can
      re-tint them at an alpha without a second copy of the hex — see
      [data-vibrancy='on'] below. */
-  --panel-rgb: 20 21 25;
+  --panel-rgb: 23 24 29;
   --panel: rgb(var(--panel-rgb));
-  --panel-focused-rgb: 23 24 29;
+  --panel-focused-rgb: 27 28 33;
   --panel-focused: rgb(var(--panel-focused-rgb));
-  --line: #23252b;
-  --line-soft: #1c1e23;
+  --line: #2a2c33;
+  --line-soft: #232530;
 
   --text: #c9ccd2;
   --text-strong: #e8eaee;
@@ -85,7 +85,7 @@
   --dimmer: #7f8797;
   --dimmest: #8f96a4;
   --edge: #343a45;
-  --well-rgb: 27 29 35;
+  --well-rgb: 31 33 40;
   --well: rgb(var(--well-rgb));
 
   /* Hover and selection washes, as one scale. On dark they lighten; the light
