@@ -943,6 +943,9 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
        */
       open: (worktreePath: string, relPath: string): Promise<void> =>
         ipcRenderer.invoke('files:open', worktreePath, relPath),
+      /** Show the file or folder in Finder, selected — `f` on a tree row. */
+      reveal: (worktreePath: string, relPath: string): Promise<void> =>
+        ipcRenderer.invoke('files:reveal', worktreePath, relPath),
       /**
        * A slice of a file, from the machine that holds it — how `o` brings a
        * document across when that machine is not this one. Null when the path

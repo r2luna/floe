@@ -314,6 +314,7 @@ const CHANNELS = [
   'files:resolveLink',
   'files:apply',
   'files:open',
+  'files:reveal',
   'files:readChunk',
   'files:openDownload',
   'review:changedFiles',

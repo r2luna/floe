@@ -4314,6 +4314,7 @@ function FilesTree({
           { label: 'Open in the default app', keys: 'o', run: () => onCommand?.('file.open') }
         ]),
     // Only while there is somewhere to come back out to.
+    { label: 'Reveal in Finder', keys: 'f', run: () => onCommand?.('file.reveal') },
     ...(base ? [{ label: 'Leave folder', keys: '-', run: () => onCommand?.('files.unroot') }] : []),
     { label: 'Rename…', keys: 'r', run: () => onCommand?.('files.rename') },
     { label: 'Move…', keys: 'm', run: () => onCommand?.('files.move') },

@@ -283,6 +283,12 @@ already does.`,
     binds: [{ key: 'o', command: 'file.open', when: 'panel in ["files", "changes"]' }]
   },
   {
+    title: 'Reveal in Finder',
+    doc: `\`f\` shows the file or folder under the cursor in Finder (the file manager
+on Linux), with it selected. Only for a worktree on this machine.`,
+    binds: [{ key: 'f', command: 'file.reveal', when: 'panel == "files"' }]
+  },
+  {
     title: 'Active',
     doc: `The active panel lists the chats you are working on. A chat joins when you
 send to it, and leaves when it is closed, removed, or idle for a day. Rows never

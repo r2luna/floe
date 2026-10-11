@@ -1126,6 +1126,11 @@ export function registerFileIpc(): void {
     // silent no-op is the one thing a keybinding must never be.
     if (failure) throw new Error(failure)
   })
+  // `f` on a file or folder row: show it in Finder (or the Linux file manager),
+  // selected. Same worktree check as `files:open`.
+  handle('files:reveal', (_event, worktreePath: string, relPath: string) =>
+    shell.showItemInFolder(safeResolve(worktreePath, relPath))
+  )
   // The other half of `o`, for when the file is NOT on this machine: the window
   // reads it across in slices and opens the copy here. `files:readChunk` runs
   // where the file is; `files:openDownload` is pinned to the machine the window

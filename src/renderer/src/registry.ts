@@ -600,6 +600,13 @@ function openTargetOf(c: CommandContext): string | null {
   return fileRow(c)?.dataset.file ?? null
 }
 
+/** The file or folder `f` shows in Finder: the tree row under the cursor. */
+function revealTargetOf(c: CommandContext): string | null {
+  if (c.lane.panels[c.lane.focus]?.kind !== 'files') return null
+  const row = fileRow(c)
+  return row?.dataset.file ?? row?.dataset.dir ?? null
+}
+
 function commentOnSelection(c: CommandContext): void {
   const panel = c.lane.panels[c.lane.focus]
   const r = selRange(panel?.selection)
@@ -1274,6 +1281,21 @@ export const REGISTRY: Map<string, Command> = new Map(
           void downloadAndOpen(root, path)
             .then((saved) => c.say(saved ? `opened ${saved}` : `downloaded ${path.split('/').pop()}`))
             .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        id: 'file.reveal',
+        title: 'Reveal in Finder',
+        group: 'Files',
+        enabled: (c) => !!c.worktree && !!revealTargetOf(c),
+        unavailable: () => 'put the cursor on a file or folder first',
+        run: (c) => {
+          const path = revealTargetOf(c)
+          const root = c.worktree?.path
+          if (!path || !root) return
+          // Finder can only show what is on this machine.
+          if (!window.floe.backends.onThisMachine()) return c.say('the file is on another machine')
+          void window.floe.files.reveal(root, path).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {
