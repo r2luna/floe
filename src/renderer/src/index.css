@@ -9185,7 +9185,8 @@ kbd {
 }
 
 /* `@opus-5` takes its own line rather than blowing the column open. */
-:root[data-chat-layout='gutter'] .irc-lead .irc-host {
+:root[data-chat-layout='gutter'] .irc-lead .irc-host,
+:root[data-chat-layout='gutter'] .irc-head .irc-host {
   display: block;
   font-size: 10px;
 }
@@ -9194,19 +9195,60 @@ kbd {
   margin-left: 0;
 }
 
-/* A run that OPENS with work has no words to sit in front of, so its head is a
-   row rather than a float — it gets the column by padding, not by pulling. */
-:root[data-chat-layout='gutter'] .chat > .irc-head {
-  display: block;
+/* What the turn cost goes in the column too, under the nick: the column is
+   where everything ABOUT the turn lives, and a float at the right end of line
+   one would cut that line short of every line under it. A second float,
+   cleared under the lead and pulled into the same padding, so it never
+   shortens a line box either. Stacked, so the column stays narrow. */
+:root[data-chat-layout='gutter'] .irc-body > .irc-cost {
+  float: left;
+  clear: left;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
   width: var(--chat-gutter);
-  margin-top: 15px;
+  margin: 1px 0 0 calc(-1 * (var(--chat-gutter) + var(--chat-gutter-gap)));
+  padding-left: 0;
+  font-size: 10px;
+  line-height: 1.35;
   text-align: right;
 }
 
-:root[data-chat-layout='gutter'] .chat > .irc-head .irc-time,
-:root[data-chat-layout='gutter'] .chat > .irc-head .irc-nick {
-  display: block;
+:root[data-chat-layout='gutter'] .irc-body > .irc-cost .irc-cost-sep {
+  display: none;
+}
+
+/* A run that OPENS with work has no words to sit in front of, so its head is a
+   row rather than a float — and a question's head is one too. Both take the
+   same two columns the message has: who spoke stacked in the first, the cost
+   at the far end of the second, so a head never leaves the grid the rest of
+   the log is set on. */
+:root[data-chat-layout='gutter'] .chat > .irc-head,
+:root[data-chat-layout='gutter'] .irc-entry > .irc-head {
+  display: grid;
+  grid-template-columns: var(--chat-gutter) minmax(0, 1fr);
+  gap: 0 var(--chat-gutter-gap);
+  align-items: start;
+  text-align: right;
+}
+
+:root[data-chat-layout='gutter'] .chat > .irc-head {
+  margin-top: 15px;
+}
+
+:root[data-chat-layout='gutter'] .irc-head > .irc-time,
+:root[data-chat-layout='gutter'] .irc-head > .irc-nick,
+:root[data-chat-layout='gutter'] .irc-head > .irc-peer {
+  grid-column: 1;
+  justify-self: end;
   line-height: 1.35;
+}
+
+:root[data-chat-layout='gutter'] .irc-head > .irc-cost {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  padding-left: 0;
 }
 
 /* Everything that is not a message lines up with the words, not with the nick:
@@ -9252,6 +9294,14 @@ kbd {
 :root[data-chat-layout='surfaces'] .chat > .irc-entry:not([data-me]) > .irc-body {
   padding: 0 11px;
   border-left: 2px solid transparent;
+}
+
+/* A head on its own row (a turn that opens with work, the question block)
+   starts where the words in a body start — 11px of padding plus the 2px edge —
+   or it sits 13px proud of every nick around it. */
+:root[data-chat-layout='surfaces'] .chat > .irc-head,
+:root[data-chat-layout='surfaces'] .irc-entry > .irc-head {
+  padding-left: 13px;
 }
 
 /* Work hangs off the turn that ran it, behind a hairline. */
@@ -9419,6 +9469,9 @@ kbd {
 :root[data-chat-layout='split'] .chat > .ag-group:has(+ .ag-group),
 :root[data-chat-layout='split'] .chat > .ag-group:has(+ .tool-run),
 :root[data-chat-layout='split'] .chat > .query-fold:has(+ .query-fold) {
+  /* Its own bottom margin too, or the pair still sits 9px apart: zeroing only
+     the next block's top margin leaves this one's to hold the gap open. */
+  margin-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -9460,10 +9513,70 @@ kbd {
 }
 
 /* A measure rather than the panel's full width, and leaded to match. This is
-   the one layout that changes how the words themselves are set. */
-:root[data-chat-layout='labels'] .irc-body {
+   the one layout that changes how the words themselves are set.
+
+   The measure is the COLUMN's, not the paragraph's: words stopped at 80ch over
+   a tool run that spans the panel are two right edges, and the eye reads the
+   ragged one as a mistake. So every child of the chat stops at the same line,
+   and only the words are leaded. (`.irc-earlier` is a button set smaller, and
+   its 80ch would fall short of everyone else's. The fanout is three answers
+   side by side — the one thing wider than a column — and capping it folds the
+   third under the first two.) */
+:root[data-chat-layout='labels'] .chat > :not(.irc-earlier, .fanout) {
   max-width: 80ch;
+}
+
+/* A head on its own row (a turn that opens with work, the question block) is
+   set like the label it stands in for, or a run that starts with a grep wears
+   a bigger nick than one that starts with a sentence. */
+:root[data-chat-layout='labels'] .chat > .irc-head,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head {
+  gap: 7px;
+  line-height: 1.4;
+}
+
+:root[data-chat-layout='labels'] .irc-entry > .irc-head {
+  margin-bottom: 2px;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-head .irc-nick,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head .irc-nick {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-head .irc-time,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head .irc-time {
+  font-size: 10px;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-entry > .irc-body {
   line-height: 1.8;
+}
+
+/* The cost ends the label line rather than floating into the words: the body
+   becomes a wrapping row, the label and the cost share the first line and
+   everything else takes a full line below — the same move `convo` makes. */
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) > .irc-lead {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body > .irc-cost {
+  float: none;
+  margin: 0 0 2px;
+  padding-left: 0;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) > :not(.irc-lead, .irc-cost) {
+  flex: 1 0 100%;
 }
 
 /* --- convo: a head line per turn, the words under it, yours on the right ---
@@ -9492,17 +9605,12 @@ kbd {
   margin-top: 0;
 }
 
-/* Words sit under the nick, not beside it. */
+/* Words sit under the nick, not beside it. At the app's own size: the 14px
+   this layout was mocked with belonged to a sans face it never shipped, and
+   in the mono face it read as a third size between the 13px head and the
+   12px clock — and it leaked into the subagent rows, which share the class. */
 :root[data-chat-layout='convo'] .chat .irc-body {
   padding-left: var(--convo-indent);
-  font-size: 14px;
-}
-
-:root[data-chat-layout='convo'] .chat .irc-body .md-code,
-:root[data-chat-layout='convo'] .chat .irc-body .file-ref,
-:root[data-chat-layout='convo'] .chat .irc-body .md-block,
-:root[data-chat-layout='convo'] .chat .irc-body .chat-paste {
-  font-size: 13px;
 }
 
 /* The head is a row of its own, pulled back into the indent so the mark sits
@@ -9537,7 +9645,6 @@ kbd {
 :root[data-chat-layout='convo'] .irc-head .irc-time {
   order: 2;
   margin-right: 0;
-  font-size: 12px;
   color: var(--dim);
 }
 
@@ -9551,6 +9658,16 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-weight: 600;
+}
+
+/* On a head row the cost comes after the rule, at the far right — where the
+   message body puts it (below). Without an order it would land between the
+   nick and the clock, in front of the rule. */
+:root[data-chat-layout='convo'] .chat > .irc-head .irc-cost,
+:root[data-chat-layout='convo'] .irc-entry > .irc-head .irc-cost {
+  order: 10;
+  margin-left: 0;
+  padding-left: 8px;
 }
 
 :root[data-chat-layout='convo'] .irc-lead .irc-host,
@@ -9636,20 +9753,30 @@ kbd {
   flex: 1 0 100%;
 }
 
-/* Your own turns, mirrored: the block hugs the right edge, the mark sits in a
-   right-hand column, and the words stay left-aligned inside the block. */
+/* Your own turns, mirrored: the block hugs the right edge, the mark sits at
+   the right end of its head, and the words stay left-aligned inside. The block
+   is a surface — recessed and outlined, never a fill — because a block that
+   merely starts further right reads as a paragraph that slipped, and a surface
+   reads as the other side of a conversation. The agents stay in the open, as
+   on every other agent desk (T3 Code, the Codex and Claude apps all set the
+   user's turn on a surface and the model's as plain prose). */
 :root[data-chat-layout='convo'] .chat > .irc-entry[data-me] > .irc-body {
   width: fit-content;
   max-width: 75%;
   margin-left: auto;
-  padding-left: 0;
-  padding-right: var(--convo-indent);
+  padding: 6px 11px 8px;
+  border: 1px solid var(--line);
+  background: var(--well);
 }
 
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead {
   flex-direction: row-reverse;
-  margin-left: 0;
-  margin-right: calc(-1 * var(--convo-indent));
+  margin: 0 0 3px;
+}
+
+/* The surface's edge is the separator, so the head draws no rule of its own. */
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead::after {
+  content: none;
 }
 
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick {
@@ -9659,18 +9786,6 @@ kbd {
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick::before {
   margin-right: 0;
   margin-left: var(--convo-gap);
-}
-
-/* Your block ends short of the left edge, so its rule would too. It overshoots
-   instead, and the entry clips it at the panel's content edge — the same edge
-   the agents' rules end on at the right. */
-:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead::after {
-  margin-left: -100vw;
-  margin-right: 4px;
-}
-
-:root[data-chat-layout='convo'] .chat > .irc-entry[data-me] {
-  overflow-x: clip;
 }
 
 /* Everything that is not a message lines up with the words. */

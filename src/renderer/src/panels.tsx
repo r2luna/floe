@@ -2744,13 +2744,15 @@ function Head({
   const turn = cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />
   // Both halves float, so both come before the words they ride beside — a
   // float placed after the line's text lands on whatever line the text ended
-  // on. The cost stays OUTSIDE the lead: a float nested in a float would be
-  // laid out inside it, at the left end of the line.
+  // on. The lead goes first: floats cannot be reordered by a stylesheet, and
+  // the `gutter` layout clears the cost under the nick, which only works with
+  // the nick already on the page. The cost stays OUTSIDE the lead: a float
+  // nested in a float would be laid out inside it, at the left end of the line.
   if (inline)
     return (
       <>
-        {turn}
         <span className="irc-lead">{said}</span>
+        {turn}
       </>
     )
   // --nick is inert in every layout but `rail`, where it colours the dot this
@@ -2878,7 +2880,9 @@ export function QuestionBlock({
 }) {
   const many = q.questions.length > 1
   return (
-    <div className="irc-entry">
+    // --nick, as on every entry: the `rail` layout colours its dot from it,
+    // and without it the question hangs on a grey bead.
+    <div className="irc-entry" style={{ '--nick': nickColor(typist) } as CSSProperties}>
       <div className="irc-head">
         <span className="irc-time">{clock(Date.now())}</span>
         <span className="irc-nick" style={{ color: nickColor(typist) }}>
