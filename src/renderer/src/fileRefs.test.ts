@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chipLabel, describeRef, refFromHref, splitRefs } from './fileRefs.ts'
+import { chipLabel, describeRef, fileTarget, opensFile, refFromHref, splitRefs } from './fileRefs.ts'
 
 test('a file reference is cut out of the text it sits in', () => {
   assert.deepEqual(splitRefs('see docs/plan.md:4 now'), [
@@ -86,4 +86,22 @@ test('a markdown link to a file becomes a reference; a URL does not', () => {
   assert.equal(refFromHref('mailto:a@b.c'), null)
   assert.equal(refFromHref('#section'), null)
   assert.equal(refFromHref('notes.md'), null)
+})
+
+test('a clicked reference opens in the worktree, or rooted at its own folder', () => {
+  const cwd = '/w/repo'
+  assert.deepEqual(fileTarget('src/a.ts:12-30', cwd), { sub: 'src/a.ts', line: 12 })
+  assert.deepEqual(fileTarget('./README.md', cwd), { sub: 'README.md', line: undefined })
+  assert.deepEqual(fileTarget('/w/repo/x/b.md', cwd), { sub: 'x/b.md', line: undefined })
+  assert.deepEqual(fileTarget('/etc/hosts:3', cwd), { root: '/etc', sub: 'hosts', line: 3 })
+  assert.deepEqual(fileTarget('../other/c.ts', cwd), { root: '/w/other', sub: 'c.ts', line: undefined })
+  assert.equal(fileTarget('src/', cwd), null)
+  assert.equal(fileTarget('~/notes.md', cwd), null)
+})
+
+test('a folder or a ~ path opens no file', () => {
+  assert.equal(opensFile('src/a.ts'), true)
+  assert.equal(opensFile('src/'), false)
+  assert.equal(opensFile('~/notes.md'), false)
+  assert.equal(opensFile(''), false)
 })

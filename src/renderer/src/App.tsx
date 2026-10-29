@@ -1915,6 +1915,15 @@ export default function App() {
     requestAnimationFrame(step)
   }
 
+  /** Open `panel`, focused, with its cursor on row `at`, and scroll that row in. */
+  const openAt = (panel: Panel, at: number, patch?: Partial<Panel>): void => {
+    setLane((l) => {
+      const next = open(l, panel)
+      return patchPanel(next, next.focus, { cursor: at, selection: null, ...patch })
+    })
+    revealRow(panel.id, panel.sub ?? '', at)
+  }
+
   /**
    * Open the file defining the first of `names` that has a definition, on its
    * line, and remember where this left from. Always the file reader, even out
@@ -1928,14 +1937,8 @@ export default function App() {
       const defs = await window.floe.files.definition(root, name, path).catch(() => [])
       const target = pickDefinition(defs, { path, line })
       if (!target) continue
-      const panel = mkPanel('file', target.path, undefined, undefined, undefined, from.root)
-      const at = target.line - 1
       setJumps((prev) => [...prev.slice(-49), from])
-      setLane((l) => {
-        const next = open(l, panel)
-        return patchPanel(next, next.focus, { cursor: at, selection: null })
-      })
-      revealRow(panel.id, target.path, at)
+      openAt(mkPanel('file', target.path, undefined, undefined, undefined, from.root), target.line - 1)
       return
     }
     say(names.length === 1 ? `no definition found for ${names[0]}` : 'no definition found on this line')
@@ -1949,12 +1952,7 @@ export default function App() {
     // Rebuilt from what it showed, not reinserted as it was: its old width and
     // dock belong to a box the lane may have rearranged since.
     const panel = { ...mkPanel(spot.kind as PanelKind, spot.sub, undefined, undefined, undefined, spot.root), view: spot.view }
-    const at = spot.cursor ?? 0
-    setLane((l) => {
-      const next = open(l, panel)
-      return patchPanel(next, next.focus, { cursor: at, selection: null, view: spot.view })
-    })
-    revealRow(panel.id, spot.sub ?? '', at)
+    openAt(panel, spot.cursor ?? 0, { view: spot.view })
   }
 
   /**
@@ -3686,7 +3684,11 @@ export default function App() {
                     // Where it lands is the lane's business, not the opener's:
                     // every panel has an order, so nothing needs to say "after
                     // me".
-                    onOpen={(child) =>
+                    onOpen={(child) => {
+                      if (child.line && child.sub) {
+                        openAt(mkPanel('file', child.sub, undefined, undefined, undefined, child.root), child.line - 1)
+                        return
+                      }
                       setLane((l) => {
                         const next = open(l, {
                           ...mkPanel(
@@ -3715,7 +3717,7 @@ export default function App() {
                         const back = next.panels.findIndex((p) => p.id === panel.id)
                         return back === -1 ? next : focusAt(next, back)
                       })
-                    }
+                    }}
                   />
                 </div>
                 {keyHintsOn && !bare && <PanelKeys binds={binds} kind={kind} />}

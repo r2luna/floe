@@ -109,3 +109,35 @@ export function refFromHref(href: string | undefined): string | null {
   if (!m || (!isFileRef(m[1]) && !m[2])) return null
   return m[1] + (m[2] ? `:${m[2]}${m[3] ? `-${m[3]}` : ''}` : '')
 }
+
+/**
+ * Whether a reference's path names a file the reader can open: not a folder,
+ * and not a `~` path this side cannot spell.
+ */
+export function opensFile(path: string): boolean {
+  return !!path && !path.endsWith('/') && !path.startsWith('~')
+}
+
+/**
+ * Where a clicked reference opens: the folder the file reader is rooted at,
+ * the file inside it, and the line to land on.
+ *
+ * A path inside the session's worktree opens against the worktree, beside the
+ * tree it came from, and has no root of its own. An absolute path anywhere
+ * else is rooted at its own folder, the way a skill's file is. A path that
+ * does not open a file gets null.
+ */
+export function fileTarget(ref: string, cwd: string): { root?: string; sub: string; line?: number } | null {
+  const { path, lines } = describeRef(ref)
+  if (!cwd || !opensFile(path)) return null
+  const base = cwd.replace(/\/+$/, '')
+  const parts: string[] = []
+  for (const p of (path.startsWith('/') ? path : `${base}/${path}`).split('/')) {
+    if (p === '..') parts.pop()
+    else if (p && p !== '.') parts.push(p)
+  }
+  const abs = `/${parts.join('/')}`
+  const line = lines ? Number(lines.split('-')[0]) : undefined
+  if (abs.startsWith(`${base}/`)) return { sub: abs.slice(base.length + 1), line }
+  return { root: `/${parts.slice(0, -1).join('/')}`, sub: parts[parts.length - 1], line }
+}

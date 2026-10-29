@@ -21,3 +21,10 @@ export const RunInTerminal = createContext<((command: string) => void) | null>(n
  * resolve one.
  */
 export const PreviewInBrowser = createContext<((command: string) => void) | null>(null)
+
+/**
+ * Open a file the model pointed at — `src/a.ts:12` — in the file reader, on its
+ * line. Provided by the chat panel, which knows the worktree a relative path is
+ * written against; null elsewhere, and then the chip is only a label.
+ */
+export const OpenFileRef = createContext<((ref: string) => void) | null>(null)

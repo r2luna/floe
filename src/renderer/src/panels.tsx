@@ -88,7 +88,7 @@ import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
-import { describeRef, splitRefs } from './fileRefs'
+import { describeRef, fileTarget, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
 import { describePaste, pastePreview, splitMessage } from './pastes'
 import { splitSkills } from '../../shared/skills'
@@ -151,7 +151,7 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
-import { PreviewInBrowser, RunInTerminal } from './runInTerminal'
+import { OpenFileRef, PreviewInBrowser, RunInTerminal } from './runInTerminal'
 import { inWorktree, previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
@@ -734,6 +734,8 @@ export type OpenFn = (child: {
   focus?: boolean
   /** Read `sub` relative to this instead of the worktree. See Panel.root. */
   root?: string
+  /** For a file: the line to land on, 1-based. */
+  line?: number
   /** For a chat: which session it shows. */
   session?: { id: string; worktreePath: string }
   /** For a brand-new chat: the message that started it, sent on mount. */
@@ -2065,6 +2067,17 @@ function ChatPanel({
         : null,
     [cwd]
   )
+  // A file chip in an answer opens the file it names, on its line.
+  const openFileRef = useMemo(
+    () =>
+      cwd
+        ? (ref: string) => {
+            const target = fileTarget(ref, cwd)
+            if (target) onOpenRef.current?.({ kind: 'file', ...target })
+          }
+        : null,
+    [cwd]
+  )
   // The names alone, so a message can tell `/deploy` (a skill this app expanded
   // into instructions) from `/usage` (the harness's own, sent as typed).
   const skillNamesList = useSkills(cwd).all
@@ -2099,6 +2112,7 @@ function ChatPanel({
         <SkillNames.Provider value={skillNames}>
           <RunInTerminal.Provider value={runInTerminal}>
           <PreviewInBrowser.Provider value={previewInBrowser}>
+          <OpenFileRef.Provider value={openFileRef}>
             <Log items={shown} cwd={cwd} base={cut} pending={pending} />
             {tail && (
               // The streaming tail lives outside the memoised Log: a delta flush
@@ -2108,6 +2122,7 @@ function ChatPanel({
                 isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))}
               />
             )}
+          </OpenFileRef.Provider>
           </PreviewInBrowser.Provider>
           </RunInTerminal.Provider>
         </SkillNames.Provider>
