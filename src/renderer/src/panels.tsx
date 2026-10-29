@@ -1108,6 +1108,7 @@ export function PanelBody({
     return (
       <FileDiff
         path={sub ?? ''}
+        root={cwd}
         changes={changes}
         onPatch={onPatch}
         find={find}
@@ -3892,9 +3893,35 @@ function definitionClick(e: ReactMouseEvent, onDefinition?: OnDefinition): void 
   onDefinition(name, line > 0 ? line : undefined)
 }
 
+/**
+ * A change git has no lines for. An image is shown as it stands in the worktree
+ * — the picture is the change — and anything else keeps the plain note.
+ */
+function BinaryDiff({ root, path }: { root: string; path: string }) {
+  const [content, setContent] = useState<FileContent | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setContent(null)
+    window.floe.files
+      .read(root, path)
+      .then((c) => live && setContent(c))
+      // A deleted file has nothing left to read.
+      .catch(() => live && setContent({ kind: 'binary' }))
+    return () => {
+      live = false
+    }
+  }, [root, path])
+
+  if (!content) return <p className="empty">Loading…</p>
+  if (content.kind === 'image') return <img className="file-image" src={content.dataUrl} alt={path} />
+  return <p className="empty">No textual diff.</p>
+}
+
 /** One file's diff, fetched on demand and highlighted once Shiki is ready. */
 function FileDiff({
   path,
+  root,
   changes,
   onPatch,
   find,
@@ -3902,6 +3929,8 @@ function FileDiff({
   onDefinition
 }: {
   path: string
+  /** The worktree, for reading the file itself when git has no text to show. */
+  root?: string
   changes: Changes
   onPatch?: (patch: string) => void
   find?: string
@@ -3977,7 +4006,7 @@ function FileDiff({
 
   if (failed) return <p className="empty error">{failed}</p>
   if (!patch) return <p className="empty">Loading…</p>
-  if (!rows.length) return <p className="empty">No textual diff.</p>
+  if (!rows.length) return root ? <BinaryDiff root={root} path={path} /> : <p className="empty">No textual diff.</p>
 
   if (prose)
     return (
