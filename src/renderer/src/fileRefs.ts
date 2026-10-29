@@ -75,3 +75,37 @@ export function describeRef(ref: string): { path: string; lines?: string; full: 
   const [, path = ref, lines] = REF.exec(ref) ?? []
   return { path, lines: lines?.slice(1), full: ref }
 }
+
+/**
+ * A reference the way an assistant message draws it: the file's name first,
+ * the folder it sits in after, the line last — `SKILL.md · universal/sol-loop
+ * · L123`. The name is what you scan for; the folder, cut to its last two
+ * steps, is enough to tell two `index.ts` apart, and the tooltip has the rest.
+ */
+export function chipLabel(ref: string): { name: string; dir?: string; lines?: string; full: string } {
+  const { path, lines, full } = describeRef(ref)
+  const parts = path.replace(/\/+$/, '').split('/')
+  const name = parts.pop() || path
+  const dir = parts.filter((p) => p && p !== '.').slice(-2).join('/') || undefined
+  return { name, dir, lines: lines && `L${lines}`, full }
+}
+
+/**
+ * The reference a markdown link points at, when it points at a file.
+ *
+ * `[SKILL.md](skills/sol-loop/SKILL.md#L123)` is how an agent cites a line:
+ * the href is the address, `#L123` or `#L12-L30` the range. A URL, a mailto or
+ * a bare anchor is a link, not a file, and gets null.
+ */
+export function refFromHref(href: string | undefined): string | null {
+  if (!href || /^[a-z][\w+.-]*:/i.test(href) || href.startsWith('#')) return null
+  let path = href
+  try {
+    path = decodeURI(href)
+  } catch {
+    // A stray `%` is not an escape — the href is read as written.
+  }
+  const m = /^([^#]+?)(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(path)
+  if (!m || (!isFileRef(m[1]) && !m[2])) return null
+  return m[1] + (m[2] ? `:${m[2]}${m[3] ? `-${m[3]}` : ''}` : '')
+}

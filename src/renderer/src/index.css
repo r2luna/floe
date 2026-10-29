@@ -3132,9 +3132,10 @@ button {
    padding as two little pills above and below the code. */
 .irc-body .md-code,
 .irc-sys code {
-  padding: 1px 5px;
+  padding: 0 5px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: var(--wash-4);
+  background: none;
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
@@ -6774,12 +6775,56 @@ kbd {
    class for the SOURCE, and padding there would shift its glyphs off the
    textarea's — the one thing that file's header says must never happen. */
 .md .md-code {
-  padding: 1px 5px;
+  padding: 0 5px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: var(--wash-4);
+  background: none;
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
+}
+
+/* A file the model pointed at: type icon, name, folder, line — one chip, the
+   name strongest and the rest stepping down. Outline only, like .file-ref,
+   with a faint blue edge so a file reads apart from a code pill. */
+.msg-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid #282f3a;
+  border-radius: var(--radius);
+  background: #1b1e25;
+  color: var(--text-strong);
+  vertical-align: baseline;
+}
+
+.msg-ref .file-mark {
+  align-self: center;
+  flex: none;
+}
+
+.msg-ref-name {
+  overflow-wrap: anywhere;
+}
+
+.msg-ref-dir,
+.msg-ref-lines {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.msg-ref-dir::before,
+.msg-ref-lines::before {
+  content: '\00b7';
+  margin-right: 6px;
+  color: var(--dimmest);
+}
+
+:root[data-theme='light'] .msg-ref {
+  border-color: #c2d4ef;
+  background: #eef2f9;
 }
 
 /* An inline code pill that names a page: still code, and now an address. The
@@ -8037,7 +8082,7 @@ kbd {
 .skill-ref {
   display: inline-block;
   padding: 0 5px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   background: var(--panel);
   color: var(--accent);
@@ -8046,7 +8091,7 @@ kbd {
 }
 
 :root[data-theme='light'] .skill-ref {
-  border-color: var(--edge);
+  border-color: var(--line-soft);
   background: var(--well);
 }
 

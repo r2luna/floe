@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { describeRef, splitRefs } from './fileRefs.ts'
+import { chipLabel, describeRef, refFromHref, splitRefs } from './fileRefs.ts'
 
 test('a file reference is cut out of the text it sits in', () => {
   assert.deepEqual(splitRefs('see docs/plan.md:4 now'), [
@@ -65,4 +65,25 @@ test('a folder the # menu wrote chips whole; an unmarked one stays prose', () =>
     { text: ' now' }
   ])
   assert.deepEqual(splitRefs('look in src/main/ now'), [{ text: 'look in src/main/ now' }])
+})
+
+test('a chip label leads with the name, then the last two folders, then the line', () => {
+  assert.deepEqual(chipLabel('/Users/me/skills/universal/sol-loop/SKILL.md:123'), {
+    name: 'SKILL.md',
+    dir: 'universal/sol-loop',
+    lines: 'L123',
+    full: '/Users/me/skills/universal/sol-loop/SKILL.md:123'
+  })
+  assert.deepEqual(chipLabel('notes.md:4-9'), { name: 'notes.md', dir: undefined, lines: 'L4-9', full: 'notes.md:4-9' })
+})
+
+test('a markdown link to a file becomes a reference; a URL does not', () => {
+  assert.equal(refFromHref('skills/sol-loop/SKILL.md#L123'), 'skills/sol-loop/SKILL.md:123')
+  assert.equal(refFromHref('src/a.ts#L12-L30'), 'src/a.ts:12-30')
+  assert.equal(refFromHref('/abs/path%20x/b.ts'), '/abs/path x/b.ts')
+  assert.equal(refFromHref('notes.md#L4'), 'notes.md:4')
+  assert.equal(refFromHref('https://x.dev/a.ts'), null)
+  assert.equal(refFromHref('mailto:a@b.c'), null)
+  assert.equal(refFromHref('#section'), null)
+  assert.equal(refFromHref('notes.md'), null)
 })
