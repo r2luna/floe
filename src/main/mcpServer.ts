@@ -72,6 +72,7 @@ import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
 import { provisionWorktree } from './provision'
 import { supportStack } from './support'
+import { listSystemFonts } from './systemFonts'
 import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
 // `./draw/index`, not `./draw`: the MCP test loads this graph under a plain
@@ -2351,6 +2352,13 @@ function registerSupportTools(server: McpServer): void {
     // supportStack owns the dispatch AND the error-to-text conversion, so the
     // palette command and this tool cannot drift apart.
     async ({ action }) => textResult(await supportStack(action))
+  )
+
+  server.tool(
+    'list_fonts',
+    "The font families installed on this machine, monospaced first — the names `[appearance] font-family` in floe.toml accepts. Empty where the OS cannot be asked.",
+    {},
+    async () => textResult(await listSystemFonts())
   )
 }
 

@@ -26,6 +26,7 @@ import type { ConfigError } from '../main/config/errors'
 import type { Board, BoardEvent, ColonyTask, TaskKind } from '../shared/colony'
 import type { Route } from '../shared/mentions'
 import type { OmarchyPalette } from '../shared/omarchyPalette'
+import type { SystemFont } from '../main/systemFonts'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -303,6 +304,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.on('omarchy:changed', listener)
         return () => ipcRenderer.removeListener('omarchy:changed', listener)
       }
+    },
+    // Installed font families, mono first. Empty where the OS cannot be asked.
+    fonts: {
+      list: (): Promise<SystemFont[]> => ipcRenderer.invoke('fonts:list')
     },
     // User keybinding overrides. `load` returns the parsed config (overrides +
     // any parse errors); `reveal` opens the file to edit; `onChange` fires when

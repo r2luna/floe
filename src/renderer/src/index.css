@@ -7659,6 +7659,65 @@ kbd {
   background: color-mix(in srgb, var(--accent) 6%, #fff);
 }
 
+/* The font picker: the filter box on the row's line, the list under it. Each
+   option is drawn in its own face, so the list is the preview. */
+.font-pick {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.font-pick-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.font-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.font-group {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.font-option {
+  flex: none;
+  padding: 3px 8px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.font-option:hover {
+  border-color: var(--line);
+}
+
+.font-cursor {
+  border-color: var(--edge);
+  color: var(--text-strong);
+}
+
+.font-on {
+  color: var(--accent);
+}
+
 /* A problem is the one row that has to pull the eye — the muted danger outline
    from the mode chips, never a fill. */
 .settings-problem .row-name {

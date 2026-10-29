@@ -7052,6 +7052,7 @@ type SettingRow =
       hint?: string
     }
   | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
+  | { kind: 'font'; table: string; key: string; label: string; value: string; placeholder: string; hint?: string }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
   | {
       kind: 'slider'
@@ -7198,12 +7199,13 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
       title: 'Appearance',
       rows: [
         {
-          kind: 'text',
+          kind: 'font',
           table: 'appearance',
           key: 'font-family',
           label: 'Font family',
           value: config.appearance.fontFamily ?? '',
-          placeholder: 'system monospace'
+          placeholder: 'system monospace',
+          hint: 'the fonts installed here, monospaced first — type to filter'
         },
         {
           kind: 'stepper',
@@ -7663,6 +7665,10 @@ function SettingRowView({
     )
   }
 
+  if (editing && row.kind === 'font') {
+    return <FontPicker row={row} onPick={pick} onCancel={leave} />
+  }
+
   if (editing && row.kind === 'slider') {
     return <SettingSlider row={row} onSet={onSet} onLeave={leave} />
   }
@@ -7700,7 +7706,13 @@ function SettingRowView({
       const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
       return onSet(row.table, row.key, next)
     }
-    if (row.kind === 'penguin' || row.kind === 'penguinColor' || row.kind === 'slider' || row.kind === 'stepper')
+    if (
+      row.kind === 'penguin' ||
+      row.kind === 'penguinColor' ||
+      row.kind === 'font' ||
+      row.kind === 'slider' ||
+      row.kind === 'stepper'
+    )
       return onEdit()
     setDraft(row.kind === 'number' ? String(row.value) : row.value)
     onEdit()
@@ -7715,6 +7727,7 @@ function SettingRowView({
         {(row.kind === 'number' || row.kind === 'slider' || row.kind === 'stepper') &&
           `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
+        {row.kind === 'font' && (row.value || row.placeholder)}
         {row.kind === 'penguin' && (
           <>
             <PenguinHead variant={row.value} size={14} className="settings-penguin" />
@@ -7996,6 +8009,123 @@ function SwatchPicker<T extends string>({
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The font-family picker — every family installed on this machine, mono first.
+ *
+ * One box does both jobs: it filters the list, and when nothing installed
+ * matches, Enter writes what was typed — a font the OS could not list (or the
+ * browser build, which lists none) is still reachable. The first entry clears
+ * the setting back to the built-in face. Each name is drawn in its own font, so
+ * the list is also the preview.
+ */
+function FontPicker({
+  row,
+  onPick,
+  onCancel
+}: {
+  row: Extract<SettingRow, { kind: 'font' }>
+  onPick: (family: string) => void
+  onCancel: () => void
+}) {
+  const [fonts, setFonts] = useState<Array<{ family: string; mono: boolean }> | null>(null)
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const box = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    box.current?.focus()
+    let live = true
+    void window.floe.fonts
+      .list()
+      .catch(() => [])
+      .then((all) => {
+        if (!live) return
+        setFonts(all)
+        // Open on the font in force, so Enter on arrival changes nothing.
+        const at = all.findIndex((f) => f.family === row.value)
+        setCursor(at === -1 ? 0 : at + 1)
+      })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const needle = query.trim().toLowerCase()
+  const entries: Array<{ family: string; mono: boolean; label: string }> = [
+    ...(needle ? [] : [{ family: '', mono: true, label: row.placeholder }]),
+    ...(fonts ?? [])
+      .filter((f) => f.family.toLowerCase().includes(needle))
+      .map((f) => ({ ...f, label: f.family }))
+  ]
+  const at = Math.min(cursor, Math.max(0, entries.length - 1))
+
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [at, fonts])
+
+  const keys = (event: ReactKeyboardEvent): void => {
+    // The lane binds j/k/Escape too; inside the picker the keys are ours.
+    event.stopPropagation()
+    const ctrl = event.ctrlKey && !event.metaKey && !event.altKey
+    const down = event.key === 'ArrowDown' || (ctrl && event.key === 'n')
+    const up = event.key === 'ArrowUp' || (ctrl && event.key === 'p')
+    if (event.key === 'Escape') return onCancel()
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      return onPick(entries[at]?.family ?? query.trim())
+    }
+    if (!down && !up) return
+    event.preventDefault()
+    setCursor(Math.max(0, Math.min(entries.length - 1, at + (down ? 1 : -1))))
+  }
+
+  return (
+    <div className="row settings-row settings-editing font-pick">
+      <div className="font-pick-head">
+        <span className="row-name">{row.label}</span>
+        <input
+          ref={box}
+          className="dialog-input settings-input"
+          value={query}
+          placeholder={fonts === null ? 'reading installed fonts…' : 'filter, or type any font name'}
+          spellCheck={false}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setCursor(0)
+          }}
+          onKeyDown={keys}
+        />
+      </div>
+      {entries.length > 0 && (
+        <div className="font-list" ref={list} role="listbox" aria-label={row.label}>
+          {entries.map((f, index) => (
+            <Fragment key={f.family || '\0default'}>
+              {f.family && entries[index - 1]?.mono !== f.mono && (
+                <div className="font-group">{f.mono ? 'MONOSPACE' : 'PROPORTIONAL'}</div>
+              )}
+              <button
+                type="button"
+                tabIndex={-1}
+                data-index={index}
+                role="option"
+                aria-selected={index === at}
+                className={`font-option${index === at ? ' font-cursor' : ''}${f.family === row.value ? ' font-on' : ''}`}
+                style={f.family ? { fontFamily: `"${f.family}", var(--mono)` } : undefined}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => onPick(f.family)}
+              >
+                {f.label}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

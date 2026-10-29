@@ -426,6 +426,7 @@ const CHANNELS = [
   'config:reveal',
   'theme:get',
   'omarchy:get',
+  'fonts:list',
   'app:getLoginItem',
   'app:setLoginItem',
   'user:name',

@@ -192,6 +192,7 @@ import {
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
 import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
+import { listSystemFonts } from './systemFonts'
 import { recapSession } from './recap'
 import { handle } from './plugins/handleMap'
 import { backendById, loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
@@ -1552,6 +1553,9 @@ export function registerSettingsIpc(): void {
 
   // The Omarchy desktop's palette, for `theme = "omarchy"` — null off Omarchy.
   handle('omarchy:get', () => readOmarchyPalette())
+
+  // Installed font families, mono first — Settings → Font family's picker.
+  handle('fonts:list', () => listSystemFonts())
 
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.
