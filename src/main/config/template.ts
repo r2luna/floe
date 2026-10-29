@@ -40,6 +40,11 @@ export const FLOE_TOML = `# ====================================================
 # | live. Where Omarchy is not installed it behaves as \`system\`, so one file
 # | can be shared between an Omarchy box and a Mac.
 # |
+# | \`dark-theme\` and \`light-theme\` pick the palette each mode wears, so
+# | \`system\` can flip between two of them. \`floe\` is the app's own. Dark
+# | also takes \`monokai-pro\`, \`tomorrow-night\`, \`vesper\`, \`rose-pine\`
+# | and \`forest-night\`. Light also takes \`tomorrow\` (Base16).
+# |
 # | \`penguin\` picks which pinguim head greets you on a new session. Same head,
 # | 24 faces — \`classic\`, \`sleepy\`, \`surprised\`, \`focused\`, \`skeptical\`,
 # | \`cool\`, \`wink\`, \`cute\`, \`zen\`, \`robot\`, \`punk\`, \`tired\`, \`happy\`,
@@ -81,6 +86,8 @@ export const FLOE_TOML = `# ====================================================
 font-family         = "CommitMonoPinguim"
 font-size           = 13
 theme               = "system"
+dark-theme          = "floe"
+light-theme         = "floe"
 penguin             = "classic"
 penguin-color       = "accent"
 chat-layout         = "classic"

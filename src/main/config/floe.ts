@@ -28,12 +28,16 @@ import {
   TRANSPARENCY
 } from '../../shared/types'
 import { HARNESSES } from '../../shared/modes'
+import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import { EFFORTS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export { EFFORTS } from '../../shared/types'
-// `omarchy` follows the Omarchy desktop's theme — see main/omarchyTheme.ts.
+// The mode. `omarchy` follows the Omarchy desktop's theme — see
+// main/omarchyTheme.ts. Which palette dark and light wear is `dark-theme` and
+// `light-theme` — see shared/builtinThemes.ts.
 export const THEMES = ['system', 'dark', 'light', 'omarchy'] as const
+export { DARK_THEMES, LIGHT_THEMES }
 
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
 // Who can run the premise interview. A subset of PROVIDERS on purpose: the flow
@@ -62,6 +66,10 @@ export interface FloeConfig {
     fontFamily?: string
     fontSize: number
     theme: (typeof THEMES)[number]
+    /** The palette worn while dark — `floe` or a shipped dark theme. */
+    darkTheme: (typeof DARK_THEMES)[number]
+    /** The palette worn while light — `floe` or a shipped light theme. */
+    lightTheme: (typeof LIGHT_THEMES)[number]
     penguin: (typeof PENGUIN_HEADS)[number]
     penguinColor: (typeof PENGUIN_COLORS)[number]
     /** How the transcript arranges a turn. Pure CSS — see CHAT_LAYOUTS. */
@@ -145,6 +153,8 @@ export const DEFAULTS: FloeConfig = {
     fontFamily: undefined,
     fontSize: 13,
     theme: 'system',
+    darkTheme: 'floe',
+    lightTheme: 'floe',
     penguin: 'classic',
     penguinColor: 'accent',
     // The log the app shipped with. A layout is a matter of taste, so nobody
@@ -353,6 +363,9 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         fontFamily: appearance?.optStr('font-family'),
         fontSize: appearance?.num('font-size', d.appearance.fontSize, { min: 6, max: 48 }) ?? d.appearance.fontSize,
         theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme,
+        darkTheme: appearance?.oneOf('dark-theme', DARK_THEMES, d.appearance.darkTheme) ?? d.appearance.darkTheme,
+        lightTheme:
+          appearance?.oneOf('light-theme', LIGHT_THEMES, d.appearance.lightTheme) ?? d.appearance.lightTheme,
         penguin: appearance?.oneOf('penguin', PENGUIN_HEADS, d.appearance.penguin) ?? d.appearance.penguin,
         penguinColor:
           appearance?.oneOf('penguin-color', PENGUIN_COLORS, d.appearance.penguinColor) ??

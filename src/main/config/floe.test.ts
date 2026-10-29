@@ -255,3 +255,19 @@ test('worktree names keep their capitals until [worktree] lowercase is turned on
     true
   )
 })
+
+test('dark-theme and light-theme default to floe and take only their own mode', () => {
+  const absent = parseFloeConfig('', 'floe.toml').config.appearance
+  assert.equal(absent.darkTheme, 'floe')
+  assert.equal(absent.lightTheme, 'floe')
+  for (const theme of ['monokai-pro', 'tomorrow-night', 'vesper', 'rose-pine', 'forest-night']) {
+    const { config, errors } = parseFloeConfig(`[appearance]\ndark-theme = "${theme}"\n`, 'floe.toml')
+    assert.equal(config.appearance.darkTheme, theme)
+    assert.deepEqual(errors, [])
+  }
+  const light = parseFloeConfig('[appearance]\nlight-theme = "tomorrow"\n', 'floe.toml')
+  assert.equal(light.config.appearance.lightTheme, 'tomorrow')
+  const crossed = parseFloeConfig('[appearance]\nlight-theme = "vesper"\n', 'floe.toml')
+  assert.equal(crossed.config.appearance.lightTheme, 'floe', 'a dark palette is not a light theme')
+  assert.equal(crossed.errors.length, 1)
+})

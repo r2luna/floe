@@ -179,6 +179,7 @@ import {
 } from '../../shared/types'
 import { previewSound } from './sounds'
 import { omarchyAvailable } from './appearance'
+import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
 import type { Skill, WritableScope } from '../../main/config/skills'
@@ -7201,6 +7202,24 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
                 hint: 'system follows the OS; omarchy follows the desktop theme; dark and light stay put'
               }
             : { options: ['dark', 'light', 'system'], hint: 'system follows the OS; dark and light stay put' })
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'dark-theme',
+          label: 'Dark theme',
+          value: config.appearance.darkTheme,
+          options: DARK_THEMES,
+          hint: 'the palette worn while dark — floe is the app’s own'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'light-theme',
+          label: 'Light theme',
+          value: config.appearance.lightTheme,
+          options: LIGHT_THEMES,
+          hint: 'the palette worn while light — floe is the app’s own'
         },
         {
           kind: 'penguin',
