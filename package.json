@@ -25,6 +25,7 @@
     "gate": "node scripts/gate.mjs",
     "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit gate active. Bypass once with: git commit --no-verify'",
     "crap": "node scripts/crap.mjs",
+    "colony:eval": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/colony-eval/run.mjs",
     "build:mac": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac",
     "build:linux": "electron-vite build && node scripts/build-server.mjs && electron-builder --linux",
     "release": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac --publish always",
