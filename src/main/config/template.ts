@@ -27,6 +27,10 @@ export const FLOE_TOML = `# ====================================================
 # | found the default monospace is used. Whatever you pick, the bundled Nerd Font
 # | stays behind it as per-glyph fallback, so terminal icons keep resolving.
 # |
+# | \`split-font\` gives the chat its own face: on, every chat — a session's
+# | and an @codex side conversation's — wears \`chat-font-family\` and the rest keeps
+# | \`font-family\`. Off, \`chat-font-family\` is ignored.
+# |
 # | \`font-size\` scales the whole surface — text, padding and rules together, the
 # | way a terminal's font size does — rather than the text alone. 13 is the size
 # | the interface is drawn at, so it is the neutral value.
@@ -84,6 +88,8 @@ export const FLOE_TOML = `# ====================================================
 
 [appearance]
 font-family         = "CommitMonoPinguim"
+split-font          = false
+chat-font-family    = "CommitMonoPinguim"
 font-size           = 13
 theme               = "system"
 dark-theme          = "floe"

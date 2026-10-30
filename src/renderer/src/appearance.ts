@@ -134,9 +134,12 @@ function fontStack(family: string | undefined): string {
  * re-applies the file, and a cancel calls `applyConfig` to put the file's font
  * back.
  */
-export function previewFont(family: string): void {
-  document.documentElement.style.setProperty('--mono', fontStack(family))
+export function previewFont(variable: FontVariable, family: string): void {
+  document.documentElement.style.setProperty(variable, fontStack(family))
 }
+
+/** `--mono` is the app's face; `--chat-mono` is the chat's under `split-font`. */
+export type FontVariable = '--mono' | '--chat-mono'
 
 /**
  * Pull floe.toml into the renderer.
@@ -150,6 +153,10 @@ export async function applyConfig(): Promise<void> {
   try {
     const config = await window.floe.config.get()
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
+    // A scope switch like chat-layout: the stylesheet re-points `--mono` at
+    // `--chat-mono` inside the chat panel only while this is on.
+    document.documentElement.style.setProperty('--chat-mono', fontStack(config.appearance.chatFontFamily))
+    document.documentElement.dataset.splitFont = config.appearance.splitFont ? 'on' : 'off'
     // Layout is a stylesheet switch, not a component one: every layout renders
     // the same transcript, and the rules keyed off this attribute are what move
     // the nick, the air and the surfaces. See CHAT_LAYOUTS in shared/types.

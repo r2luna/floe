@@ -178,7 +178,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import { applyConfig, omarchyAvailable, previewFont } from './appearance'
+import { applyConfig, omarchyAvailable, previewFont, type FontVariable } from './appearance'
 import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
@@ -7067,7 +7067,17 @@ type SettingRow =
       hint?: string
     }
   | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
-  | { kind: 'font'; table: string; key: string; label: string; value: string; placeholder: string; hint?: string }
+  | {
+      kind: 'font'
+      table: string
+      key: string
+      label: string
+      value: string
+      placeholder: string
+      /** The variable the picker previews on — which part of the app this font dresses. */
+      variable: FontVariable
+      hint?: string
+    }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
   | {
       kind: 'slider'
@@ -7220,8 +7230,33 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           label: 'Font family',
           value: config.appearance.fontFamily ?? '',
           placeholder: 'system monospace',
+          variable: '--mono',
           hint: 'the fonts installed here, monospaced first — type to filter'
         },
+        {
+          kind: 'bool',
+          table: 'appearance',
+          key: 'split-font',
+          label: 'Split font',
+          value: config.appearance.splitFont,
+          hint: 'give the chat its own font — everything else keeps the one above'
+        },
+        // Only while split: off, the chat wears the app font and this row would
+        // set something that changes nothing on screen.
+        ...(config.appearance.splitFont
+          ? [
+              {
+                kind: 'font' as const,
+                table: 'appearance',
+                key: 'chat-font-family',
+                label: 'Chat font',
+                value: config.appearance.chatFontFamily ?? '',
+                placeholder: 'system monospace',
+                variable: '--chat-mono' as const,
+                hint: 'every chat — sessions and @codex side conversations'
+              }
+            ]
+          : []),
         {
           kind: 'stepper',
           table: 'appearance',
@@ -8090,8 +8125,8 @@ function FontPicker({
   // The whole app wears the highlighted font while the cursor walks the list.
   // Waits for the list so opening the picker does not flash the default face.
   useEffect(() => {
-    if (fonts !== null) previewFont(highlighted)
-  }, [highlighted, fonts])
+    if (fonts !== null) previewFont(row.variable, highlighted)
+  }, [highlighted, fonts, row.variable])
 
   // Leaving without a pick — Escape, or the panel closing under the picker —
   // put nothing on disk, so the file's font comes back. After a pick the write's

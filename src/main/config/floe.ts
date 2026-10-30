@@ -64,6 +64,9 @@ export interface HarnessDefault {
 export interface FloeConfig {
   appearance: {
     fontFamily?: string
+    /** The chat panel wears `chatFontFamily` instead of `fontFamily`. */
+    splitFont: boolean
+    chatFontFamily?: string
     fontSize: number
     theme: (typeof THEMES)[number]
     /** The palette worn while dark — `floe` or a shipped dark theme. */
@@ -151,6 +154,10 @@ export const DEFAULTS: FloeConfig = {
   // user into light on the next launch without them asking for it.
   appearance: {
     fontFamily: undefined,
+    // One face for the whole app until asked: a second font is a choice, and
+    // nobody's chat should change face on an update.
+    splitFont: false,
+    chatFontFamily: undefined,
     fontSize: 13,
     theme: 'system',
     darkTheme: 'floe',
@@ -361,6 +368,8 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
     config: {
       appearance: {
         fontFamily: appearance?.optStr('font-family'),
+        splitFont: appearance?.bool('split-font', d.appearance.splitFont) ?? d.appearance.splitFont,
+        chatFontFamily: appearance?.optStr('chat-font-family'),
         fontSize: appearance?.num('font-size', d.appearance.fontSize, { min: 6, max: 48 }) ?? d.appearance.fontSize,
         theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme,
         darkTheme: appearance?.oneOf('dark-theme', DARK_THEMES, d.appearance.darkTheme) ?? d.appearance.darkTheme,

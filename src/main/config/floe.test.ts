@@ -148,6 +148,16 @@ test('transparency names the themes that get glass, and defaults to off', () => 
   assert.equal(absent.config.appearance.transparency, 'off', 'an existing app stays solid')
 })
 
+test('split-font is off until asked for, and carries its own chat face', () => {
+  const off = parseFloeConfig('', 'floe.toml').config.appearance
+  assert.equal(off.splitFont, false)
+  assert.equal(off.chatFontFamily, undefined)
+  const on = parseFloeConfig('[appearance]\nsplit-font = true\nchat-font-family = "Menlo"\n', 'floe.toml')
+  assert.equal(on.config.appearance.splitFont, true)
+  assert.equal(on.config.appearance.chatFontFamily, 'Menlo')
+  assert.deepEqual(on.errors, [])
+})
+
 test('key-hints is off until asked for', () => {
   assert.equal(parseFloeConfig('', 'floe.toml').config.appearance.keyHints, false)
   const on = parseFloeConfig('[appearance]\nkey-hints = true\n', 'floe.toml')

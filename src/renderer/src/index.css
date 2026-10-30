@@ -7676,6 +7676,17 @@ kbd {
   background: color-mix(in srgb, var(--accent) 6%, #fff);
 }
 
+/* `split-font`: every chat — the session's panel and a query's side
+   conversation, transcript and composer — re-points the app face at the
+   chat's own. The variable moves every rule inside that names
+   `--mono`; the family moves the text that only inherits it from <body>,
+   which arrives already resolved to the app face. */
+:root[data-split-font='on'] .chat-panel,
+:root[data-split-font='on'] .query-panel {
+  --mono: var(--chat-mono);
+  font-family: var(--chat-mono);
+}
+
 /* The font picker: the filter box on the row's line, the list under it. Each
    option is drawn in its own face, so the list is the preview. */
 .font-pick {
