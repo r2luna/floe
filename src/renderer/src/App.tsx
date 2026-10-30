@@ -1301,7 +1301,7 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
-    // Counted for the "Switch project…" order, most used first.
+    // Noted for the "Switch project…" order, most recently used first.
     if (projects.current?.path !== path) noteProjectUse(path)
     // Going somewhere on purpose ends the boot restore, which may still be
     // waiting on a remote list and would pull the selection back when it lands.

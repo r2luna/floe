@@ -12,12 +12,20 @@ const store = new Map<string, string>()
 
 const id = (p: string): string => p
 
-test('the most used project comes first', () => {
+test('the most recently used project comes first', () => {
   resetProjectUsage()
   noteProjectUse('/b')
   noteProjectUse('/c')
-  noteProjectUse('/c')
   assert.deepEqual(byUsage(['/a', '/b', '/c'], id), ['/c', '/b', '/a'])
+})
+
+test('going back to an older project moves it to the top, however often the other was used', () => {
+  resetProjectUsage()
+  noteProjectUse('/b')
+  noteProjectUse('/b')
+  noteProjectUse('/c')
+  noteProjectUse('/b')
+  assert.deepEqual(byUsage(['/a', '/b', '/c'], id), ['/b', '/c', '/a'])
 })
 
 test('projects never used keep the order they were given in', () => {
@@ -26,8 +34,9 @@ test('projects never used keep the order they were given in', () => {
   assert.deepEqual(byUsage(['/x', '/y', '/z', '/w'], id), ['/z', '/x', '/y', '/w'])
 })
 
-test('the counts are saved to localStorage', () => {
+test('the order is saved to localStorage', () => {
   resetProjectUsage()
   noteProjectUse('/a')
-  assert.deepEqual(JSON.parse(store.get('floe.projectUsage') ?? '{}'), { '/a': 1 })
+  noteProjectUse('/b')
+  assert.deepEqual(JSON.parse(store.get('floe.projectRecent') ?? '{}'), { '/a': 1, '/b': 2 })
 })
