@@ -42,3 +42,15 @@ test('the specs drafts and the shipped skills say the same thing', () => {
   assert.equal(text('colony-feature'), draft('colony-feature.md'))
   assert.equal(text('colony-add-task').trimEnd(), draft('colony-add-task.md').trimEnd())
 })
+
+test('the lane bodies carry no restated question rule and no PHP-only runner names', () => {
+  for (const lane of LANES) {
+    assert.doesNotMatch(text(lane), /## No questions/, `${lane} leaves the question rule to the contract`)
+    assert.doesNotMatch(text(lane), /vendor\/bin\/pest/, `${lane} stays project-neutral`)
+  }
+})
+
+test('the review lane closes codex exec stdin so the second opinion cannot hang', () => {
+  assert.match(text('colony-review'), /codex exec "[^`]*" < \/dev\/null/)
+  assert.match(text('colony-review'), /never pipe its\s+output into `tail`/)
+})

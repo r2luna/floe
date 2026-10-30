@@ -58,14 +58,6 @@ is cheaper than you guessing at someone else's design.
 The exception is mechanical: a formatter that only needs to be run, an import
 order, a generated file that is stale. Fix those, say you did, and pass.
 
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with `COLONY: return <lane>`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
-
 ## Report
 
 Each gate with its command and result, the placement findings, and the verdict.
