@@ -38,6 +38,7 @@ const {
   deleteBranch,
   dirtySnapshot,
   isMergedInto,
+  mergeBaseOf,
   removeWorktree,
   restoreSnapshot,
   fileDiff,
@@ -552,6 +553,24 @@ test('isMergedInto is true once the branch tip is on base', async () => {
     await mergeWorktree(fx.dir, feat)
     assert.equal(await isMergedInto(fx.dir, 'feat', 'trunk'), true)
     assert.equal(await isMergedInto(fx.dir, 'no-such-branch', 'trunk'), false)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('mergeBaseOf is the commit the tree forked from base, and undefined when git cannot say', () => {
+  const fx = seededRepo('floe-git-mergebase-')
+  try {
+    const { parent, feat } = parentHeldElsewhere(fx)
+    const fork = fx.git('rev-parse', 'trunk').trim()
+    // Base moves on after the fork; the merge-base stays where the tree left it.
+    writeFileSync(join(parent, 'later.txt'), 'later\n')
+    fx.git('-C', parent, 'add', 'later.txt')
+    fx.git('-C', parent, 'commit', '-q', '-m', 'base moves on')
+    assert.notEqual(fx.git('rev-parse', 'trunk').trim(), fork)
+    assert.equal(mergeBaseOf(feat, 'trunk'), fork)
+    assert.equal(mergeBaseOf(feat, 'no-such-branch'), undefined)
+    assert.equal(mergeBaseOf(bareDir('floe-git-mergebase-bare-'), 'trunk'), undefined)
   } finally {
     fx.cleanup()
   }
