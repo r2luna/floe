@@ -18,16 +18,20 @@ WORKTREE: this task owns this worktree and its branch. Both already exist — th
 colony created them. Never create or switch branches.
 
 BASE: the prompt's `Base:` line names the branch this task was cut from and
-merges back into — often a feature's parent branch, not the default one. Every
-diff against "the merge-base" below means the merge-base with THAT branch:
-`git diff $(git merge-base <base> HEAD)`.
+merges back into — often a feature's parent branch, not the default one. The
+`Merge-base:` line is the commit this branch forked from it, already resolved
+by the board, and the `Diff:` line is the exact command to see this task's
+whole change. Every "diff against the merge-base" below means run that `Diff:`
+line as written. Never recompute the base or the merge-base yourself. If the
+prompt has no `Merge-base:` line, the board could not resolve it: fall back to
+`git diff $(git merge-base <Base> HEAD)`.
 
-ARTIFACTS: everything this task writes lives in `specs/<dir>/` at the repo root,
-where `<dir>` is the current branch name with every `/` replaced by `-`
-(`feature/DOS-12` → `specs/feature-DOS-12/`). Create it if missing and reuse it
-across lanes: spec.md, plan.md, tasks.md and review.md all share it. The board
-commits this directory after your turn ends, so an artifact is never lost for
-being left uncommitted — but the code is yours to commit.
+ARTIFACTS: everything this task writes lives in the directory the prompt's
+`Artifacts:` line names (the `<dir>` in `specs/<dir>/` below), at the repo
+root. Use that path exactly; do not derive it from the branch name. Create it if
+missing and reuse it across lanes: spec.md, plan.md, tasks.md and review.md all
+share it. The board commits this directory after your turn ends, so an artifact
+is never lost for being left uncommitted — but the code is yours to commit.
 
 CONVENTIONS: if the project carries a conventions doc — `AGENTS.md`,
 `CLAUDE.md`, `CONVENTIONS.md`, `.ds/memory/constitution.md` — read it and treat
