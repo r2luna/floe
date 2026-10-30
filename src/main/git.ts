@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -128,6 +128,30 @@ export async function isMergedInto(root: string, branch: string, base: string): 
     return true
   } catch {
     return false
+  }
+}
+
+/**
+ * The commit a tree's HEAD forked from `base`, or undefined when git cannot say
+ * (unknown base, unrelated histories, not a repository).
+ *
+ * `git merge-base` is the mechanics behind every "diff against the merge-base"
+ * a colony lane is told to run; the runner resolves it once and hands the lane
+ * the sha, so no agent has to work it out (and get it wrong) by hand.
+ *
+ * Synchronous on purpose: the lane's prompt is built and dispatched in one tick,
+ * and one `merge-base` is a few milliseconds of local git.
+ */
+export function mergeBaseOf(worktreePath: string, base: string): string | undefined {
+  try {
+    const sha = execFileSync('git', ['-C', worktreePath, 'merge-base', base, 'HEAD'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000
+    }).trim()
+    return /^[0-9a-f]{7,64}$/.test(sha) ? sha : undefined
+  } catch {
+    return undefined
   }
 }
 

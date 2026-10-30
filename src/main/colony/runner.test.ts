@@ -68,6 +68,8 @@ interface Stubs {
   restoredBranches: { branch: string; sha: string }[]
   /** Every `readBase` answer, by worktree path. */
   bases: Map<string, string>
+  /** `mergeBaseOf` answers, keyed "<worktree>@<base>". */
+  mergeBases: Map<string, string>
   /** Every `snapshotTree` call, in order. The Nth returns `treeN`. */
   snapshots: string[]
 }
@@ -105,6 +107,7 @@ const stubs: Stubs = {
   deletedBranches: [],
   restoredBranches: [],
   bases: new Map(),
+  mergeBases: new Map(),
   snapshots: []
 }
 ;(globalThis as unknown as { __colonyStubs: Stubs }).__colonyStubs = stubs
@@ -163,6 +166,7 @@ const SOURCES = {
     'export async function dirtySnapshot() { return s().dirt }',
     'export async function isMergedInto(root, branch, base) { return s().mergedInto(branch, base) }',
     'export function readBase(path) { return s().bases.get(path) }',
+    'export function mergeBaseOf(path, base) { return s().mergeBases.get(path + "@" + base) }',
     'export async function restoreBranch(root, branch, sha) { s().restoredBranches.push({ branch, sha }); return true }',
     'export async function restoreSnapshot(worktree, snapshot) { s().restores.push({ worktree, snapshot }); return Object.keys(snapshot) }',
     'export async function uncommittedWork(path) { return s().uncommitted.get(path) ?? [] }'
@@ -1282,6 +1286,41 @@ test('a task cut from a feature branch is cut from it, remembers it, and tells i
   await releaseTask(win, plain.id)
   assert.equal(stubs.createOptions.at(-1)?.base, undefined)
   assert.equal(getTask(plain.id)?.base, 'main')
+})
+
+test('the prompt carries the resolved merge-base and the exact diff command, and drops them when git cannot say', async () => {
+  const root = project(ONE_STAGE)
+  const worktree = tree('with-merge-base')
+  stubs.worktreeFor = (_root, branch) => [{ path: worktree, branch }]
+  stubs.mergeBases.set(`${worktree}@feat/parent`, 'abc1234def5678')
+  const task = addTask({ project: root, name: 'with-merge-base', brief: 'x', base: 'feat/parent' })
+
+  await releaseTask(win, task.id)
+  const prompt = stubs.turns.at(-1)?.prompt ?? ''
+  assert.match(prompt, /^Artifacts: specs\/feat-with-merge-base\/$/m)
+  assert.match(prompt, /^Base: feat\/parent$/m)
+  assert.match(prompt, /^Merge-base: abc1234def5678$/m)
+  assert.match(prompt, /^Diff: git diff abc1234def5678$/m)
+
+  // The base read back from the tree is resolved the same way, and named.
+  const plainTree = tree('merge-base-from-tree')
+  stubs.worktreeFor = (_root, branch) => [{ path: plainTree, branch }]
+  stubs.bases.set(plainTree, 'main')
+  stubs.mergeBases.set(`${plainTree}@main`, 'fff0000')
+  const plain = addTask({ project: root, name: 'merge-base-from-tree', brief: 'x' })
+  await releaseTask(win, plain.id)
+  const plainPrompt = stubs.turns.at(-1)?.prompt ?? ''
+  assert.match(plainPrompt, /^Base: main$/m)
+  assert.match(plainPrompt, /^Merge-base: fff0000$/m)
+
+  // Git could not say (nothing stubbed): no line at all, not an empty one.
+  const lostTree = tree('merge-base-unknown')
+  stubs.worktreeFor = (_root, branch) => [{ path: lostTree, branch }]
+  const lost = addTask({ project: root, name: 'merge-base-unknown', brief: 'x', base: 'feat/gone' })
+  await releaseTask(win, lost.id)
+  const lostPrompt = stubs.turns.at(-1)?.prompt ?? ''
+  assert.match(lostPrompt, /^Base: feat\/gone$/m)
+  assert.doesNotMatch(lostPrompt, /Merge-base:|^Diff:/m)
 })
 
 test('an autonomous task says so in every lane prompt; an ordinary one does not', async () => {
