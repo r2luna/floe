@@ -55,14 +55,6 @@ hand off clean.
 Never leave the suite red. A refactor that changes behaviour is a bug, not a
 refactor: if the tests move, you did something else.
 
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with `COLONY: return <lane>`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
-
 ## Report
 
 Verdict (`implement`, `recommend` or `skip`), the concrete structure or `none`,

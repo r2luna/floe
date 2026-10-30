@@ -46,19 +46,11 @@ letting it read as damage you caused.
 
 Run every test command under a timeout (`timeout 600 <cmd>`). A launcher that
 hangs with no CPU use is a launcher problem, not a red suite: call the runner it
-wraps directly instead — `vendor/bin/pest` rather than `php artisan test`, the
-package's own binary rather than a script that shells out to it.
+wraps directly instead — the package's own binary, as the conventions doc
+names it, rather than a script that shells out to it.
 
 Commit the work with a message that says what changed and why. One commit per
 coherent unit, not one commit per file.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with `COLONY: return <lane>`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 

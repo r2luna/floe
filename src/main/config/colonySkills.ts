@@ -269,19 +269,11 @@ letting it read as damage you caused.
 
 Run every test command under a timeout (\`timeout 600 <cmd>\`). A launcher that
 hangs with no CPU use is a launcher problem, not a red suite: call the runner it
-wraps directly instead — \`vendor/bin/pest\` rather than \`php artisan test\`, the
-package's own binary rather than a script that shells out to it.
+wraps directly instead — the package's own binary, as the conventions doc
+names it, rather than a script that shells out to it.
 
 Commit the work with a message that says what changed and why. One commit per
 coherent unit, not one commit per file.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with \`COLONY: return <lane>\`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 
@@ -346,14 +338,6 @@ hand off clean.
 
 Never leave the suite red. A refactor that changes behaviour is a bug, not a
 refactor: if the tests move, you did something else.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with \`COLONY: return <lane>\`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 
@@ -422,14 +406,6 @@ is cheaper than you guessing at someone else's design.
 The exception is mechanical: a formatter that only needs to be run, an import
 order, a generated file that is stale. Fix those, say you did, and pass.
 
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with \`COLONY: return <lane>\`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
-
 ## Report
 
 Each gate with its command and result, the placement findings, and the verdict.`
@@ -473,12 +449,15 @@ goes in the report as one, not as a defect.
 
 ## 3. Get the second opinion
 
-Ask another harness, from Bash. Codex is the default:
+Ask another harness, from Bash. Codex is the default; if it is not installed,
+use whichever other harness CLI is, in its non-interactive mode. Close stdin
+(\`< /dev/null\`) — \`codex exec\` blocks forever on an open stdin — and never pipe its
+output into \`tail\`.
 
 \`\`\`bash
 codex exec "You are a senior engineer reviewing this change adversarially. <the
 diff, the spec's requirements, and your own findings>. Where am I wrong, and
-what did I miss?"
+what did I miss?" < /dev/null
 \`\`\`
 
 Hand over the full context: what the change was meant to do, the diff, and your
@@ -504,14 +483,6 @@ A finding that needs a design decision, or that reaches beyond the files this
 task touched, goes back: write it into \`specs/<dir>/review.md\` and hand off
 \`return coder\` with the one-line reason. Do not redesign someone else's change
 inside a review turn.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with \`COLONY: return <lane>\`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 
@@ -550,8 +521,8 @@ is a check that failed.
 
 Run every test command under a timeout (\`timeout 600 <cmd>\`). A launcher that
 hangs with no CPU use is a launcher problem, not a red suite: call the runner it
-wraps directly instead — \`vendor/bin/pest\` rather than \`php artisan test\`, the
-package's own binary rather than a script that shells out to it.
+wraps directly instead — the package's own binary, as the conventions doc
+names it, rather than a script that shells out to it.
 
 Distinguish damage from inheritance: if something was already red before this
 branch, verify that against the merge-base and say so explicitly, or the task
@@ -577,14 +548,6 @@ Anything red, or a criterion you cannot demonstrate: write what you ran, what yo
 saw, and the smallest reproduction into \`specs/<dir>/verify.md\`, then hand off
 \`return coder\` — or \`return specifier\` when the failure is that the spec and the
 implementation disagree about what was wanted, which is not a coding mistake.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with \`COLONY: return <lane>\`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 
