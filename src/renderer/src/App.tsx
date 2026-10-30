@@ -3261,7 +3261,13 @@ export default function App() {
         />
       )}
       <div className="workspace">
-        <div className="lane" ref={laneRef}>
+        <div
+          className="lane"
+          ref={laneRef}
+          data-solo-chat={
+            (columns.length === 1 && columns[0].length === 1 && columns[0][0].panel.kind === 'chat') || undefined
+          }
+        >
           {/* Columns, not panels: a docked panel shares its neighbour's column
               instead of taking one of its own. The column carries the width and
               the pinning, so a stacked pair is sized and pinned as one thing. */}

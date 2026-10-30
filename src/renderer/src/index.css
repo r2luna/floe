@@ -3030,6 +3030,23 @@ button {
   overflow-anchor: none;
 }
 
+/* A chat left on its own fills the window, but a transcript should not. Keep
+   its reading column centred while leaving the panel frame and its footer as
+   full-width edges. The same inset on the composer keeps what you write lined
+   up with what you read. */
+.lane[data-solo-chat] .panel[data-kind='chat'] {
+  --chat-reading-inset: max(24px, calc((100% - 900px) / 2));
+}
+
+.lane[data-solo-chat] .panel[data-kind='chat'] .chat {
+  padding-inline: var(--chat-reading-inset);
+}
+
+.lane[data-solo-chat] .panel[data-kind='chat'] .composer-bar,
+.lane[data-solo-chat] .panel[data-kind='chat'] .composer > .attachments {
+  padding-inline: var(--chat-reading-inset);
+}
+
 /* Nothing between messages: the log is one column of lines, and a gap that
    groups a run would be air the transcript reads slower for. What separates
    two speakers is the time and the nick at the head of the line. */
