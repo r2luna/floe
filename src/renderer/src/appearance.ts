@@ -128,6 +128,17 @@ function fontStack(family: string | undefined): string {
 }
 
 /**
+ * Wear a font without writing it — the font picker's live preview.
+ *
+ * Nothing restores it on its own: a pick writes floe.toml and the change event
+ * re-applies the file, and a cancel calls `applyConfig` to put the file's font
+ * back.
+ */
+export function previewFont(family: string): void {
+  document.documentElement.style.setProperty('--mono', fontStack(family))
+}
+
+/**
  * Pull floe.toml into the renderer.
  *
  * Two settings, one fetch: the font face, and the model a new session starts on.

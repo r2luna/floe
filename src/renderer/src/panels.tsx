@@ -178,7 +178,7 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import { omarchyAvailable } from './appearance'
+import { applyConfig, omarchyAvailable, previewFont } from './appearance'
 import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
@@ -8055,8 +8055,10 @@ function FontPicker({
   useEffect(() => {
     box.current?.focus()
     let live = true
-    void window.floe.fonts
-      .list()
+    // Through a promise so a window older than the main process (no `fonts` on
+    // the bridge yet) lands on an empty list instead of a picker stuck loading.
+    void Promise.resolve()
+      .then(() => window.floe.fonts.list())
       .catch(() => [])
       .then((all) => {
         if (!live) return
@@ -8079,10 +8081,32 @@ function FontPicker({
       .map((f) => ({ ...f, label: f.family }))
   ]
   const at = Math.min(cursor, Math.max(0, entries.length - 1))
+  const highlighted = entries[at]?.family ?? query.trim()
 
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
   }, [at, fonts])
+
+  // The whole app wears the highlighted font while the cursor walks the list.
+  // Waits for the list so opening the picker does not flash the default face.
+  useEffect(() => {
+    if (fonts !== null) previewFont(highlighted)
+  }, [highlighted, fonts])
+
+  // Leaving without a pick — Escape, or the panel closing under the picker —
+  // put nothing on disk, so the file's font comes back. After a pick the write's
+  // change event re-applies the file; restoring here would flash the old font.
+  const picked = useRef(false)
+  useEffect(
+    () => () => {
+      if (!picked.current) void applyConfig()
+    },
+    []
+  )
+  const choose = (family: string): void => {
+    picked.current = true
+    onPick(family)
+  }
 
   const keys = (event: ReactKeyboardEvent): void => {
     // The lane binds j/k/Escape too; inside the picker the keys are ours.
@@ -8093,7 +8117,7 @@ function FontPicker({
     if (event.key === 'Escape') return onCancel()
     if (event.key === 'Enter') {
       event.preventDefault()
-      return onPick(entries[at]?.family ?? query.trim())
+      return choose(highlighted)
     }
     if (!down && !up) return
     event.preventDefault()
@@ -8133,7 +8157,8 @@ function FontPicker({
                 className={`font-option${index === at ? ' font-cursor' : ''}${f.family === row.value ? ' font-on' : ''}`}
                 style={f.family ? { fontFamily: `"${f.family}", var(--mono)` } : undefined}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onPick(f.family)}
+                onMouseEnter={() => setCursor(index)}
+                onClick={() => choose(f.family)}
               >
                 {f.label}
               </button>
