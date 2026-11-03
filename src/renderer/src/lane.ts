@@ -61,6 +61,11 @@ export type Panel = {
   folded?: boolean
   /** For a chat panel: the session it shows. */
   session?: { id: string; worktreePath: string }
+  /**
+   * For a launcher ⌘T put up: the branch still remembers the chat this replaced.
+   * Asking for a new session closes nothing, so coming back finds that chat.
+   */
+  keepsChat?: boolean
   /** A brand-new chat's opening message, sent once when it mounts. */
   firstPrompt?: string
   /** The model that opening message was addressed to. */

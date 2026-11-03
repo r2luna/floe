@@ -2,12 +2,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   carrySizes,
+  chatToRemember,
   fileIntoSession,
   load,
   persistable,
   projectRailOf,
   remember,
   rememberRail,
+  rememberedSession,
   rememberSession,
   rememberWorktree,
   save,
@@ -147,6 +149,28 @@ test('a worktree remembers an empty chat as an answer, not as a gap', () => {
   const by = rememberSession({ '/wt': 's1' }, '/wt', null)
   assert.equal(by['/wt'], null)
   assert.equal('/wt' in by, true)
+})
+
+test('a chat is found by the id it opened with, even once it has a claudeId', () => {
+  const sessions = [{ id: 'store', claudeId: 'claude' }, { id: 'other' }]
+  assert.equal(rememberedSession(sessions, 'store')?.id, 'store')
+  assert.equal(rememberedSession(sessions, 'claude')?.id, 'store')
+  assert.equal(rememberedSession(sessions, 'other')?.id, 'other')
+  assert.equal(rememberedSession(sessions, 'gone'), undefined)
+  assert.equal(rememberedSession(sessions, null), undefined)
+  assert.equal(rememberedSession(undefined, 'store'), undefined)
+})
+
+test('only a chat that was really closed clears what the branch remembers', () => {
+  const lane = (...panels: Panel[]): Lane => ({ panels, focus: 0 })
+  const chat: Panel = { id: 'chat:s1', kind: 'chat', title: 'chat', slot: 'session', session: { id: 's1', worktreePath: '/wt' } }
+  const launcher: Panel = { id: 'branch:b', kind: 'branch', title: 'branch', slot: 'session' }
+  assert.equal(chatToRemember(lane(chat)), 's1')
+  // ⌘W on a chat leaves a plain launcher.
+  assert.equal(chatToRemember(lane(launcher)), null)
+  // ⌘T over a chat, and then closing that launcher.
+  assert.equal(chatToRemember(lane({ ...launcher, keepsChat: true })), undefined)
+  assert.equal(chatToRemember(lane({ id: 'worktrees', kind: 'worktrees', title: 'worktrees' })), undefined)
 })
 
 test('the places you have not been in a hundred switches fall off', () => {

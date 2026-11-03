@@ -44,11 +44,13 @@ import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
   carrySizes,
+  chatToRemember,
   fileIntoSession,
   load as loadLane,
   projectRailOf,
   remember,
   rememberRail,
+  rememberedSession,
   rememberSession,
   rememberWorktree,
   save as saveLane,
@@ -688,6 +690,9 @@ export default function App() {
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
   const [newWtOpens, setNewWtOpens] = useState<NewWorktreeOpens>('name')
+  // Bumped by every ⌘N, so one pressed with the form already up can put the
+  // keyboard back in it. See NewWorktreeProps.focusRequest.
+  const [newWtFocus, setNewWtFocus] = useState(0)
   // Why the last create was refused, and whether one is in flight — both belong
   // to the form, which stays open across a failure so it can show them.
   const [newWtError, setNewWtError] = useState<WorktreeFailure | null>(null)
@@ -832,19 +837,20 @@ export default function App() {
     // project's, or a switch would tell the project you just left that it holds
     // the board you are about to open in the new one.
     if (project) railByProject.current = rememberRail(railByProject.current, project, projectRailOf(lane))
-    // Which chat this branch is showing — `null` when it is showing none, which
-    // is a thing to remember rather than an absence of one. Keyed off the OPEN
-    // CHAT's own worktree, not the sidebar selection: for one render after a
+    // Which chat this branch is showing — `null` when it closed the one it had,
+    // which is a thing to remember rather than an absence of one. Keyed off the
+    // OPEN CHAT's own worktree, not the sidebar selection: for one render after a
     // switch the two disagree, and that render would file a session under the
     // wrong branch.
     const chat = sessionOf(lane)
+    const left = chatToRemember(lane)
     // A chat names its own branch, so it is always safe to file. Without one,
     // the selection is only trustworthy while the lists agree: a project switch
     // closes the chat a render before the worktree selection catches up, and
     // filing then would tell the branch you just left that it holds no chat.
     const worktree = chat?.worktreePath ?? worktrees.currentPath
-    if (worktree && (chat || project))
-      byWorktree.current = rememberSession(byWorktree.current, worktree, chat?.id ?? null)
+    if (worktree && left !== undefined && (chat || project))
+      byWorktree.current = rememberSession(byWorktree.current, worktree, left)
     saveLane({
       lane,
       bySession: by,
@@ -1224,10 +1230,11 @@ export default function App() {
     const want = byWorktree.current[path]
     // Only a session that is still there: a transcript deleted behind the app
     // would otherwise restore a chat with nothing in it.
-    const session = want ? row?.sessions.find((s) => (s.claudeId ?? s.id) === want) : undefined
-    if (session) {
-      const id = session.claudeId ?? session.id
-      setLane((l) => open(l, mkPanel('chat', session.title, { id, worktreePath: path })))
+    const session = rememberedSession(row?.sessions, want)
+    if (session && want) {
+      // Under the id it was filed with, because that is also the key its panels
+      // were filed under: a different id would bring the chat back without them.
+      setLane((l) => open(l, mkPanel('chat', session.title, { id: want, worktreePath: path })))
       return 'chat'
     }
     if (!launcher) return 'none'
@@ -1276,8 +1283,12 @@ export default function App() {
    * already in should do. Everything else is the jump the `active` panel makes.
    */
   const openFinderChat = (chat: FinderChat): void => {
-    if (chat.backend === currentBackend() && chat.projectPath === projects.current?.path)
+    if (chat.backend === currentBackend() && chat.projectPath === projects.current?.path) {
+      // The sidebar comes along: ⌘T and ⌘W read the selection, and would greet
+      // you on the branch you left instead of the one this chat is on.
+      worktrees.select(chat.worktreePath)
       return ctxRef.current.openChat({ id: chat.id, worktreePath: chat.worktreePath })
+    }
     jumpToSession({
       projectPath: chat.projectPath,
       projectName: chat.projectName,
@@ -1365,6 +1376,29 @@ export default function App() {
     }
     enterWorktree((row ?? worktrees.rows[0]).worktree.path)
   }, [worktrees.rows, worktrees.repo, worktrees.loading, projects.current?.path])
+
+  // The selected worktree left the list — a guided removal, a merge, an agent
+  // over MCP. Staying selected would leave a launcher with no branch, starting
+  // sessions in a folder that is gone, so the app moves to the project's main
+  // worktree. "Was listed and is not any more", rather than "is not listed": a
+  // worktree just created is selected before the list that contains it arrives.
+  const listed = useRef<{ repo?: string; rows: WorktreeRow[] }>({ rows: [] })
+  useEffect(() => {
+    const before = listed.current
+    listed.current = { repo: worktrees.repo, rows: worktrees.rows }
+    const path = worktrees.currentPath
+    const has = (rows: WorktreeRow[]): boolean => rows.some((r) => r.worktree.path === path)
+    if (before.repo !== worktrees.repo || !has(before.rows) || has(worktrees.rows)) return
+    const main = worktrees.rows.find((r) => r.worktree.isMain) ?? worktrees.rows[0]
+    if (!main) return
+    const focused = lane.panels[lane.focus]
+    const inSlot = (p?: Panel): boolean => (p?.slot ?? p?.kind) === 'session'
+    if (!lane.panels.some(inSlot)) return worktrees.select(main.worktree.path)
+    enterWorktree(main.worktree.path)
+    // The checklist that did the removal keeps the keyboard: it is still reporting.
+    if (focused && !inSlot(focused))
+      setLane((l) => focusAt(l, l.panels.findIndex((p) => p.id === focused.id)))
+  }, [worktrees.rows])
 
   // ⌃I / ⌃O walk every session in the sidebar, in the order it lists them:
   // down a branch's chats, then on into the next branch's. The list you see is
@@ -1650,6 +1684,9 @@ export default function App() {
       })
       return
     }
+    // Back across a branch takes the sidebar along, as cycleSession does. Only to
+    // a row that is still listed: this chat's worktree may have been removed.
+    if (worktrees.rows.some((r) => r.worktree.path === s.worktreePath)) worktrees.select(s.worktreePath)
     setLane((l) => open(l, mkPanel('chat', a.panel.sub, s)))
   }
 
@@ -2215,7 +2252,6 @@ export default function App() {
     worktrees.reload()
     const made = list.find((wt) => wt.branch === branch)
     if (made) worktrees.select(made.path)
-    setLane((l) => open(l, panelOf('branch', branch)))
     // The environment, right after the tree: `.env`, dependencies, the site and
     // this branch's own database. Without it the worktree is a checkout you cannot
     // run, and the site you open is still serving the main checkout.
@@ -2224,6 +2260,8 @@ export default function App() {
         { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
         premise ? { premiseAnswer: premise } : undefined
       )
+    // Last, so the launcher takes the focus and the checklist reports beside it.
+    setLane((l) => open(l, panelOf('branch', branch)))
   }
 
   ctxRef.current = {
@@ -2557,6 +2595,7 @@ export default function App() {
       setNewWtError(null)
       setNewWtBusy(false)
       setNewWt(true)
+      setNewWtFocus((n) => n + 1)
       // The form lives at the top of the worktrees panel, so the panel has to
       // be up — and focused, so the input's own focus lands inside the panel
       // the lane already calls current.
@@ -3007,6 +3046,15 @@ export default function App() {
       })
     })
 
+  // Where a launcher belongs while the worktree list is still a fetch away: the
+  // branch this project was left on, or its root. The saved project counts until
+  // boot has settled on one. Without this it would sit in the home folder for
+  // that moment, and what you typed there would be filed under the wrong place.
+  const landingProject = landedProject.current
+    ? projects.current?.path
+    : (restored.current?.project ?? projects.current?.path)
+  const landingWorktree = landingProject && (byProject.current[landingProject] ?? landingProject)
+
   // The inline new-worktree form's wiring, handed to the worktrees panel while
   // ⌘N has one open — the flow that used to be a modal.
   const newWorktreeProps: NewWorktreeProps | undefined =
@@ -3014,6 +3062,7 @@ export default function App() {
       ? {
           root: projects.current.path,
           opens: newWtOpens,
+          focusRequest: newWtFocus,
           branches,
           mainBase: worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch,
           defaultBase: current?.worktree.branch,
@@ -3675,6 +3724,8 @@ export default function App() {
                     // place — see jumpToSession.
                     onJumpSession={jumpToSession}
                     newWorktree={newWorktreeProps}
+                    landingWorktree={landingWorktree}
+                    focused={i === lane.focus}
                     cwd={cwd}
                     root={panel.root}
                     onPatch={(patch) => (lastPatch.current = patch)}

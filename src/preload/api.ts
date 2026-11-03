@@ -567,6 +567,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, payload: AgentEventEnvelope): void => cb(payload)
         ipcRenderer.on('agent:event', listener)
         return () => ipcRenderer.removeListener('agent:event', listener)
+      },
+      // A socket to a backend came back (see socketIpc.ts). Every event sent
+      // while it was down is gone, so a panel has to read its session again.
+      onReconnected: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('backend:reconnected', listener)
+        return () => ipcRenderer.removeListener('backend:reconnected', listener)
       }
     },
     // Side conversations opened off a session — see docs/queries.md.

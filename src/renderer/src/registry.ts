@@ -2583,7 +2583,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.worktree,
         run: (c) =>
           c.setLane((l) =>
-            open(l, c.makePanel('branch', c.worktree?.branch))
+            open(l, { ...c.makePanel('branch', c.worktree?.branch), keepsChat: true })
           )
       },
       {
