@@ -6,6 +6,9 @@
 // that can explain it, so this maps the raw text to a sentence, git's own
 // words, and — where one exists — a name that would have worked.
 
+/** Marks an error as the source's answer rather than git's. */
+export const SOURCE_FAILURE = 'Source: '
+
 /** A refused worktree, as the form shows it. */
 export interface WorktreeFailure {
   /** One sentence saying what git refused and why. */
@@ -84,6 +87,12 @@ export function diagnoseWorktreeFailure(branch: string, message: string): Worktr
 
   if (/not a valid branch name|invalid branch name|invalid ref/i.test(raw)) {
     return { why: `git will not accept ${branch} as a branch name.`, raw }
+  }
+
+  // A failure before git was even asked: no remote, gh logged out, a number
+  // that is neither a PR nor an issue. Blaming git for those would mislead.
+  if (raw.startsWith(SOURCE_FAILURE)) {
+    return { why: raw.slice(SOURCE_FAILURE.length), raw: '' }
   }
 
   // createWorktree's own throws — already in the app's voice, so they ARE the

@@ -110,6 +110,7 @@ for the card under the cursor now and opens it.`,
       { key: 'a', command: 'tasks.attach', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'd', command: 'tasks.delete', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'c', command: 'tasks.chat', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'w', command: 'tasks.worktree', when: 'panel == "colony" and tab == "ideas"' },
       { key: 't', command: 'tasks.cycleKind', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'shift+>', command: 'tasks.statusUp', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'shift+<', command: 'tasks.statusDown', when: 'panel == "colony" and tab == "ideas"' },
@@ -378,7 +379,8 @@ canvas, the rest in the reader.
 on the main branch, and its colony card starts. \`b\` shows the board, \`z\`
 shows or hides done tasks. \`c\` opens a chat about the task, docked under it:
 the agent reads the task first, and its edits show in the panel above as it
-works.`,
+works. \`w\` creates a worktree for the task, with the task as its premise, or
+goes to the one it already has.`,
     binds: [
       { key: 'n', command: 'tasks.new', when: 'panel in ["tasks", "task"]' },
       { key: ']', command: 'tasks.statusUp', when: 'panel in ["tasks", "task"]' },
@@ -390,6 +392,7 @@ works.`,
       { key: 'd', command: 'tasks.delete', when: 'panel in ["tasks", "task"]' },
       { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
       { key: 'c', command: 'tasks.chat', when: 'panel in ["tasks", "task"]' },
+      { key: 'w', command: 'tasks.worktree', when: 'panel in ["tasks", "task"]' },
       { key: 't', command: 'tasks.cycleKind', when: 'panel in ["tasks", "task"]' },
       { key: 'b', command: 'tasks.openCard', when: 'panel == "task"' },
       { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }

@@ -11,6 +11,8 @@
 
 import { open, type Lane, type Panel } from './lane.ts'
 import type { Commands } from './useCommands.ts'
+import type { NewWorktreeOpens } from './NewWorktree.tsx'
+import type { Worktree } from '../../shared/types.ts'
 
 export interface CommandContext {
   lane: Lane
@@ -231,8 +233,10 @@ export interface CommandContext {
     cancel: () => void
     openChat: () => void
   }
-  /** Show the new-worktree flow. */
-  newWorktree: () => void
+  /** Show the new-worktree flow, on the Name tab or on the first PR-and-issue tab. */
+  newWorktree: (opens?: NewWorktreeOpens) => void
+  /** Go to a worktree just made or found, and set it up if it is new. */
+  landOnWorktree: (made: { worktrees: Worktree[]; branch: string; existed: boolean }) => void
   /**
    * The open project's branches, in the sidebar's order. What `worktree.focusAt`
    * is judged against — ⌘4 on a project with three branches is a refusal with a

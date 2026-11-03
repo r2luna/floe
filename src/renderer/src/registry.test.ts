@@ -60,6 +60,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     movingProject: false,
     deleteGroup: () => {},
     newWorktree: () => {},
+    landOnWorktree: () => {},
     worktreeNames: [],
     gotoTargets: ['projects', 'worktrees', 'files'],
     confirm: async () => true,

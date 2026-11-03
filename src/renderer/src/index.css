@@ -6429,6 +6429,134 @@ kbd {
   font-size: 12px;
 }
 
+/* The tasks panel's top level: where a task lives. mocks/tasks-by-source.html is
+   the design. Text and a hairline only, so it needs no light-theme override. */
+.task-source {
+  margin: 10px -8px 0;
+  padding: 6px 12px 5px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-strong);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.task-source:first-child {
+  margin-top: 0;
+}
+
+/* Where the worktree comes from. mocks/worktree-from-sources.html is the design.
+   Text and a hairline only, so it needs no light-theme override. */
+.wt-new-tabs {
+  display: flex;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.wt-new-tab {
+  margin-bottom: -1px;
+  padding: 0 0 6px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+}
+
+.wt-new-tab:hover {
+  color: var(--text);
+}
+
+.wt-new-tabs-key {
+  align-self: flex-start;
+  margin-left: auto;
+}
+
+.wt-new-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.wt-new-tab:focus-visible {
+  outline: none;
+  color: var(--accent);
+}
+
+/* PRs and issues, in the row style of the base dropdown. The list is in the
+   form, not hanging off it, so it scrolls instead of growing the dialog. */
+.gh-list {
+  max-height: 240px;
+  margin-top: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+}
+
+.gh-group {
+  padding: 6px 8px 2px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.gh-list .wt-base-note {
+  text-transform: none;
+}
+
+.gh-number {
+  flex: none;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-status {
+  padding: 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.gh-picked {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-focused);
+  font-size: 12px;
+}
+
+.gh-picked-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-clear {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+}
+
+.gh-clear:hover,
+.gh-clear:focus-visible {
+  outline: none;
+  color: var(--accent);
+}
+
+.gh-detail {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
 /* The base dropdown. Hand-rolled rather than a native <select> so the closed
    row matches .dialog-input exactly and the open list reads like every other
    list in the app. Relative, because the menu hangs off it. */
@@ -10761,9 +10889,12 @@ button.cv-row2:hover {
    mocks/task-panel.html is the design. Colour only where it means something:
    ready (you can act) is the accept green, in dev (an agent is on it) the plan
    blue. Everything else stays grey. */
+/* A floor, not a width: 3ch lines up local numbers, and a reference like
+   SUP2-1030 needs more. The title is the one that gives way. */
 .task-no {
   flex: none;
-  width: 3ch;
+  min-width: 3ch;
+  white-space: nowrap;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }

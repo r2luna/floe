@@ -44,6 +44,15 @@ import { dataDir, setSharedDataDir } from './dataDir'
 import { installCli, openNameFromArgv, openPathFromArgv, openProject, refreshCli, type CliPaths } from './cli'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
+import {
+  availableSources,
+  createWorktreeFromSource,
+  integrationStatus,
+  listTaskIssues,
+  searchSource
+} from './integrations/index'
+import { setCredential } from './integrations/credentials'
+import type { SourceId } from '../shared/worktreeSource'
 import { findDefinitions } from './definitions'
 import {
   changedFiles,
@@ -267,6 +276,7 @@ import {
   type NewTaskFolder
 } from './taskFolders'
 import { cardLookup, sendDeps } from './taskFolderDeps'
+import { createTaskWorktree } from './taskWorktree'
 import type { TaskFolderPatch } from '../shared/taskFolders'
 import {
   boardFor,
@@ -1244,6 +1254,7 @@ export function registerTaskFoldersIpc(): void {
   handle('tasks:attach', (_event, root: string, ref: string, what: Attachment) => attachToTask(root, ref, what))
   handle('tasks:detach', (_event, root: string, ref: string, target: string) => detachFromTask(root, ref, target))
   handle('tasks:send', (event, root: string, ref: string) => sendTaskFolder(root, ref, sendDeps(winOf(event))))
+  handle('tasks:createWorktree', (_event, root: string, ref: string) => createTaskWorktree(root, ref))
   handle('tasks:delete', (_event, root: string, ref: string) => deleteTaskFolder(root, ref))
   handle('tasks:watch', (event, root: string) => watchTaskFolders(event.sender, root))
 }
@@ -1400,6 +1411,21 @@ export function registerWorktreeIpc(): void {
   handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
     createWorktree(root, branch, options)
   )
+  handle('sources:available', (_event, root: string) => availableSources(root))
+  handle('sources:search', (_event, root: string, source: SourceId, query?: string) =>
+    searchSource(root, source, query)
+  )
+  handle(
+    'sources:createWorktree',
+    (_event, root: string, source: SourceId, ref: string, options?: { base?: string; writePremise?: boolean }) =>
+      createWorktreeFromSource(root, source, ref, options)
+  )
+  handle('tasks:issues', (_event, root: string) => listTaskIssues(root))
+  handle('integrations:status', () => integrationStatus())
+  handle('integrations:set', (_event, source: SourceId, field: string, value: string) => {
+    setCredential(source, field, value)
+    return integrationStatus()
+  })
   handle('worktrees:remove', (_event, root: string, target: string) => removeWorktree(root, target))
   handle('worktrees:reorder', (_event, root: string, orderedPaths: string[]) =>
     reorderWorktrees(root, orderedPaths)

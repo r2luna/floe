@@ -68,7 +68,7 @@ export async function repoRoot(dir: string): Promise<string | null> {
 
 const sanitizeBranch = (branch: string): string => branch.replace(/\//g, '-')
 
-async function branchExists(root: string, branch: string): Promise<boolean> {
+export async function branchExists(root: string, branch: string): Promise<boolean> {
   try {
     await git(root, ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`])
     return true
@@ -425,6 +425,10 @@ export interface CreateWorktreeOptions {
   // so there's no way to rebuild the worktree on a different base. Destructive —
   // whatever was on the branch is dropped, so only ever set it on explicit intent.
   resetBranch?: boolean
+  // The name is already a real ref, so keep it. Slugging would rewrite a PR head
+  // like `dependabot/npm_and_yarn/vite-5.1.0` into a branch git does not have, and
+  // the create would then fork a new one from base instead of checking it out.
+  exact?: boolean
 }
 
 // Create a worktree the gw way: <repo>/.worktrees/<sanitized-branch>, reuse an
@@ -438,9 +442,11 @@ export async function createWorktree(
 ): Promise<Worktree[]> {
   // The name may arrive free-form (spaces, capitals, accents). Slug it so the
   // git branch and the directory are always valid — never let raw input reach git.
-  const slug = slugifyBranch(branch, {
-    preserveCase: options.preserveCase ?? !floeConfig().worktree.lowercase
-  })
+  const slug = options.exact
+    ? branch
+    : slugifyBranch(branch, {
+        preserveCase: options.preserveCase ?? !floeConfig().worktree.lowercase
+      })
   if (!slug) {
     throw new Error(`Cannot derive a branch name from: "${branch}"`)
   }
@@ -476,6 +482,31 @@ export async function createWorktree(
   writeOrder(root, order)
 
   return listWorktrees(root)
+}
+
+/**
+ * Bring a pull request's head into local `branch`, ready for createWorktree.
+ *
+ * A same-repo head tracks its remote branch, so a plain `git push` updates the
+ * PR. A fork's head has no such branch here, so it comes from GitHub's
+ * `refs/pull/<n>/head`, or from `forkUrl` on a host with no such ref, and is kept
+ * under refs/floe, out of the remote-branch picker. An existing local branch is only fast-forwarded: commits you made on
+ * it are not this function's to drop, so a diverged branch stays as it is.
+ */
+export async function fetchPullRequest(
+  root: string,
+  remote: string,
+  pr: { id: string; head: string; fork: boolean; forkUrl?: string },
+  branch: string
+): Promise<void> {
+  const source = pr.fork && !pr.forkUrl ? `refs/pull/${pr.id}/head` : `refs/heads/${pr.head}`
+  const fetched = pr.fork ? `refs/floe/pr/${pr.id}` : `refs/remotes/${remote}/${pr.head}`
+  await git(root, ['fetch', pr.forkUrl ?? remote, `+${source}:${fetched}`])
+  if (await branchExists(root, branch)) {
+    await git(root, ['fetch', '.', `${fetched}:refs/heads/${branch}`]).catch(() => undefined)
+    return
+  }
+  await git(root, ['branch', pr.fork ? '--no-track' : '--track', branch, fetched])
 }
 
 // Remove a worktree (never the main one). Force-removes so untracked files

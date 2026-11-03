@@ -37,6 +37,7 @@ import { clear, leave, toggleFavorite, updateActive } from './activeStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
 import { taskChatOpener, type TaskFolderKind } from '../../shared/taskFolders.ts'
+import type { SourceId } from '../../shared/worktreeSource.ts'
 import { colonyTab, setColonyTab, stepTab, type ColonyTab } from './colonyTab.ts'
 import { downloadAndOpen, downloadFile } from './download.ts'
 import { identifiersOf } from './definition.ts'
@@ -375,6 +376,16 @@ function taskFileRow(c: CommandContext): HTMLElement | null {
   if (c.lane.panels[c.lane.focus]?.kind !== 'task') return null
   const row = fileRow(c)
   return row?.dataset.taskFile ? row : null
+}
+
+/** The GitHub or Jira row under the tasks cursor. They are not task folders. */
+function issueRowAt(c: CommandContext): { root: string; source: SourceId; ref: string } | null {
+  const root = c.project
+  if (!root || c.lane.panels[c.lane.focus]?.kind !== 'tasks') return null
+  const row = fileRow(c)
+  const source = row?.dataset.issueSource as SourceId | undefined
+  const ref = row?.dataset.issueRef
+  return source && ref ? { root, source, ref } : null
 }
 
 function stepTask(c: CommandContext, delta: 1 | -1): void {
@@ -1947,6 +1958,22 @@ export const REGISTRY: Map<string, Command> = new Map(
         // is showing — docked under the task. The same task gets the same chat
         // back while that session exists; the first press opens it on a message
         // that has the agent read the task before you type.
+        id: 'tasks.worktree',
+        title: 'Create a worktree for the task',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c) || !!issueRowAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const issue = issueRowAt(c)
+          const at = taskFolderAt(c)
+          const creating = issue
+            ? window.floe.sources.createWorktree(issue.root, issue.source, issue.ref, { writePremise: true })
+            : at && window.floe.tasks.createWorktree(at.root, at.ref)
+          if (!creating) return
+          void creating.then((made) => c.landOnWorktree(made)).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'tasks.chat',
         title: 'Chat about the task',
         group: 'Tasks',
@@ -2919,6 +2946,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'New worktree',
         group: 'Worktrees',
         run: (c) => c.newWorktree()
+      },
+      {
+        id: 'worktree.newFromSource',
+        title: 'New worktree from a PR or issue',
+        group: 'Worktrees',
+        run: (c) => c.newWorktree('source')
       },
       {
         // By POSITION in the sidebar, not by name: the number you press is the

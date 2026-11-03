@@ -8,6 +8,8 @@ import type {
   MergeFfResult,
   LastCommit
 } from '../main/git'
+import type { IntegrationStatus, SourceWorktree, TaskIssues } from '../main/integrations'
+import type { SourceId, SourceSearch } from '../shared/worktreeSource'
 import type { ClaudeSessionMeta, ResumableSession, TranscriptItem } from '../main/claudeSessions'
 import type { HarnessSession, HistoryHarness } from '../main/harnessHistory'
 import type { ViewState, WorktreeView, ProjectUiState, WorktreeUiState } from '../main/sessionStore'
@@ -18,6 +20,7 @@ import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
 import type { Skill, SkillImport, WritableScope } from '../main/config/skills'
 import type { Attachment, NewTaskFolder } from '../main/taskFolders'
+import type { TaskWorktree } from '../main/taskWorktree'
 import type { TaskFolder, TaskFolderDetail, TaskFolderPatch } from '../shared/taskFolders'
 import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
@@ -417,6 +420,24 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // Codex models offered in the picker, read from codex's own model cache.
     codex: {
       models: (): Promise<CodexModel[]> => ipcRenderer.invoke('codex:models')
+    },
+    // Worktrees opened from a pull request or an issue.
+    sources: {
+      available: (root: string): Promise<SourceId[]> => ipcRenderer.invoke('sources:available', root),
+      search: (root: string, source: SourceId, query?: string): Promise<SourceSearch> =>
+        ipcRenderer.invoke('sources:search', root, source, query),
+      createWorktree: (
+        root: string,
+        source: SourceId,
+        ref: string,
+        options?: { base?: string; writePremise?: boolean }
+      ): Promise<SourceWorktree> => ipcRenderer.invoke('sources:createWorktree', root, source, ref, options)
+    },
+    // The keys behind them. Write-only: `status` says what is saved, never the value.
+    integrations: {
+      status: (): Promise<IntegrationStatus> => ipcRenderer.invoke('integrations:status'),
+      set: (source: SourceId, field: string, value: string): Promise<IntegrationStatus> =>
+        ipcRenderer.invoke('integrations:set', source, field, value)
     },
     worktrees: {
       list: (repoPath: string): Promise<Worktree[]> => ipcRenderer.invoke('worktrees:list', repoPath),
@@ -1094,6 +1115,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('tasks:detach', root, ref, target),
       // Move to specs/, commit on main, start the colony card.
       send: (root: string, ref: string): Promise<TaskFolderDetail> => ipcRenderer.invoke('tasks:send', root, ref),
+      createWorktree: (root: string, ref: string): Promise<TaskWorktree> =>
+        ipcRenderer.invoke('tasks:createWorktree', root, ref),
+      // The GitHub and Jira issues listed under the local tasks.
+      issues: (root: string): Promise<TaskIssues[]> => ipcRenderer.invoke('tasks:issues', root),
       // Removes the folder. Refuses a task already sent to the colony.
       delete: (root: string, ref: string): Promise<{ deleted: string }> => ipcRenderer.invoke('tasks:delete', root, ref),
       watch: (root: string): Promise<void> => ipcRenderer.invoke('tasks:watch', root),

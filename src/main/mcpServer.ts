@@ -46,6 +46,7 @@ import {
   type Attachment
 } from './taskFolders'
 import { cardLookup, sendDeps } from './taskFolderDeps'
+import { createTaskWorktree } from './taskWorktree'
 import {
   addTask,
   dependencyProblem,
@@ -156,6 +157,15 @@ import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import { diagnoseWorktreeFailure } from '../shared/worktreeError'
+import { sourceWorktreePremise, type SourceId } from '../shared/worktreeSource'
+import {
+  availableSources,
+  createWorktreeFromSource,
+  integrationStatus,
+  listTaskIssues,
+  searchSource
+} from './integrations/index'
+import { setCredential } from './integrations/credentials'
 import {
   createSkill,
   deleteSkill,
@@ -564,6 +574,28 @@ async function createWorktreeTool(
   }
 }
 
+async function createWorktreeFromSourceTool(
+  project: string,
+  source: SourceId,
+  ref: string,
+  base?: string,
+  premise?: string
+): Promise<ToolResult> {
+  try {
+    const made = await createWorktreeFromSource(project, source, ref, { base })
+    const created = made.worktrees.find((w) => w.branch === made.branch)
+    if (made.existed) return textResult({ created, existed: true, item: made.item })
+    pushWorktrees(project, made.worktrees)
+    seedPremise(created, premise ?? sourceWorktreePremise(made.item))
+    const win = getWindow()
+    if (win && created) void provisionWorktree(win, project, created.path, created.branch)
+    return textResult({ created, item: made.item, worktrees: made.worktrees })
+  } catch (e) {
+    const failure = diagnoseWorktreeFailure(ref, (e as Error).message)
+    return textResult({ error: failure.why, git: failure.raw || undefined })
+  }
+}
+
 async function mergeWorktreeTool(project: string, worktree: string): Promise<ToolResult> {
   try {
     const result = await mergeWorktree(project, worktree)
@@ -594,6 +626,8 @@ async function startMergeTool(token: string, worktree: string): Promise<ToolResu
     return textResult({ error: (e as Error).message })
   }
 }
+
+const SOURCE_ID = z.enum(['github', 'bitbucket', 'jira']).describe('The service to ask.')
 
 // Projects, worktrees and the review pair: everything that runs straight
 // against git in main.
@@ -650,6 +684,62 @@ function registerWorktreeTools(server: McpServer, token: string): void {
         )
     },
     async (a) => createWorktreeTool(a.project, a.branch, a.base, a.note, a.premise)
+  )
+
+  server.tool(
+    'list_worktree_sources',
+    'Which services can open a worktree in this project: github or bitbucket when a remote points there, and always jira.',
+    { project: z.string().describe('The repo root path of the project.') },
+    async (a) => textResult({ sources: await availableSources(a.project) })
+  )
+
+  server.tool(
+    'search_worktree_source',
+    "List open pull requests and issues from github, bitbucket or jira, for create_worktree_from_source. With no query jira lists the user's own open issues. A query searches; #123, PROJ-123 or a URL looks up that one, in any state. A missing key comes back as `error`.",
+    {
+      project: z.string().describe('The repo root path of the project.'),
+      source: SOURCE_ID,
+      query: z.string().optional().describe('Search text, a #number, a Jira key, or a URL.')
+    },
+    async (a) => textResult(await searchSource(a.project, a.source, a.query))
+  )
+
+  server.tool(
+    'create_worktree_from_source',
+    'Open a worktree for a pull request or issue. A PR checks out its head branch; an issue forks a new branch named after it. Provisioning runs as in the in-app flow. An item that already has a worktree returns that one with existed: true.',
+    {
+      project: z.string().describe('The repo root path of the project.'),
+      source: SOURCE_ID,
+      ref: z.string().describe('The number, or the Jira key: `123`, `PROJ-123`.'),
+      base: z.string().optional().describe('The base branch for an issue (defaults to the main branch). A PR uses its own.'),
+      premise: z.string().optional().describe("The worktree's standing brief. Defaults to the item's reference, title and URL.")
+    },
+    async (a) => createWorktreeFromSourceTool(a.project, a.source, a.ref, a.base, a.premise)
+  )
+
+  server.tool(
+    'integration_status',
+    'What is saved in Settings for GitHub, Bitbucket and Jira, and whether gh is logged in. Says whether a key exists, and never returns one.',
+    {},
+    async () => textResult(await integrationStatus())
+  )
+
+  server.tool(
+    'set_integration_credential',
+    "Save one Settings value for an integration: github token, bitbucket email or token, jira site, email or token. An empty value removes it. Write-only. A key passed here is also in this session's transcript, so prefer asking the user to paste it in Settings, under Integrations.",
+    {
+      source: SOURCE_ID,
+      field: z.string().describe('token, email or site.'),
+      value: z.string().describe('The value. Empty removes it.')
+    },
+    async (a) => {
+      try {
+        setCredential(a.source, a.field, a.value.trim())
+        return textResult(await integrationStatus())
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
   )
 
   server.tool(
@@ -1820,6 +1910,30 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
     "Send a READY task to the colony: its folder moves to specs/NNN-slug/, the move is committed on the main branch, and a colony card is started with its lanes writing into specs/NNN-slug/colony/. Refuses unless the user marked it ready and the main checkout is on the main branch. Sending a task already in specs/ finishes whatever an earlier send did not.",
     { project: TASK_PROJECT, task: TASK_REF },
     ({ project, task }) => taskToolResult(() => sendTaskFolder(projectRoot(project), task, sendDeps(getWindow())))
+  )
+
+  server.tool(
+    'task_issues',
+    "The GitHub and Jira issues the tasks panel lists under the local tasks: open issues from the project's GitHub repository, and the user's own open Jira issues once Jira's keys are saved. Open one with create_worktree_from_source.",
+    { project: TASK_PROJECT },
+    ({ project }) => taskToolResult(() => listTaskIssues(projectRoot(project)))
+  )
+
+  server.tool(
+    'task_create_worktree',
+    "Create a worktree for a task, on a branch named after its folder, clipped to keep its number, with a premise that references the task's files and quotes its idea. Provisioning runs as in the in-app flow. A task that already has one returns it with existed: true. Refuses a task already sent to the colony.",
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) =>
+      taskToolResult(async () => {
+        const root = projectRoot(project)
+        const made = await createTaskWorktree(root, task)
+        const created = made.worktrees.find((w) => w.branch === made.branch)
+        if (made.existed) return { created, existed: true }
+        pushWorktrees(root, made.worktrees)
+        const win = getWindow()
+        if (win && created) void provisionWorktree(win, root, created.path, created.branch)
+        return { created, worktrees: made.worktrees }
+      })
   )
 
   server.tool(

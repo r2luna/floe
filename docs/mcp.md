@@ -72,7 +72,12 @@ as that session under a token it was lent (`peerMcp`).
 
 1. **Main-process tools** — actions that live in main (git, sessionStore, the
    agent conns): `list_projects`, `list_worktrees`, `create_worktree` (runs
-   provisioning like the in-app flow), `remove_worktree`, `merge_worktree`,
+   provisioning like the in-app flow), `list_worktree_sources`,
+   `search_worktree_source`, `create_worktree_from_source` (a PR or issue from GitHub,
+   Bitbucket or Jira), `integration_status`, `set_integration_credential` (write-only),
+   `task_create_worktree` (a task's worktree, with the task as its premise),
+   `task_issues` (the GitHub and Jira rows in the tasks panel),
+   `remove_worktree`, `merge_worktree`,
    `worktree_status`, `list_branches`, `changed_files`, `file_diff`, `submodules`,
    `find_definition`, `list_sessions`, `create_session` (`select` defaults to false — creating a
    background session must not steal the user's screen), `send_message` (with

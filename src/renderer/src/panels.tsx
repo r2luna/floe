@@ -78,7 +78,7 @@ import { splitByHits } from './findHits.ts'
 import { markAll } from './findMark'
 import { usePlans } from './usePlans'
 import { useDrawings } from './useDrawings'
-import { useTaskFolder, useTaskFolders } from './useTaskFolders'
+import { useTaskFolder, useTaskFolders, useTaskIssues } from './useTaskFolders'
 import { TASKS_TOGGLE_DONE } from './taskEvents'
 import { useSkills } from './useSkills'
 import { useMcpServers } from './useMcpServers'
@@ -109,6 +109,9 @@ import type { Commands } from './useCommands'
 import { useSessionActivity } from './useRunning'
 import { useRecap } from './useRecap'
 import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
+import { useIntegrations } from './useIntegrations'
+import type { IntegrationStatus } from '../../main/integrations'
+import { SOURCE_LABELS, sourceLabel, type SourceId } from '../../shared/worktreeSource'
 import type { Projects } from './useProjects'
 import { moveTargets } from './projectMove'
 import type { Worktrees } from './useWorktrees'
@@ -5029,6 +5032,7 @@ function TaskList({
   find?: string
 }) {
   const { tasks, loading, error } = useTaskFolders(root)
+  const issues = useTaskIssues(root)
   const [showDone, setShowDone] = useState(() => localStorage.getItem(TASKS_DONE_KEY) === '1')
   const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
 
@@ -5051,12 +5055,24 @@ function TaskList({
 
   if (error) return <p className="empty error">{error}</p>
   if (loading && !tasks.length) return <p className="empty">Loading…</p>
-  if (!tasks.length) return <p className="empty">No tasks yet. Press n to capture an idea.</p>
 
+  const openMenu = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const row = e.currentTarget as HTMLElement
+    row.focus()
+    setMenu({ x: e.clientX, y: e.clientY, row })
+  }
+
+  // A GitHub or Jira row is not a folder, so the task's other actions do not apply.
+  const issueItems: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    { label: 'Create worktree', keys: 'w', run: () => onCommand?.('tasks.worktree') }
+  ]
   const items: MenuAction[] = [
     { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
     { label: 'Status up', keys: ']', run: () => onCommand?.('tasks.statusUp') },
     { label: 'Status down', keys: '[', run: () => onCommand?.('tasks.statusDown') },
+    { label: 'Create worktree', keys: 'w', run: () => onCommand?.('tasks.worktree') },
     { label: 'Send to colony', keys: '⌘⏎', run: () => onCommand?.('tasks.send') },
     { label: 'Delete…', keys: 'd', run: () => onCommand?.('tasks.delete') },
     { label: 'New task…', keys: 'n', run: () => onCommand?.('tasks.new') }
@@ -5064,6 +5080,8 @@ function TaskList({
 
   return (
     <>
+      <div className="task-source">LOCAL</div>
+      {!tasks.length && <p className="empty">No tasks yet. Press n to capture an idea.</p>}
       {TASK_GROUPS.map((status) => {
         const rows = tasks.filter((t) => t.status === status)
         if (!rows.length) return null
@@ -5087,12 +5105,7 @@ function TaskList({
                 data-task-status={t.status}
                 data-dim={t.status === 'done' || undefined}
                 onClick={() => onOpen({ kind: 'task', sub: t.name, root })}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  const row = e.currentTarget as HTMLElement
-                  row.focus()
-                  setMenu({ x: e.clientX, y: e.clientY, row })
-                }}
+                onContextMenu={openMenu}
               >
                 <span className="task-no">{t.number}</span>
                 <span className="row-name">{markAll(t.title, find)}</span>
@@ -5108,7 +5121,31 @@ function TaskList({
           </Fragment>
         )
       })}
-      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
+      {/* Nothing to pick means no section. A source that cannot answer is not news
+          here: the new-worktree form says why, where you would act on it. */}
+      {issues.filter((section) => section.items.length).map(({ source, items: found }) => (
+        <Fragment key={source}>
+          <div className="task-source">
+            {SOURCE_LABELS[source].toUpperCase()} <span className="group-n">{found.length}</span>
+          </div>
+          {found.map((item) => (
+            <button
+              className="row task-row"
+              key={item.url}
+              title={item.url}
+              data-issue-source={item.source}
+              data-issue-ref={item.ref}
+              onClick={() => openTaskFile(onOpen, root ?? '', '', 'link', item.url)}
+              onContextMenu={openMenu}
+            >
+              <span className="task-no">{sourceLabel(item)}</span>
+              <span className="row-name">{markAll(item.title, find)}</span>
+              <span className="task-counts">{item.author}</span>
+            </button>
+          ))}
+        </Fragment>
+      ))}
+      {menu && <RowMenu at={menu} items={menu.row.dataset.issueRef ? issueItems : items} onClose={closeMenu} />}
     </>
   )
 }
@@ -5206,6 +5243,11 @@ function TaskItem({
         <button className="chip task-chat" onClick={() => onCommand?.('tasks.chat')}>
           chat about it <kbd>c</kbd>
         </button>
+        {!sent && (
+          <button className="chip task-chat" onClick={() => onCommand?.('tasks.worktree')}>
+            create worktree <kbd>w</kbd>
+          </button>
+        )}
       </div>
       <div className="task-ladder">
         {TASK_FOLDER_STATUSES.map((s, i) => (
@@ -7066,7 +7108,19 @@ type SettingRow =
       placeholder?: string
       hint?: string
     }
-  | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
+  | {
+      kind: 'text'
+      table: string
+      key: string
+      label: string
+      value: string
+      placeholder?: string
+      /** What the open box says, when that differs from the closed row's placeholder. */
+      prompt?: string
+      /** A key: the box opens empty and masked, because nothing can be read back. */
+      secret?: boolean
+      hint?: string
+    }
   | {
       kind: 'font'
       table: string
@@ -7166,8 +7220,42 @@ function harnessRows(config: FloeConfig, agents: LocalAgent[]): SettingRow[] {
  * its documentation. Anything the panel does not cover is a row that opens the
  * file, rather than a setting the user cannot reach.
  */
+// Rows whose table starts with this write to the credentials store, not floe.toml.
+const INTEGRATION_TABLE = 'integrations.'
+
+const PASTE_TOKEN = 'Paste it. Leave empty to remove.'
+
+function integrationRow(
+  source: SourceId,
+  key: string,
+  label: string,
+  value: string,
+  prompt: string,
+  secret = false
+): SettingRow {
+  return { kind: 'text', table: `${INTEGRATION_TABLE}${source}`, key, label, value, placeholder: 'not set', prompt, secret }
+}
+
+/**
+ * GitHub, Bitbucket and Jira keys. A token's row only ever says whether one is
+ * saved. GitHub says `using gh` when gh answers, since that is what gets used.
+ */
+function integrationRows(status: IntegrationStatus | null): SettingRow[] {
+  const saved = (has: boolean | undefined): string => (has ? 'saved' : '')
+  const github = status?.github.gh ? 'using gh' : saved(status?.github.token)
+  return [
+    integrationRow('github', 'token', 'GitHub token', github, PASTE_TOKEN, true),
+    integrationRow('bitbucket', 'email', 'Bitbucket email', status?.bitbucket.email ?? '', 'Your Atlassian account email'),
+    integrationRow('bitbucket', 'token', 'Bitbucket API token', saved(status?.bitbucket.token), PASTE_TOKEN, true),
+    integrationRow('jira', 'site', 'Jira site', status?.jira.site ?? '', 'acme, or acme.atlassian.net'),
+    integrationRow('jira', 'email', 'Jira email', status?.jira.email ?? '', 'Your Atlassian account email'),
+    integrationRow('jira', 'token', 'Jira API token', saved(status?.jira.token), PASTE_TOKEN, true)
+  ]
+}
+
 function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   const settings = useSettings()
+  const integrations = useIntegrations()
   const { config } = settings
   // Only the harnesses this machine actually has get a row: a default model for
   // a CLI that is not installed is a setting for something that cannot answer.
@@ -7501,12 +7589,16 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           suffix: 'h'
         }
       ]
-    }
+    },
+    { title: 'Integrations', rows: integrationRows(integrations.status) }
   ]
 
   // Hearing the pick is the only honest way to choose a sound, so cycling the
   // row plays what it just set.
   const setValue: typeof settings.set = (table, key, value) => {
+    if (table.startsWith(INTEGRATION_TABLE)) {
+      return integrations.set(table.slice(INTEGRATION_TABLE.length) as SourceId, key, String(value))
+    }
     settings.set(table, key, value)
     if (table === 'notifications' && key === 'sound') previewSound(value as NotifySoundId)
   }
@@ -7514,6 +7606,7 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   return (
     <div className="settings">
       {settings.error && <p className="empty error">{settings.error}</p>}
+      {integrations.error && <p className="empty error">{integrations.error}</p>}
 
       {/* Problems first: a value you set that did not take is the one thing you
           need to know before reading anything below it. */}
@@ -7734,13 +7827,20 @@ function SettingRowView({
         <input
           ref={box}
           className="dialog-input settings-input"
+          type={row.kind === 'text' && row.secret ? 'password' : undefined}
+          autoComplete={row.kind === 'text' && row.secret ? 'off' : undefined}
           value={draft}
-          placeholder={row.kind === 'text' ? row.placeholder : undefined}
+          placeholder={row.kind === 'text' ? (row.prompt ?? row.placeholder) : undefined}
           spellCheck={false}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation()
-            if (e.key === 'Enter') commit()
+            if (e.key === 'Enter') {
+              // Or the same Enter goes on to press the row focus just returned to,
+              // and the box opens again on what was only just saved.
+              e.preventDefault()
+              commit()
+            }
             if (e.key === 'Escape') leave()
           }}
         />
@@ -7764,7 +7864,7 @@ function SettingRowView({
       row.kind === 'stepper'
     )
       return onEdit()
-    setDraft(row.kind === 'number' ? String(row.value) : row.value)
+    setDraft(row.kind === 'number' ? String(row.value) : row.secret ? '' : row.value)
     onEdit()
   }
 

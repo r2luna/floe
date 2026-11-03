@@ -82,7 +82,8 @@ import {
   type ChatRow,
   type FinderChat
 } from './finderChats'
-import type { NewWorktreeProps } from './NewWorktree'
+import type { NewWorktreeProps, NewWorktreeOpens } from './NewWorktree'
+import type { Worktree } from '../../shared/types'
 import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -684,6 +685,7 @@ export default function App() {
   const markAnchor = useRef<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
+  const [newWtOpens, setNewWtOpens] = useState<NewWorktreeOpens>('name')
   // Why the last create was refused, and whether one is in flight — both belong
   // to the form, which stays open across a failure so it can show them.
   const [newWtError, setNewWtError] = useState<WorktreeFailure | null>(null)
@@ -2193,6 +2195,29 @@ export default function App() {
   // The registry reads state through this, so a command written once works the
   // same whether a key, the palette or an MCP tool called it.
   const ctxRef = useRef<CommandContext>(null as unknown as CommandContext)
+  /**
+   * Land in a worktree just made or found. Creating one and then having to go find
+   * it is a step the app can take for you. The path comes from what create
+   * returned, not from guessing where git put it.
+   */
+  const landOnWorktree = (
+    { worktrees: list, branch, existed }: { worktrees: Worktree[]; branch: string; existed: boolean },
+    premise?: string
+  ): void => {
+    worktrees.reload()
+    const made = list.find((wt) => wt.branch === branch)
+    if (made) worktrees.select(made.path)
+    setLane((l) => open(l, panelOf('branch', branch)))
+    // The environment, right after the tree: `.env`, dependencies, the site and
+    // this branch's own database. Without it the worktree is a checkout you cannot
+    // run, and the site you open is still serving the main checkout.
+    if (made && !existed)
+      provision.start(
+        { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
+        premise ? { premiseAnswer: premise } : undefined
+      )
+  }
+
   ctxRef.current = {
     lane,
     setLane,
@@ -2508,8 +2533,10 @@ export default function App() {
     },
     jumpBack: jumps.length ? jumpBack : undefined,
     pendingUpdate: pendingUpdate?.version,
-    newWorktree: () => {
+    landOnWorktree: (made) => landOnWorktree(made),
+    newWorktree: (opens = 'name') => {
       if (!projects.current) return
+      setNewWtOpens(opens)
       // Branches with no worktree yet: checking one out is a valid answer, and
       // offering one that is already open would create a worktree git refuses.
       void window.floe.worktrees
@@ -2977,6 +3004,8 @@ export default function App() {
   const newWorktreeProps: NewWorktreeProps | undefined =
     newWt && projects.current
       ? {
+          root: projects.current.path,
+          opens: newWtOpens,
           branches,
           mainBase: worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch,
           defaultBase: current?.worktree.branch,
@@ -2993,34 +3022,23 @@ export default function App() {
             // would hand focus to a button about to disappear.
             requestAnimationFrame(backToLane)
           },
-          onCreate: ({ branch, base, resetBranch, premise }) => {
+          onCreate: ({ branch, base, resetBranch, premise, item }) => {
             // The form stays up until git agrees. Closing it first is what used
             // to send a refusal to the console and leave the panel looking as
             // if nothing had been asked for.
             setNewWtError(null)
             setNewWtBusy(true)
-            void window.floe.worktrees
-              .create(projects.current!.path, branch, { base, resetBranch })
-              .then((list) => {
+            const root = projects.current!.path
+            const creating = item
+              ? window.floe.sources.createWorktree(root, item.source, item.ref, { base })
+              : window.floe.worktrees
+                  .create(root, branch, { base, resetBranch })
+                  .then((list) => ({ worktrees: list, existed: false }))
+            void creating
+              .then(({ worktrees: list, existed }) => {
                 setNewWtBusy(false)
                 setNewWt(false)
-                worktrees.reload()
-                // Land in what you just made — creating a worktree and then
-                // having to go find it is a step the app can take for you. The
-                // path comes from what create returned, not from guessing where
-                // git put it.
-                const made = list.find((wt) => wt.branch === branch)
-                if (made) worktrees.select(made.path)
-                setLane((l) => open(l, panelOf('branch', branch)))
-                // The environment, right after the tree: `.env`, dependencies,
-                // the site and this branch's own database. Without it the
-                // worktree is a checkout you cannot run, and the site you open
-                // is still serving the main checkout.
-                if (made)
-                  provision.start(
-                    { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
-                    premise ? { premiseAnswer: premise } : undefined
-                  )
+                landOnWorktree({ worktrees: list, branch, existed }, premise)
               })
               .catch((e: Error) => {
                 setNewWtBusy(false)
