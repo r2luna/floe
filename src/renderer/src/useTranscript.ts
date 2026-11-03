@@ -18,6 +18,7 @@ import type {
   ImageAttachment,
   PermissionMode
 } from '../../shared/types'
+import { expandRemoteProjects } from './remoteProjects.ts'
 import type { Route } from '../../shared/mentions.ts'
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
@@ -669,7 +670,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         .start(
           key,
           worktreePath,
-          prompt,
+          expandRemoteProjects(prompt),
           // `optionsKey` in the main process is built from these, so changing
           // the picker restarts the CLI rather than silently keeping the old
           // model — or the old mode — for the rest of the session. `panel` is
@@ -784,7 +785,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // dispatchTurn).
       if (addressed?.route) {
         void window.floe.agent
-          .start(key, worktreePath, prompt, { ...(choice ?? choiceRef.current), permissionMode: (choice ?? choiceRef.current).mode ?? DEFAULT_MODE }, images ?? [], files ?? [], addressed.route)
+          .start(key, worktreePath, expandRemoteProjects(prompt), { ...(choice ?? choiceRef.current), permissionMode: (choice ?? choiceRef.current).mode ?? DEFAULT_MODE }, images ?? [], files ?? [], addressed.route)
           .catch((e: unknown) => setError(String(e)))
         return
       }

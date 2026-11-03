@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { folderMentions, sessionMentions, taskMentions } from './useMenuItems.ts'
+import { folderMentions, projectMentions, remoteProjectRefs, sessionMentions, taskMentions } from './useMenuItems.ts'
 import type { TaskFolder } from '../../shared/taskFolders.ts'
 import type { WorktreeRow } from './useWorktrees.ts'
 
@@ -44,4 +44,34 @@ test('a task is offered by its number', () => {
   assert.equal(item.id, '#001')
   assert.equal(item.title, '001 sidebar')
   assert.equal(item.group, 'tasks')
+})
+
+const here = { current: 'local', label: (id: string) => (id === 'link' ? 'Link' : id) }
+const projects = [
+  { path: '/p/floe', name: 'floe', group: '' },
+  { path: '/p/my app', name: 'my app', group: '' },
+  { path: '/p/floe2', name: 'floe', group: '' },
+  { path: '/r/floe', name: 'floe', group: '', backend: 'link' },
+  { path: '/home', name: 'Home', group: '', home: true }
+]
+
+test('projects are offered as $name, naming the machine when it is another one', () => {
+  assert.deepEqual(
+    projectMentions(projects, here).map((m) => m.id),
+    ['$floe', '$my-app', '$floe@Link']
+  )
+})
+
+test('seen from another machine, the roles swap', () => {
+  const at = { ...here, current: 'link' }
+  assert.deepEqual(
+    projectMentions(projects, at).map((m) => m.id),
+    ['$floe@local', '$my-app@local', '$floe']
+  )
+})
+
+test('only the projects main cannot resolve are expanded by the renderer', () => {
+  assert.deepEqual([...remoteProjectRefs(projects, here)], [
+    ['floe@Link', { name: 'floe', path: '/r/floe', machine: 'Link' }]
+  ])
 })

@@ -1,0 +1,192 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe — projects, active, worktrees stacked in one column</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .page { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .cap { color: var(--text-strong); font-size: 11px; letter-spacing: 0.08em; }
+  .notes { color: var(--dim); font-size: 11px; line-height: 1.6; margin: 0; padding-left: 16px; max-width: 900px; }
+  .notes b { color: var(--text); font-weight: normal; }
+  kbd { font: inherit; color: var(--text-strong); border: 1px solid var(--edge); padding: 0 5px; }
+
+  /* the lane today vs proposed — width budget */
+  .budget { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--dim); }
+  .bar { display: flex; height: 18px; gap: 6px; }
+  .bar span { display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); color: var(--dimmest); box-sizing: border-box; }
+  .bar .chat { flex: 1; border-style: dashed; }
+
+  /* the app frame */
+  .app { display: flex; gap: 6px; height: 600px; padding: 6px; border: 1px solid var(--line); box-sizing: border-box; background: var(--bg); }
+  .side { flex: 0 0 300px; width: 300px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+  .chat-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--line); }
+
+  .sec { display: flex; flex-direction: column; min-height: 0; background: var(--panel); border: 1px solid var(--line); transition: flex-grow 0.12s; }
+  .sec[data-open] { flex: 1 1 0; }
+  .sec:not([data-open]) { flex: 0 0 auto; }
+  .sec[data-focus] { background: var(--panel-focused); }
+  .sec-head { flex: none; display: flex; align-items: center; gap: 8px; height: var(--head-h); padding-inline: 11px; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; box-sizing: border-box; }
+  .sec[data-open] .sec-head { border-bottom: 1px solid var(--line-soft); }
+  .caret { flex: none; width: 10px; color: var(--dim); }
+  .sec-name { color: var(--dimmest); }
+  .sec[data-focus] .sec-name { color: var(--accent); }
+  .sec-count { color: var(--dim); }
+  .sec-sum { flex: 1; min-width: 0; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dimmest); }
+  .sec[data-open] .sec-sum { display: none; }
+  .sec-key { flex: none; color: var(--faint); }
+  .sec-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 6px; font-size: 11px; line-height: 1.5; }
+  .sec:not([data-open]) .sec-body { display: none; }
+
+  .dot { flex: none; width: 6px; height: 6px; border: 1px solid #4a4f59; border-radius: 50%; box-sizing: border-box; }
+  .dot-unread { background: var(--accent); border-color: var(--accent); }
+  .ask { flex: none; width: 6px; display: grid; place-items: center; color: var(--accent); font-weight: 700; }
+  .spin { flex: none; width: 6px; display: grid; place-items: center; color: var(--dim); }
+
+  .r { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 12px; border: 0; border-left: 2px solid transparent;
+       background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; box-sizing: border-box; min-width: 0; }
+  .r:hover { background: rgba(255,255,255,0.04); }
+  .r .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .r .tag { flex: none; color: var(--dimmest); }
+  .r[data-sel] .t { color: var(--text-strong); }
+  .sec[data-focus] .r[data-cur] { background: var(--bg); border-left-color: var(--accent); }
+  .sec[data-focus] .r[data-cur] .t { color: var(--accent); }
+  .p { padding: 6px 12px 1px; color: var(--text); }
+  .w { display: flex; align-items: center; gap: 6px; padding: 2px 12px 1px 20px; color: var(--dim); }
+  .r.c { padding-left: 22px; }
+
+  .keys { margin-top: auto; flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 12px; border-top: 1px solid var(--line-soft); color: var(--dim); font-size: 11px; }
+  .keys b { color: var(--text-strong); font-weight: normal; }
+
+  .chat-head { height: var(--head-h); display: flex; align-items: center; gap: 8px; padding-inline: 12px; border-bottom: 1px solid var(--line-soft); }
+  .chat-head .n { color: var(--text-strong); }
+  .chat-head .s { color: var(--dim); }
+  .chat-body { flex: 1; padding: 14px 16px; color: var(--dim); font-size: 12px; }
+  .chat-body p { margin: 0 0 10px; max-width: 70ch; }
+  .chat-body .you { color: var(--nick-you); }
+  .chat-body .cl { color: var(--nick-claude); }
+  .composer { border-top: 1px solid var(--line); padding: 10px 14px; color: var(--faint); }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="budget">
+    <div class="cap">WIDTH BUDGET (px, 1440 window)</div>
+    <div class="bar"><span style="flex:0 0 220px">projects 220</span><span style="flex:0 0 340px">active 340</span><span style="flex:0 0 330px">worktrees 330</span><span class="chat">chat: what is left (~550)</span></div>
+    <div class="bar"><span style="flex:0 0 300px">stacked 300</span><span class="chat">chat: what is left (~1140)</span></div>
+  </div>
+
+  <div class="cap">PROPOSED · ONE COLUMN, THREE SECTIONS · try it: 1 2 3 · z · a · j k · ⏎</div>
+
+  <div class="app" id="app" tabindex="0">
+    <div class="side" id="side"></div>
+    <div class="chat-pane">
+      <div class="chat-head"><span class="n" id="chatTitle">fix lane drag snapping on narrow panels</span><span class="s" id="chatSub">floe › master</span></div>
+      <div class="chat-body">
+        <p><span class="you">you</span> the lane snaps back when the panel is under 260px</p>
+        <p><span class="cl">claude</span> Found it. The drag handler clamps to `min` before it reads the pointer offset, so the first move after the clamp always lands on the old width.</p>
+      </div>
+      <div class="composer">&gt; message…</div>
+    </div>
+  </div>
+
+  <ol class="notes">
+    <li><b>One column, 300px</b> instead of three columns (890px). The chat gets the difference.</li>
+    <li><b>Accordion.</b> A section is open or collapsed to its 34px head. Collapsed heads still say something useful: the selected project, the selected worktree, or how many chats are unread or asking.</li>
+    <li><b>Keys.</b> <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> focus a section and open it (the others fold). <kbd>z</kbd> folds or unfolds the focused one. <kbd>a</kbd> opens all three, sharing the height. <kbd>j</kbd> <kbd>k</kbd> move the cursor, <kbd>⏎</kbd> picks. Picking a project jumps to worktrees, picking a worktree folds the pair and returns to the chat.</li>
+    <li><b>Order top to bottom</b> follows the lane today: projects, active, worktrees. Each is a palette command too (<code>sidebar.projects</code>, <code>sidebar.active</code>, <code>sidebar.worktrees</code>, <code>sidebar.toggle</code>), plus the MCP tools, per the agent-first rule.</li>
+    <li><b>Open question.</b> Does <kbd>h</kbd>/<kbd>l</kbd> keep walking panels in the lane, with the stack as a single stop, or does the stack replace the three stops?</li>
+  </ol>
+</div>
+
+<script>
+const DATA = {
+  projects: { label: 'projects', key: '1', items: ['00.life-os', 'floe', 'os', 'tide', 'link'] },
+  active: { label: 'active', key: '2', items: [
+    { p: 'floe', w: 'master', main: true, rows: [
+      { m: 'spin', t: 'fix lane drag snapping on narrow panels' }] },
+    { p: 'floe', w: 'jev', rows: [
+      { m: 'unread', t: "Okay, I got Jev API key. I'm gonna give it to you so we can" }] },
+    { p: 'os', w: 'develop', main: true, rows: [
+      { m: 'dot', t: 'no replan image 01 .. eu ndnao consigo ver o nome da pessoa' },
+      { m: 'ask', t: 'pga os logs de erros de produção mais recentes e ssh ds.os' },
+      { m: 'dot', t: 'o que temos de teste skipped no projeot?' }] },
+    { p: '00.life-os', w: 'devsquad-new-flow', rows: [
+      { m: 'unread', t: 'squadra: presentation' }, { m: 'dot', t: 'squadra: skills' }] }
+  ] },
+  worktrees: { label: 'worktrees', key: '3', items: [
+    { w: 'master', main: true, n: 1, dirt: '+3 ~2' }, { w: 'jev', n: 1, dirt: '~7' }, { w: 'orbs', n: 0, dirt: '' }, { w: 'plugin-v2', n: 0, dirt: '+1' }
+  ] }
+}
+const S = {
+  open: new Set(['active']),
+  focus: 'active',
+  cur: { projects: 1, active: 0, worktrees: 0 },
+  sel: { projects: 1, worktrees: 0 },
+  chat: 0 // flat index into active rows
+}
+const ORDER = ['projects', 'active', 'worktrees']
+const markHtml = (m) => ({ spin: '<span class="spin">⠹</span>', unread: '<span class="dot dot-unread"></span>', ask: '<span class="ask">?</span>', dot: '<span class="dot"></span>' }[m])
+const flatActive = () => DATA.active.items.flatMap((g) => g.rows.map((r) => ({ ...r, p: g.p, w: g.w })))
+const count = (k) => k === 'active' ? flatActive().length : DATA[k].items.length
+const summary = (k) => {
+  if (k === 'projects') return DATA.projects.items[S.sel.projects]
+  if (k === 'worktrees') return DATA.worktrees.items[S.sel.worktrees].w
+  const rows = flatActive(), u = rows.filter((r) => r.m === 'unread').length, a = rows.filter((r) => r.m === 'ask').length
+  return [u && u + ' unread', a && a + ' asking'].filter(Boolean).join(' · ') || 'all seen'
+}
+function body(k) {
+  const cur = S.cur[k]
+  if (k === 'projects') return DATA.projects.items.map((n, i) =>
+    `<button class="r" data-i="${i}" ${i === cur ? 'data-cur' : ''} ${i === S.sel.projects ? 'data-sel' : ''}><span class="t">${n}</span></button>`).join('')
+  if (k === 'worktrees') return DATA.worktrees.items.map((x, i) =>
+    `<button class="r" data-i="${i}" ${i === cur ? 'data-cur' : ''} ${i === S.sel.worktrees ? 'data-sel' : ''}><span class="t">${x.w}${x.main ? ' <span style="color:var(--dimmest)">main</span>' : ''}</span><span class="tag">${x.dirt}</span><span class="tag">${x.n ? x.n + ' chat' : ''}</span></button>`).join('')
+  let i = 0, out = ''
+  for (const g of DATA.active.items) {
+    out += `<div class="p">${g.p}</div><div class="w">⎇ ${g.w}${g.main ? ' <span style="color:var(--dimmest)">main</span>' : ''}</div>`
+    for (const r of g.rows) { out += `<button class="r c" data-i="${i}" ${i === cur ? 'data-cur' : ''} ${i === S.chat ? 'data-sel' : ''}>${markHtml(r.m)}<span class="t">${r.t}</span></button>`; i++ }
+  }
+  return out
+}
+function render() {
+  document.getElementById('side').innerHTML = ORDER.map((k) => {
+    const open = S.open.has(k), d = DATA[k]
+    return `<section class="sec" data-k="${k}" ${open ? 'data-open' : ''} ${S.focus === k ? 'data-focus' : ''}>
+      <button class="sec-head" data-head="${k}"><span class="caret">${open ? '▾' : '▸'}</span><span class="sec-name">${d.label}</span><span class="sec-count">${count(k)}</span><span class="sec-sum">${summary(k)}</span><span class="sec-key">${open ? '' : d.key}</span></button>
+      <div class="sec-body">${body(k)}</div></section>`
+  }).join('') + `<div class="keys"><span><b>1 2 3</b> section</span><span><b>z</b> fold</span><span><b>a</b> all</span><span><b>j k</b> move</span><span><b>⏎</b> pick</span></div>`
+  const r = flatActive()[S.chat]
+  document.getElementById('chatTitle').textContent = r.t
+  document.getElementById('chatSub').textContent = r.p + ' › ' + r.w
+}
+function focusSec(k, only) {
+  S.focus = k
+  if (only) S.open = new Set([k]); else S.open.add(k)
+  render()
+}
+document.addEventListener('keydown', (e) => {
+  const k = e.key, f = S.focus
+  if (['1', '2', '3'].includes(k)) focusSec(ORDER[+k - 1], true)
+  else if (k === 'z') { S.open.has(f) ? S.open.delete(f) : S.open.add(f); render() }
+  else if (k === 'a') { S.open = new Set(ORDER); render() }
+  else if (k === 'j' || k === 'k') {
+    S.cur[f] = Math.max(0, Math.min(count(f) - 1, S.cur[f] + (k === 'j' ? 1 : -1))); render()
+    document.querySelector('.sec[data-focus] [data-cur]')?.scrollIntoView({ block: 'nearest' })
+  } else if (k === 'Enter') {
+    if (f === 'projects') { S.sel.projects = S.cur.projects; focusSec('worktrees', true) }
+    else if (f === 'worktrees') { S.sel.worktrees = S.cur.worktrees; S.open = new Set(); S.focus = 'active'; render() }
+    else { S.chat = S.cur.active; S.open = new Set(); render() }
+  } else return
+  e.preventDefault()
+})
+document.getElementById('side').addEventListener('click', (e) => {
+  const h = e.target.closest('[data-head]'); if (h) { const k = h.dataset.head; S.focus = k; S.open.has(k) ? S.open.delete(k) : S.open.add(k); render() }
+  const r = e.target.closest('.r'); if (r) { const k = r.closest('.sec').dataset.k; S.focus = k; S.cur[k] = +r.dataset.i; render() }
+})
+render()
+</script>
+</body>
+</html>

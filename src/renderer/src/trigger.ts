@@ -1,4 +1,4 @@
-// Finding the `/`, `#` or `@` you are typing right now.
+// Finding the `/`, `#`, `@` or `$` you are typing right now.
 //
 // Both menus hang on the same question: is the caret inside a token that starts
 // with a trigger character? Getting it wrong in either direction is bad — a menu
@@ -6,8 +6,8 @@
 // just typed is a feature you cannot reach.
 
 export interface Trigger {
-  /** Which menu: '/' skills, '#' sessions and files, '@' who is in the channel. */
-  char: '/' | '#' | '@'
+  /** Which menu: '/' skills, '#' sessions and files, '@' who is in the channel, '$' projects. */
+  char: '/' | '#' | '@' | '$'
   /** What you have typed after it, for filtering. */
   query: string
   /** Where the trigger character sits, so a pick can replace from there. */
@@ -28,7 +28,7 @@ export function triggerAt(text: string, caret: number): Trigger | null {
   while (i > 0 && !/\s/.test(text[i - 1])) i--
 
   const char = text[i]
-  if (char !== '/' && char !== '#' && char !== '@') return null
+  if (char !== '/' && char !== '#' && char !== '@' && char !== '$') return null
 
   const query = text.slice(i + 1, caret)
   // A space closes the menu: once you have typed past the token you are writing
@@ -77,7 +77,7 @@ export function refBefore(
   // with it: the `#` is part of the chip, not punctuation in front of it.
   let start = caret
   while (start > 0 && /[\w./:-]/.test(text[start - 1])) start--
-  if (start > 0 && (text[start - 1] === '#' || text[start - 1] === '@')) start--
+  if (start > 0 && (text[start - 1] === '#' || text[start - 1] === '@' || text[start - 1] === '$')) start--
   if (start === caret) return null
   // A reference stands on its own — after a space, a bracket, or nothing.
   if (start > 0 && !/[\s([]/.test(text[start - 1])) return null

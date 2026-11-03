@@ -26,7 +26,7 @@ const INLINE =
   /(`[^`\n]+`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\n]+\*|_[^_\n]+_)|(\[[^\]\n]*\]\([^)\n]*\))/g
 
 /**
- * What could be a reference: a mention (`#name`, `@name`) or a path with an
+ * What could be a reference: a mention (`#name`, `@name`, `$name`) or a path with an
  * extension, each optionally carrying a line range.
  *
  * Deliberately generous — it only proposes. Whether a candidate IS a reference
@@ -34,7 +34,7 @@ const INLINE =
  * which sessions exist, and which short tokens stand for a path.
  */
 const REF =
-  /(^|[\s([])([#@][\w./:-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*(?::\d+(?:-\d+)?)?)/g
+  /(^|[\s([])([#@$][\w./:-]+|(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z][\w-]*(?::\d+(?:-\d+)?)?)/g
 
 /** Split a plain run into text and the references inside it. */
 function refs(text: string, out: Token[], isRef: (token: string) => boolean): void {
@@ -216,6 +216,8 @@ export type MdLine = {
   task?: 'open' | 'done'
   /** A line that continues the item above it — indented under its text. */
   cont?: boolean
+  /** A fenced code line's language, as the fence named it. */
+  lang?: string
 }
 
 // Inline spans with their delimiters, so the rendered text can drop them.
@@ -282,6 +284,7 @@ export function renderMarkdown(text: string): MdLine[] {
   const src = text.split('\n')
   const out: MdLine[] = []
   let fence: string | null = null
+  let fenceLang: string | undefined
   // YAML front matter, which is metadata rather than prose. Only at the very top
   // of the file, and only when it CLOSES — an opening `---` with no partner is
   // a rule on the first line, not a block that swallows the whole document.
@@ -329,7 +332,10 @@ export function renderMarkdown(text: string): MdLine[] {
     if (fenceMatch) {
       const mark = fenceMatch[2]
       const open = fence
-      if (!open) fence = mark
+      if (!open) {
+        fence = mark
+        fenceLang = fenceMatch[3].trim().split(/\s+/)[0] || undefined
+      }
       else if (mark[0] === open[0] && mark.length >= open.length) fence = null
       // The fence itself is not content: it keeps its row (the numbers must
       // stay true to the file) but shows only the language, if it named one.
@@ -338,7 +344,7 @@ export function renderMarkdown(text: string): MdLine[] {
     }
     // Inside a fence everything is literal — no bold, no links, no bullets.
     if (fence) {
-      push({ kind: 'code', spans: [{ text: line, cls: '' }] })
+      push({ kind: 'code', spans: [{ text: line, cls: '' }], lang: fenceLang })
       continue
     }
 
@@ -496,7 +502,8 @@ function numberLists(lines: MdLine[]): void {
     // way back out, so a second sub-list does not continue the first one's
     // numbering.
     const counters: number[] = []
-    let width = 2
+    // Room for a checkbox (an 11px box, a character and a half) plus the gap.
+    let width = 3
     for (let n = i; n <= end; n++) {
       const line = lines[n]
       if (line.kind !== 'list' || !line.marker) continue
@@ -504,8 +511,9 @@ function numberLists(lines: MdLine[]): void {
       counters.length = depth + 1
       counters[depth] = (counters[depth] ?? 0) + 1
       line.marker = `${counters[depth]}.`
-      // +1 for the gap between the marker and the text it labels.
-      width = Math.max(width, line.marker.length + 1)
+      // 1.5 for the gap between the marker and the text it labels: the same
+      // gap a bullet and a checkbox get (.md-bullet's padding-right).
+      width = Math.max(width, line.marker.length + 1.5)
     }
 
     // Continuation lines get it too: their indent is the item's text column.

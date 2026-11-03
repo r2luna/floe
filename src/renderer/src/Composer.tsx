@@ -532,7 +532,8 @@ export function Composer({
   const syncTrigger = (el: HTMLTextAreaElement) => {
     if (!menuItems) return
     const found = triggerAt(el.value, el.selectionStart)
-    setTrigger(found)
+    // `$` in a shell line is a variable, not a project.
+    setTrigger(found?.char === '$' && shell && isBang(el.value) ? null : found)
     setMenuAt(0)
     setDrill([])
   }
@@ -561,7 +562,7 @@ export function Composer({
         if (item.variants) walk(item.variants)
       }
     }
-    for (const char of ['#', '@'] as const) walk(menuItems?.({ char, query: '', start: 0 }) ?? [])
+    for (const char of ['#', '@', '$'] as const) walk(menuItems?.({ char, query: '', start: 0 }) ?? [])
     return ids
   }, [menuItems])
 

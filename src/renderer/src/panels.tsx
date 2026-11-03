@@ -72,7 +72,7 @@ import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { buildChangeTree, countRepos, flattenChanges, isOpen, repoRef, type ChangeNode } from './changesTree'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
-import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
+import { langForPath, resolveLang, tokenizeLines, type HlToken } from './lib/highlight'
 import { wordAt } from './definition'
 import { splitByHits } from './findHits.ts'
 import { markAll } from './findMark'
@@ -946,6 +946,7 @@ export function PanelBody({
         branch={
           worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.worktree.branch
         }
+        project={projects.current?.name}
         onCreated={worktrees.reload}
         noProjects={!projects.loading && projects.all.length === 0}
         onAddProject={onAddProject}
@@ -1266,6 +1267,7 @@ function Launcher({
   menuItems,
   worktreePath,
   branch,
+  project,
   onCreated,
   noProjects,
   onAddProject
@@ -1277,6 +1279,8 @@ function Launcher({
   worktreePath?: string
   /** The branch the session will be started on — absent when none is selected. */
   branch?: string
+  /** The project that branch belongs to, named beside it. */
+  project?: string
   /** Re-read the worktree list, so the new session shows up under its branch. */
   onCreated?: () => void
   /** Nothing has ever been added — not merely "none selected right now". */
@@ -1440,6 +1444,7 @@ function Launcher({
           would be a lie. */}
       {branch && (
         <div className="greet-branch">
+          {project && <span className="greet-project">{project}</span>}
           <IconGitBranch size={13} stroke={1.6} />
           {branch}
         </div>
@@ -4056,7 +4061,7 @@ function FileDiff({
     )
 
   return (
-    <div className="diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
+    <div className="diff patch-diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
       {rows.map((r, i) => {
         if (r.kind === 'hunk') {
           return (
@@ -4455,6 +4460,37 @@ function FilesTree({
  */
 function MarkdownLines({ text }: { text: string }) {
   const lines = useMemo(() => renderMarkdown(text), [text])
+  // Fenced code, coloured: one tokenize per block, keyed by the block's rows.
+  const [hl, setHl] = useState<Map<number, HlToken[]>>(new Map())
+
+  useEffect(() => {
+    setHl(new Map())
+    let live = true
+    for (let i = 0; i < lines.length; i++) {
+      const lang = lines[i].kind === 'code' && lines[i].lang ? resolveLang(lines[i].lang!) : null
+      if (!lang) continue
+      let end = i
+      while (lines[end + 1]?.kind === 'code' && lines[end + 1].lang === lines[i].lang) end++
+      const start = i
+      const code = lines.slice(start, end + 1).map((l) => l.spans[0].text).join('\n')
+      void tokenizeLines(code, lang)
+        .then((rows) => {
+          if (!live) return
+          setHl((prev) => {
+            const next = new Map(prev)
+            rows.forEach((row, n) => next.set(start + n, row))
+            return next
+          })
+        })
+        .catch(() => {
+          /* no grammar for it — the plain row reads fine */
+        })
+      i = end
+    }
+    return () => {
+      live = false
+    }
+  }, [lines])
 
   return (
     <div className="diff md-lines">
@@ -4468,7 +4504,7 @@ function MarkdownLines({ text }: { text: string }) {
           tabIndex={-1}
         >
           <span className="diff-no">{i + 1}</span>
-          <MarkdownText line={line} />
+          <MarkdownText line={line} tokens={hl.get(i)} />
         </div>
       ))}
     </div>
@@ -4483,7 +4519,7 @@ function MarkdownLines({ text }: { text: string }) {
  * same whichever of the two is showing it, and that is only guaranteed while
  * there is one place that draws it.
  */
-function MarkdownText({ line }: { line: MdLine }): ReactNode {
+function MarkdownText({ line, tokens }: { line: MdLine; tokens?: HlToken[] }): ReactNode {
   return (
     // Not `.diff-code`: that class carries Shiki's `!important` colour
     // override for code tokens, which would repaint every bold, link
@@ -4502,13 +4538,19 @@ function MarkdownText({ line }: { line: MdLine }): ReactNode {
           // The block's shared marker column: "10." makes it 4ch and
           // every item of that list gets the same, so the numbers line up
           // on the period and all the text starts in one column.
-          style={{ minWidth: `${line.markerWidth ?? 2}ch` }}
+          style={{ minWidth: `${line.markerWidth ?? 3}ch` }}
         >
           {line.marker}
         </span>
       )}
       {line.kind === 'table' ? (
         <MarkdownRow line={line} />
+      ) : tokens?.length ? (
+        tokens.map((t, j) => (
+          <span style={t.style} key={j}>
+            {t.content}
+          </span>
+        ))
       ) : (
         line.spans.map((span, j) =>
           span.cls ? (
@@ -4540,9 +4582,10 @@ function MarkdownRow({ line }: { line: MdLine }): ReactNode {
       className="md-cells"
       data-head={line.head || undefined}
       style={{
-        // fr, not ch: the table fills the panel and splits it in proportion to
-        // its content, so a narrow panel shrinks columns instead of clipping.
-        gridTemplateColumns: (line.cols ?? []).map((w) => `minmax(0, ${w}fr)`).join(' ')
+        // ch, with minmax(0, …): a column is as wide as its widest cell (+2 for
+        // a code pill's padding) and no wider, and a narrow panel shrinks the
+        // columns instead of clipping them.
+        gridTemplateColumns: (line.cols ?? []).map((w) => `minmax(0, ${w + 2}ch)`).join(' ')
       }}
     >
       {(line.cells ?? []).map((cell, c) => (
@@ -4574,12 +4617,12 @@ function indentOf(line: MdLine): CSSProperties | undefined {
   // A lazily-indented line under an item is that item's paragraph, so it lines
   // up with the item's TEXT — not with its marker, and not back at the margin.
   if (line.cont)
-    return { paddingLeft: `calc(8px + ${(line.depth ?? 0) * 2 + (line.markerWidth ?? 2)}ch)` }
+    return { paddingLeft: `calc(8px + ${(line.depth ?? 0) * 2 + (line.markerWidth ?? 3)}ch)` }
   if (line.kind !== 'list') return undefined
   // The marker starts where a paragraph starts — a top-level item lines up with
   // the prose above it — and the item's own text sits one marker column further
   // in, where the negative text-indent leaves every wrapped line.
-  const width = line.markerWidth ?? 2
+  const width = line.markerWidth ?? 3
   const marker = (line.depth ?? 0) * 2
   return { paddingLeft: `calc(8px + ${marker + width}ch)`, textIndent: `-${width}ch` }
 }
