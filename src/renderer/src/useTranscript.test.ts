@@ -350,3 +350,63 @@ test('the turn ending leaves a background workflow row running', () => {
     ['w1#1', true]
   ])
 })
+
+const NOW = 1_000_000
+
+const said = (text: string, at = NOW): TranscriptItem => ({ role: 'user', text, at })
+
+test('resync: a reply the stream never delivered comes back from disk', () => {
+  const s = run(
+    { type: 'load', items: [said('old', 1)] },
+    { type: 'push', item: said('hi', NOW - 60_000) },
+    { type: 'text', item: { role: 'assistant', text: 'half an ans', at: NOW - 59_000 } },
+    {
+      type: 'resync',
+      items: [said('old', 1), said('hi', NOW - 60_000), { role: 'assistant', text: 'half an answer, then the rest', at: NOW - 59_000 }],
+      said: [],
+      now: NOW
+    }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['old', 'hi', 'half an answer, then the rest'])
+  assert.equal(s.tail, null, 'the partial copy does not stay beside the full one')
+})
+
+test('resync: a line just sent that the disk does not have yet is kept', () => {
+  const s = run(
+    { type: 'push', item: said('sent while reconnecting', NOW - 1_000) },
+    { type: 'resync', items: [], said: [], now: NOW }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['sent while reconnecting'])
+})
+
+test('resync: a recent line already on disk is not doubled', () => {
+  const s = run(
+    { type: 'push', item: said('hi', NOW - 1_000) },
+    { type: 'resync', items: [said('hi', NOW - 900)], said: [], now: NOW }
+  )
+  assert.equal(shown(s).length, 1)
+})
+
+test('resync: the same words said long ago do not hide a line just sent', () => {
+  const s = run(
+    { type: 'push', item: said('continue', NOW - 1_000) },
+    { type: 'resync', items: [said('continue', 1)], said: [], now: NOW }
+  )
+  assert.equal(shown(s).length, 2)
+})
+
+test('resync: a line the replay is about to push is left to the replay', () => {
+  const s = run(
+    { type: 'push', item: said('steered', NOW - 1_000) },
+    { type: 'resync', items: [], said: ['steered'], now: NOW }
+  )
+  assert.equal(shown(s).length, 0)
+})
+
+test('resync: an old line reworded on the way out is not kept as a second copy', () => {
+  const s = run(
+    { type: 'push', item: said('@codex hi', NOW - 60_000) },
+    { type: 'resync', items: [said('hi', NOW - 60_000)], said: [], now: NOW }
+  )
+  assert.deepEqual(shown(s).map((i) => i.text), ['hi'])
+})

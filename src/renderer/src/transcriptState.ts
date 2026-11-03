@@ -38,6 +38,10 @@ export type LiveAction =
   // its launch was both written to the JSONL and streamed here, and neither
   // must the turn in flight (see `since`).
   | { type: 'load'; items: TranscriptItem[] }
+  // The socket came back and the stream has a hole of unknown size: start over
+  // from the disk, as reopening the chat would. `said` is the lines the replay
+  // is about to push again. `now` is when this runs, passed in to keep this pure.
+  | { type: 'resync'; items: TranscriptItem[]; said: string[]; now: number }
   // A settled entry (user turn, tool row): settles the tail first, so a tool
   // call that interrupts the text keeps its place in the conversation.
   | { type: 'push'; item: TranscriptItem }
@@ -72,6 +76,24 @@ function mine(item: TranscriptItem): boolean {
   if (item.role === 'image' || item.role === 'artifact') return true
   // `from` is another session speaking — the stream replays that as a `peer`.
   return item.role === 'user' && !item.from
+}
+
+/**
+ * How long after sending a line can still be missing from disk. Past this the
+ * backend has it and the CLI wrote it at submit, so the disk copy is the record.
+ */
+const UNSAVED_MS = 15_000
+/** The disk stamps with the backend's clock and a line typed here with this one. */
+const CLOCK_SKEW_MS = 60_000
+
+/** Lines just sent that a re-read of the disk would otherwise lose. */
+function unsaved(live: TranscriptItem[], items: TranscriptItem[], said: string[], now: number): TranscriptItem[] {
+  return live.filter((line) => {
+    if (line.role !== 'user' || line.from || !line.text || !line.at) return false
+    if (now - line.at >= UNSAVED_MS || said.includes(line.text)) return false
+    const sentAt = line.at
+    return !items.some((i) => i.role === 'user' && i.text === line.text && (i.at ?? 0) >= sentAt - CLOCK_SKEW_MS)
+  })
 }
 
 /** What you said, as the live stream is already showing it. */
@@ -147,6 +169,12 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
         : action.items
       return { ...state, base: beforeTurn(items, state.since, state.live) }
     }
+    case 'resync':
+      return {
+        base: action.items,
+        live: unsaved(state.live, action.items, action.said, action.now),
+        tail: null
+      }
     case 'push': {
       // A subagent row this panel already has (read off disk on open) must not
       // be opened again by the replay of the turn it is part of — two rows for
