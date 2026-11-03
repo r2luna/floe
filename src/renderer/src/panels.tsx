@@ -791,6 +791,8 @@ export function PanelBody({
   onEnterProject,
   onEnterWorktree,
   newWorktree,
+  landingWorktree,
+  focused,
   cwd,
   root,
   session,
@@ -845,6 +847,10 @@ export function PanelBody({
    * inline at the top of the worktrees panel, not in a modal.
    */
   newWorktree?: NewWorktreeProps | null
+  /** Where a launcher belongs before anything is selected. See landingWorktree in App. */
+  landingWorktree?: string
+  /** Whether this is the panel the lane has focused. */
+  focused?: boolean
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
   cwd?: string
   /** Overrides `cwd` for this panel — see Panel.root. */
@@ -942,7 +948,7 @@ export function PanelBody({
         onOpen={onOpen}
         onCommand={onCommand}
         menuItems={menuItems}
-        worktreePath={worktrees.currentPath}
+        worktreePath={worktrees.currentPath ?? landingWorktree}
         branch={
           worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.worktree.branch
         }
@@ -950,6 +956,7 @@ export function PanelBody({
         onCreated={worktrees.reload}
         noProjects={!projects.loading && projects.all.length === 0}
         onAddProject={onAddProject}
+        focused={focused}
       />
     )
   if (kind === 'chat')
@@ -960,6 +967,9 @@ export function PanelBody({
         firstPrompt={firstPrompt}
         firstChoice={firstChoice}
         firstAttached={firstAttached}
+        // Started from a launcher, you were mid-thought: the next line goes in
+        // the same box, so the caret comes along.
+        autoFocus={!!firstPrompt}
         onUsage={onUsage}
         onOpen={onOpen}
         onCommand={onCommand}
@@ -1270,7 +1280,8 @@ function Launcher({
   project,
   onCreated,
   noProjects,
-  onAddProject
+  onAddProject,
+  focused
 }: {
   onOpen: OpenFn
   /** `/resume` is a command, not a first message — see isResume. */
@@ -1286,6 +1297,8 @@ function Launcher({
   /** Nothing has ever been added — not merely "none selected right now". */
   noProjects?: boolean
   onAddProject?: () => void
+  /** Whether this is the panel the lane has focused. */
+  focused?: boolean
 }) {
   // With no branch selected the launcher still works — it just starts the
   // session in the user's home directory, so a question that isn't about any
@@ -1458,7 +1471,9 @@ function Launcher({
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
-        autoFocus
+        // Only as the lane's focused panel: a launcher arriving behind the
+        // checklist of a removal must not take the keyboard away from it.
+        autoFocus={focused}
         // The card, not the footer: this composer is the only thing on an empty
         // screen, with nothing above it to be the bottom edge of. See `boxed`.
         boxed
@@ -1709,6 +1724,7 @@ function ChatPanel({
   firstPrompt,
   firstChoice,
   firstAttached,
+  autoFocus,
   onUsage,
   onOpen,
   onCommand
@@ -1718,6 +1734,8 @@ function ChatPanel({
   firstPrompt?: string
   firstChoice?: ModelChoice
   firstAttached?: Attached
+  /** Put the caret in the composer when the panel mounts. */
+  autoFocus?: boolean
   /** `/resume` is a command, not a message — see isResume. */
   onCommand?: (id: string) => void
   /**
@@ -2207,6 +2225,7 @@ function ChatPanel({
         onChange={setText}
         draftKey={session?.id}
         historyKey={cwd}
+        autoFocus={autoFocus}
         onSend={(choice, attached, message) => {
           repin()
           // What the composer says is going out, which is not always what is in

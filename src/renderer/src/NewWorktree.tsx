@@ -34,6 +34,8 @@ export interface NewWorktreeProps {
   /** The project, for asking which sources it has and what they hold. */
   root: string
   opens?: NewWorktreeOpens
+  /** Changes on every ⌘N: pressed with the form already up, it refocuses the name. */
+  focusRequest?: number
   /** Local branches that have no worktree yet — checking one out is a valid answer. */
   branches: string[]
   /** The project's main branch — the default base to fork from. */
@@ -85,7 +87,8 @@ export function NewWorktreeForm({
   busy = false,
   onClearError,
   onCreate,
-  onCancel
+  onCancel,
+  focusRequest
 }: NewWorktreeProps) {
   const [name, setName] = useState('')
   // null until touched: the default tracks what you TYPE (keep for an existing
@@ -137,6 +140,9 @@ export function NewWorktreeForm({
 
   useEffect(() => {
     requestAnimationFrame(() => input.current?.focus())
+  }, [focusRequest])
+
+  useEffect(() => {
     void window.floe.config.get().then((c) => setLower(c.worktree.lowercase))
   }, [])
 
