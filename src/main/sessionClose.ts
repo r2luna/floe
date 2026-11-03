@@ -34,6 +34,9 @@ export function closeSessionFully(win: BrowserWindow | null, opts: CloseSessionO
     forgetThread(key)
     forgetSeen(key)
   }
+  // Imported on demand, as the MCP server's browser tools do: `browser` needs
+  // Electron's window classes, which this module's other callers may not have.
+  void import('./browser').then((browser) => browser.closeBrowserPages(sessionKeys(opts))).catch(() => {})
   closeSession(opts)
 }
 

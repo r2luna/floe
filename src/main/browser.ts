@@ -269,6 +269,26 @@ export function destroyBrowser(hostId: number): void {
   hosts.delete(hostId)
 }
 
+/** Close the named pages of one window and forget them. */
+export function closePages(sessions: Map<string, Pick<Session, 'win' | 'view' | 'mounted'>>, names: string[]): void {
+  for (const name of names) {
+    const session = sessions.get(name)
+    if (!session) continue
+    sessions.delete(name)
+    if (session.mounted && !session.win.isDestroyed()) session.win.contentView.removeChildView(session.view)
+    if (!session.view.webContents.isDestroyed()) session.view.webContents.close()
+  }
+}
+
+/**
+ * Close a session's pages, in whichever window holds them. A page otherwise
+ * lives until its window closes: its renderer and GPU tiles stay allocated for
+ * a session nobody can return to.
+ */
+export function closeBrowserPages(names: string[]): void {
+  for (const host of hosts.values()) closePages(host.sessions, names)
+}
+
 export function browserState(win: BrowserWindow, key?: string): BrowserState {
   return stateOf(sessionFor(win, key))
 }

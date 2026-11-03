@@ -4,8 +4,48 @@ import { installHook } from './config/hook.test-helper.ts'
 
 installHook()
 
-const { browserKeyFor, browserShortcut, captureFullPage, handOffScreenshot, normalizeBrowserUrl, screenshotFileName, selectBrowserSession } =
+const { browserKeyFor, browserShortcut, captureFullPage, closePages, handOffScreenshot, normalizeBrowserUrl, screenshotFileName, selectBrowserSession } =
   await import('./browser.ts')
+
+const fakePage = (mounted: boolean, gone = false) => {
+  const calls: string[] = []
+  const view = {
+    webContents: { isDestroyed: () => gone, close: () => calls.push('close') }
+  } as unknown as Electron.WebContentsView
+  const win = {
+    isDestroyed: () => gone,
+    contentView: { removeChildView: () => calls.push('remove') }
+  } as unknown as Electron.BrowserWindow
+  return { calls, page: { win, view, mounted } }
+}
+
+test('closePages closes only the named pages and takes them off screen first', () => {
+  const shown = fakePage(true)
+  const hidden = fakePage(false)
+  const other = fakePage(true)
+  const sessions = new Map([
+    ['chat-a', shown.page],
+    ['claude-a', hidden.page],
+    ['chat-b', other.page]
+  ])
+
+  closePages(sessions, ['chat-a', 'claude-a', 'never-opened'])
+
+  assert.deepEqual(shown.calls, ['remove', 'close'])
+  assert.deepEqual(hidden.calls, ['close'])
+  assert.deepEqual(other.calls, [])
+  assert.deepEqual([...sessions.keys()], ['chat-b'])
+})
+
+test('closePages forgets a page whose window and contents are already gone', () => {
+  const dead = fakePage(true, true)
+  const sessions = new Map([['chat-a', dead.page]])
+
+  assert.doesNotThrow(() => closePages(sessions, ['chat-a']))
+
+  assert.deepEqual(dead.calls, [])
+  assert.equal(sessions.size, 0)
+})
 
 test('normalizeBrowserUrl accepts local dev servers without forcing HTTPS', () => {
   assert.equal(normalizeBrowserUrl('localhost:5173'), 'http://localhost:5173')
