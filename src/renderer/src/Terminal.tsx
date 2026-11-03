@@ -1,6 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
+import { disposeTerminal } from './xtermDispose'
 import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
@@ -263,7 +264,7 @@ export function TerminalPanel({
       offTheme()
       input.dispose()
       resize.disconnect()
-      term.dispose()
+      disposeTerminal(term)
       // The PTY is deliberately left running in the main process.
     }
     // `file` is a dependency: opening another file re-runs this, which re-attaches
