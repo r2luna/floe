@@ -11,6 +11,7 @@ import { contextTokens } from '../shared/types'
 import { collapseSkills, hasSkill } from '../shared/skills'
 import { collapseSessionRefs, hasSessionRef } from '../shared/sessionRefs'
 import { collapseTaskRefs, hasTaskRef } from '../shared/taskRefs'
+import { collapseProjectRefs, hasProjectRef } from '../shared/projectRefs'
 import { hasPremise, premiseIn, stripPremise } from '../shared/premise'
 import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
@@ -757,6 +758,7 @@ export function collapseFloe(text: string): string {
   if (hasSkill(out)) out = collapseSkills(out)
   if (hasSessionRef(out)) out = collapseSessionRefs(out)
   if (hasTaskRef(out)) out = collapseTaskRefs(out)
+  if (hasProjectRef(out)) out = collapseProjectRefs(out)
   return out
 }
 

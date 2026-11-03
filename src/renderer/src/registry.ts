@@ -17,7 +17,9 @@ import {
   patchPanel,
   resizePanel,
   setCursor,
+  stackSidebar,
   toggleDock,
+  toggleFold,
   toggleKind
 } from './lane.ts'
 import { READS_AS_PROSE } from './proseDiff.ts'
@@ -741,6 +743,26 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Panels',
         enabled: (c) => c.lane.focus > 0 && !!c.lane.panels[c.lane.focus],
         run: (c) => c.setLane((l) => toggleDock(l, l.focus))
+      },
+      {
+        // The accordion half of a sidebar stack: fold the focused list to its
+        // header, or open it again. Folding is a property of the panel, so the
+        // palette, the key and MCP all flip the same field.
+        id: 'panel.fold',
+        title: 'Fold or unfold panel',
+        group: 'Panels',
+        enabled: (c) => !!c.lane.panels[c.lane.focus],
+        run: (c) => c.setLane((l) => toggleFold(l, l.focus))
+      },
+      {
+        // Projects, active and worktrees in ONE column instead of three. The
+        // layout is built from `dock`, so ⌘K / still undoes it one panel at a
+        // time.
+        id: 'sidebar.stack',
+        title: 'Stack projects, active and worktrees in one column',
+        group: 'Panels',
+        run: (c) =>
+          c.setLane((l) => stackSidebar(l, (kind) => (c.canOpen(kind) ? c.makePanel(kind) : undefined)))
       },
       {
         // The keyboard half of dragging a splitter. Same lane field, so a drag

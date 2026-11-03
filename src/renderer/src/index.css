@@ -1286,6 +1286,13 @@ button {
   font-size: 12px;
 }
 
+/* The gap to the branch is wider than the icon's, so the two read as a pair of
+   names rather than one icon-prefixed string. */
+.greet-project {
+  margin-right: 6px;
+  color: var(--text);
+}
+
 /* On a phone the greeting is two lines whatever you do — "Good afternoon," and
    a name will not fit in 390px at 21px — so it stops pretending to be a row:
    the mark goes above the words and the whole block centres under it, instead
@@ -4871,6 +4878,17 @@ button {
   scrollbar-width: none;
 }
 
+/* A patch is read line-by-line, but a single long line must not turn the whole
+   panel into a horizontal scroller. Keep its indentation and wrap unbroken
+   values when they reach the code column's edge. Files retain their scrollable
+   source view. */
+.patch-diff .diff-code,
+.patch-diff .diff-hunk {
+  overflow-x: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .diff-row[data-kind="add"] {
   background: #22371f4d;
 }
@@ -5210,14 +5228,15 @@ button {
   background: var(--wash-4);
 }
 
-/* As wide as the hanging indent reserves (set inline, per list block). A number
-   is right-aligned in it with a character of air before the text, so 9. and 10.
-   line up on the period. */
+/* As wide as the hanging indent reserves (set inline, per list block). The
+   marker, whatever it is — a number, a disc or a checkbox — is right-aligned in
+   it with the SAME air before the text, so 9. and 10. line up on the period and
+   every kind of list reads with one gap. */
 .md-bullet {
   display: inline-block;
   /* The done-task tick is positioned against this box. */
   position: relative;
-  padding-right: 1ch;
+  padding-right: 1.5ch;
   /* text-indent inherits, and the item's hanging indent would drag the drawn
      marker out of its own column. The indent is the line's, not the marker's. */
   text-indent: 0;
@@ -5233,19 +5252,9 @@ button {
 /* The unordered marker is drawn, not typed: a disc centred in its column and on
    the text's x-height. A font's bullet glyph is whatever size the face decided,
    sits on the baseline, and is a hollow box when the face has no bullet. */
-/* A disc has no period to line up on, so it sits in the middle of its column
-   instead of against the text. */
-.md-bullet[data-dot] {
-  padding-right: 0;
-  text-align: center;
-}
-
-/* A checkbox starts where the text of the lines around it starts, and the
-   rest of its column is the gap before the words. Centred, it floated a
-   little in from the edge with no air on the text side. */
-.md-bullet[data-task] {
-  padding-right: 0;
-  text-align: left;
+/* A checkbox keeps the dim ink of a control you have not used yet. */
+.md-bullet[data-task],
+:root[data-theme='light'] .md-bullet[data-task] {
   color: var(--dim);
 }
 
@@ -5276,17 +5285,17 @@ button {
   background: currentColor;
 }
 
-/* Centred on the box, which is the first 11px of the column, not the column. */
+/* Centred on the box, which is the 11px before the gap, not the column. */
 .md-bullet[data-task="done"]::after {
   content: "";
   position: absolute;
   top: 50%;
-  left: 5.5px;
+  right: calc(1.5ch + 5.5px);
   width: 3px;
   height: 6px;
   border: solid var(--bg);
   border-width: 0 1.5px 1.5px 0;
-  transform: translate(-50%, -65%) rotate(45deg);
+  transform: translate(50%, -65%) rotate(45deg);
 }
 
 /* Everything a document says but does not mean for you to read as prose: front
@@ -5402,6 +5411,12 @@ button {
   font-size: 11px;
 }
 
+/* Shiki's colours, dark side: same swap as .diff-code above. Light keeps the
+   inline github-light colour. */
+:root[data-theme='dark'] .md-row[data-md="code"] .md-text span[style] {
+  color: var(--shiki-dark, currentColor) !important;
+}
+
 /* A table row is a grid, not a line of pipes: every row of a block shares one
    template (set inline from the block's widest cells), so the columns line up
    while each row stays its own numbered, navigable line. */
@@ -5416,8 +5431,13 @@ button {
 
 .md-cells {
   display: grid;
-  gap: 0 14px;
-  padding: 1px 0;
+  gap: 0 24px;
+  padding: 3px 0;
+}
+
+/* A thin rule between body rows, so a row reads across its columns. */
+.md-row[data-md="table"] .md-cells:not([data-head]) {
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .md-cell {
@@ -11005,4 +11025,30 @@ button.cv-row2:hover {
 .msg-ref-link:hover .msg-ref-name {
   color: var(--accent);
   text-decoration: underline;
+}
+
+/* --- sidebar stack: projects, active and worktrees in one column ---------- */
+
+/* An accordion: every list shares the column's height, and a folded one is
+   nothing but its header. Overrides the 40% a plain docked panel takes. */
+.lane-col[data-stack] > .panel {
+  flex: 1 1 0;
+}
+
+.lane-col[data-stack] > .panel[data-folded] {
+  flex: 0 0 auto;
+}
+
+.panel[data-folded] > .panel-body {
+  display: none;
+}
+
+.panel[data-folded] > .panel-head {
+  border-bottom-color: transparent;
+}
+
+.fold-caret {
+  flex: none;
+  width: 10px;
+  color: var(--dim);
 }

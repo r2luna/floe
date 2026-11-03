@@ -26,6 +26,8 @@ import { expandSkills } from '../shared/skills'
 import { expandSessionRefs } from '../shared/sessionRefs'
 import { resolveSessionRef } from './sessionRefs'
 import { expandTaskRefs } from '../shared/taskRefs'
+import { expandProjectRefs } from '../shared/projectRefs'
+import { resolveProjectRef } from './projectRefs'
 import { resolveTaskRef } from './taskRefs'
 import { readSkill } from './config/skills'
 import { projectFor } from './config/projectStore'
@@ -140,12 +142,16 @@ export function startTurn(
   // own text turned out to contain, which is the right way round: a skill that
   // names a session means that session.
   // Tasks last: a session titled `001` is the more specific thing to have meant.
-  const expanded = expandTaskRefs(
-    expandSessionRefs(
-      expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined)),
-      (slug) => resolveSessionRef(slug, worktreePath)
+  // Projects (`$name`) share no mark with the others, so their order is free.
+  const expanded = expandProjectRefs(
+    expandTaskRefs(
+      expandSessionRefs(
+        expandSkills(prompt, (name) => readSkill(name, projectFor(worktreePath) ?? undefined)),
+        (slug) => resolveSessionRef(slug, worktreePath)
+      ),
+      (ref) => resolveTaskRef(ref, worktreePath)
     ),
-    (ref) => resolveTaskRef(ref, worktreePath)
+    resolveProjectRef
   )
   // Anything but Claude runs on the machine's own runtime and answers over the
   // same agent:event channel.

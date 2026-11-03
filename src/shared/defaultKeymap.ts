@@ -138,7 +138,11 @@ scroll where there isn't — two entries sharing a chord, split by \`when\`, wit
 the narrower one first. \`⌃1\`–\`⌃9\` jump straight to a panel by position, on the
 same modifier as everything else here — \`⌘1\`–\`⌘9\` are the worktrees now. \`⌘K /\`
 flips the focused panel between docked beside and docked below. \`⌃=\` and \`⌃-\`
-make the focused panel bigger and smaller: wider in the lane, taller docked.`,
+make the focused panel bigger and smaller: wider in the lane, taller docked.
+
+\`sidebar.stack\` (palette) puts projects, active and worktrees in one column. Moving
+onto one of them opens it and folds the others. Bare \`z\` folds or unfolds the
+focused list.`,
     binds: [
       { key: 'ctrl+h', command: 'panel.left' },
       { key: 'ctrl+l', command: 'panel.right' },
@@ -152,7 +156,12 @@ make the focused panel bigger and smaller: wider in the lane, taller docked.`,
       { key: 'ctrl+=', command: 'panel.grow' },
       { key: 'ctrl+-', command: 'panel.shrink' },
       { key: 'super+w', command: 'panel.close' },
-      { key: 'super+k /', command: 'panel.dock' }
+      { key: 'super+k /', command: 'panel.dock' },
+      {
+        key: 'z',
+        command: 'panel.fold',
+        when: 'panel == "projects" or panel == "active" or panel == "worktrees"'
+      }
     ]
   },
   {

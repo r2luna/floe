@@ -17,6 +17,8 @@ export const COMMAND_IDS: string[] = [
   'panel.focusAt',
   'panel.close',
   'panel.dock',
+  'panel.fold',
+  'sidebar.stack',
   'panel.grow',
   'panel.shrink',
   'panel.resetSize',

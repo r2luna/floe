@@ -19,10 +19,12 @@ import {
   columnsOf,
   crowdedOut,
   focusAt,
+  isSidebarStack,
   laneOf,
   open,
   patchPanel,
   resizePanel,
+  reveal,
   setCursor,
   slotOf,
   toggleDock
@@ -524,7 +526,7 @@ export default function App() {
   // `here`, not the sidebar's selection: at the launcher nothing is selected
   // yet, and a `#` menu that offered sessions but no files was reading a
   // worktree the app already knew how to name.
-  const menuItems = useMenuItems(here, worktrees, projects.current?.path)
+  const menuItems = useMenuItems(here, worktrees, projects.current?.path, projects.all)
   // After a turn ends, adopt Claude's auto-generated title (or a Haiku-written
   // one for headless runs) so a session stops reading "Session N". The main
   // process only applies it while the title is still a placeholder and the
@@ -776,6 +778,12 @@ export default function App() {
   }, [sessionKey])
   // How the lane is laid out: one entry per column, docked panels folded in.
   const columns = columnsOf(lane)
+  // The sidebar stack is an accordion: moving onto a list opens it and folds the
+  // others. Keyed on the focus ONLY, so folding one by hand (`z`) is not undone
+  // on the next render.
+  useEffect(() => {
+    setLane((l) => reveal(l))
+  }, [lane.focus])
   // The lane's inner width, watched: whether the columns fit is a question
   // about the window, and the answer changes when you resize it.
   const [laneWidth, setLaneWidth] = useState(0)
@@ -3318,6 +3326,7 @@ export default function App() {
                 // A width you dragged to is a width you asked for: it wins over
                 // growing, or the lane would take it straight back.
                 data-sized={head.width !== undefined || undefined}
+                data-stack={isSidebarStack(column) || undefined}
                 data-fill={fill || undefined}
                 data-grow={
                   (head.width === undefined && 'grow' in headSpec && headSpec.grow) || undefined
@@ -3392,7 +3401,7 @@ export default function App() {
                 className="panel"
                 data-kind={panel.kind}
                 style={
-                  panel.dock
+                  panel.dock && !isSidebarStack(column)
                     ? {
                         // A height you dragged wins; otherwise the kind's own
                         // share, and 40% for a kind with no opinion.
@@ -3409,6 +3418,7 @@ export default function App() {
                 data-focused={i === lane.focus || undefined}
                 data-bare={bare || undefined}
                 data-docked={panel.dock || undefined}
+                data-folded={(panel.folded && isSidebarStack(column)) || undefined}
                 onMouseDown={(e) => {
                   setLane((l) => focusAt(l, i))
                   startLineDrag(e, i)
@@ -3424,7 +3434,7 @@ export default function App() {
                   if (at !== -1) setLane((l) => setCursor(l, i, at))
                 }}
               >
-                {panel.dock === 'below' && (
+                {panel.dock === 'below' && !isSidebarStack(column) && (
                   <Splitter
                     axis="y"
                     invert
@@ -3442,6 +3452,11 @@ export default function App() {
                 )}
                 {!bare && (
                   <header className="panel-head">
+                    {isSidebarStack(column) && (
+                      <span className="fold-caret" aria-hidden="true">
+                        {panel.folded ? '▸' : '▾'}
+                      </span>
+                    )}
                     <Icon size={14} stroke={1.6} className="panel-icon" />
                     {/* A query is titled by who answers in it, in that
                         harness's own nick colour — the same colour its lines
