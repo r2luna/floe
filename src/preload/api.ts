@@ -560,6 +560,7 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('agent:recap', key, worktreePath, awayMs),
       // The turn in flight, for a panel that mounts mid-turn (see AgentReplay).
       replay: (key: string): Promise<AgentReplay> => ipcRenderer.invoke('agent:replay', key),
+      clearChecklist: (key: string): Promise<void> => ipcRenderer.invoke('agent:clearChecklist', key),
       // Every session working right now, for useSessionActivity to reconcile
       // its event-driven set against.
       active: (): Promise<string[]> => ipcRenderer.invoke('agent:active'),

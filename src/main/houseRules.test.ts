@@ -37,6 +37,12 @@ test('the rules go once per thread, and again after a reset', () => {
   assert.notEqual(houseRulesFor('s2', 'opencode'), '')
 })
 
+test("Floe's own rule goes out even with no prompt file, and only when asked for", () => {
+  rmSync(promptFile, { force: true })
+  assert.match(houseRulesFor('s4', 'codex', 'Keep a checklist.'), /Keep a checklist\./)
+  assert.equal(houseRulesFor('s5', 'codex'), '')
+})
+
 test('Claude gets nothing here — it takes the same text as a system prompt', () => {
   // agent.ts passes --append-system-prompt. Sending it as a message too would
   // be the instructions twice, once in a form Claude could read as the user

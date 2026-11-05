@@ -68,8 +68,8 @@ export function serversFor(key: string, worktreePath?: string): McpServerMap {
 
 /**
  * A query gets no servers at all (D8): its key resolves to no session, so the
- * token would be one no tool can attribute, and a read-only side conversation
- * has no business opening panels or creating sessions either.
+ * token would be one no tool can attribute, so queries receive no Floe control
+ * tools.
  *
  * Claude spells that with `--strict-mcp-config` and an empty file. Nobody else
  * has such a flag: codex, opencode and gemini all MERGE what Floe passes over
@@ -101,6 +101,11 @@ export function queryServers(worktreePath?: string): McpServerMap {
  */
 export function harnessMcp(harness: string, key: string, worktreePath?: string): Record<string, string> {
   return harnessEnv(harness, key, mapFor(key, worktreePath))
+}
+
+/** Does this turn's non-Claude harness hold Floe's tools? Local models and queries do not. */
+export function holdsFloeTools(harness: string, key: string): boolean {
+  return ['codex', 'opencode', 'gemini'].includes(harness) && !isQueryKey(key)
 }
 
 /**

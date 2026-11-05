@@ -267,7 +267,10 @@ test('opencode: the reply and the session id come out of its JSON stream', async
   assert.deepEqual(args.slice(0, 4), ['run', '--format', 'json', '--print-logs'])
   assert.ok(args.includes('-m') && args.includes('anthropic/sonnet'))
   // "ask" is not something opencode can do, so the default mode snaps to plan.
-  assert.deepEqual(args.slice(-3), ['--agent', 'plan', 'hello'])
+  assert.equal(args[args.indexOf('--agent') + 1], 'plan')
+  // Floe's checklist rule rides on the first message, and what you typed comes last.
+  assert.ok(args.join('\n').includes('mcp__floe__set_checklist'))
+  assert.equal(args.at(-1), 'hello')
   assert.equal(args.includes('-s'), false, 'no session to continue on the first turn')
 
   // The id it reported is carried into the next turn.
@@ -325,8 +328,10 @@ test('gemini: -o json, the prompt, and our mode in its own spelling', async () =
     assert.deepEqual(text(events), ['the gemini answer'])
     assert.equal(ok(events), true)
     const args = argv()[0]
-    assert.deepEqual(args.slice(0, 6), ['-p', 'hi', '-o', 'json', '--approval-mode', approval])
-    assert.deepEqual(args.slice(6), ['-m', 'gemini-3-pro'])
+    assert.equal(args[0], '-p')
+    // Floe's checklist rule rides on the first message, and what you typed comes last.
+    assert.ok(args.join('\n').includes('mcp__floe__set_checklist'))
+    assert.deepEqual(args.slice(-7), ['hi', '-o', 'json', '--approval-mode', approval, '-m', 'gemini-3-pro'])
   }
 })
 

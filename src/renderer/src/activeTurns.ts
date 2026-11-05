@@ -8,6 +8,8 @@
 // mid-interval gets a fresh one at once rather than waiting out the tick.
 
 export interface TurnSnapshot {
+  /** When the requests started, so an older answer cannot erase a newer event. */
+  requestedAt: number
   /** Keys with a turn in flight, or null when main did not answer. */
   active: string[] | null
   /** Keys blocked on the user, or null when main did not answer. */
@@ -29,12 +31,13 @@ let inFlight: Promise<TurnSnapshot> | null = null
  */
 export function refreshTurns(): Promise<TurnSnapshot> {
   if (inFlight) return inFlight
+  const requestedAt = Date.now()
   inFlight = Promise.all([
     window.floe.agent.active().catch(() => null),
     window.floe.agent.waiting().catch(() => null)
   ])
     .then(([active, waiting]) => {
-      const snapshot = { active, waiting }
+      const snapshot = { active, waiting, requestedAt }
       for (const listener of listeners) listener(snapshot)
       return snapshot
     })

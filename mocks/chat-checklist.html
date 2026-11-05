@@ -1,0 +1,174 @@
+<!doctype html><html lang="en" data-chat-layout="classic"><head><meta charset="utf-8" />
+<title>Floe — agent checklist</title>
+<!-- The app's real stylesheet for the transcript. Only the `.cl-*` rules below are
+     new, and they are what the feature would add to index.css. Sizes are inherited
+     from the transcript: hierarchy comes from bold and colour, never font size. -->
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .page { padding: 20px 24px 60px; }
+  .bar { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; color: var(--dim); }
+  .bar b { color: var(--text-strong); }
+  .bar .grow { flex: 1; }
+  .chip { padding: 4px 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .chip kbd { color: var(--dim); font: inherit; margin-left: 4px; }
+  .lbl { margin: 0 0 6px; color: var(--dim); }
+  .lbl b { color: var(--text-strong); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; margin-bottom: 30px; }
+
+  /* A chat panel: the transcript scroller, then the pinned slot, then the composer. */
+  .frame { position: relative; display: flex; flex-direction: column; height: 440px; background: var(--panel); border: 1px solid var(--line); }
+  .scroll { flex: 1; min-height: 0; overflow: hidden; padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-end; }
+  .fake-composer { border-top: 1px solid var(--line-soft); padding: 10px 14px; color: var(--dim); }
+
+  /* ---- what the feature adds ---- */
+  :root { --cl-done: #93b8a1; }
+  :root[data-theme='light'] { --cl-done: #2f7d52; }
+
+  .cl { font: inherit; }
+  .cl-pinned { border-top: 1px solid var(--line-soft); padding: 6px 14px; }
+  .cl-inline { margin-top: 10px; padding: 6px 10px; border: 1px solid var(--line); }
+  .cl-dock { position: absolute; right: 10px; bottom: 50px; width: 270px; padding: 6px 10px; background: var(--panel); border: 1px solid var(--edge); }
+
+  /* The head is the whole strip when folded: fold mark, segments, count, the live step. */
+  .cl-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 2px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .cl-mark { flex: none; width: 10px; color: var(--dim); }
+  .cl-count { flex: none; color: var(--text-strong); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cl-now { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text); }
+
+  /* One segment per task, so the size of the job reads at a glance. */
+  .cl-segs { flex: none; display: flex; gap: 2px; }
+  .cl-seg { width: 12px; height: 4px; background: var(--edge); transition: background .3s; }
+  .cl-seg[data-s='completed'] { background: var(--cl-done); }
+  .cl-seg[data-s='in_progress'] { background: var(--working); animation: cl-pulse 1.4s ease-in-out infinite; }
+  .cl-seg[data-s='cancelled'] { background: transparent; outline: 1px solid var(--edge); outline-offset: -1px; }
+  @keyframes cl-pulse { 50% { opacity: .35; } }
+
+  .cl-list { list-style: none; margin: 4px 0 2px; padding: 0; }
+  .cl-item { display: flex; align-items: baseline; gap: 8px; padding: 2px 0; transition: color .3s; }
+  .cl-item[data-s='pending'] { color: var(--dim); }
+  .cl-item[data-s='in_progress'] { color: var(--text-strong); font-weight: 700; }
+  .cl-item[data-s='completed'] { color: var(--dim); }
+  .cl-item[data-s='cancelled'] { color: var(--dim); text-decoration: line-through; }
+  .cl-more { color: var(--dim); padding: 2px 0 2px 21px; }
+
+  /* The box is an outline, like every other control. Done is a tinted outline
+     and a drawn tick, never a solid fill. */
+  .cl-box { flex: none; position: relative; top: 2px; display: grid; place-items: center; width: 13px; height: 13px; border: 1px solid var(--edge); transition: border-color .3s; }
+  .cl-item[data-s='completed'] .cl-box { border-color: var(--cl-done); }
+  .cl-box svg { width: 9px; height: 9px; fill: none; stroke: var(--cl-done); stroke-width: 2; stroke-dasharray: 16; stroke-dashoffset: 0; }
+  .cl-item[data-fresh] .cl-box svg { animation: cl-tick .35s ease-out; }
+  @keyframes cl-tick { from { stroke-dashoffset: 16; } }
+  .cl-box .cl-dash { width: 7px; height: 1px; background: var(--dim); }
+  .cl-box .cl-spin { color: var(--working); font-weight: 400; line-height: 1; }
+
+  .cl-end { display: flex; align-items: center; gap: 8px; color: var(--dim); }
+  .cl-end b { color: var(--text-strong); }
+  .cl-end .cl-box { top: 0; }
+</style></head><body><div class="page">
+
+<div class="bar">
+  <b>Agent checklist</b><span>the same run drives all three placements</span><span class="grow"></span>
+  <button class="chip" id="step">step<kbd>space</kbd></button>
+  <button class="chip" id="replay">replay<kbd>r</kbd></button>
+  <button class="chip" id="fold">fold<kbd>c</kbd></button>
+  <button class="chip" id="theme">theme<kbd>t</kbd></button>
+</div>
+
+<div class="grid">
+  <div><p class="lbl"><b>L1 · pinned above the composer</b> (recommended) — always visible, folds to one line</p>
+    <div class="frame"><div class="scroll" data-chat></div><div class="cl cl-pinned" data-cl></div><div class="fake-composer">message claude…</div></div></div>
+  <div><p class="lbl"><b>L2 · inline under the latest message</b> — the desktop Code tab's spot, scrolls away</p>
+    <div class="frame"><div class="scroll"><div data-chat></div><div class="cl cl-inline" data-cl></div></div><div class="fake-composer">message claude…</div></div></div>
+  <div><p class="lbl"><b>L3 · corner dock</b> — beside the agents dock, covers the transcript</p>
+    <div class="frame"><div class="scroll" data-chat></div><div class="cl cl-dock" data-cl></div><div class="fake-composer">message claude…</div></div></div>
+</div>
+
+<div class="grid">
+  <div><p class="lbl"><b>S1 · folded</b> — the default while working once you press <b>c</b></p><div class="frame" style="height:auto"><div class="cl cl-pinned" id="s1"></div></div></div>
+  <div><p class="lbl"><b>S2 · long list</b> — a window around the live step, so it never eats the chat</p><div class="frame" style="height:auto"><div class="cl cl-pinned" id="s2"></div></div></div>
+  <div><p class="lbl"><b>S3 · turn stopped early</b> — the unfinished steps stay honest</p><div class="frame" style="height:auto"><div class="cl cl-pinned" id="s3"></div></div></div>
+  <div><p class="lbl"><b>S4 · finished</b> — the strip leaves, one fold row stays in the transcript</p><div class="frame" style="height:auto"><div class="scroll" style="padding:8px 14px"><div class="tool-run"><div class="run-fold" role="button"><span class="bash-mark">▸</span><span class="run-fold-line"><span class="run-fold-count">checklist 5/5</span><span class="run-fold-verbs"> · 4m 12s</span></span></div></div></div></div></div>
+  <div><p class="lbl"><b>S5 · codex</b> — same strip, any harness, only the nick changes</p><div class="frame" style="height:auto"><div class="scroll" style="padding:8px 14px"><div class="irc-typing" data-live><span class="irc-nick" style="color:var(--nick-codex)">codex</span> is typing<span class="spin">⠹</span>&#32;<span class="irc-dim"> 12s · 3.4k</span></div></div><div class="cl cl-pinned" id="s5"></div></div></div>
+</div>
+
+</div><script>
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+const TICK = '<svg viewBox="0 0 10 10"><path d="M1.5 5.5 4 8l4.5-6"/></svg>'
+const BASE = [
+  ['Map the event flow', 'Mapping the event flow'],
+  ['Add the checklist event', 'Adding the checklist event'],
+  ['Render the pinned strip', 'Rendering the pinned strip'],
+  ['Run the gate', 'Running the gate'],
+  ['Drive the real app', 'Driving the real app'],
+]
+const fresh = () => BASE.map(([subject, activeForm]) => ({ subject, activeForm, status: 'pending' }))
+let tasks = fresh(), justDone = -1, folded = false, frame = 0
+
+const box = (t, i) => `<span class="cl-box">${
+  t.status === 'completed' ? TICK :
+  t.status === 'in_progress' ? `<span class="cl-spin" data-spin>${SPIN[frame]}</span>` :
+  t.status === 'cancelled' ? '<span class="cl-dash"></span>' : ''}</span>`
+
+const row = (t, i, live) => `<li class="cl-item" data-s="${t.status}" ${live && i === justDone ? 'data-fresh' : ''}>${box(t, i)}<span>${t.status === 'in_progress' ? t.activeForm : t.subject}</span></li>`
+
+function strip(list, { fold = false, windowed = false, live = false, ended = false } = {}) {
+  const done = list.filter((t) => t.status === 'completed').length
+  const now = list.find((t) => t.status === 'in_progress')
+  const line = ended ? 'stopped' : now ? now.activeForm : done === list.length ? 'done' : 'next: ' + (list.find((t) => t.status === 'pending') || {}).subject
+  const head = `<button class="cl-head" tabindex="-1"><span class="cl-mark">${fold ? '▸' : '▾'}</span><span class="cl-segs">${list.map((t) => `<span class="cl-seg" data-s="${t.status}"></span>`).join('')}</span><span class="cl-count">${done}/${list.length}</span>${fold ? `<span class="cl-now">${line}</span>` : ended ? `<span class="cl-now">${line}</span>` : '<span class="cl-now"></span>'}</button>`
+  if (fold) return head
+  let rows = list.map((t, i) => row(t, i, live))
+  if (windowed) {
+    const at = Math.max(0, list.findIndex((t) => t.status === 'in_progress'))
+    const from = Math.max(0, at - 1), to = Math.min(list.length, from + 5)
+    rows = rows.slice(from, to).concat(`<li class="cl-more">+${list.length - (to - from)} more</li>`)
+  }
+  return head + `<ul class="cl-list">${rows.join('')}</ul>`
+}
+
+const CHAT = (n) => `<div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>add the checklist to the chat</div></div><div class="irc-head" style="--nick:var(--nick-claude)"><span class="irc-time">14:03</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></div><div class="tool-run"><div class="run-fold" role="button"><span class="bash-mark">▸</span><span class="run-fold-line"><span class="run-fold-count">${6 + n * 4} calls</span><span class="run-fold-verbs"> · read, grep, edit</span></span></div></div>`
+
+function render() {
+  document.querySelectorAll('[data-cl]').forEach((el) => { el.innerHTML = strip(tasks, { fold: folded, live: true }) })
+  const n = tasks.filter((t) => t.status === 'completed').length
+  document.querySelectorAll('[data-chat]').forEach((el) => { el.innerHTML = CHAT(n) })
+}
+
+function step() {
+  justDone = -1
+  const at = tasks.findIndex((t) => t.status === 'in_progress')
+  if (at >= 0) { tasks[at].status = 'completed'; justDone = at; }
+  else { const next = tasks.findIndex((t) => t.status === 'pending'); if (next >= 0) tasks[next].status = 'in_progress'; else { tasks = fresh() } }
+  render()
+}
+
+const statuses = (arr) => BASE.map(([subject, activeForm], i) => ({ subject, activeForm, status: arr[i] }))
+const LONG = Array.from({ length: 12 }, (_, i) => ({ subject: `Migrate panel ${i + 1}`, activeForm: `Migrating panel ${i + 1}`, status: i < 5 ? 'completed' : i === 5 ? 'in_progress' : 'pending' }))
+document.getElementById('s1').innerHTML = strip(statuses(['completed', 'completed', 'in_progress', 'pending', 'pending']), { fold: true })
+document.getElementById('s2').innerHTML = strip(LONG, { windowed: true })
+document.getElementById('s3').innerHTML = strip(statuses(['completed', 'completed', 'cancelled', 'pending', 'pending']), { ended: true })
+document.getElementById('s5').innerHTML = strip(statuses(['completed', 'in_progress', 'pending', 'pending', 'pending']))
+
+const q = new URLSearchParams(location.search)
+if (q.get('theme') === 'light') document.documentElement.dataset.theme = 'light'
+if (q.has('at')) { for (let i = 0; i < +q.get('at'); i++) step() }
+
+const toggleTheme = () => { const d = document.documentElement.dataset; d.theme = d.theme === 'light' ? '' : 'light' }
+const toggleFold = () => { folded = !folded; render() }
+const replay = () => { tasks = fresh(); justDone = -1; render() }
+document.getElementById('step').onclick = step
+document.getElementById('replay').onclick = replay
+document.getElementById('fold').onclick = toggleFold
+document.getElementById('theme').onclick = toggleTheme
+addEventListener('keydown', (e) => {
+  if (e.key === ' ') { e.preventDefault(); clearInterval(auto); step() }
+  if (e.key === 'r') replay()
+  if (e.key === 'c') toggleFold()
+  if (e.key === 't') toggleTheme()
+})
+
+render()
+setInterval(() => { frame = (frame + 1) % SPIN.length; document.querySelectorAll('[data-spin]').forEach((s) => { s.textContent = SPIN[frame] }) }, 90)
+const auto = q.has('at') ? 0 : setInterval(step, 1500)
+</script></body></html>

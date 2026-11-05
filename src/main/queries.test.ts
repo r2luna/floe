@@ -169,15 +169,14 @@ function fresh(unread: number): { sessionId: string; qkey: string } {
   return { sessionId, qkey: opened.key }
 }
 
-test('only a harness with a real read-only mode can hold a query', () => {
-  // The gate is `plan`, not an approximation of it: gemini has no read-only
-  // setting, so `nearestMode` would land it on "ask" and it would start asking
-  // permission to edit — in a conversation that promised never to write (R2).
+test('every supported harness can hold a query', () => {
   assert.equal(canOpenQuery('claude'), true)
   assert.equal(canOpenQuery('codex'), true)
   assert.equal(canOpenQuery('opencode'), true)
-  assert.equal(canOpenQuery('gemini'), false)
-  assert.equal(canOpenQuery('ollama'), false)
+  assert.equal(canOpenQuery('gemini'), true)
+  assert.equal(canOpenQuery('lmstudio'), true)
+  assert.equal(canOpenQuery('ollama'), true)
+  assert.equal(canOpenQuery('unknown'), false)
 })
 
 test('opening the same harness twice is one query, not two', () => {
@@ -254,14 +253,13 @@ test('an action on a query nobody has says so, rather than doing nothing', () =>
 
 test('@all asks the harnesses it was given, and never any others', () => {
   const { sessionId } = fresh(0)
-  // gemini has no read-only mode, so it is refused rather than approximated —
-  // and the ones that can hold a query still go out (R2, R7).
+  // Every named runtime goes out, and nothing is added to the caller's list.
   const out = fanOut(WIN, sessionId, WT, {
     harnesses: ['codex', 'claude', 'gemini'],
     prompt: 'o que voces acham'
   })
-  assert.deepEqual(out.refused, ['gemini'])
-  assert.deepEqual(out.keys, [`${sessionId}~codex`, `${sessionId}~claude`])
+  assert.deepEqual(out.refused, [])
+  assert.deepEqual(out.keys, [`${sessionId}~codex`, `${sessionId}~claude`, `${sessionId}~gemini`])
   // One turn each, in its OWN query — never in the chat.
   assert.deepEqual(globalThis.__sent.map((t) => t.key), out.keys)
   for (const t of globalThis.__sent) assert.equal(t.prompt, 'o que voces acham')
@@ -333,16 +331,13 @@ function opened(sessionId: string, qkey: string, prompt = 'confere o erro'): Pro
   return new Promise((resolve) => withOpeningContext(WIN, qkey, sessionId, WT, 'codex', prompt, resolve))
 }
 
-test('a query opened off a Claude chat starts with a summary of it', async () => {
+test('a query opened off a Claude chat receives its full recorded transcript', async () => {
   const { sessionId, qkey } = fresh(0)
   linkCreatedSession(sessionId, 'claude-parent')
-  globalThis.__summary = 'The Changes panel diffs against origin/HEAD.'
+  globalThis.__said[sessionId] = 4
   const prefix = await opened(sessionId, qkey)
-  // Forked off the parent's own Claude session, asked about THIS message.
-  assert.equal(globalThis.__forked[0].id, 'claude-parent')
-  assert.match(globalThis.__forked[0].input, /confere o erro/)
-  assert.match(prefix, /diffs against origin\/HEAD/)
-  assert.match(prefix, /floe:handoff/, 'wrapped as a packet, so it strips back out of the transcript')
+  assert.deepEqual(globalThis.__forked, [], 'does not depend on the parent Claude process')
+  assert.match(prefix, new RegExp(`\\[packet 4 from ${sessionId}\\]`))
 })
 
 test('a chat with no Claude session to fork sends its raw tail instead', async () => {
@@ -353,12 +348,11 @@ test('a chat with no Claude session to fork sends its raw tail instead', async (
   assert.match(prefix, new RegExp(`\\[packet 4 from ${sessionId}\\]`))
 })
 
-test('a summary run that comes back empty falls back to the raw tail', async () => {
+test('the full transcript path works even without a Claude session id', async () => {
   const { sessionId, qkey } = fresh(0)
-  linkCreatedSession(sessionId, 'claude-parent-2')
   globalThis.__said[sessionId] = 2
   const prefix = await opened(sessionId, qkey)
-  assert.equal(globalThis.__forked.length, 1)
+  assert.deepEqual(globalThis.__forked, [])
   assert.match(prefix, /\[packet 2/)
 })
 

@@ -87,7 +87,8 @@ import {
   type FinderChat
 } from './finderChats'
 import type { NewWorktreeProps, NewWorktreeOpens } from './NewWorktree'
-import type { Worktree } from '../../shared/types'
+import type { PermissionMode, Worktree } from '../../shared/types'
+import { modeLabel } from '../../shared/modes'
 import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -152,7 +153,7 @@ function matchingRows(rows: HTMLElement[], q: string): number[] {
 const panelOf = (
   kind: PanelKind,
   sub?: string,
-  session?: { id: string; worktreePath: string },
+  session?: { id: string; worktreePath: string; permissionMode?: PermissionMode },
   firstPrompt?: string,
   firstChoice?: ModelChoice
 ): Panel => ({
@@ -2646,7 +2647,7 @@ export default function App() {
   >(() => {})
   useEffect(() => window.floe.query.onOpened((p) => openQueryRef.current(p)), [])
   openQueryRef.current = ({ query, worktreePath, parentKeys }): void => {
-    const session = { id: query.id, worktreePath }
+    const session = { id: query.id, worktreePath, permissionMode: query.mode }
     setLane((l) => {
       // Only into the chat it belongs to. An agent can open a query off ANY
       // session — over `send_message`, on a followup timer — and the lane is
@@ -3541,8 +3542,8 @@ export default function App() {
                         and a panel that looks exactly like the chat beside it
                         has to say how it differs. */}
                     {kind === 'query' && (
-                      <span className="badge" title="Read-only — a query never writes">
-                        ro
+                      <span className="badge" title="Permission mode inherited from the parent session">
+                        {modeLabel(panel.session?.permissionMode ?? 'default')}
                       </span>
                     )}
                     {/* The tree can be pointed at a directory inside the worktree

@@ -95,6 +95,8 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { agentIdentityNames, resolveAgentIdentity } from './identity'
+import { checklistSummary } from '../shared/checklist'
+import { publishChecklist } from './agent'
 import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
@@ -511,6 +513,7 @@ function registerTools(server: McpServer, token: string): void {
   registerPlanTools(server, token)
   registerDrawingTools(server, token)
   registerDecisionTools(server)
+  registerChecklistTools(server, token)
   registerColonyTools(server)
   registerColonyLandingTools(server)
   registerColonyReportTools(server)
@@ -1317,18 +1320,18 @@ function listQueriesTool(sessionId: string): ToolResult {
 
 function registerQueryTools(server: McpServer): void {
   // --- Queries -------------------------------------------------------------
-  // A query is a side conversation running beside a session, read-only, in its
+  // A query is a side conversation running beside a session in its
   // own panel. An agent gets the same five verbs a person does — see
   // docs/queries.md. (An agent running INSIDE a query has no Floe token at all
   // and reaches none of this; that is D8.)
   server.tool(
     'open_query',
-    'Open a read-only side conversation with another harness beside a session, in its own panel, running in parallel. The same thing typing `@codex …` in the composer does. If that harness already has a query open on the session, this continues it: the prompt goes into the existing conversation.',
+    'Open a side conversation with another harness beside a session, in its own panel, running in parallel with the parent session permission mode. The same thing typing `@codex …` in the composer does. If that harness already has a query open on the session, this continues it: the prompt goes into the existing conversation.',
     {
       session_id: z.string().describe('The Floe session to open it beside.'),
       harness: z
         .enum(HARNESSES as [string, ...string[]])
-        .describe('Who answers in it. Must be a harness with a read-only mode — codex, claude or opencode.'),
+        .describe('Who answers in it.'),
       prompt: z.string().optional().describe('A message for the query: the first one if it opens now, the next one if it is already open.'),
       model: z.string().optional().describe("That harness's own slug."),
       effort: z.enum(EFFORTS).optional().describe('How hard to think.')
@@ -1338,13 +1341,13 @@ function registerQueryTools(server: McpServer): void {
 
   server.tool(
     'ask_all',
-    'Ask several harnesses the same thing at once. Each answers in its own read-only query, and the replies come back into the session side by side for comparison. The harnesses are the ones you name — this never fans out to everything installed.',
+    'Ask several harnesses the same thing at once. Each answers in its own query using the parent session permission mode, and the replies come back into the session side by side for comparison. The harnesses are the ones you name — this never fans out to everything installed.',
     {
       session_id: z.string().describe('The Floe session to ask from.'),
       harnesses: z
         .array(z.enum(HARNESSES as [string, ...string[]]))
         .min(1)
-        .describe('Who to ask. Only harnesses with a read-only mode can hold a query.'),
+        .describe('Who to ask.'),
       prompt: z.string().describe('The message every one of them gets.'),
       effort: z.enum(EFFORTS).optional().describe('One effort for all of them.')
     },
@@ -1947,6 +1950,36 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
         pushCommand({ kind: 'open_task', callerKey: token, root, ref: found.name })
         return { ok: true, task: found.name }
       })
+  )
+}
+
+function registerChecklistTools(server: McpServer, token: string): void {
+  server.tool(
+    'set_checklist',
+    [
+      "Show the user your to-do list for the work in hand, pinned above the chat's composer.",
+      'Use it when a request takes three or more distinct steps. Send the WHOLE list every time:',
+      'once before you start, then whenever a step starts or finishes. Keep exactly one step',
+      'in_progress. Send it in the same message as your next tool call when you can, so it costs',
+      'no extra round trip. An empty list takes it down.'
+    ].join(' '),
+    {
+      items: z
+        .array(
+          z.object({
+            text: z.string().min(1).describe('The step, imperative: "Run the gate".'),
+            active: z.string().optional().describe('Shown while it runs: "Running the gate".'),
+            status: z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
+          })
+        )
+        .max(100)
+        .describe('The complete list, in order. Replaces the previous one.')
+    },
+    async ({ items }) => {
+      if (token === GLOBAL_TOKEN) return textResult({ error: 'A checklist belongs to a Floe session, and this caller is not one.' })
+      publishChecklist(getWindow(), token, items)
+      return textResult({ ok: true, progress: checklistSummary(items) })
+    }
   )
 }
 
@@ -3667,9 +3700,7 @@ export function mcpConfigFor(key: string, worktreePath?: string): string {
  * A query gets no Floe token (D8). The token IS the session id (`/mcp/<key>`),
  * and a query key resolves to no session — so a query would carry a token
  * `findSessionAny` cannot resolve and every tool that depends on it would break
- * in silence. Mating that with the read-only promise, the honest answer is that
- * a conversation which only reads should not be opening panels, creating
- * sessions or running commands in the app either.
+ * in silence. The query therefore receives no Floe control tools.
  *
  * But not minting the token is not enough on its own: without a config of its
  * own the CLI falls back to the Floe server registered GLOBALLY and comes back

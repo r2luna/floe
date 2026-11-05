@@ -132,7 +132,7 @@ import {
   type ModelChoice
 } from './models'
 import type { FloeConfig } from '../../main/config/floe'
-import { HARNESSES, supportsMode } from '../../shared/modes'
+import { HARNESSES } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
 import { handleRows, routeAll, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
 import { nickColor } from './nickColor'
@@ -154,6 +154,7 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
+import { ChecklistStrip } from './ChecklistStrip'
 import { OpenFileRef, PreviewInBrowser, RunInTerminal } from './runInTerminal'
 import { inWorktree, previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
@@ -1181,15 +1182,8 @@ export function PanelBody({
 
 /* --- launcher ------------------------------------------------------------ */
 
-/**
- * Whether a harness can hold a query at all — the `plan` gate, read from the
- * one table that says what each runtime can honestly do.
- *
- * Duplicated on this side deliberately: the picker has to draw the refusal
- * BEFORE anything is sent, and main refuses again when it is (see
- * `canOpenQuery`). Both read `shared/modes.ts`, so they cannot disagree.
- */
-const canHoldQuery = (harness: string): boolean => supportsMode(harness, 'plan')
+/** Whether a harness is one of Floe's supported agent runtimes. */
+const canHoldQuery = (harness: string): boolean => HARNESSES.includes(harness)
 
 /** No conversation yet — a stable identity so the roster memo holds. */
 const NO_TRANSCRIPT: TranscriptItem[] = []
@@ -1806,7 +1800,8 @@ function ChatPanel({
     question,
     answerActive,
     togglePick,
-    answering
+    answering,
+    checklist
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
@@ -2207,6 +2202,7 @@ function ChatPanel({
         ))}
       </div>
 
+      <ChecklistStrip items={checklist} running={running} />
       {asking && session && (
         <AllPicker
           own={choice.provider ?? 'claude'}

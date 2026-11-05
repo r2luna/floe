@@ -115,6 +115,7 @@ import {
 import { mcpRebind } from './mcpHarness'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
+import { publishChecklist } from './agent'
 import { listHarnessSessions, resumeHarnessSession, type HistoryHarness } from './harnessHistory'
 import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
 import {
@@ -783,6 +784,9 @@ export function registerAgentIpc(): void {
   // an event that lands under the session's other name — or a window that
   // reloaded while a card was up — left the mark on with nothing to turn it off.
   handle('agent:waiting', () => [...new Set([...waitingKeys(), ...codexWaitingKeys()])])
+  handle('agent:clearChecklist', (event, key: string) => {
+    publishChecklist(BrowserWindow.fromWebContents(event.sender) ?? undefined, key, [])
+  })
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)

@@ -39,9 +39,8 @@ const SOURCE = {
     "export function armRelay(win, key) { globalThis.__armed.push({ kind: 'relay', key }) }" +
     "\\nexport function armAddress(win, key) { globalThis.__armed.push({ kind: 'address', key }) }",
   'stub:queries':
-    "export const QUERY_MODE = 'plan'" +
     "\\nexport function canOpenQuery(h) { return globalThis.__canOpen.includes(h) }" +
-    "\\nexport function refuseReason(h) { return h + ' has no read-only mode' }" +
+    "\\nexport function refuseReason(h) { return h + ' is not a supported query runtime' }" +
     "\\nexport function canRunInQuery(win, key, harness) { return !globalThis.__busyQ.includes(key) }" +
     "\\nexport function openQueryFor(win, parentKey, wt, spec) {" +
     "\\n  if (!globalThis.__canOpen.includes(spec.harness)) return null" +
@@ -53,7 +52,7 @@ const SOURCE = {
     "\\nexport function noteOpened() {}" +
     "\\nexport function echoOpening(win, key, text) { globalThis.__echoed.push({ key, text }) }" +
     "\\nexport function refuse(win, key, reason) { globalThis.__refused.push({ key, reason }) }" +
-    "\\nexport function queryOptions(base) { return { ...base, permissionMode: 'plan' } }" +
+    "\\nexport function queryOptions(base) { return base }" +
     "\\nexport function withOpeningContext(win, key, parent, wt, harness, prompt, start) { start(globalThis.__prefix) }"
 }
 export async function load(url, context, next) {
@@ -104,7 +103,7 @@ declare global {
   var __echoed: Array<{ key: string; text: string }>
   // eslint-disable-next-line no-var
   var __refused: Array<{ key: string; reason: string }>
-  // The harnesses that can hold a query in this test — the `plan` gate.
+  // Harnesses supported for queries in this test.
   // eslint-disable-next-line no-var
   var __canOpen: string[]
   /** What the stubbed opening context puts in front of a query's turn. */
@@ -127,7 +126,7 @@ function fresh(): void {
   globalThis.__opened = []
   globalThis.__echoed = []
   globalThis.__refused = []
-  globalThis.__canOpen = ['claude', 'codex', 'opencode']
+  globalThis.__canOpen = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama']
   globalThis.__busyQ = []
   globalThis.__prefix = ''
 }
@@ -219,8 +218,8 @@ test('a routed message opens the query and runs there, not in the session', () =
   assert.equal(turn.key, 'sess~codex')
   // The handle came off on the way, exactly as it does for a session turn.
   assert.equal(turn.prompt, 'analisa isso')
-  // Read-only, whatever the parent is on. The parent here is `skip`.
-  assert.equal(turn.options.permissionMode, 'plan')
+  // The query inherits the parent session's mode.
+  assert.equal(turn.options.permissionMode, 'skip')
   // And the panel shows the line that opened it.
   assert.deepEqual(globalThis.__echoed, [{ key: 'sess~codex', text: '@codex analisa isso' }])
 })
@@ -278,7 +277,7 @@ test('a query cannot open another query', () => {
   assert.equal(globalThis.__refused[0].key, 'sess~codex')
 })
 
-test('a harness with no read-only mode is refused, not approximated', () => {
+test('a query can use a harness without a plan mode', () => {
   fresh()
   const out = dispatchTurn({
     win: WIN,
@@ -288,10 +287,9 @@ test('a harness with no read-only mode is refused, not approximated', () => {
     route: { harness: 'gemini', prompt: 'revisa' },
     origin: 'user'
   })
-  assert.match(out.error ?? '', /gemini has no read-only mode/)
-  assert.deepEqual(globalThis.__started, [])
-  // Said in the chat that asked, so the refusal is not silent.
-  assert.equal(globalThis.__refused[0].key, 'sess')
+  assert.equal(out.error, undefined)
+  assert.equal(globalThis.__started[0].key, 'sess~gemini')
+  assert.equal(globalThis.__started[0].options.permissionMode, 'skip')
 })
 
 test('who opened it is carried through, so an agent-opened panel says so', () => {
