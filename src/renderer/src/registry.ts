@@ -2820,7 +2820,7 @@ export const REGISTRY: Map<string, Command> = new Map(
                   (lane, q) =>
                     open(lane, {
                       ...c.makePanel('query', q.harness),
-                      session: { id: q.id, worktreePath }
+                      session: { id: q.id, worktreePath, permissionMode: q.mode }
                     }),
                   l
                 )
