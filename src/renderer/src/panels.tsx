@@ -154,6 +154,7 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
+import { ChecklistStrip } from './ChecklistStrip'
 import { OpenFileRef, PreviewInBrowser, RunInTerminal } from './runInTerminal'
 import { inWorktree, previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
@@ -1806,7 +1807,8 @@ function ChatPanel({
     question,
     answerActive,
     togglePick,
-    answering
+    answering,
+    checklist
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
@@ -2207,6 +2209,7 @@ function ChatPanel({
         ))}
       </div>
 
+      <ChecklistStrip items={checklist} running={running} />
       {asking && session && (
         <AllPicker
           own={choice.provider ?? 'claude'}

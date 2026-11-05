@@ -126,6 +126,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'promote_drawing',
       'open_drawing',
       'present_decision',
+      'set_checklist',
       'start_merge',
       'colony_board',
       'colony_add_task',

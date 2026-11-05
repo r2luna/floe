@@ -6,6 +6,9 @@ import type { BrowserWindow } from 'electron'
 import { contextTokens } from '../shared/types'
 import type { AgentEvent, AgentQuestion, AgentReplay, AgentRunOptions, FileAttachment, ImageAttachment, PermissionMode } from '../shared/types'
 import { parseArtifactSpec } from '../shared/artifact'
+import { addCreatedTask, applyTaskUpdate, checklistOpen, checklistRow, fromTodoWrite, type ChecklistItem } from '../shared/checklist'
+import { CHECKLIST_RULE } from './houseRules'
+import { getChecklist, saveChecklist } from './checklistStore'
 import { getCreatedSession } from './sessionStore'
 import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
 import { colonySessionIds } from './colony/store'
@@ -252,6 +255,12 @@ export function sendAgentEvent(win: BrowserWindow, key: string, event: AgentEven
 const runtimeText = new Map<string, string>()
 const send = sendAgentEvent
 
+/** Keep the session's to-do list and tell its panels. An empty list takes it down. */
+export function publishChecklist(win: BrowserWindow | undefined, key: string, items: ChecklistItem[]): void {
+  saveChecklist(key, items)
+  if (win) send(win, key, { kind: 'checklist', items })
+}
+
 const lastErrors = new Map<string, { at: number; message: string }>()
 const seqs = new Map<string, number>()
 
@@ -417,7 +426,7 @@ export function replaySnapshot(key: string): AgentReplay {
       }
     }
   }
-  return { running: false, lastSeq: seqs.get(key) ?? 0, events: [], ...snapshot, names }
+  return { running: false, lastSeq: seqs.get(key) ?? 0, events: [], ...snapshot, names, checklist: getChecklist(key) }
 }
 
 function recordForReplay(key: string, event: AgentEvent, seq: number): void {
@@ -581,8 +590,8 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   if (options.model) args.push('--model', options.model)
   if (options.effort) args.push('--effort', options.effort)
   if (resumeId) args.push('--resume', resumeId)
-  const systemPrompt = getSystemPrompt()
-  if (systemPrompt) args.push('--append-system-prompt', systemPrompt)
+  const systemPrompt = [getSystemPrompt(), CHECKLIST_RULE].filter(Boolean).join('\n\n')
+  args.push('--append-system-prompt', systemPrompt)
 
   // Wire the in-app MCP control server: a per-session config whose HTTP url
   // carries this session's key as a token (/mcp/<key>), so a tool call knows its
@@ -1889,6 +1898,29 @@ function emitDecisionArtifact(win: BrowserWindow, key: string, conn: Conn, block
   return true
 }
 
+// TaskCreate's id only exists in its result, so the input waits here for it.
+const pendingTaskCreates = new Map<string, unknown>()
+
+// Claude's own to-do tools, for the models that still have them. The call still
+// shows as a tool row: this only keeps the checklist in step with it.
+function foldNativeChecklist(win: BrowserWindow, key: string, block: Record<string, unknown>): void {
+  if (block.name === 'TodoWrite') publishChecklist(win, key, fromTodoWrite(block.input))
+  else if (block.name === 'TaskUpdate') publishChecklist(win, key, applyTaskUpdate(getChecklist(key), block.input))
+  else if (block.name === 'TaskCreate' && typeof block.id === 'string') pendingTaskCreates.set(block.id, block.input)
+}
+
+function settleCreatedTask(win: BrowserWindow, key: string, block: Record<string, unknown>, result: unknown): void {
+  const id = block.tool_use_id
+  if (typeof id !== 'string' || !pendingTaskCreates.has(id)) return
+  const input = pendingTaskCreates.get(id)
+  pendingTaskCreates.delete(id)
+  const taskId = (result as { task?: { id?: unknown } } | undefined)?.task?.id
+  if (block.is_error === true || typeof taskId !== 'string') return
+  // A finished list is over: the first task of the next job starts a new one.
+  const current = getChecklist(key)
+  publishChecklist(win, key, addCreatedTask(checklistOpen(current) ? current : [], taskId, input))
+}
+
 function handleAssistantBlock(win: BrowserWindow, key: string, conn: Conn, block: Record<string, unknown>): void {
   if (appendAssistantText(conn, block)) return
   if (block.type !== 'tool_use') return
@@ -1901,6 +1933,7 @@ function handleAssistantBlock(win: BrowserWindow, key: string, conn: Conn, block
   if ((block.name === 'Task' || block.name === 'Agent') && typeof block.id === 'string')
     return startSubagent(win, key, conn, block, block.id)
   if (block.name === 'SendMessage' && typeof block.id === 'string') conn.sends.add(block.id)
+  foldNativeChecklist(win, key, block)
   const toolName = String(block.name ?? 'tool')
   const toolSummary = summarizeTool(block)
   pushTranscript(conn, `[tool ${toolName}]${toolSummary ? ` ${toolSummary}` : ''}`)
@@ -2006,7 +2039,10 @@ function handleUserLine(win: BrowserWindow, key: string, conn: Conn, msg: Record
   if (!Array.isArray(content)) return
   // The tool this line answers is over, and so is its `Bash · 45s`.
   setStatus(win, key, conn, '')
-  for (const block of content as Array<Record<string, unknown>>) handleToolResultBlock(win, key, conn, block)
+  for (const block of content as Array<Record<string, unknown>>) {
+    settleCreatedTask(win, key, block, msg.tool_use_result)
+    handleToolResultBlock(win, key, conn, block)
+  }
 }
 
 /** When the window that refused this session's turn reopens, by session key. */
@@ -2275,6 +2311,8 @@ export function parseQuestions(input: unknown): AgentQuestion[] {
 }
 
 function summarizeTool(block: Record<string, unknown>): string | undefined {
+  const row = checklistRow(block.name, block.input)
+  if (row) return row
   const input = (block.input ?? {}) as Record<string, unknown>
   for (const field of ['file_path', 'command', 'pattern', 'path', 'url', 'description', 'skill']) {
     const value = input[field]

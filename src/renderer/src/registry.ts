@@ -25,6 +25,7 @@ import {
 import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import type { Command, CommandContext } from './commands.ts'
+import { toggleChecklistFold } from './checklistFold.ts'
 import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
@@ -2441,6 +2442,23 @@ export const REGISTRY: Map<string, Command> = new Map(
         title: 'Settings…',
         group: 'App',
         run: (c) => c.setLane((l) => toggleKind(l, 'settings', () => c.makePanel('settings')))
+      },
+      {
+        id: 'chat.checklistFold',
+        title: 'Fold or open the agent checklist',
+        group: 'App',
+        run: (c) => c.say(toggleChecklistFold() ? 'Checklist folded' : 'Checklist open')
+      },
+      {
+        id: 'chat.checklistClear',
+        title: 'Clear the agent checklist',
+        group: 'Sessions',
+        enabled: (c) => !!chatOf(c)?.session,
+        unavailable: () => 'open a chat first',
+        run: async (c) => {
+          const session = chatOf(c)?.session
+          if (session) await window.floe.agent.clearChecklist(session.id)
+        }
       },
       {
         // Settings has a row for this, but a layout is judged by reading a real

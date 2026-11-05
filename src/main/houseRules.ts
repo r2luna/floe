@@ -22,6 +22,18 @@ import { getSystemPrompt } from './appSettings'
 const OPEN = '<!-- floe:house-rules:v1 -->'
 const CLOSE = '<!-- /floe:house-rules:v1 -->'
 
+// A tool's description is not enough to get set_checklist used: Claude defers MCP
+// tools and never looks up one it does not know it wants, and codex was seen doing
+// a four-step job without calling it. Both finish the work with no list on screen.
+export const CHECKLIST_RULE = [
+  'Progress checklist: the user follows your work on a checklist pinned above the composer.',
+  'Whenever a request takes three or more distinct steps, you MUST call mcp__floe__set_checklist',
+  'with the whole list before your first other tool call (load it with ToolSearch if it is',
+  'deferred), then again each time a step starts or finishes. Make those calls in the same message',
+  'as your next tool call when you can, so they cost no extra round trip. Keep exactly one step',
+  'in_progress. Skip it for short or single-step work. If you have no such tool, ignore this.'
+].join(' ')
+
 /** Where the rules have already been delivered, as `key harness`. */
 const delivered = new Set<string>()
 
@@ -33,9 +45,9 @@ const mark = (key: string, harness: string): string => `${key} ${harness}`
  * Empty for Claude, which gets the same text as a real system prompt rather
  * than as a message it could mistake for the user talking.
  */
-export function houseRulesFor(key: string, harness: string): string {
+export function houseRulesFor(key: string, harness: string, floeRule = ''): string {
   if (harness === 'claude') return ''
-  const rules = getSystemPrompt()
+  const rules = [getSystemPrompt(), floeRule].filter(Boolean).join('\n\n')
   if (!rules) return ''
   const id = mark(key, harness)
   if (delivered.has(id)) return ''

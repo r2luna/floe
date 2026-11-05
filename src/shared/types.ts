@@ -1,6 +1,7 @@
 // Types shared across the main, preload, and renderer processes.
 
 import type { ArtifactSpec } from './artifact'
+import type { ChecklistItem } from './checklist'
 export type { ArtifactSpec } from './artifact'
 
 /**
@@ -1144,6 +1145,8 @@ export type AgentEvent =
   // moving (a delta, a tool row, the end) takes it down too. Without it a
   // rate-limited turn reads exactly like a hung one, for as long as it lasts.
   | { kind: 'status'; text: string; at: number }
+  // The agent's to-do list, whole, every time it changes (shared/checklist.ts).
+  | { kind: 'checklist'; items: ChecklistItem[] }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
@@ -1223,6 +1226,8 @@ export interface AgentReplay {
    * key goes deaf mid-turn: no text, and no `done` to take "is typing" back off.
    */
   names?: string[]
+  /** The session's to-do list. Outlives the turn, so it is sent whether one is running or not. */
+  checklist?: ChecklistItem[]
 }
 
 // --- Provisioning (setup checklist for a freshly created worktree) ---------

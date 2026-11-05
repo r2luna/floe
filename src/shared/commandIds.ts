@@ -94,6 +94,8 @@ export const COMMAND_IDS: string[] = [
   'settings.open',
   'chat.layout',
   'chat.orcaFont',
+  'chat.checklistFold',
+  'chat.checklistClear',
   'appearance.transparency',
   'commands.open',
   'skills.open',

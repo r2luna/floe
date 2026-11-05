@@ -8,6 +8,7 @@ import {
   useSyncExternalStore
 } from 'react'
 import type { TranscriptItem } from '../../main/claudeSessions'
+import type { ChecklistItem } from '../../shared/checklist'
 import type {
   AgentEvent,
   AgentEventEnvelope,
@@ -99,6 +100,8 @@ export interface Transcript {
   startedAt?: number
   /** Why nothing is streaming, when the CLI has said: a retry, a long tool. '' otherwise. */
   status: string
+  /** The agent's to-do list for this session, empty when it has none. */
+  checklist: ChecklistItem[]
   /**
    * Typed while a ONE-SHOT runtime (codex, opencode…) was busy, not sent yet;
    * drains one entry per turn boundary. Claude never queues — a mid-turn send
@@ -168,6 +171,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // What the CLI is doing while nothing streams — an API retry, a tool that
   // has run for a while. Shown after the typing meter; '' is nothing to show.
   const [status, setStatus] = useState('')
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
   // `apply` is built once — its identity must not change mid-turn — so the two
   // numbers the turn footer needs are mirrored here for it to read on `done`.
   const startedRef = useRef<number | undefined>(undefined)
@@ -303,6 +307,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
 
   /** Fold one streamed event into the panel. Also used for the replay events. */
   const apply = useCallback((event: AgentEvent) => {
+    if (event.kind === 'checklist') {
+      setChecklist(event.items)
+      return
+    }
     // A status stands until the next thing that IS the turn moving — a delta,
     // a tool row, a question, the end. The token gauge and a subagent's own
     // progress are not that: they arrive beside a retry, not instead of it.
@@ -543,6 +551,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // the claudeId — listening for one name alone is how a chat went silent
       // mid-turn and then kept "is typing" up with no `done` on the way.
       if (replay.names?.length) names.current = new Set([key, ...replay.names])
+      setChecklist(replay.checklist ?? [])
       if (replay.running) {
         if (replay.model) runModel.current = replay.model
         // Whoever is answering RIGHT NOW, which the picker cannot say: this
@@ -947,6 +956,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     tokens,
     startedAt,
     status,
+    checklist,
     queued,
     send,
     unqueue,

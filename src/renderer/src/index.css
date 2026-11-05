@@ -1424,6 +1424,164 @@ button {
    would read as a different kind of thing sitting at the bottom.
    A bordered card around one line of text also spent a ring of pixels saying
    "an input is here", which the caret already says. */
+/* The agent's to-do list, pinned above the composer. Sizes come from the transcript:
+   hierarchy is bold and colour. Done is a tinted outline and a drawn tick, never a fill. */
+.cl {
+  --cl-done: #93b8a1;
+  flex: none;
+  border-top: 1px solid var(--line-soft);
+  padding: 6px 14px;
+}
+
+:root[data-theme='light'] .cl {
+  --cl-done: #2f7d52;
+}
+
+.cl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cl-mark {
+  flex: none;
+  width: 10px;
+  color: var(--dim);
+}
+
+.cl-count {
+  flex: none;
+  color: var(--text-strong);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-now {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cl-segs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 50%;
+}
+
+.cl-seg {
+  width: 12px;
+  height: 4px;
+  background: var(--edge);
+  transition: background 0.3s;
+}
+
+.cl-seg[data-status='completed'] {
+  background: var(--cl-done);
+}
+
+.cl-seg[data-status='in_progress'] {
+  background: var(--working);
+  animation: cl-pulse 1.4s ease-in-out infinite;
+}
+
+.cl-seg[data-status='cancelled'] {
+  background: transparent;
+  outline: 1px solid var(--edge);
+  outline-offset: -1px;
+}
+
+@keyframes cl-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.cl-list {
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+}
+
+.cl-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--dim);
+  transition: color 0.3s;
+}
+
+.cl-item[data-status='in_progress'] {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.cl-item[data-status='cancelled'] .cl-text {
+  text-decoration: line-through;
+}
+
+.cl-more {
+  padding: 2px 0 2px 21px;
+  color: var(--dim);
+}
+
+.cl-box {
+  flex: none;
+  position: relative;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--edge);
+  transition: border-color 0.3s;
+}
+
+.cl-box[data-status='completed'] {
+  border-color: var(--cl-done);
+}
+
+.cl-box svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: var(--cl-done);
+  stroke-width: 2;
+  stroke-dasharray: 16;
+  animation: cl-tick 0.35s ease-out;
+}
+
+@keyframes cl-tick {
+  from {
+    stroke-dashoffset: 16;
+  }
+}
+
+.cl-dash {
+  width: 7px;
+  height: 1px;
+  background: var(--dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-seg[data-status='in_progress'],
+  .cl-box svg {
+    animation: none;
+  }
+}
+
 .composer {
   border-top: 1px solid var(--line-soft);
   padding-inline: 0;

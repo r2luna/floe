@@ -8,6 +8,7 @@ import { codexFullReset, scheduleUsageResume } from './usageResume'
 import { logTurn } from './runtimeLog'
 import { addCumulative, codexRunningUsage } from './usageLedger'
 import { forgetThreads, rememberThread, threadFor } from './threads'
+import { checklistRow } from '../shared/checklist'
 import { forgetHouseRules } from './houseRules'
 import { LANE_ANSWERS_ITSELF, laneAnswersItself } from './colony/laneQuestions'
 
@@ -376,7 +377,10 @@ export function codexTool(item: Record<string, unknown> | undefined): { name: st
       return { name: 'Edit', summary: paths.length ? paths.join(', ') : undefined }
     }
     case 'mcpToolCall':
-      return { name: `mcp__${String(item.server ?? '')}__${String(item.tool ?? '')}` }
+      return {
+        name: `mcp__${String(item.server ?? '')}__${String(item.tool ?? '')}`,
+        ...(item.tool === 'set_checklist' && { summary: checklistRow(item.tool, item.arguments) })
+      }
     case 'dynamicToolCall':
       return { name: String(item.tool ?? 'tool') }
     case 'webSearch':

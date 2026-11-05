@@ -103,6 +103,11 @@ export function harnessMcp(harness: string, key: string, worktreePath?: string):
   return harnessEnv(harness, key, mapFor(key, worktreePath))
 }
 
+/** Does this turn's non-Claude harness hold Floe's tools? Local models and queries do not. */
+export function holdsFloeTools(harness: string, key: string): boolean {
+  return ['codex', 'opencode', 'gemini'].includes(harness) && !isQueryKey(key)
+}
+
 /**
  * The env a PEER consult spawns with (peer.ts): every server switched off.
  *

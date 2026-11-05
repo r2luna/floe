@@ -217,6 +217,7 @@ const CHANNELS = [
   'agent:replay',
   'agent:active',
   'agent:waiting',
+  'agent:clearChecklist',
   'agent:stop',
   'agent:recap',
   'query:list',

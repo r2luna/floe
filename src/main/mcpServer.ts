@@ -95,6 +95,8 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { agentIdentityNames, resolveAgentIdentity } from './identity'
+import { checklistSummary } from '../shared/checklist'
+import { publishChecklist } from './agent'
 import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
@@ -511,6 +513,7 @@ function registerTools(server: McpServer, token: string): void {
   registerPlanTools(server, token)
   registerDrawingTools(server, token)
   registerDecisionTools(server)
+  registerChecklistTools(server, token)
   registerColonyTools(server)
   registerColonyLandingTools(server)
   registerColonyReportTools(server)
@@ -1947,6 +1950,36 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
         pushCommand({ kind: 'open_task', callerKey: token, root, ref: found.name })
         return { ok: true, task: found.name }
       })
+  )
+}
+
+function registerChecklistTools(server: McpServer, token: string): void {
+  server.tool(
+    'set_checklist',
+    [
+      "Show the user your to-do list for the work in hand, pinned above the chat's composer.",
+      'Use it when a request takes three or more distinct steps. Send the WHOLE list every time:',
+      'once before you start, then whenever a step starts or finishes. Keep exactly one step',
+      'in_progress. Send it in the same message as your next tool call when you can, so it costs',
+      'no extra round trip. An empty list takes it down.'
+    ].join(' '),
+    {
+      items: z
+        .array(
+          z.object({
+            text: z.string().min(1).describe('The step, imperative: "Run the gate".'),
+            active: z.string().optional().describe('Shown while it runs: "Running the gate".'),
+            status: z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
+          })
+        )
+        .max(100)
+        .describe('The complete list, in order. Replaces the previous one.')
+    },
+    async ({ items }) => {
+      if (token === GLOBAL_TOKEN) return textResult({ error: 'A checklist belongs to a Floe session, and this caller is not one.' })
+      publishChecklist(getWindow(), token, items)
+      return textResult({ ok: true, progress: checklistSummary(items) })
+    }
   )
 }
 
