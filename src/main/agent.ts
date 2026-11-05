@@ -577,6 +577,7 @@ function spawnConn(win: BrowserWindow, key: string, worktreePath: string, option
   // as if the user ignored the question ("the prompt was dismissed"). With the
   // flag attached, the question is delivered over the control channel and stays
   // answerable — while every other tool still bypasses, as Dangerous mode intends.
+  // The model entering plan mode also makes the CLI ask: see bypassAllows.
   args.push('--permission-prompt-tool', 'stdio')
   if (options.model) args.push('--model', options.model)
   if (options.effort) args.push('--effort', options.effort)
@@ -1599,6 +1600,17 @@ function permissionSummary(req: Record<string, unknown>): string | undefined {
   return summarizeTool({ input: req.input }) || undefined
 }
 
+// The tools that exist to reach the user, so even bypass leaves them a card.
+const ALWAYS_ASKS = new Set(['AskUserQuestion', 'ExitPlanMode'])
+
+// Bypass means no prompts, but the CLI stops honouring it once the model calls
+// EnterPlanMode: from then on it asks about any command it cannot prove
+// read-only, for the subagents too. The mode is the user's choice, not the
+// model's, so Floe answers those itself.
+function bypassAllows(conn: Conn, toolName: unknown): boolean {
+  return conn.optionsKey.startsWith('skip|') && !ALWAYS_ASKS.has(String(toolName))
+}
+
 // The CLI asks for tool permission over the control channel (we opted in with
 // `--permission-prompt-tool stdio`). Remember the input so we can echo it back
 // on allow, then surface an approve/deny prompt in the transcript.
@@ -1608,6 +1620,12 @@ function handleControlRequest(win: BrowserWindow, key: string, conn: Conn, msg: 
   const requestId = String(msg.request_id ?? '')
   if (req.subtype !== 'can_use_tool' || !requestId) return
   if (req.tool_name === 'AskUserQuestion' && handleAskUserQuestion(win, key, conn, req, requestId)) return
+  if (bypassAllows(conn, req.tool_name)) {
+    log('permission-bypassed', { key, requestId, tool: req.tool_name })
+    const response = permissionResponse(true, req.input ?? {})
+    write(conn, { type: 'control_response', response: { subtype: 'success', request_id: requestId, response } })
+    return
+  }
   conn.pendingPerms.set(requestId, req.input)
   const remember = Array.isArray(req.permission_suggestions) && req.permission_suggestions.length > 0
   if (remember) conn.permSuggestions.set(requestId, req.permission_suggestions as unknown[])
