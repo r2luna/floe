@@ -6,15 +6,9 @@ import { markUnread, readOpen, subscribeUnread, unreadMarks } from './unreadStor
 import { noteActivity, noteLeft } from './awayStore.ts'
 import { subscribeTurns } from './activeTurns.ts'
 
-// How long an event-driven `busy` entry is trusted over the server's answer. A
-// poll in flight when a turn starts would otherwise erase the spinner it raced:
-// the reply was assembled before the turn existed. Anything quieter than this
-// the server knows better than we do.
-const GRACE_MS = 5_000
-
 /**
- * The set the next tick should hold: the server's answer, plus the keys whose
- * last event is too recent for a poll that started earlier to have seen.
+ * The set the next tick should hold: the server's answer, plus keys whose last
+ * event arrived after the poll started and therefore could not be in its reply.
  *
  * Pure so the race is testable, and used for BOTH live sets. Each was
  * event-driven only, and each had the same hole: an edge that never arrived
@@ -26,12 +20,12 @@ export function reconcileLive(
   prev: Set<string>,
   serverKeys: string[],
   lastEventAt: Map<string, number>,
-  now: number
+  requestedAt: number
 ): Set<string> {
   const next = new Set(serverKeys)
   for (const key of prev) {
     if (next.has(key)) continue
-    if (now - (lastEventAt.get(key) ?? 0) < GRACE_MS) next.add(key)
+    if ((lastEventAt.get(key) ?? 0) >= requestedAt) next.add(key)
   }
   // Same membership: hand back the old set so the list does not re-render.
   if (next.size === prev.size && [...next].every((k) => prev.has(k))) return prev
@@ -184,13 +178,12 @@ export function useSessionActivity(openKeys: readonly string[] = []): SessionAct
   // chat correct themselves against the same answer, on the same timer.
   useEffect(
     () =>
-      subscribeTurns(({ active, waiting }) => {
-        const now = Date.now()
+      subscribeTurns(({ active, waiting, requestedAt }) => {
         // Filtered HERE and not in main, for the reason above: `agent.active()`
         // has to keep telling the truth to the panel that asks about itself.
         const own = (list: string[]): string[] => list.filter((k) => !isQueryKey(k))
-        if (active) setBusy((prev) => reconcileLive(prev, own(active), lastEventAt.current, now))
-        if (waiting) setWaiting((prev) => reconcileLive(prev, own(waiting), lastEventAt.current, now))
+        if (active) setBusy((prev) => reconcileLive(prev, own(active), lastEventAt.current, requestedAt))
+        if (waiting) setWaiting((prev) => reconcileLive(prev, own(waiting), lastEventAt.current, requestedAt))
       }),
     []
   )
