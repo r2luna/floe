@@ -136,6 +136,9 @@ as that session under a token it was lent (`peerMcp`).
      `browser_history` controls navigation and `browser_devtools` opens the
      detached Chromium developer tools. `browser_screenshot_to_desk` captures the
      full page and opens it in CleanShot (or copies it and opens Preview).
+     `browser_annotate` is the agent's form of the annotate surface (⌘⇧N): it
+     marks elements by ref or selector and returns the marked viewport PNG with
+     a numbered list of what each mark landed on.
 2. **UI commands** — everything the renderer's command registry dispatches
    (the palette, the keymap): `list_commands` and `run_command`. These do a
    round-trip to the renderer (`mcp:command` → `mcp:command-result`), which runs

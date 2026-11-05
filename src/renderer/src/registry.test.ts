@@ -39,7 +39,8 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       stop: () => {},
       focus: () => {},
       devtools: () => {},
-      screenshot: () => {}
+      screenshot: () => {},
+      annotate: () => {}
     },
     patchFor: () => '',
     openPalette: () => {},

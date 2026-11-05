@@ -191,6 +191,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'browser_press',
       'browser_evaluate',
       'browser_screenshot',
+      'browser_annotate',
       'browser_history',
       'browser_devtools',
       'browser_screenshot_to_desk',

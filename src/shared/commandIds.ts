@@ -32,6 +32,7 @@ export const COMMAND_IDS: string[] = [
   'browser.focus',
   'browser.devtools',
   'browser.screenshot',
+  'browser.annotate',
   // Cursor
   'cursor.down',
   'cursor.up',

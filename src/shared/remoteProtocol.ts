@@ -77,6 +77,7 @@ export const PINNED_CHANNELS = new Set([
   'browser:focus',
   'browser:devtools',
   'browser:screenshot',
+  'browser:capture',
   // A file pulled off another machine has to land on the desk the WINDOW is at
   // — opening the copy on the backend would be the bug this exists to fix.
   'files:openDownload',

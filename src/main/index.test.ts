@@ -302,6 +302,7 @@ const CHANNELS = [
   'browser:focus',
   'browser:devtools',
   'browser:screenshot',
+  'browser:capture',
   'files:list',
   'files:all',
   'files:read',

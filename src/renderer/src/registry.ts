@@ -891,6 +891,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.browser.screenshot()
       },
       {
+        id: 'browser.annotate',
+        title: 'Annotate browser page',
+        group: 'Browser',
+        // Not the focused panel: a click inside the native page never reaches the
+        // lane, so the chat you just sent from still counts as focused there.
+        enabled: (c) => c.lane.panels.some((panel) => panel.kind === 'browser'),
+        run: (c) => c.browser.annotate()
+      },
+      {
         id: 'cursor.down',
         title: 'Move cursor down',
         group: 'Cursor',
