@@ -156,8 +156,11 @@ export function BrowserAnnotate({
   const stage = useRef<SVGSVGElement>(null)
   const [tool, setTool] = useState<Tool>(startTool)
   const [marks, setMarks] = useState<Mark[]>([])
+  // The row whose description has the caret. The text itself lives on the mark,
+  // so every row stays editable and nothing has to be merged back at send time.
   const [noting, setNoting] = useState<number | null>(null)
-  const [noteText, setNoteText] = useState('')
+  const descriptions = useRef<(HTMLInputElement | null)[]>([])
+  const describeNewest = useRef(false)
   const [prefix, setPrefix] = useState('')
   const [drag, setDrag] = useState<Point[] | null>(null)
   const [error, setError] = useState('')
@@ -172,38 +175,42 @@ export function BrowserAnnotate({
   const frozenAt = useMemo(() => new Date(capture.capturedAt).toLocaleTimeString(), [capture.capturedAt])
 
   useEffect(() => {
-    if (noting === null) root.current?.focus()
-  }, [noting])
+    root.current?.focus()
+  }, [])
+
+  // A new mark asks for its description straight away.
+  useEffect(() => {
+    if (!describeNewest.current) return
+    describeNewest.current = false
+    descriptions.current[marks.length - 1]?.focus()
+  }, [marks.length])
 
   const place = (mark: Mark): void => {
+    describeNewest.current = true
     setMarks((list) => [...list, mark])
-    setNoting(marks.length)
-    setNoteText('')
     setPrefix('')
   }
 
-  /** The marks with the open note written in. Text with no words is not a mark:
-      it would burn a number onto nothing. */
-  const withNote = (text: string): Mark[] =>
-    noting !== null && marks[noting]?.kind === 'text' && !text
-      ? marks.filter((_, i) => i !== noting)
-      : marks.map((mark, i) => (i === noting ? { ...mark, note: text } : mark))
+  const describe = (target: Mark, note: string): void =>
+    setMarks((list) => list.map((mark) => (mark === target ? { ...mark, note } : mark)))
 
-  const closeNote = (text: string): void => {
-    setMarks(withNote(text))
+  /** Leaving a row. Text with no words is not a mark: it would burn a number onto nothing. */
+  const leave = (target: Mark): void => {
     setNoting(null)
-    setNoteText('')
+    if (target.kind === 'text') setMarks((list) => list.filter((mark) => mark !== target || mark.note))
   }
 
+  /** Back to the drawing keys. Blurring the row is what saves it. */
+  const finishDescribing = (): void => root.current?.focus()
+
   const undo = (): void => {
-    setNoting(null)
-    setNoteText('')
+    finishDescribing()
     setMarks((list) => list.slice(0, -1))
   }
 
-  const send = (list = marks): void => {
+  const send = (): void => {
     setError('')
-    const sent = list
+    const sent = marks.filter((mark) => mark.kind !== 'text' || mark.note)
     flatten(capture, sent)
       .then((data) =>
         onSend({
@@ -266,11 +273,7 @@ export function BrowserAnnotate({
 
   const onPointerDown = (e: PointerEvent<SVGSVGElement>): void => {
     e.preventDefault()
-    // Clicking away finishes the note. It does not also start the next mark.
-    if (noting !== null) {
-      closeNote(noteText)
-      return
-    }
+    if (noting !== null) finishDescribing()
     const p = pointOf(e)
     if (tool === 'element') {
       const element = elementAt(capture.elements, p)
@@ -344,23 +347,19 @@ export function BrowserAnnotate({
                 {markLine({ ...mark, note: '' }, i + 1, capture.elements).replace(/^\d+\. /, '')}
               </span>
               <input
-                autoFocus={noting === i}
+                ref={(el) => {
+                  descriptions.current[i] = el
+                }}
                 aria-label={`Description for mark ${i + 1}`}
                 placeholder={mark.kind === 'text' ? 'Text to draw' : 'Add a description…'}
-                value={noting === i ? noteText : mark.note}
-                onFocus={() => {
-                  setNoting(i)
-                  setNoteText(mark.note)
-                }}
-                onChange={(e) => {
-                  const value = e.currentTarget.value
-                  setNoteText(value)
-                  setMarks((list) => list.map((item, index) => index === i ? { ...item, note: value } : item))
-                }}
+                value={mark.note}
+                onFocus={() => setNoting(i)}
+                onBlur={() => leave(mark)}
+                onChange={(e) => describe(mark, e.currentTarget.value)}
                 onKeyDown={(e) => {
                   e.stopPropagation()
-                  if (e.key === 'Enter') closeNote(noteText)
-                  else if (e.key === 'Escape') closeNote('')
+                  // Both keep what was typed: a row is edited in place, never thrown away.
+                  if (e.key === 'Enter' || e.key === 'Escape') finishDescribing()
                 }}
               />
             </li>
@@ -376,7 +375,7 @@ export function BrowserAnnotate({
             data-on={tool === t || undefined}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => {
-              if (noting !== null) closeNote(noteText)
+              finishDescribing()
               setTool(t)
             }}
           >
@@ -407,7 +406,7 @@ export function BrowserAnnotate({
           className="annotate-chip"
           data-on
           onMouseDown={(e) => e.preventDefault()}
-          onClick={() => send(withNote(noteText))}
+          onClick={send}
         >
           {noting === null && <kbd>⏎</kbd>}
           send to composer
