@@ -154,12 +154,8 @@ export function Composer({
       this one's. Held blank rather than swapped mid-flight. */
   pinPending?: boolean
   /**
-   * The pinned MODE is not the user's to change — a query is read-only by
-   * construction, and the mode is the whole of that guarantee (docs/queries.md).
-   *
-   * Without this the mode you last used travels into the query and the chip
-   * says `bypass` over a turn that runs at `plan`: not merely wrong, but the
-   * one lie this composer must not tell.
+   * The pinned mode belongs to the parent chat. Query turns use that same mode,
+   * mapped to what their harness supports.
    */
   modeLocked?: boolean
   /**
@@ -319,9 +315,8 @@ export function Composer({
   // Which modes this harness can honestly do. Empty for a runtime with no tools
   // (LM Studio, Ollama) — the row is then not rendered at all.
   const modes = modesFor(choice.provider)
-  // Offered, as opposed to merely true. A locked mode is still SHOWN on the
-  // chip — it is the one thing the chip is for — but it is not something to
-  // walk, cycle or pick: a query runs read-only or it is not a query.
+  // Offered, as opposed to merely true. A locked mode is shown on the chip but
+  // cannot be changed inside this panel.
   const modeOptions = modeLocked ? [] : modes
   const mode = choice.mode ?? DEFAULT_MODE
   const claude = !choice.provider || choice.provider === 'claude'

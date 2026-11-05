@@ -9,6 +9,7 @@ import { answeringWho, lastSpeaker, whoOf } from './speakers'
 import { speakerKey } from './models'
 import { nickColor } from './nickColor'
 import { DEFAULT_MODE } from '../../shared/modes'
+import type { PermissionMode } from '../../shared/types'
 import { parseQueryKey } from '../../shared/queries'
 
 // The panel a query runs in.
@@ -23,7 +24,7 @@ import { parseQueryKey } from '../../shared/queries'
 //    would be addressing the harness that is already answering. It only means
 //    something in the main chat.
 //  - no ⌘L. There is no previous message of yours to join onto.
-//  - `plan`, always, said in the head as `ro`. See main/queries.ts.
+//  - the parent session's permission mode, mapped to this harness.
 //  - the three actions across the foot: merge, peek, discard.
 
 export function QueryPanel({
@@ -33,7 +34,7 @@ export function QueryPanel({
   onCommand
 }: {
   /** `id` is the QUERY key — `sess~codex`. See shared/queries.ts. */
-  session: { id: string; worktreePath: string }
+  session: { id: string; worktreePath: string; permissionMode?: PermissionMode }
   /** Who answers here. The panel's `sub`, and half of its key. */
   harness: string
   menuItems?: (trigger: Trigger) => PaletteItem[]
@@ -82,13 +83,24 @@ export function QueryPanel({
 
   // One identity, or the Composer's pin effect re-runs on every render.
   const pin = useMemo(
-    () => ({ provider: who, model: '', effort: 'medium' as const, mode: 'plan' as const }),
-    [who]
+    () => ({
+      provider: who,
+      model: '',
+      effort: 'medium' as const,
+      mode: session.permissionMode ?? DEFAULT_MODE
+    }),
+    [who, session.permissionMode]
   )
 
   const pending = useMemo(
-    () => answeringWho(items, tail, { provider: who, model: '', effort: 'medium', mode: DEFAULT_MODE }),
-    [items, tail, who]
+    () =>
+      answeringWho(items, tail, {
+        provider: who,
+        model: '',
+        effort: 'medium',
+        mode: session.permissionMode ?? DEFAULT_MODE
+      }),
+    [items, tail, who, session.permissionMode]
   )
 
   return (
@@ -162,9 +174,7 @@ export function QueryPanel({
           send(message ?? text, choice, attached?.images, attached?.files)
           setText('')
         }}
-        // The mode is not the user's to change here — a query is read-only by
-        // construction (D1/R5) — so it is pinned AND locked: the chip says
-        // `plan` and the menu offers nothing else.
+        // Keep this query on the mode selected in its parent chat.
         pinned={pin}
         modeLocked
         onStop={running ? stop : undefined}
