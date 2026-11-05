@@ -12,9 +12,9 @@ test('a session the server says is idle stops spinning', () => {
   assert.deepEqual([...next], [])
 })
 
-test('a turn that started since the poll left keeps its spinner', () => {
+test('a turn that started after the poll began keeps its spinner', () => {
   const prev = new Set(['fresh'])
-  const next = reconcileLive(prev, [], new Map([['fresh', NOW - 500]]), NOW)
+  const next = reconcileLive(prev, [], new Map([['fresh', NOW + 1]]), NOW)
   assert.deepEqual([...next], ['fresh'])
 })
 
@@ -34,15 +34,15 @@ test('a key with no event ever recorded is not held', () => {
   assert.deepEqual([...reconcileLive(prev, [], new Map(), NOW)], [])
 })
 
-test('a question the server says was answered stops showing the ?', () => {
+test('an answered question clears immediately, even when its event was recent', () => {
   // The reported bug: the answer went through, but the event that would have
   // cleared the mark never reached this set — so the row asked forever.
   const prev = new Set(['answered'])
-  const next = reconcileLive(prev, [], new Map([['answered', NOW - 60_000]]), NOW)
+  const next = reconcileLive(prev, [], new Map([['answered', NOW - 1]]), NOW)
   assert.deepEqual([...next], [])
 })
 
-test('a question that just arrived is not erased by a poll that predates it', () => {
+test('a question that arrived after a poll began is not erased by that poll', () => {
   const prev = new Set(['asking'])
-  assert.deepEqual([...reconcileLive(prev, [], new Map([['asking', NOW - 500]]), NOW)], ['asking'])
+  assert.deepEqual([...reconcileLive(prev, [], new Map([['asking', NOW]]), NOW)], ['asking'])
 })

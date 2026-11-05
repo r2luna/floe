@@ -150,7 +150,7 @@ export function packetFrom(
   worktreePath: string,
   fromKey: string,
   toKey: string,
-  opts: { since: 'watermark' | 'all'; to: string }
+  opts: { since: 'watermark' | 'all'; to: string; complete?: boolean }
 ): { packet: string; entries: number } | null {
   const items = sessionTranscript(worktreePath, fromKey)
   const seen = opts.since === 'watermark' ? (readInto.get(readKey(fromKey, toKey)) ?? 0) : 0
@@ -160,7 +160,11 @@ export function packetFrom(
     (i) => (i.at ?? 0) > seen && !(i.role === 'tool' && (i.name === 'handoff' || i.name === 'query'))
   )
   if (!gap.length) return null
-  const packet = buildPacket(gap, { to: opts.to })
+  // A query's first turn needs the whole session, including long answers and
+  // older turns. Later query-to-chat handoffs keep the normal bounded packet.
+  const packet = buildPacket(gap, opts.complete
+    ? { to: opts.to, budget: Number.POSITIVE_INFINITY, itemChars: Number.POSITIVE_INFINITY }
+    : { to: opts.to })
   if (!packet) return null
   // Moved at the START, exactly as seedFor does: a turn that dies halfway has
   // still delivered its packet, and re-sending would pay twice for context the

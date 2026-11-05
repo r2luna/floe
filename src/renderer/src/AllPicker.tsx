@@ -17,17 +17,13 @@ export interface AllTarget {
   harness: string
   /** Already installed and runnable on this machine. */
   ready: boolean
-  /** Cannot hold a query at all — no read-only mode (R2). */
+  /** This name is not a supported Floe runtime. */
   blocked?: boolean
   note?: string
 }
 
 /**
  * The harnesses that can actually hold a query, in menu order.
- *
- * `plan` is the gate and it is the real one: gemini has no read-only setting,
- * so it is listed and struck rather than quietly missing — "why is gemini not
- * here" is a worse question than an answer to it. See docs/queries.md.
  */
 export function allTargets(
   installed: Array<{ id: string; label: string }>,
@@ -42,7 +38,7 @@ export function allTargets(
       harness: id,
       ready: true,
       blocked: !canHold(id),
-      note: canHold(id) ? undefined : 'no read-only mode'
+      note: canHold(id) ? undefined : 'unsupported runtime'
     })
   }
   return rows

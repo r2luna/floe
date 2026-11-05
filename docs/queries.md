@@ -5,7 +5,8 @@ waited for the turn to end, and then codex's answer landed in the same scroll,
 in the middle of the work.
 
 Now it opens a **query**: a second conversation, in its own panel, on its own
-key, running in parallel. It is read-only by construction. Three actions close
+key, running in parallel. It uses the session's selected permission mode,
+mapped to what the query harness supports. Three actions close
 the cycle — **merge**, **peek**, **discard**.
 
 The name is IRC's, for a private side conversation. `lane` was taken: it is
@@ -155,27 +156,18 @@ dispatchTurn({ win, parentKey, worktreePath, prompt, route, origin })
 With a `route` it opens (or refocuses) a query and runs there. Without one it is
 the session's own turn, exactly as before.
 
-## Read-only, and how it is actually enforced
+## Permission mode and Floe MCP
 
-A query is a second agent pointed at a worktree somebody else is already writing
-in. Two writers in one checkout is the failure this exists to prevent, so a
-query runs at `plan` and the mode is not read from the parent — the parent may
-well be on bypass.
-
-**A harness without a real `plan` mode cannot hold a query.** `nearestMode`
-would happily snap to something it *can* do — gemini has no read-only setting,
-so it would land on "ask" and start requesting permission to edit. Refusing is
-better than promising a read-only that does not exist. In practice: claude,
-codex and opencode can; gemini, lmstudio and ollama cannot, and the refusal says
-which and why in the chat that asked.
+A query inherits the parent session's selected permission mode, mapped to the
+closest mode its harness supports. A query can write when that mode allows it,
+so it can change the same worktree as the agent running in the main chat.
 
 ### D8 — a query gets no Floe MCP token
 
 The token in `/mcp/<key>` *is* the session id, and a query key resolves to no
 session — so a query would carry a token `findSessionAny` cannot resolve, and
-every tool depending on it would break in silence. Paired with the read-only
-promise, the honest answer is that a conversation which only reads should not be
-opening panels, creating sessions or running commands in the app either.
+every tool depending on it would break in silence. Queries therefore do not
+receive Floe's MCP tools.
 
 Not minting the token is **not enough on its own**. Without a config of its own
 the CLI falls back to the Floe server registered globally and comes back as
@@ -187,8 +179,7 @@ the CLI falls back to the Floe server registered globally and comes back as
 
 **Consequence, taken deliberately:** the managed hooks stop firing inside a
 query — `hooks.ts`'s `DETECT_FLOE` recognises a Floe process by exactly those two
-argv entries. `plan` is the barrier that replaces them, which is why a harness
-without `plan` is refused outright.
+argv entries.
 
 **Cost:** an agent inside a query cannot drive Floe.
 
@@ -241,7 +232,7 @@ s.claudeId])`), and `sess~codex` is not `sess`.
 ## `@all` — one message, several agents
 
 `@all o que voces acham` asks more than one harness at once. Each target is an
-**ordinary query** — same key, same panel, same read-only, same three actions —
+**ordinary query** — same key, same panel, same permission mode, same three actions —
 so nothing about it is a second mechanism. What the fan-out adds is the
 comparison: every answer is also mirrored into the chat under one `fanoutId`,
 and items sharing one render as columns instead of as four replies in a row.

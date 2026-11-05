@@ -855,7 +855,8 @@ export interface ThreadComment {
 
 // `@codex analisa isso` with Claude mid-turn opens a QUERY: its own panel, its
 // own transcript, running in parallel instead of queueing behind the turn in
-// flight. It is read-only by construction, and three actions close the cycle —
+// flight. It inherits the parent's permission mode, and three actions close
+// the cycle —
 // merge (the conversation becomes the session's context), peek (the session
 // reads it with nothing closing) and discard.
 //

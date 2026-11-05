@@ -1,4 +1,4 @@
-import type { Attached } from '../../shared/types'
+import type { Attached, PermissionMode } from '../../shared/types'
 import type { ModelChoice } from './models'
 
 // The lane is the whole navigation model: panels side by side, in a fixed
@@ -60,7 +60,7 @@ export type Panel = {
    */
   folded?: boolean
   /** For a chat panel: the session it shows. */
-  session?: { id: string; worktreePath: string }
+  session?: { id: string; worktreePath: string; permissionMode?: PermissionMode }
   /**
    * For a launcher ⌘T put up: the branch still remembers the chat this replaced.
    * Asking for a new session closes nothing, so coming back finds that chat.

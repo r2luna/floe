@@ -138,16 +138,17 @@ function render(item: TranscriptItem, max?: number): string | null {
  */
 export function buildPacket(
   items: TranscriptItem[],
-  opts: { to: string; budget?: number }
+  opts: { to: string; budget?: number; itemChars?: number }
 ): string | null {
   const budget = opts.budget ?? BUDGET_CHARS
+  const itemChars = opts.itemChars ?? ITEM_CHARS
   const lines: string[] = []
   let used = 0
   let kept = 0
   for (let i = items.length - 1; i >= 0; i--) {
     // The newest entry is the message being handed over, and it may spend the
     // whole budget. Everything before it is background at the short allowance.
-    const line = render(items[i], i === items.length - 1 ? budget : undefined)
+    const line = render(items[i], i === items.length - 1 ? budget : itemChars)
     if (!line) continue
     if (used + line.length > budget && kept > 0) break
     lines.unshift(line)
@@ -155,7 +156,7 @@ export function buildPacket(
     kept++
   }
   if (!kept) return null
-  const rendered = items.filter((i) => render(i) !== null).length
+  const rendered = items.filter((i) => render(i, itemChars) !== null).length
   const dropped = rendered - kept
   const scope = dropped > 0 ? `the last ${kept} of ${rendered} entries` : `${kept} entries`
   return [
