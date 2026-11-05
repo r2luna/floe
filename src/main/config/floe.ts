@@ -23,6 +23,7 @@ import {
   DEFAULT_GROUP,
   HOST_SITE_MODES,
   NOTIFY_SOUNDS,
+  ORCA_FONTS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
   TRANSPARENCY
@@ -77,6 +78,8 @@ export interface FloeConfig {
     penguinColor: (typeof PENGUIN_COLORS)[number]
     /** How the transcript arranges a turn. Pure CSS — see CHAT_LAYOUTS. */
     chatLayout: (typeof CHAT_LAYOUTS)[number]
+    /** The face the `orca` layout wears — see ORCA_FONTS. */
+    orcaFont: (typeof ORCA_FONTS)[number]
     /** Which themes get the translucent window — see TRANSPARENCY. macOS only. */
     transparency: (typeof TRANSPARENCY)[number]
     /**
@@ -167,6 +170,7 @@ export const DEFAULTS: FloeConfig = {
     // The log the app shipped with. A layout is a matter of taste, so nobody
     // gets moved off the one they already know by installing an update.
     chatLayout: 'classic',
+    orcaFont: 'orca',
     // Opaque until asked: the glass is a choice about the desktop behind the
     // window, and nobody's app should turn see-through on an update.
     transparency: 'off',
@@ -382,6 +386,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         chatLayout:
           appearance?.oneOf('chat-layout', CHAT_LAYOUTS, d.appearance.chatLayout) ??
           d.appearance.chatLayout,
+        orcaFont: appearance?.oneOf('orca-font', ORCA_FONTS, d.appearance.orcaFont) ?? d.appearance.orcaFont,
         transparency:
           appearance?.oneOf('transparency', TRANSPARENCY, d.appearance.transparency) ??
           d.appearance.transparency,

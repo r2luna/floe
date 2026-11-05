@@ -173,6 +173,7 @@ import {
   CHAT_LAYOUTS,
   HOST_SITE_MODES,
   NOTIFY_SOUNDS,
+  ORCA_FONTS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
   TRANSPARENCY,
@@ -7480,6 +7481,20 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           options: [...CHAT_LAYOUTS],
           hint: 'how a turn is arranged — classic is the log the app shipped with'
         },
+        // Only under its layout: anywhere else this row changes nothing on screen.
+        ...(config.appearance.chatLayout === 'orca'
+          ? [
+              {
+                kind: 'choice' as const,
+                table: 'appearance',
+                key: 'orca-font',
+                label: 'Orca font',
+                value: config.appearance.orcaFont,
+                options: [...ORCA_FONTS],
+                hint: 'orca is Geist with SF Mono for code — app is the font the rest of Floe wears'
+              }
+            ]
+          : []),
         {
           kind: 'choice',
           table: 'appearance',

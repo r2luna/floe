@@ -72,10 +72,10 @@ export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
  * change rather than a component change.
  *
  * `classic` is the IRC log the app shipped with — one column, no air between
- * turns. The other seven each pull one lever on it: a nick gutter, a surface per
+ * turns. The others each pull one lever on it: a nick gutter, a surface per
  * turn, a rule between turns, a timeline rail, work banded away from speech,
- * the nick as a label line above the words, and a head line per turn with
- * your own turns on the right.
+ * the nick as a label line above the words, a head line per turn with your own
+ * turns on the right, and Orca's chat, where only other speakers are named.
  */
 export const CHAT_LAYOUTS = [
   'classic',
@@ -85,10 +85,20 @@ export const CHAT_LAYOUTS = [
   'rail',
   'split',
   'labels',
-  'convo'
+  'convo',
+  'orca'
 ] as const
 
 export type ChatLayoutId = (typeof CHAT_LAYOUTS)[number]
+
+/**
+ * The face the `orca` chat layout wears — `[appearance] orca-font`. `orca` is
+ * Geist with SF Mono for code; `app` is the face the rest of Floe wears. Neither
+ * changes the size, which is always `font-size`'s. A stylesheet switch like the layout itself: `data-orca-font` on <html>.
+ */
+export const ORCA_FONTS = ['orca', 'app'] as const
+
+export type OrcaFontId = (typeof ORCA_FONTS)[number]
 
 /**
  * Which themes get the translucent window — `[appearance] transparency`.

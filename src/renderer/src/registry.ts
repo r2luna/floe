@@ -43,7 +43,7 @@ import type { SourceId } from '../../shared/worktreeSource.ts'
 import { colonyTab, setColonyTab, stepTab, type ColonyTab } from './colonyTab.ts'
 import { downloadAndOpen, downloadFile } from './download.ts'
 import { identifiersOf } from './definition.ts'
-import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
+import { CHAT_LAYOUTS, ORCA_FONTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
  * The layout after this one, wrapping — what `chat.layout` steps through.
@@ -2457,6 +2457,26 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.config
             .set('appearance', 'chat-layout', next)
             .then(() => c.say(`Chat layout: ${next}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Like the layout: the two faces are compared by reading a real
+        // transcript, so the switch has to work with the chat in view.
+        id: 'chat.orcaFont',
+        title: 'Next Orca layout font',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then(async (config) => {
+              const at = ORCA_FONTS.indexOf(config.appearance.orcaFont)
+              const next = ORCA_FONTS[(at + 1) % ORCA_FONTS.length] as string
+              // The write comes back as a `config:changed`, which is what moves
+              // the attribute — see appearance.ts.
+              await window.floe.config.set('appearance', 'orca-font', next)
+              c.say(`Orca font: ${next}`)
+            })
             .catch((err: unknown) => c.say(reason(err)))
         }
       },

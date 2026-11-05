@@ -161,6 +161,7 @@ export async function applyConfig(): Promise<void> {
     // the same transcript, and the rules keyed off this attribute are what move
     // the nick, the air and the surfaces. See CHAT_LAYOUTS in shared/types.
     document.documentElement.dataset.chatLayout = config.appearance.chatLayout
+    document.documentElement.dataset.orcaFont = config.appearance.orcaFont
     // Before applyTheme: it resolves dark/light and applies the glass with it.
     glass = config.appearance.transparency
     glassAmount = config.appearance.transparencyAmount

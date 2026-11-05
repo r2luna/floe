@@ -93,6 +93,7 @@ export const COMMAND_IDS: string[] = [
   'auth.account',
   'settings.open',
   'chat.layout',
+  'chat.orcaFont',
   'appearance.transparency',
   'commands.open',
   'skills.open',

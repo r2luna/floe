@@ -17,6 +17,8 @@
    layout from the real stylesheet. No value means `classic`. */
 document.documentElement.dataset.chatLayout =
   new URLSearchParams(location.search).get('layout') || 'classic';
+document.documentElement.dataset.orcaFont =
+  new URLSearchParams(location.search).get('orcaFont') || 'orca';
 if (new URLSearchParams(location.search).get('theme') === 'light')
   document.documentElement.dataset.theme = 'light';
 </script><div class="page">

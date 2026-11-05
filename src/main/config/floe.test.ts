@@ -130,6 +130,19 @@ test('chat-layout takes only the known layouts, and defaults to classic', () => 
   assert.equal(absent.config.appearance.chatLayout, 'classic', 'an old file keeps the log it had')
 })
 
+test('orca-font picks the orca layout\'s face, and defaults to orca', () => {
+  const app = parseFloeConfig('[appearance]\nchat-layout = "orca"\norca-font = "app"\n', 'floe.toml')
+  assert.equal(app.config.appearance.chatLayout, 'orca')
+  assert.equal(app.config.appearance.orcaFont, 'app')
+  assert.deepEqual(app.errors, [])
+
+  const unknown = parseFloeConfig('[appearance]\norca-font = "comic"\n', 'floe.toml')
+  assert.equal(unknown.config.appearance.orcaFont, 'orca')
+  assert.equal(unknown.errors.length, 1)
+
+  assert.equal(parseFloeConfig('', 'floe.toml').config.appearance.orcaFont, 'orca')
+})
+
 test('transparency names the themes that get glass, and defaults to off', () => {
   const dark = parseFloeConfig('[appearance]\ntransparency = "dark"\n', 'floe.toml')
   assert.equal(dark.config.appearance.transparency, 'dark')

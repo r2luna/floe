@@ -31,6 +31,14 @@
   font-display: swap;
   src: url("./assets/fonts/MapleMono-NF-Bold.woff2") format("woff2");
 }
+/* The `orca` chat layout's face, and nothing else's. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/Geist-Variable.woff2") format("woff2");
+}
 
 :root {
   /* Prose leading — looser than the app's 1.55, which is set for rows and code.
@@ -10087,6 +10095,208 @@ kbd {
 
 :root[data-chat-layout='convo'] .chat > .tool-run {
   margin-top: 4px;
+}
+
+/* --- orca: your turns on a surface to the right, the agent as plain prose ---
+   The shape of Orca's chat (mocks/orca-chat.html) in Floe's colours and corners.
+   One size throughout, the app's own, so `font-size` in floe.toml moves it like
+   everything else: hierarchy comes from weight and colour. `orca-font` only
+   decides the face, and the composer sits outside `.chat`, so it never changes. */
+
+/* Re-pointing `--mono` moves every rule in here that names it to the code face;
+   the family moves the text that only inherits the app's from <body>. */
+:root[data-chat-layout='orca'][data-orca-font='orca'] .chat {
+  --mono:
+    "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Liberation Mono",
+    "Maple Mono NF", monospace;
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-chat-layout='orca'] .chat * {
+  font-size: inherit;
+}
+
+/* `font: inherit` on these would otherwise set code in the prose face. */
+:root[data-chat-layout='orca'] .chat :is(code, pre, .md-code, .md-pre) {
+  font-family: var(--mono);
+}
+
+/* Air above a turn; the work under a message stays close to it. */
+:root[data-chat-layout='orca'] .chat > :is(.irc-entry, .irc-head, .tool-run, .ag-group, .query-fold, .fanout, .irc-sys, .irc-typing) {
+  margin-top: 20px;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-cont] {
+  margin-top: 10px;
+}
+
+:root[data-chat-layout='orca'] .chat > :is(.irc-entry, .tool-run) + .tool-run {
+  margin-top: 8px;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-head + .tool-run {
+  margin-top: 2px;
+}
+
+:root[data-chat-layout='orca'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* The clock stays on screen at the right edge: a message cannot take focus, so
+   Orca's hover reveal would leave it out of reach from the keyboard. Only another
+   session or a subagent names itself; the agent you are talking to does not. */
+:root[data-chat-layout='orca'] .irc-lead {
+  float: right;
+  margin: 0 0 0 12px;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.irc-lead, .irc-head) .irc-time {
+  order: 2;
+  margin-right: 0;
+}
+
+:root[data-chat-layout='orca'] .irc-lead:not(:has(.irc-peer)) .irc-nick,
+:root[data-chat-layout='orca'] .irc-head:not(:has(.irc-peer)) > .irc-nick {
+  display: none;
+}
+
+:root[data-chat-layout='orca'] .irc-head {
+  justify-content: flex-end;
+}
+
+:root[data-chat-layout='orca'] .irc-head .irc-cost {
+  order: 1;
+  margin-left: 0;
+}
+
+:root[data-chat-layout='orca'] .irc-body > .irc-cost {
+  padding-left: 12px;
+}
+
+:root[data-chat-layout='orca'] .irc-lead:has(.irc-peer) {
+  float: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+
+:root[data-chat-layout='orca'] .irc-head:has(.irc-peer) {
+  justify-content: flex-start;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.irc-lead, .irc-head) .irc-peer {
+  margin: 0 auto 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+}
+
+/* Your own turn: recessed and outlined, with its clock under the surface. */
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] {
+  position: relative;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me]:has(.irc-lead) {
+  padding-bottom: 1.6em;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] > .irc-body {
+  width: fit-content;
+  max-width: 80%;
+  margin-left: auto;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  color: var(--text-strong);
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] .irc-lead {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  float: none;
+  margin: 0;
+}
+
+/* The words. The head floats right here, so a block has to clear that side too
+   or the clock narrows a code slab that opens the message. */
+:root[data-chat-layout='orca'] .chat .irc-body .md > :not(p) {
+  clear: both;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md p {
+  margin-bottom: 10px;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md > :last-child {
+  margin-bottom: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 8px;
+  color: var(--text-strong);
+  font-weight: 700;
+  line-height: inherit;
+}
+
+:root[data-chat-layout='orca'] .chat .md > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md-code {
+  padding: 1px 5px;
+  border-color: var(--line);
+  background: var(--well);
+  color: var(--text);
+}
+
+:root[data-chat-layout='orca'] .chat .md-block {
+  margin: 12px 0;
+  border-color: var(--line);
+  background: var(--well);
+}
+
+:root[data-chat-layout='orca'] .chat .md-block-head {
+  padding: 4px 8px 0 14px;
+  border-bottom: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .md-pre {
+  padding: 2px 14px 12px;
+}
+
+/* The work: rows, not a tree. A verb in grey and its target in the text colour. */
+:root[data-chat-layout='orca'] .chat .run-fold {
+  padding: 2px 0;
+  line-height: var(--prose-line);
+  opacity: 1;
+}
+
+:root[data-chat-layout='orca'] .chat .run-fold-body {
+  margin: 2px 0 6px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.tool-row, .bash-row) {
+  align-items: center;
+  min-height: 26px;
+}
+
+:root[data-chat-layout='orca'] .chat .tool-mark {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .tool-verb {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.tool-arg, .tool-base) {
+  color: var(--text);
 }
 
 /* --- the nanny: the board's log, and the board's session under it ---------

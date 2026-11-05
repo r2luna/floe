@@ -61,14 +61,20 @@ export const FLOE_TOML = `# ====================================================
 # | the theme flipping under it.
 # |
 # | \`chat-layout\` is how the transcript arranges a turn. \`classic\` is the
-# | IRC log the app shipped with — one column, no air between turns. The other
-# | six each pull one lever on it: \`gutter\` puts the time and nick in a fixed
+# | IRC log the app shipped with — one column, no air between turns. The others
+# | each pull one lever on it: \`gutter\` puts the time and nick in a fixed
 # | left column so every message starts at the same edge, \`surfaces\` gives
 # | your own messages a recessed well, \`ruled\` draws a hairline between
 # | speakers, \`rail\` hangs the turns off a timeline, \`split\` bands the tool
-# | work away from the speech, and \`labels\` puts the nick on its own line
-# | above the words. Every one of them is a block of CSS — the transcript
-# | renders the same either way.
+# | work away from the speech, \`labels\` puts the nick on its own line above
+# | the words, \`convo\` gives each turn a head line with yours on the right,
+# | and \`orca\` follows Orca's chat: your turns on the right, the session's
+# | own agent unnamed, one font size. Every one of them is a block of CSS — the
+# | transcript renders the same either way.
+# |
+# | \`orca-font\` is the face the \`orca\` layout wears: \`orca\` is Geist, with
+# | SF Mono for code, and \`app\` is the font the rest of Floe wears. The size
+# | stays \`font-size\`'s either way. The other layouts ignore it.
 # |
 # | \`transparency\` makes the window translucent, with the desktop blurred
 # | behind every surface — macOS only. It is chosen per theme, because the two
@@ -97,6 +103,7 @@ light-theme         = "floe"
 penguin             = "classic"
 penguin-color       = "accent"
 chat-layout         = "classic"
+orca-font           = "orca"
 transparency        = "off"
 transparency-amount = 18
 key-hints           = false
