@@ -4,8 +4,8 @@ import { isChecklistFolded, subscribeChecklistFold, toggleChecklistFold } from '
 import { Spinner } from './Spinner'
 
 // The agent's to-do list, pinned between the transcript and the composer: the
-// transcript scrolls and the work it describes should not. Shown while there is
-// anything left to do. A list finished in full leaves when the turn ends, and its
+// transcript scrolls and the work it describes should not. Shown only while there
+// is anything left to do: a finished list leaves at once, even mid-turn, and its
 // updates stay in the transcript as ordinary tool rows.
 
 /** How many rows a long list shows, so it can never push the chat off the panel. */
@@ -35,18 +35,12 @@ function visibleRows(items: readonly ChecklistItem[]): { rows: readonly Checklis
 
 export function ChecklistStrip({ items, running }: { items: readonly ChecklistItem[]; running: boolean }) {
   const folded = useSyncExternalStore(subscribeChecklistFold, isChecklistFolded)
-  if (!items.length || (!running && !checklistOpen(items))) return null
+  if (!checklistOpen(items)) return null
 
   const done = items.filter((item) => item.status === 'completed').length
   const live = items.find((item) => item.status === 'in_progress')
   const next = items.find((item) => item.status === 'pending')
-  const line = !running
-    ? 'stopped'
-    : live
-      ? (live.active ?? live.text)
-      : next
-        ? `next: ${next.text}`
-        : 'done'
+  const line = !running ? 'stopped' : live ? (live.active ?? live.text) : `next: ${next?.text}`
   const { rows, hidden } = visibleRows(items)
 
   return (
