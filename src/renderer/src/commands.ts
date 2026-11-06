@@ -122,6 +122,8 @@ export interface CommandContext {
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
+  /** Ask the worktree's chat to commit its changes, opening a chat if none is. */
+  commit: () => void
   /** The open project's repo root. The colony board is scoped to it. */
   project?: string
   /**

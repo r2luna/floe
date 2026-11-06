@@ -3038,6 +3038,16 @@ export const REGISTRY: Map<string, Command> = new Map(
           `no worktree ${Number(arg ?? 0) + 1} — this project has ${c.worktreeNames.length}`,
         run: (c, arg) => c.enterWorktreeAt(Number(arg ?? 0))
       },
+      {
+        // The top bar's commit chip. The agent writes the message, so this asks
+        // the branch's chat rather than committing behind its back.
+        id: 'worktree.commit',
+        title: 'Ask the chat to commit this worktree',
+        group: 'Worktrees',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to commit — open one first',
+        run: (c) => c.commit()
+      },
       // --- guided merge ---------------------------------------------------
       // Everything the checklist offers is a command: its chips dispatch these
       // ids, and so do ⏎ / r / s / esc over the panel.

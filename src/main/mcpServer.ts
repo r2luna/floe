@@ -65,6 +65,7 @@ import {
   fileDiff,
   listBranches,
   listWorktrees,
+  mergeTargetOf,
   mergeWorktree,
   removeWorktree,
   worktreeDiffStat
@@ -805,11 +806,14 @@ function registerWorktreeTools(server: McpServer, token: string): void {
 
   server.tool(
     'worktree_status',
-    'Git status of a worktree: dirty files plus the diff stat against its review base.',
+    'Git status of a worktree: dirty files, commits to push, how far it is ahead of and behind the branch it merges into (status.base), plus the diff stat against its review base.',
     { worktree: z.string().describe('The worktree path.') },
     async ({ worktree }) => {
       try {
-        const [status, stat] = await Promise.all([worktreeStatus(worktree), worktreeDiffStat(worktree)])
+        const [status, stat] = await Promise.all([
+          mergeTargetOf(worktree).then((base) => worktreeStatus(worktree, base)),
+          worktreeDiffStat(worktree)
+        ])
         return textResult({ status, diffStat: stat })
       } catch (e) {
         return textResult({ error: (e as Error).message })

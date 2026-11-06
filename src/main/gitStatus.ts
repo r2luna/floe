@@ -42,7 +42,27 @@ export function parseStatus(out: string): WorktreeStatus {
   return status
 }
 
-export async function worktreeStatus(path: string): Promise<WorktreeStatus | null> {
+/** The branch `git status -b` reports, or undefined on a detached HEAD. */
+export function headBranch(out: string): string | undefined {
+  // `## feat/x...origin/feat/x [ahead 2]`, `## feat/x`, `## No commits yet on x`.
+  const line = out.split('\n', 1)[0]
+  if (!line.startsWith('## ') || line.startsWith('## HEAD (no branch)')) return undefined
+  const head = line.slice(3).replace(/^No commits yet on /, '')
+  return head.split('...')[0].split(' ')[0] || undefined
+}
+
+/** `rev-list --left-right --count base...HEAD` prints `behind<TAB>ahead`. */
+export function parseDistance(out: string): { ahead: number; behind: number } | undefined {
+  const m = /^(\d+)\s+(\d+)/.exec(out.trim())
+  return m ? { behind: Number(m[1]), ahead: Number(m[2]) } : undefined
+}
+
+/**
+ * `base` is the branch this worktree merges into, resolved by the caller (see
+ * git.ts mergeTargetOf). A worktree that IS on its base, the main one, gets no
+ * distance: there is nothing to merge it into.
+ */
+export async function worktreeStatus(path: string, base?: string): Promise<WorktreeStatus | null> {
   try {
     // `--no-renames` so a rename reads as one delete plus one add, which is what
     // the two numbers already mean — and keeps the line format to a plain XY.
@@ -55,7 +75,15 @@ export async function worktreeStatus(path: string): Promise<WorktreeStatus | nul
       '--no-renames',
       '--untracked-files=all'
     ])
-    return parseStatus(stdout)
+    const status = parseStatus(stdout)
+    if (base && base !== headBranch(stdout)) {
+      const distance = await exec('git', ['-C', path, 'rev-list', '--left-right', '--count', `${base}...HEAD`])
+        .then(({ stdout }) => parseDistance(stdout))
+        // An unknown base leaves the field out rather than failing the row.
+        .catch(() => undefined)
+      if (distance) status.base = { name: base, ...distance }
+    }
+    return status
   } catch {
     // Not a repo, or the worktree is gone from disk. The row just shows nothing.
     return null

@@ -37,6 +37,8 @@ import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { useNarrow, useTouch } from './useNarrow'
 import { RailMenu } from './RailMenu'
+import { TopBar } from './TopBar'
+import { sayTo } from './chatSay'
 import { installPluginCommands, runCommand, type CommandContext, type CommandRow } from './commands'
 import { keyHint, panelKeys } from './keyHints'
 import { useNeedsYouNotifier } from './useNotify'
@@ -2461,6 +2463,18 @@ export default function App() {
     // listing — and reading the selection instead left `e`, `r`, `m` and `d`
     // silently refusing on a tree the user can see. Same answer as `here`, so
     // the commands and the panels cannot disagree about which tree they mean.
+    commit: () => {
+      if (!here) return
+      const prompt = 'Commit the uncommitted changes in this worktree.'
+      const chat = sessionOf(lane)
+      if (chat?.worktreePath === here) return sayTo(chat.id, prompt)
+      const id = crypto.randomUUID()
+      const session = { id, worktreePath: here }
+      void window.floe.claude
+        .createSession({ ...session, title: 'Commit' })
+        .then(() => ctxRef.current.openChat(session, prompt))
+        .catch((e: Error) => say(`Could not start a chat to commit: ${e.message}`))
+    },
     worktree: here
       ? {
           path: here,
@@ -3336,6 +3350,23 @@ export default function App() {
             setRailMenu(false)
             menuRef.current?.focus()
           }}
+        />
+      )}
+      {/* Wide only: on a phone the lane bar owns the top, and a second strip
+          would leave the panel no room. */}
+      {!narrow && (
+        <TopBar
+          project={projects.current?.name}
+          machine={
+            projects.current?.backend && projects.current.backend !== 'local'
+              ? projects.current.backend
+              : undefined
+          }
+          worktree={worktrees.rows.find((r) => r.worktree.path === here)?.worktree}
+          status={here ? worktrees.status[here] : undefined}
+          keys={{ commit: chordLabels['worktree.commit'], merge: chordLabels['worktree.merge'] }}
+          onCommit={() => runCommand(REGISTRY, ctxRef.current, 'worktree.commit')}
+          onMerge={() => runCommand(REGISTRY, ctxRef.current, 'worktree.merge')}
         />
       )}
       <div className="workspace">

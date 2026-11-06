@@ -197,6 +197,7 @@ export const COMMAND_IDS: string[] = [
   'worktree.new',
   'worktree.newFromSource',
   'worktree.focusAt',
+  'worktree.commit',
   'worktree.merge',
   'merge.confirm',
   'merge.review',

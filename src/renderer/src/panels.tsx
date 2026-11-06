@@ -187,6 +187,7 @@ import { applyConfig, omarchyAvailable, previewFont, type FontVariable } from '.
 import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
+import { onSay } from './chatSay'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -1920,6 +1921,16 @@ function ChatPanel({
   // up to re-read something and being yanked back down by the next delta is the
   // worst thing a live transcript can do.
   const pinned = useRef(true)
+
+  // A command speaking into this chat (the top bar's commit) goes out the way a
+  // typed line would: this composer's model and mode, queued behind a busy turn.
+  useEffect(() => {
+    if (!session) return
+    return onSay(session.id, (said) => {
+      repin()
+      send(said, choice)
+    })
+  })
 
   // Nail the last line to the bottom edge. Every path below ends here.
   const stick = () => {

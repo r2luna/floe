@@ -238,6 +238,10 @@ export interface WorktreeStatus {
   ahead: number // commits to push
   behind: number // commits to pull
   upstream: boolean // has a tracking branch at all
+  // Where this branch stands against the branch it merges into: `ahead` is what
+  // a merge would bring, `behind` is what the base gained since. Absent on the
+  // main worktree, and when git cannot tell.
+  base?: { name: string; ahead: number; behind: number }
 }
 
 // The live status the projects rail shows for a project the user worked today:

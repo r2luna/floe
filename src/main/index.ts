@@ -76,6 +76,7 @@ import {
   removeWorktreeGuided,
   deleteBranch,
   mergePreflight,
+  mergeTargetOf,
   mergeStash,
   mergeBase,
   mergeResolveCheck,
@@ -580,7 +581,9 @@ export async function listWorktreesFor(win: BrowserWindow | null, repoPath: stri
 // worktrees run in parallel, and a clean one is left out entirely.
 export async function worktreeStatuses(paths: string[]): Promise<Record<string, unknown>> {
   const entries = await Promise.all(
-    paths.filter((path) => !isHomePath(path)).map(async (path) => [path, await worktreeStatus(path)] as const)
+    paths
+      .filter((path) => !isHomePath(path))
+      .map(async (path) => [path, await worktreeStatus(path, await mergeTargetOf(path))] as const)
   )
   return Object.fromEntries(entries.filter(([, status]) => status))
 }

@@ -277,6 +277,150 @@ button {
   height: 100%;
 }
 
+/* --- top bar (TopBar.tsx) ------------------------------------------------- */
+
+/* Where you are, and what is left before merge. The window is frameless, so the
+   strip is also its drag handle; the chips opt back out to stay clickable. */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 30px;
+  flex: none;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.topbar-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar-project {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.topbar-branch {
+  color: var(--accent);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-faint {
+  color: var(--faint);
+}
+
+.topbar-tag {
+  color: var(--faint);
+  border: 1px solid var(--edge);
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.topbar-gap {
+  flex: 1;
+}
+
+/* Groups are split by a hairline, so "to commit" and "to push" never read as
+   one number. The first one after the gap has nothing to its left to split. */
+.topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 16px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.topbar-gap + .topbar-group {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.topbar-group .wt-add,
+.topbar-group .wt-mod,
+.topbar-group .wt-del,
+.topbar-group .wt-sync {
+  font-weight: 700;
+}
+
+.topbar-ok {
+  color: var(--live);
+}
+
+.topbar-warn {
+  color: #c9a05f;
+}
+
+:root[data-theme='light'] .topbar-warn {
+  color: #8a6314;
+}
+
+/* The outline chip, in the mode-chip tones: amber for commit, green for merge. */
+.topbar-chip {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.topbar-chip kbd {
+  font: inherit;
+  font-size: 10px;
+  color: var(--faint);
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+.topbar-chip[data-tone='commit'] {
+  color: #c9a05f;
+  border-color: #3a3226;
+  background: #211d17;
+}
+
+.topbar-chip[data-tone='merge'] {
+  color: #93b8a1;
+  border-color: #283129;
+  background: #1b201d;
+}
+
+:root[data-theme='light'] .topbar-chip[data-tone='commit'] {
+  color: #8a6314;
+  border-color: #e6d3ae;
+  background: #fbf5ea;
+}
+
+:root[data-theme='light'] .topbar-chip[data-tone='merge'] {
+  color: #2f7d52;
+  border-color: #b6d9c3;
+  background: #eef6f1;
+}
+
+.topbar-chip:hover,
+.topbar-chip:focus-visible {
+  border-color: currentColor;
+}
+
 /* --- lane ---------------------------------------------------------------- */
 
 .workspace {

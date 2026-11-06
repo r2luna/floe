@@ -269,6 +269,14 @@ export async function reorderWorktrees(root: string, orderedPaths: string[]): Pr
   return listWorktrees(root)
 }
 
+/**
+ * The branch a worktree merges into: its `.gw-base`, else the project's main
+ * branch. The answer mergePreflight gives, read from the worktree itself.
+ */
+export async function mergeTargetOf(path: string): Promise<string> {
+  return readBase(path) || (await mainBranch(path))
+}
+
 export function readBase(path: string): string | undefined {
   const file = join(path, '.gw-base')
   if (!existsSync(file)) return undefined

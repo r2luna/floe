@@ -93,6 +93,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       remove: async () => {},
       setScope: async () => {}
     },
+    commit: () => {},
     merge: {
       active: false,
       failed: false,

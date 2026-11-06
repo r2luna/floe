@@ -451,6 +451,14 @@ adds a project rather than repeating a search — \`/\` still searches it, and
     ]
   },
   {
+    title: 'Top bar',
+    doc: `The strip across the top says where you are (project, branch, the base it
+merges into) and what is left: files to commit, commits to push, and whether the
+branch is ready to merge. \`⌘⇧C\` asks this branch's chat to commit, so the
+agent writes the message; with no chat open it starts one. \`⌘K M\` is the merge.`,
+    binds: [{ key: 'super+shift+c', command: 'worktree.commit' }]
+  },
+  {
     title: 'Guided merge',
     doc: `\`⌘K M\` merges the worktree you are in into its base, as a checklist you
 can watch: it brings base in, hands any conflicts to an agent in a session of
