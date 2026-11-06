@@ -333,7 +333,11 @@ export function focusDir(lane: Lane, dx: -1 | 0 | 1, dy: -1 | 0 | 1): Lane {
   if (dx !== 0) {
     const col = columns[c + dx]
     if (!col) return lane // already the edge column — no wrap
-    return focusAt(lane, col[Math.min(r, col.length - 1)].index)
+    const row = col[Math.min(r, col.length - 1)]
+    // Into a sidebar stack you land on a list you can see: a folded one is a
+    // bare header, and focusing it would leave j/k walking hidden rows.
+    const shown = isSidebarStack(col) && row.panel.folded ? col.find((x) => !x.panel.folded) : row
+    return focusAt(lane, (shown ?? row).index)
   }
 
   const row = columns[c][r + dy]
@@ -398,7 +402,7 @@ export function stackSidebar(lane: Lane, make: (kind: string) => Panel | undefin
   const inStack = keep !== -1 && SIDEBAR_KINDS.includes(panels[keep].kind)
   const active = panels.findIndex((p) => p.kind === 'active')
   const revealed = inStack ? keep : active === -1 ? first : active
-  const folded = reveal({ panels, focus: revealed }, true)
+  const folded = foldAllBut({ panels, focus: revealed })
   return { panels: folded.panels, focus: keep === -1 ? revealed : keep }
 }
 
@@ -416,24 +420,16 @@ export function toggleFold(lane: Lane, index: number): Lane {
   return patchPanel(lane, index, { folded: panel.folded ? undefined : true })
 }
 
-/**
- * The accordion rule: in a sidebar stack, the focused panel is open and its
- * siblings fold. Called when focus MOVES, not on every render, so `toggleFold`
- * can still open a second section by hand. `force` applies it regardless
- * (stacking for the first time). Returns the same lane when nothing changes.
- */
-export function reveal(lane: Lane, force = false): Lane {
+/** Open the focused list of a sidebar stack and fold its siblings. Stacking only. */
+function foldAllBut(lane: Lane): Lane {
   const column = columnsOf(lane).find((col) => col.some((c) => c.index === lane.focus))
   if (!column || !isSidebarStack(column)) return lane
-  const wanted = new Set(column.filter((c) => c.index !== lane.focus).map((c) => c.index))
-  let changed = false
   const panels = lane.panels.map((p, i) => {
-    const folded = i === lane.focus ? undefined : wanted.has(i) ? true : p.folded
-    if (folded === p.folded) return p
-    changed = true
-    return { ...p, folded }
+    if (!column.some((c) => c.index === i)) return p
+    const folded = i === lane.focus ? undefined : true
+    return folded === p.folded ? p : { ...p, folded }
   })
-  return changed || force ? { ...lane, panels } : lane
+  return { ...lane, panels }
 }
 
 /**
