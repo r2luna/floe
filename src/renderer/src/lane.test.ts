@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, laneOf, open, focusDir, resizePanel, reveal, setCursor, slotOf, stackSidebar, toggleDock, toggleFold, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, stackSidebar, toggleDock, toggleFold, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -517,18 +517,24 @@ test('a list that cannot open is left out of the stack', () => {
   assert.deepEqual(ids(lane), ['projects', 'active', 'chat'])
 })
 
-test('moving focus inside the stack reveals the target and folds its siblings', () => {
-  let lane = stackSidebar(sidebarLane(), make)
-  lane = reveal(focusAt(lane, 2))
-  assert.deepEqual(lane.panels.map((x) => !!x.folded), [true, true, false, false])
+test('moving focus never folds or unfolds a list', () => {
+  const lane = stackSidebar(focusAt(sidebarLane(), 3), make) // focus on the chat
+  const folds = lane.panels.map((x) => !!x.folded)
+  for (const next of [focusDir(lane, -1, 0), focusAt(lane, 2), focusDir(focusAt(lane, 1), 0, 1)])
+    assert.deepEqual(next.panels.map((x) => !!x.folded), folds)
 })
 
-test('reveal leaves a lane alone when nothing changes, and a non-sidebar stack untouched', () => {
-  const stacked = stackSidebar(sidebarLane(), make)
-  assert.equal(reveal(stacked), stacked)
-  const term = toggleDock(open(sidebarLane(), ranked('terminal', 'terminal', 40)), 2)
-  const onChat = focusAt(term, 1)
-  assert.equal(reveal(onChat), onChat)
+test('crossing into a sidebar stack lands on the open list, not a folded header', () => {
+  let lane = stackSidebar(sidebarLane(), make) // projects open, the rest folded
+  lane = toggleFold(focusAt(lane, 2), 2) // worktrees opened by hand
+  lane = toggleFold(focusAt(lane, 0), 0) // projects folded by hand
+  assert.equal(lane.panels[focusDir(focusAt(lane, 3), -1, 0).focus].id, 'worktrees')
+})
+
+test('crossing into a sidebar stack keeps the row when that list is open', () => {
+  let lane = stackSidebar(sidebarLane(), make)
+  lane = toggleFold(focusAt(lane, 1), 1) // projects + active open
+  assert.equal(lane.panels[focusDir(focusAt(lane, 3), -1, 0).focus].id, 'projects')
 })
 
 test('folding flips a panel and keeps through a content swap', () => {

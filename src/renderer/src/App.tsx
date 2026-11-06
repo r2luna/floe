@@ -24,10 +24,10 @@ import {
   open,
   patchPanel,
   resizePanel,
-  reveal,
   setCursor,
   slotOf,
-  toggleDock
+  toggleDock,
+  toggleFold
 } from './lane'
 import { dragAnchor, selRange } from './diff'
 import { pickDefinition } from './definition'
@@ -786,12 +786,6 @@ export default function App() {
   }, [sessionKey])
   // How the lane is laid out: one entry per column, docked panels folded in.
   const columns = columnsOf(lane)
-  // The sidebar stack is an accordion: moving onto a list opens it and folds the
-  // others. Keyed on the focus ONLY, so folding one by hand (`z`) is not undone
-  // on the next render.
-  useEffect(() => {
-    setLane((l) => reveal(l))
-  }, [lane.focus])
   // The lane's inner width, watched: whether the columns fit is a question
   // about the window, and the answer changes when you resize it.
   const [laneWidth, setLaneWidth] = useState(0)
@@ -3519,7 +3513,19 @@ export default function App() {
                   />
                 )}
                 {!bare && (
-                  <header className="panel-head">
+                  <header
+                    className="panel-head"
+                    // In a sidebar stack the header is the fold switch, like `z`.
+                    // Only by hand: nothing else folds or unfolds a list.
+                    onClick={
+                      isSidebarStack(column)
+                        ? (e) => {
+                            if ((e.target as HTMLElement).closest('button')) return
+                            setLane((l) => toggleFold(l, i))
+                          }
+                        : undefined
+                    }
+                  >
                     {isSidebarStack(column) && (
                       <span className="fold-caret" aria-hidden="true">
                         {panel.folded ? '▸' : '▾'}
