@@ -1,0 +1,26 @@
+session 637a9ba0-fd46-4e24-8da0-b821aa89e0d0
+idle seconds: 1634, capture: no surface
+STAND-IN pixels for this run: the page has not been on screen
+PASS  a new mark puts the caret in its own description
+PASS  drawing the next mark straight away works on the first click  -> 2
+rows: [{"el":"button.pay \"Pay now\"","input":true,"value":"","placeholder":"Add a description…"},{"el":"#card \"Card number\"","input":true,"value":"","placeholder":"Add a description…"},{"el":"#card \"Card number\"","input":true,"value":"","placeholder":"Add a description…"}]
+PASS  every row has a description field
+PASS  an empty one says it can be filled in
+PASS  Esc on an empty description leaves the mark in place
+PASS  Esc returns to the drawing keys
+PASS  clicking row 2 puts the caret there
+PASS  Esc keeps what was typed  -> Contrast fails AA
+PASS  moving to another row kept the first description  -> Card brand icon goes here
+PASS  a text mark opens its own row
+PASS  a text mark left empty goes away
+--- composer ---
+image 01 http://127.0.0.1:5199/checkout at 689×743
+1. button.pay "Pay now": Contrast fails AA
+2. #card "Card number": Show the card brand icon
+3. #card "Card number"
+----------------
+PASS  row 1 went with its description
+PASS  the edited description replaced the old one
+PASS  the undescribed arrow still went, without a description
+
+all description checks passed

@@ -221,6 +221,7 @@ import {
 import {
   BROWSER_PARTITION,
   browserBack,
+  captureBrowser,
   browserForward,
   browserReload,
   browserState,
@@ -1080,6 +1081,8 @@ const browserFocusIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, focusBrowser)
 const browserDevToolsIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, openBrowserDevTools)
+const browserCaptureIpc = (event: IpcMainInvokeEvent): ReturnType<typeof captureBrowser> | null =>
+  withBrowserWindow(event, (win) => captureBrowser(win))
 const browserScreenshotIpc = (event: IpcMainInvokeEvent): ReturnType<typeof screenshotPageToDesk> | null =>
   withBrowserWindow(event, (win) => screenshotPageToDesk(win))
 
@@ -1098,6 +1101,7 @@ export function registerBrowserIpc(): void {
   handle('browser:focus', browserFocusIpc)
   handle('browser:devtools', browserDevToolsIpc)
   handle('browser:screenshot', browserScreenshotIpc)
+  handle('browser:capture', browserCaptureIpc)
 }
 
 // The file tree, media probes and the review diff.

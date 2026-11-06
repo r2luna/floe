@@ -533,6 +533,30 @@ export interface BrowserTarget {
 }
 
 /** The readable and interactive page surface returned to an agent. */
+/** An element on screen when the page was captured, in the page's CSS pixels. */
+export interface BrowserElement {
+  selector: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Worth a keyboard hint: what you would otherwise have to aim a mouse at. */
+  interactive: boolean
+}
+
+/** The viewport as an image, and what was where on it at that moment. */
+export interface BrowserCapture {
+  data: string
+  mimeType: 'image/png'
+  url: string
+  title: string
+  width: number
+  height: number
+  capturedAt: number
+  elements: BrowserElement[]
+}
+
 export interface BrowserSnapshot {
   url: string
   title: string

@@ -26,6 +26,7 @@ import {
   readAttachment,
   renumberImageRefs
 } from './attachments'
+import { addAnnotation, composerInbox, type Delivery } from './annotate'
 import { bangTokens, isBang } from './bang'
 import { isFileRef } from './fileRefs'
 import {
@@ -583,6 +584,20 @@ export function Composer({
   // Kept beside the text under the same key, so leaving the panel with a
   // pasted screenshot and coming back finds it still attached.
   const { images, files, pastes, setImages, setFiles, setPastes } = usePending(draftKey)
+  // A browser annotation arrives from another panel. The ref is what keeps it
+  // from landing on the draft as it stood when this composer mounted.
+  const takeAnnotation = useRef<(delivery: Delivery) => void>(() => {})
+  takeAnnotation.current = ({ image, summary }) => {
+    setImages((prev) => [...prev, image])
+    const next = addAnnotation(value, images.length + 1, summary)
+    onChange(next.text)
+    setCaret(next.caret)
+    input.current?.focus()
+  }
+  useEffect(() => {
+    if (!draftKey) return
+    return composerInbox.open(draftKey, (delivery) => takeAnnotation.current(delivery))
+  }, [draftKey])
   // Which collapsed paste the caret is sitting in, if any — the rail is two
   // lines on screen and this is how you see what is under them.
   const [peek, setPeek] = useState<number | null>(null)

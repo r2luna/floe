@@ -1,0 +1,36 @@
+idle seconds: 73, page: visible
+PASS  the bar sits under the page, not over it
+PASS  the page view was resized to leave room for the bar  -> {"x":656,"y":100,"width":689,"height":743}
+real capturePage right now: real {"width":1378,"height":1486}
+PASS  clicking pen in the bar opens the surface
+PASS  the surface starts on the tool that was clicked  -> ppen
+PASS  the tools are below the page while drawing
+PASS  a pen stroke by mouse makes a mark
+PASS  clicking another tool saves the open note
+PASS  and switches to it  -> aarrow
+PASS  an arrow by mouse makes a second mark
+PASS  clicking undo during a note removes that mark and its note field
+PASS  one click on send closes the surface
+--- composer ---
+image 01 http://127.0.0.1:5199/checkout at 689×743
+1. button.pay "Pay now": Circled by mouse
+2. form: Typed, never saved with Enter
+----------------
+PASS  focus lands in the composer
+PASS  the note still open at send time went with it
+PASS  the first note is there too
+PASS  a sloppy circle around Pay now resolved to the button
+PASS  the undone arrow is not
+PASS  an image chip is attached
+
+--- real pixels: the paths earlier runs could not reach ---
+page: visible
+PASS  super+shift+n inside the page opens it on a real capture
+after Esc: webContents focused=true, renderer active=BODY
+http://127.0.0.1:5199/checkout
+1. button.pay "Pay now": too green
+2. #card "Card number": needs an icon
+PASS  browser_annotate returns real pixels
+PASS  its marks are gone from the page afterwards
+
+all mouse checks passed

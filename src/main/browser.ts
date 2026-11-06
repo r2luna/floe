@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, nativeImage, shell, WebContentsView, typ
 import { execFile } from 'node:child_process'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { BrowserSnapshot, BrowserState } from '../shared/types'
+import type { BrowserCapture, BrowserElement, BrowserSnapshot, BrowserState } from '../shared/types'
 
 type Session = {
   win: BrowserWindow
@@ -84,6 +84,7 @@ export function browserShortcut(input: Electron.Input): string | undefined {
     (commandOrControl ? primary[key] : undefined) ??
     (commandOrControl && input.alt && key === 'i' ? 'browser.devtools' : undefined) ??
     (commandOrControl && input.shift && key === 's' ? 'browser.screenshot' : undefined) ??
+    (commandOrControl && input.shift && key === 'n' ? 'browser.annotate' : undefined) ??
     (input.control ? control[key] : undefined)
   )
 }
@@ -140,7 +141,7 @@ function shortcut(session: Session, event: Electron.Event, input: Electron.Input
   // The address field lives in Floe's own page. Focusing it from the renderer
   // alone leaves the OS keyboard focus inside this view, so typing would still
   // go to the site. Hand focus to the host first.
-  if (command === 'browser.address') session.win.webContents.focus()
+  if (command === 'browser.address' || command === 'browser.annotate') session.win.webContents.focus()
   session.win.webContents.send('browser:shortcut', command)
 }
 
@@ -452,6 +453,194 @@ export async function screenshotBrowser(
 ): Promise<{ data: string; mimeType: 'image/png' }> {
   const image = await withBrowserTimeout('Browser screenshot', sessionFor(win, key).view.webContents.capturePage())
   return { data: image.toPNG().toString('base64'), mimeType: 'image/png' }
+}
+
+// A short selector for an element, walking up only as far as it takes to be
+// unique. Shared by the capture map and browser_annotate, so an agent reads the
+// same names a person's marks produce.
+const SELECTOR_JS = `const selectorOf = (el) => {
+    const part = (node) => {
+      const testId = node.getAttribute('data-testid')
+      if (testId) return '[data-testid="' + CSS.escape(testId) + '"]'
+      if (node.id) return '#' + CSS.escape(node.id)
+      const classes = [...node.classList].slice(0, 2).map((c) => '.' + CSS.escape(c)).join('')
+      return node.tagName.toLowerCase() + classes
+    }
+    const unique = (sel) => {
+      try { return document.querySelectorAll(sel).length === 1 } catch { return false }
+    }
+    let path = part(el)
+    if (unique(path)) return path
+    const siblings = el.parentElement ? [...el.parentElement.children].filter((c) => c.tagName === el.tagName) : []
+    if (siblings.length > 1) path += ':nth-of-type(' + (siblings.indexOf(el) + 1) + ')'
+    let up = el.parentElement
+    for (let depth = 0; depth < 4 && up && up !== document.body && !unique(path); depth++) {
+      path = part(up) + ' > ' + path
+      up = up.parentElement
+    }
+    return path
+  }
+  const labelOf = (el) => {
+    const own = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ')
+    const inner = el.matches(INTERACTIVE) ? el.innerText : ''
+    return (el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('alt') || el.getAttribute('placeholder') || inner || own || '').trim().replace(/\\s+/g, ' ').slice(0, 60)
+  }`
+
+const INTERACTIVE_JS = `const INTERACTIVE = 'a[href], button, input, textarea, select, summary, [role="button"], [role="link"], [contenteditable="true"], [tabindex]:not([tabindex="-1"])'`
+
+// No field values in the labels: a capture ends up in a prompt, and a password
+// box must not take its contents along.
+const CAPTURE_MAP_SCRIPT = `(() => {
+  ${INTERACTIVE_JS}
+  ${SELECTOR_JS}
+  const W = innerWidth
+  const H = innerHeight
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'HEAD', 'META', 'LINK', 'TITLE'])
+  const seen = []
+  for (const el of document.body ? document.body.querySelectorAll('*') : []) {
+    if (SKIP.has(el.tagName)) continue
+    const r = el.getBoundingClientRect()
+    const x = Math.max(0, r.left)
+    const y = Math.max(0, r.top)
+    const width = Math.min(W, r.right) - x
+    const height = Math.min(H, r.bottom) - y
+    if (width < 2 || height < 2) continue
+    const s = getComputedStyle(el)
+    if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') continue
+    // Under a modal is not on screen: only what a click there would reach counts.
+    const hit = document.elementFromPoint(x + width / 2, y + height / 2)
+    if (!hit || !(el.contains(hit) || hit.contains(el))) continue
+    seen.push({ el, x, y, width, height, interactive: el.matches(INTERACTIVE) })
+  }
+  const kept = [...seen.filter((e) => e.interactive), ...seen.filter((e) => !e.interactive)].slice(0, 800)
+  const elements = kept.map(({ el, x, y, width, height, interactive }) => ({
+    selector: selectorOf(el),
+    label: labelOf(el),
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+    interactive
+  }))
+  return { url: location.href, title: document.title, width: W, height: H, elements }
+})()`
+
+/**
+ * Keep asking until the view has something to show. capturePage throws "Current
+ * display surface not available" or answers an empty image while a view that just
+ * came back has not painted, so neither is final at first.
+ *
+ * Not a cure for a page that has NEVER been on screen, in a window covered from
+ * the moment the page opened: that one has no surface until it is shown, and
+ * neither waiting nor Chromium's own screenshot command gave it one. It answers
+ * with the error, which is also what browser_screenshot does.
+ */
+export async function retryCapture<T extends { isEmpty: () => boolean }>(
+  capture: () => Promise<T>,
+  pause: (ms: number) => Promise<unknown> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+): Promise<T> {
+  let reason = 'The browser page has nothing on screen to capture.'
+  for (let attempt = 0; attempt < 10; attempt++) {
+    if (attempt) await pause(100)
+    try {
+      const image = await capture()
+      if (!image.isEmpty()) return image
+    } catch (error) {
+      reason = (error as Error).message
+    }
+  }
+  throw new Error(reason)
+}
+
+const paintedCapture = (contents: Electron.WebContents): Promise<Electron.NativeImage> =>
+  retryCapture(() => contents.capturePage())
+
+/** What the annotate surface freezes: the viewport, and what was where on it. */
+export async function captureBrowser(win: BrowserWindow, key?: string): Promise<BrowserCapture> {
+  const session = sessionFor(win, key)
+  // A palette or lightbox that was just up leaves the view hidden for a moment.
+  if (session.mounted) session.view.setVisible(true)
+  const contents = session.view.webContents
+  const task = Promise.all([
+    contents.executeJavaScript(CAPTURE_MAP_SCRIPT, true) as Promise<Omit<BrowserCapture, 'data' | 'mimeType' | 'capturedAt'>>,
+    paintedCapture(contents)
+  ])
+  const [map, image] = await withBrowserTimeout('Browser capture', task)
+  return { ...map, data: image.toPNG().toString('base64'), mimeType: 'image/png', capturedAt: Date.now() }
+}
+
+export type AgentMark = { target: string; note?: string }
+type PlacedMark = Pick<BrowserElement, 'selector' | 'label'> | null
+
+// Injected for the length of one capture, so an agent can point at the page with
+// no surface in the way. Its own page in its own world: nothing here survives
+// past the removal below, and the page's script cannot see it.
+function drawMarksScript(marks: AgentMark[]): string {
+  return `(() => {
+    ${INTERACTIVE_JS}
+    ${SELECTOR_JS}
+    const layer = document.createElement('div')
+    layer.setAttribute('data-floe-annotate', '')
+    layer.style.cssText = 'position:fixed;inset:0;z-index:2147483647;pointer-events:none'
+    const found = ${JSON.stringify(marks.map((mark) => mark.target))}.map((target, index) => {
+      let el = document.querySelector('[data-floe-browser-ref="' + CSS.escape(target) + '"]')
+      if (!el) { try { el = document.querySelector(target) } catch { el = null } }
+      if (!el) return null
+      if (index === 0) el.scrollIntoView({ block: 'center' })
+      return el
+    })
+    found.forEach((el, index) => {
+      if (!el) return
+      const r = el.getBoundingClientRect()
+      const box = document.createElement('div')
+      box.style.cssText = 'position:absolute;border:2px solid #e5484d;box-sizing:border-box;left:' + r.left + 'px;top:' + r.top + 'px;width:' + r.width + 'px;height:' + r.height + 'px'
+      const badge = document.createElement('div')
+      badge.textContent = String(index + 1)
+      badge.style.cssText = 'position:absolute;left:-9px;top:-9px;width:18px;height:18px;border-radius:50%;background:#e5484d;color:#fff;font:700 11px/18px monospace;text-align:center'
+      box.append(badge)
+      layer.append(box)
+    })
+    document.documentElement.append(layer)
+    const placed = found.map((el) => (el ? { selector: selectorOf(el), label: labelOf(el) } : null))
+    // Two frames so the marks are painted, or a moment on a hidden page, which runs none.
+    return new Promise((resolve) => {
+      setTimeout(() => resolve(placed), 150)
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(placed)))
+    })
+  })()`
+}
+
+const CLEAR_MARKS_SCRIPT = `document.querySelectorAll('[data-floe-annotate]').forEach((el) => el.remove())`
+
+/** The numbered list an agent's marks read back as, same shape as a person's. */
+export function annotationReport(url: string, marks: AgentMark[], placed: PlacedMark[]): string {
+  const lines = marks.map((mark, index) => {
+    const at = placed[index]
+    const what = !at ? `not found: ${mark.target}` : at.label ? `${at.selector} "${at.label}"` : at.selector
+    return mark.note ? `${index + 1}. ${what}: ${mark.note}` : `${index + 1}. ${what}`
+  })
+  return [url, ...lines].join('\n')
+}
+
+/** Mark elements on the page and capture it, for an agent that has no surface. */
+export async function annotateBrowser(
+  win: BrowserWindow,
+  marks: AgentMark[],
+  key?: string
+): Promise<{ data: string; mimeType: 'image/png'; report: string }> {
+  const contents = sessionFor(win, key).view.webContents
+  const task = (async () => {
+    const placed = (await contents.executeJavaScript(drawMarksScript(marks), true)) as PlacedMark[]
+    const image = await paintedCapture(contents)
+    return { data: image.toPNG().toString('base64'), mimeType: 'image/png' as const, report: annotationReport(contents.getURL(), marks, placed) }
+  })()
+  try {
+    return await withBrowserTimeout('Browser annotate', task)
+  } finally {
+    // Out here, not inside the task: a capture that fails or times out must not
+    // leave red boxes on someone's page.
+    await contents.executeJavaScript(CLEAR_MARKS_SCRIPT, true).catch(() => undefined)
+  }
 }
 
 /**

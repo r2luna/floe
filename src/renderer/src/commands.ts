@@ -45,6 +45,7 @@ export interface CommandContext {
     focus: () => void
     devtools: () => void
     screenshot: () => void
+    annotate: () => void
   }
   /** The unified diff for a path. Injected so the registry needs no demo data. */
   patchFor: (path: string) => string

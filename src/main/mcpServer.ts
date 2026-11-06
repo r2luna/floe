@@ -3212,6 +3212,40 @@ function registerBrowserTools(server: McpServer, token: string): void {
     }
   })
   server.tool(
+    'browser_annotate',
+    'Mark elements on the current page and capture it: numbered boxes burned into a viewport PNG, plus a numbered list of what each mark landed on. The tool form of the annotate surface a person uses (⌘⇧N).',
+    {
+      marks: z
+        .array(
+          z.object({
+            target: z.string().describe('A ref from browser_snapshot, or a CSS selector.'),
+            note: z.string().optional().describe('What this mark is about.')
+          })
+        )
+        .min(1)
+        .describe('What to mark, in order. The first is scrolled into view.')
+    },
+    async ({ marks }) => {
+      try {
+        // Answers an image, so like browser_screenshot it builds its own result.
+        const headless = noBrowserHere()
+        if (headless) return textResult({ error: headless })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No Floe window is open.' })
+        const browser = await import('./browser')
+        const shot = await browser.annotateBrowser(win, marks, browser.browserKeyFor(win, browserNames(token)))
+        return {
+          content: [
+            { type: 'image' as const, data: shot.data, mimeType: shot.mimeType },
+            { type: 'text' as const, text: shot.report }
+          ]
+        }
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+  server.tool(
     'browser_history',
     'Move through or control the current page load.',
     { action: z.enum(['back', 'forward', 'reload', 'stop']).describe('Browser action to run.') },

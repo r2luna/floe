@@ -4,7 +4,7 @@ import { installHook } from './config/hook.test-helper.ts'
 
 installHook()
 
-const { browserKeyFor, browserShortcut, captureFullPage, closePages, handOffScreenshot, normalizeBrowserUrl, screenshotFileName, selectBrowserSession } =
+const { annotationReport, retryCapture, browserKeyFor, browserShortcut, captureFullPage, closePages, handOffScreenshot, normalizeBrowserUrl, screenshotFileName, selectBrowserSession } =
   await import('./browser.ts')
 
 const fakePage = (mounted: boolean, gone = false) => {
@@ -73,11 +73,45 @@ test('browserShortcut preserves browser and Floe navigation while the page owns 
   assert.equal(browserShortcut(input(']', { meta: true })), 'browser.forward')
   assert.equal(browserShortcut(input('i', { meta: true, alt: true })), 'browser.devtools')
   assert.equal(browserShortcut(input('S', { meta: true, shift: true })), 'browser.screenshot')
+  assert.equal(browserShortcut(input('N', { meta: true, shift: true })), 'browser.annotate')
+  assert.equal(browserShortcut(input('n', { meta: true })), undefined)
   assert.equal(browserShortcut(input('s', { meta: true })), undefined)
   assert.equal(browserShortcut(input('w', { meta: true })), 'panel.close')
   assert.equal(browserShortcut(input('h', { control: true })), 'panel.left')
   assert.equal(browserShortcut(input('l', { control: true })), 'panel.right')
   assert.equal(browserShortcut(input('a')), undefined)
+})
+
+const frame = (empty: boolean) => ({ isEmpty: () => empty })
+const noPause = async (): Promise<void> => {}
+
+test('retryCapture waits out a view that has no surface yet', async () => {
+  const answers = [
+    () => { throw new Error('Current display surface not available for capture') },
+    () => frame(true),
+    () => frame(false)
+  ]
+  let calls = 0
+  const image = await retryCapture(async () => answers[calls++](), noPause)
+  assert.equal(image.isEmpty(), false)
+  assert.equal(calls, 3)
+})
+
+test('retryCapture gives up with the last reason it was told', async () => {
+  await assert.rejects(retryCapture(async () => { throw new Error('no surface') }, noPause), /no surface/)
+  await assert.rejects(retryCapture(async () => frame(true), noPause), /nothing on screen/)
+})
+
+test('annotationReport numbers an agent\'s marks and says which it could not place', () => {
+  const report = annotationReport(
+    'http://localhost:5173/checkout',
+    [{ target: 'b3', note: 'too green' }, { target: '.gone', note: 'missing' }, { target: 'b4' }],
+    [{ selector: 'button.pay', label: 'Pay now' }, null, { selector: 'form', label: '' }]
+  )
+  assert.equal(
+    report,
+    'http://localhost:5173/checkout\n1. button.pay "Pay now": too green\n2. not found: .gone: missing\n3. form'
+  )
 })
 
 test('screenshotFileName names the shot after the host and the local time', () => {

@@ -104,6 +104,7 @@ import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
 import { useBrowserCovered } from './browserCover'
+import { requestAnnotate } from './annotate'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import { byUsage, noteProjectUse } from './projectUsage'
 import { colonyTab } from './colonyTab'
@@ -2305,7 +2306,8 @@ export default function App() {
       stop: () => void window.floe.browser.stop(),
       focus: () => void window.floe.browser.focus(),
       devtools: () => void window.floe.browser.devtools(),
-      screenshot: () => void window.floe.browser.screenshot().catch((e) => console.error('browser screenshot', e))
+      screenshot: () => void window.floe.browser.screenshot().catch((e) => console.error('browser screenshot', e)),
+      annotate: requestAnnotate
     },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it

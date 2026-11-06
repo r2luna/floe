@@ -8,7 +8,9 @@ import {
   IconTool
 } from './icons'
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
-import type { BrowserState } from '../../shared/types'
+import type { BrowserCapture, BrowserState } from '../../shared/types'
+import { composerInbox, onAnnotateRequest, requestAnnotate, TOOLS, type Delivery, type Tool } from './annotate'
+import { BrowserAnnotate } from './BrowserAnnotate'
 
 const EMPTY: BrowserState = {
   url: 'about:blank',
@@ -52,9 +54,46 @@ export function BrowserPanel({
   const editingAddress = useRef(false)
   const [state, setState] = useState(EMPTY)
   const [url, setUrl] = useState(EMPTY.url)
+  const [capture, setCapture] = useState<BrowserCapture | null>(null)
+  const [startTool, setStartTool] = useState<Tool>('element')
+  const capturing = useRef(false)
+  const [annotateError, setAnnotateError] = useState('')
 
   useEffect(() => window.floe.browser.onState(setState), [])
   useEffect(() => window.floe.browser.onShortcut((command) => onCommand?.(command)), [onCommand])
+
+  // Guarded: a shortcut pressed inside the page can arrive twice, and a second
+  // capture would freeze the surface it had already put up.
+  useEffect(
+    () =>
+      onAnnotateRequest((tool) => {
+        if (capturing.current) return
+        capturing.current = true
+        setStartTool(tool ?? 'element')
+        setAnnotateError('')
+        window.floe.browser
+          .capture()
+          .then((next) => {
+            if (!next) capturing.current = false
+            setCapture(next)
+          })
+          .catch((e: Error) => {
+            capturing.current = false
+            setAnnotateError(`Could not capture this page: ${e.message}`)
+          })
+      }),
+    []
+  )
+  const closeAnnotate = (): void => {
+    capturing.current = false
+    setCapture(null)
+  }
+  const sendAnnotation = (delivery: Delivery): void => {
+    const went = composerInbox.deliver(sessionKey, delivery)
+    closeAnnotate()
+    if (went !== 'composer') void window.floe.browser.focus()
+    if (went === 'nowhere') setAnnotateError('No chat to send this annotation to.')
+  }
 
   useEffect(() => {
     if (!editingAddress.current) setUrl(state.url)
@@ -193,7 +232,29 @@ export function BrowserPanel({
         {state.error ?? (state.loading ? `Loading ${state.url}` : '')}
       </div>
       {state.error && <div className="browser-error">Could not load this page: {state.error}</div>}
+      {annotateError && <div className="browser-error">{annotateError}</div>}
       <div ref={viewport} className="browser-viewport" aria-label="Browser page" />
+      <div className="annotate-bar" role="toolbar" aria-label="Annotate page">
+        <span className="annotate-bar-label" title="Annotate page (⌘⇧N)">
+          annotate
+        </span>
+        {TOOLS.map(({ tool, label }) => (
+          <button key={tool} type="button" className="annotate-chip" onClick={() => requestAnnotate(tool)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {capture && (
+        <BrowserAnnotate
+          capture={capture}
+          startTool={startTool}
+          onSend={sendAnnotation}
+          onDiscard={() => {
+            closeAnnotate()
+            void window.floe.browser.focus()
+          }}
+        />
+      )}
     </div>
   )
 }

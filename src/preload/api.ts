@@ -55,6 +55,7 @@ import type {
   McpServerEntry,
   MediaFile,
   AuthStatus,
+  BrowserCapture,
   BrowserState,
   ClaudeAuthEvent,
   ClaudeStats,
@@ -184,6 +185,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       /** Full-page PNG, handed to CleanShot or copied and opened in Preview. */
       screenshot: (): Promise<{ path: string; openedIn: 'cleanshot' | 'preview' } | null> =>
         ipcRenderer.invoke('browser:screenshot'),
+      /** The viewport as an image with what was where on it, for annotate. */
+      capture: (): Promise<BrowserCapture | null> => ipcRenderer.invoke('browser:capture'),
       onState: (cb: (state: BrowserState) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, state: BrowserState): void => cb(state)
         ipcRenderer.on('browser:state', listener)
