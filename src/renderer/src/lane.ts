@@ -214,7 +214,37 @@ export function open(lane: Lane, panel: Panel): Lane {
   const before = panels.findIndex((p) => (p.order ?? 0) > rank)
   const at = besidePartner(panels, panel.kind) ?? (before === -1 ? panels.length : before)
   panels.splice(at, 0, panel)
-  return { panels, focus: at }
+  return { panels: stackLists(panels, at), focus: at }
+}
+
+/**
+ * Join the sidebar list that just landed at `at` to its neighbours. The lists
+ * are one column whenever two of them stand side by side, so ⌘E hiding and
+ * showing worktrees puts it back under active instead of beside it, and a lone
+ * list is never left to be crowded out. A new stack's head takes the stack
+ * width, as `stackSidebar` gives it.
+ */
+function stackLists(panels: Panel[], at: number): Panel[] {
+  const isList = (p?: Panel) => !!p && SIDEBAR_KINDS.includes(p.kind)
+  if (!isList(panels[at])) return panels
+  const set = (i: number, patch: Partial<Panel>) => {
+    const p = panels[i]
+    if (Object.entries(patch).some(([k, v]) => p[k as keyof Panel] !== v)) panels[i] = { ...p, ...patch }
+  }
+  const below = { dock: 'below' as const, width: undefined }
+  if (isList(panels[at - 1])) set(at, below)
+  const next = panels[at + 1]
+  if (isList(next) && next.dock !== 'below') set(at + 1, { ...below, height: undefined })
+  let head = at
+  while (head > 0 && panels[head].dock === 'below') head--
+  if (head !== at || isList(next)) set(head, { width: panels[head].width ?? SIDEBAR_WIDTH })
+  return panels
+}
+
+/** Every sidebar list joined to its neighbours — for a lane saved before the rule. */
+export function joinLists(lane: Lane): Lane {
+  const panels = lane.panels.reduce((acc, _, i) => stackLists(acc, i), [...lane.panels])
+  return panels.every((p, i) => p === lane.panels[i]) ? lane : { ...lane, panels }
 }
 
 /**
@@ -237,6 +267,11 @@ export function close(lane: Lane, index: number): Lane {
     lane.panels.flatMap((p, i) => (i === index || MARRIED_TO[p.kind] === closing ? [i] : []))
   )
   const panels = lane.panels.filter((_, i) => !gone.has(i))
+  // Closing the head of a column promotes the panel docked under it. Left
+  // docked, it would slide under whatever column stands to the left.
+  const heir = index - [...gone].filter((i) => i < index).length
+  if (!lane.panels[index].dock && panels[heir]?.dock === 'below')
+    panels[heir] = { ...panels[heir], dock: undefined, width: lane.panels[index].width, folded: undefined }
   // Closing a panel to the LEFT of the focused one shifts every index after it,
   // so the focus has to follow or it would silently jump to a different panel.
   const focus = lane.focus - [...gone].filter((i) => i < lane.focus).length

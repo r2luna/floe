@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, stackSidebar, toggleDock, toggleFold, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, joinLists, laneOf, open, focusDir, resizePanel, setCursor, slotOf, stackSidebar, toggleDock, toggleFold, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -19,7 +19,7 @@ test('a panel lands at its order, not at the end', () => {
 
 test('reopening a closed panel restores its place', () => {
   let lane = laneOf(ranked('projects', 'projects', 0))
-  lane = open(lane, ranked('worktrees', 'worktrees', 10))
+  lane = open(lane, ranked('worktrees', 'tree', 10))
   lane = open(lane, ranked('chat', 'chat', 30))
   lane = close(lane, 0)
   assert.deepEqual(ids(lane), ['worktrees', 'chat'])
@@ -575,4 +575,55 @@ test('a sidebar stack is never crowded out of a tight window', () => {
   // Unstacked, the same left column IS what gets crowded out.
   const flat = focusAt(open(laneOf(ranked('projects', 'projects', 0)), { id: 'chat', kind: 'chat', title: 'chat', slot: 'session', order: 30 }), 1)
   assert.equal(crowdedOut(columnsOf(flat), [220, 400], 500, 6, flat.focus).size, 1)
+})
+
+test('worktrees opened beside active stacks under it, and ⌘E brings it back there', () => {
+  const chat = ranked('chat', 'chat', 30)
+  let lane = open(laneOf(make('active')!), chat)
+  const toggle = (l: Lane) => toggleKind(l, 'worktrees', () => make('worktrees')!)
+  lane = toggle(lane)
+  const cols = (l: Lane) => columnsOf(l).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(cols(lane), [['active', 'worktrees'], ['chat']])
+  lane = toggle(lane) // focused → hidden
+  assert.deepEqual(cols(lane), [['active'], ['chat']])
+  lane = toggle(lane) // shown again, in the same place
+  assert.deepEqual(cols(lane), [['active', 'worktrees'], ['chat']])
+})
+
+test('active opened beside worktrees takes it into its column', () => {
+  const lane = open(laneOf(make('worktrees')!), make('active')!)
+  assert.deepEqual(columnsOf(lane).map((col) => col.map((c) => c.panel.id)), [['active', 'worktrees']])
+})
+
+test('active reopened inside a sidebar stack rejoins it', () => {
+  let lane = stackSidebar(sidebarLane(), make)
+  lane = close(lane, 1) // active out
+  lane = open(lane, make('active')!)
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'active', 'worktrees'], ['chat']])
+})
+
+test('closing the head of a column promotes the panel docked under it', () => {
+  let lane = laneOf(p('left'))
+  lane = open(lane, make('active')!)
+  lane = open(lane, make('worktrees')!)
+  lane = close(lane, 1) // active, with worktrees under it
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['left'], ['worktrees']], 'worktrees stands alone, not under its neighbour')
+})
+
+test('worktrees reopened beside a lone projects list joins it, at the stack width', () => {
+  let lane = open(laneOf(ranked('projects', 'projects', 0)), ranked('chat', 'chat', 30))
+  lane = open(lane, make('worktrees')!)
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'worktrees'], ['chat']])
+  assert.equal(lane.panels[0].width, 300)
+})
+
+test('a lane saved with the lists side by side is joined into one column', () => {
+  const saved: Lane = { panels: [ranked('projects', 'projects', 0), make('active')!, make('worktrees')!, ranked('chat', 'chat', 30)], focus: 3 }
+  const columns = columnsOf(joinLists(saved)).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'active', 'worktrees'], ['chat']])
+  const joined = joinLists(saved)
+  assert.equal(joinLists(joined), joined, 'an already-joined lane is left as it is')
 })

@@ -20,6 +20,7 @@ import {
   crowdedOut,
   focusAt,
   isSidebarStack,
+  joinLists,
   laneOf,
   open,
   patchPanel,
@@ -396,7 +397,11 @@ export default function App() {
   // parses) starts at the worktrees of the current project — the projects panel
   // is one ⌘⇧E away and does not need to be in the way every launch.
   const restored = useRef(loadLane())
-  const [lane, setLaneRaw] = useState(() => restored.current?.lane ?? laneOf(panelOf('worktrees')))
+  // Joined on the way in: a lane saved with the lists side by side comes back
+  // stacked, as every list opened since lands.
+  const [lane, setLaneRaw] = useState(() =>
+    restored.current ? joinLists(restored.current.lane) : laneOf(panelOf('worktrees'))
+  )
 
   // --- lane memory ---------------------------------------------------------
   // What each session had open. See laneStore.ts.
