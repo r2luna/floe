@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { queryKey } from '../shared/queries.ts'
 import { installHook } from './config/hook.test-helper.ts'
 
 // The registry writes through configDir(), which honours XDG_CONFIG_HOME — a
@@ -19,6 +20,7 @@ const {
   codexMcpConfig,
   geminiMcpConfig,
   harnessMcp,
+  holdsFloeTools,
   mcpRebind,
   mcpUrlFor,
   opencodeMcpConfig,
@@ -42,6 +44,12 @@ addMcpServer('global', {
 })
 addMcpServer('global', { name: 'local', transport: 'stdio', command: 'npx', args: ['-y', 'thing'], env: { API_KEY: 'k' } })
 addMcpServer('global', { name: 'off', transport: 'http', url: 'https://off.example', enabled: false })
+
+test('only a real session on a harness with MCP holds the Floe tools', () => {
+  for (const harness of ['codex', 'opencode', 'gemini']) assert.equal(holdsFloeTools(harness, 'sess-1'), true)
+  for (const harness of ['lmstudio', 'ollama']) assert.equal(holdsFloeTools(harness, 'sess-1'), false)
+  assert.equal(holdsFloeTools('codex', queryKey('sess-1', 'codex')), false, 'a query is handed no Floe token')
+})
 
 test('a session gets Floe plus the enabled registry entries, with their credentials', () => {
   const map = serversFor('sess-1')

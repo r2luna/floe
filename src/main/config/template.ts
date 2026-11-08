@@ -27,6 +27,10 @@ export const FLOE_TOML = `# ====================================================
 # | found the default monospace is used. Whatever you pick, the bundled Nerd Font
 # | stays behind it as per-glyph fallback, so terminal icons keep resolving.
 # |
+# | \`split-font\` gives the chat its own face: on, every chat — a session's
+# | and an @codex side conversation's — wears \`chat-font-family\` and the rest keeps
+# | \`font-family\`. Off, \`chat-font-family\` is ignored.
+# |
 # | \`font-size\` scales the whole surface — text, padding and rules together, the
 # | way a terminal's font size does — rather than the text alone. 13 is the size
 # | the interface is drawn at, so it is the neutral value.
@@ -40,6 +44,11 @@ export const FLOE_TOML = `# ====================================================
 # | live. Where Omarchy is not installed it behaves as \`system\`, so one file
 # | can be shared between an Omarchy box and a Mac.
 # |
+# | \`dark-theme\` and \`light-theme\` pick the palette each mode wears, so
+# | \`system\` can flip between two of them. \`floe\` is the app's own. Dark
+# | also takes \`monokai-pro\`, \`tomorrow-night\`, \`vesper\`, \`rose-pine\`
+# | and \`forest-night\`. Light also takes \`tomorrow\` (Base16).
+# |
 # | \`penguin\` picks which pinguim head greets you on a new session. Same head,
 # | 24 faces — \`classic\`, \`sleepy\`, \`surprised\`, \`focused\`, \`skeptical\`,
 # | \`cool\`, \`wink\`, \`cute\`, \`zen\`, \`robot\`, \`punk\`, \`tired\`, \`happy\`,
@@ -52,14 +61,20 @@ export const FLOE_TOML = `# ====================================================
 # | the theme flipping under it.
 # |
 # | \`chat-layout\` is how the transcript arranges a turn. \`classic\` is the
-# | IRC log the app shipped with — one column, no air between turns. The other
-# | six each pull one lever on it: \`gutter\` puts the time and nick in a fixed
+# | IRC log the app shipped with — one column, no air between turns. The others
+# | each pull one lever on it: \`gutter\` puts the time and nick in a fixed
 # | left column so every message starts at the same edge, \`surfaces\` gives
 # | your own messages a recessed well, \`ruled\` draws a hairline between
 # | speakers, \`rail\` hangs the turns off a timeline, \`split\` bands the tool
-# | work away from the speech, and \`labels\` puts the nick on its own line
-# | above the words. Every one of them is a block of CSS — the transcript
-# | renders the same either way.
+# | work away from the speech, \`labels\` puts the nick on its own line above
+# | the words, \`convo\` gives each turn a head line with yours on the right,
+# | and \`orca\` follows Orca's chat: your turns on the right, the session's
+# | own agent unnamed, one font size. Every one of them is a block of CSS — the
+# | transcript renders the same either way.
+# |
+# | \`orca-font\` is the face the \`orca\` layout wears: \`orca\` is Geist, with
+# | SF Mono for code, and \`app\` is the font the rest of Floe wears. The size
+# | stays \`font-size\`'s either way. The other layouts ignore it.
 # |
 # | \`transparency\` makes the window translucent, with the desktop blurred
 # | behind every surface — macOS only. It is chosen per theme, because the two
@@ -79,11 +94,16 @@ export const FLOE_TOML = `# ====================================================
 
 [appearance]
 font-family         = "CommitMonoPinguim"
+split-font          = false
+chat-font-family    = "CommitMonoPinguim"
 font-size           = 13
 theme               = "system"
+dark-theme          = "floe"
+light-theme         = "floe"
 penguin             = "classic"
 penguin-color       = "accent"
 chat-layout         = "classic"
+orca-font           = "orca"
 transparency        = "off"
 transparency-amount = 18
 key-hints           = false

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, laneOf, open, focusDir, resizePanel, setCursor, slotOf, toggleDock, toggleKind, type Lane, type Panel } from './lane.ts'
+import { clearSize, close, closePanel, columnsOf, crowdedOut, focusAt, focusBy, joinLists, laneOf, open, focusDir, resizePanel, setCursor, slotOf, stackSidebar, toggleDock, toggleFold, toggleKind, type Lane, type Panel } from './lane.ts'
 
 // Distinct kinds: same-kind panels replace each other, which these tests are
 // not about.
@@ -19,7 +19,7 @@ test('a panel lands at its order, not at the end', () => {
 
 test('reopening a closed panel restores its place', () => {
   let lane = laneOf(ranked('projects', 'projects', 0))
-  lane = open(lane, ranked('worktrees', 'worktrees', 10))
+  lane = open(lane, ranked('worktrees', 'tree', 10))
   lane = open(lane, ranked('chat', 'chat', 30))
   lane = close(lane, 0)
   assert.deepEqual(ids(lane), ['worktrees', 'chat'])
@@ -483,4 +483,147 @@ test('a crowded lane hides the lists left of the session, not the focused one', 
 test('a crowded lane without a session hides nothing', () => {
   const lane: Lane = { panels: [ranked('projects', 'projects', 0), ranked('files', 'files', 42)], focus: 1 }
   assert.deepEqual([...crowdedOut(columnsOf(lane), [220, 300], 100, 6, 1)], [])
+})
+
+const sidebarLane = (): Lane => {
+  let lane = laneOf(ranked('projects', 'projects', 0))
+  lane = open(lane, ranked('chat', 'chat', 30))
+  return focusAt(lane, 0)
+}
+const make = (kind: string): Panel | undefined =>
+  kind === 'worktrees' || kind === 'active' ? ranked(kind, kind, kind === 'active' ? 5 : 10) : undefined
+
+test('stacking the sidebar docks active and worktrees under projects, chat stays beside', () => {
+  const lane = stackSidebar(sidebarLane(), make)
+  assert.deepEqual(ids(lane), ['projects', 'active', 'worktrees', 'chat'])
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'active', 'worktrees'], ['chat']])
+  assert.equal(lane.panels[0].width, 300)
+})
+
+test('stacking opens the focused list and folds the rest', () => {
+  const lane = stackSidebar(sidebarLane(), make)
+  assert.deepEqual(lane.panels.map((x) => !!x.folded), [false, true, true, false])
+})
+
+test('stacking from outside the sidebar opens active and keeps focus where it was', () => {
+  const lane = stackSidebar(focusAt(sidebarLane(), 1), make)
+  assert.deepEqual(lane.panels.map((x) => !!x.folded), [true, false, true, false])
+  assert.equal(lane.panels[lane.focus].id, 'chat')
+})
+
+test('a list that cannot open is left out of the stack', () => {
+  const lane = stackSidebar(sidebarLane(), (kind) => (kind === 'active' ? make(kind) : undefined))
+  assert.deepEqual(ids(lane), ['projects', 'active', 'chat'])
+})
+
+test('moving focus never folds or unfolds a list', () => {
+  const lane = stackSidebar(focusAt(sidebarLane(), 3), make) // focus on the chat
+  const folds = lane.panels.map((x) => !!x.folded)
+  for (const next of [focusDir(lane, -1, 0), focusAt(lane, 2), focusDir(focusAt(lane, 1), 0, 1)])
+    assert.deepEqual(next.panels.map((x) => !!x.folded), folds)
+})
+
+test('crossing into a sidebar stack lands on the open list, not a folded header', () => {
+  let lane = stackSidebar(sidebarLane(), make) // projects open, the rest folded
+  lane = toggleFold(focusAt(lane, 2), 2) // worktrees opened by hand
+  lane = toggleFold(focusAt(lane, 0), 0) // projects folded by hand
+  assert.equal(lane.panels[focusDir(focusAt(lane, 3), -1, 0).focus].id, 'worktrees')
+})
+
+test('crossing into a sidebar stack keeps the row when that list is open', () => {
+  let lane = stackSidebar(sidebarLane(), make)
+  lane = toggleFold(focusAt(lane, 1), 1) // projects + active open
+  assert.equal(lane.panels[focusDir(focusAt(lane, 3), -1, 0).focus].id, 'projects')
+})
+
+test('folding flips a panel and keeps through a content swap', () => {
+  let lane = stackSidebar(sidebarLane(), make)
+  lane = toggleFold(focusAt(lane, 1), 1) // active: open it by hand beside projects
+  assert.equal(lane.panels[1].folded, undefined)
+  lane = toggleFold(lane, 1)
+  assert.equal(lane.panels[1].folded, true)
+  lane = open(lane, ranked('active2', 'active', 5))
+  assert.equal(lane.panels[1].folded, true, 'a replacement inherits the fold like it inherits the dock')
+})
+
+test('the last open list in a sidebar stack never folds', () => {
+  const lane = stackSidebar(sidebarLane(), make) // only projects is open
+  assert.equal(toggleFold(lane, 0), lane)
+  const two = toggleFold(focusAt(lane, 1), 1) // projects + active open
+  assert.equal(toggleFold(two, 1).panels[1].folded, true, 'one stays open, so this folds')
+})
+
+test('folding a panel outside a sidebar stack does nothing', () => {
+  const lane = sidebarLane()
+  assert.equal(toggleFold(lane, 1), lane)
+})
+
+test('projects cannot be closed while it heads a sidebar stack', () => {
+  const lane = stackSidebar(sidebarLane(), make)
+  assert.equal(close(lane, 0), lane)
+  const toggled = toggleKind(lane, 'projects', () => p('projects')) // focused: would close
+  assert.deepEqual(ids(toggled), ['projects', 'active', 'worktrees', 'chat'])
+})
+
+test('a sidebar stack is never crowded out of a tight window', () => {
+  let lane = laneOf(ranked('projects', 'projects', 0))
+  lane = open(lane, { id: 'chat', kind: 'chat', title: 'chat', slot: 'session', order: 30 })
+  lane = stackSidebar(focusAt(lane, 1), make) // focus on the chat
+  const hidden = crowdedOut(columnsOf(lane), [300, 400], 500, 6, lane.focus)
+  assert.equal(hidden.size, 0)
+  // Unstacked, the same left column IS what gets crowded out.
+  const flat = focusAt(open(laneOf(ranked('projects', 'projects', 0)), { id: 'chat', kind: 'chat', title: 'chat', slot: 'session', order: 30 }), 1)
+  assert.equal(crowdedOut(columnsOf(flat), [220, 400], 500, 6, flat.focus).size, 1)
+})
+
+test('worktrees opened beside active stacks under it, and ⌘E brings it back there', () => {
+  const chat = ranked('chat', 'chat', 30)
+  let lane = open(laneOf(make('active')!), chat)
+  const toggle = (l: Lane) => toggleKind(l, 'worktrees', () => make('worktrees')!)
+  lane = toggle(lane)
+  const cols = (l: Lane) => columnsOf(l).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(cols(lane), [['active', 'worktrees'], ['chat']])
+  lane = toggle(lane) // focused → hidden
+  assert.deepEqual(cols(lane), [['active'], ['chat']])
+  lane = toggle(lane) // shown again, in the same place
+  assert.deepEqual(cols(lane), [['active', 'worktrees'], ['chat']])
+})
+
+test('active opened beside worktrees takes it into its column', () => {
+  const lane = open(laneOf(make('worktrees')!), make('active')!)
+  assert.deepEqual(columnsOf(lane).map((col) => col.map((c) => c.panel.id)), [['active', 'worktrees']])
+})
+
+test('active reopened inside a sidebar stack rejoins it', () => {
+  let lane = stackSidebar(sidebarLane(), make)
+  lane = close(lane, 1) // active out
+  lane = open(lane, make('active')!)
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'active', 'worktrees'], ['chat']])
+})
+
+test('closing the head of a column promotes the panel docked under it', () => {
+  let lane = laneOf(p('left'))
+  lane = open(lane, make('active')!)
+  lane = open(lane, make('worktrees')!)
+  lane = close(lane, 1) // active, with worktrees under it
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['left'], ['worktrees']], 'worktrees stands alone, not under its neighbour')
+})
+
+test('worktrees reopened beside a lone projects list joins it, at the stack width', () => {
+  let lane = open(laneOf(ranked('projects', 'projects', 0)), ranked('chat', 'chat', 30))
+  lane = open(lane, make('worktrees')!)
+  const columns = columnsOf(lane).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'worktrees'], ['chat']])
+  assert.equal(lane.panels[0].width, 300)
+})
+
+test('a lane saved with the lists side by side is joined into one column', () => {
+  const saved: Lane = { panels: [ranked('projects', 'projects', 0), make('active')!, make('worktrees')!, ranked('chat', 'chat', 30)], focus: 3 }
+  const columns = columnsOf(joinLists(saved)).map((col) => col.map((c) => c.panel.id))
+  assert.deepEqual(columns, [['projects', 'active', 'worktrees'], ['chat']])
+  const joined = joinLists(saved)
+  assert.equal(joinLists(joined), joined, 'an already-joined lane is left as it is')
 })

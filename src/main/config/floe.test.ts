@@ -130,6 +130,19 @@ test('chat-layout takes only the known layouts, and defaults to classic', () => 
   assert.equal(absent.config.appearance.chatLayout, 'classic', 'an old file keeps the log it had')
 })
 
+test('orca-font picks the orca layout\'s face, and defaults to orca', () => {
+  const app = parseFloeConfig('[appearance]\nchat-layout = "orca"\norca-font = "app"\n', 'floe.toml')
+  assert.equal(app.config.appearance.chatLayout, 'orca')
+  assert.equal(app.config.appearance.orcaFont, 'app')
+  assert.deepEqual(app.errors, [])
+
+  const unknown = parseFloeConfig('[appearance]\norca-font = "comic"\n', 'floe.toml')
+  assert.equal(unknown.config.appearance.orcaFont, 'orca')
+  assert.equal(unknown.errors.length, 1)
+
+  assert.equal(parseFloeConfig('', 'floe.toml').config.appearance.orcaFont, 'orca')
+})
+
 test('transparency names the themes that get glass, and defaults to off', () => {
   const dark = parseFloeConfig('[appearance]\ntransparency = "dark"\n', 'floe.toml')
   assert.equal(dark.config.appearance.transparency, 'dark')
@@ -146,6 +159,16 @@ test('transparency names the themes that get glass, and defaults to off', () => 
 
   const absent = parseFloeConfig('', 'floe.toml')
   assert.equal(absent.config.appearance.transparency, 'off', 'an existing app stays solid')
+})
+
+test('split-font is off until asked for, and carries its own chat face', () => {
+  const off = parseFloeConfig('', 'floe.toml').config.appearance
+  assert.equal(off.splitFont, false)
+  assert.equal(off.chatFontFamily, undefined)
+  const on = parseFloeConfig('[appearance]\nsplit-font = true\nchat-font-family = "Menlo"\n', 'floe.toml')
+  assert.equal(on.config.appearance.splitFont, true)
+  assert.equal(on.config.appearance.chatFontFamily, 'Menlo')
+  assert.deepEqual(on.errors, [])
 })
 
 test('key-hints is off until asked for', () => {
@@ -254,4 +277,20 @@ test('worktree names keep their capitals until [worktree] lowercase is turned on
     parseFloeConfig('[worktree]\nlowercase = true\n', 'floe.toml').config.worktree.lowercase,
     true
   )
+})
+
+test('dark-theme and light-theme default to floe and take only their own mode', () => {
+  const absent = parseFloeConfig('', 'floe.toml').config.appearance
+  assert.equal(absent.darkTheme, 'floe')
+  assert.equal(absent.lightTheme, 'floe')
+  for (const theme of ['monokai-pro', 'tomorrow-night', 'vesper', 'rose-pine', 'forest-night']) {
+    const { config, errors } = parseFloeConfig(`[appearance]\ndark-theme = "${theme}"\n`, 'floe.toml')
+    assert.equal(config.appearance.darkTheme, theme)
+    assert.deepEqual(errors, [])
+  }
+  const light = parseFloeConfig('[appearance]\nlight-theme = "tomorrow"\n', 'floe.toml')
+  assert.equal(light.config.appearance.lightTheme, 'tomorrow')
+  const crossed = parseFloeConfig('[appearance]\nlight-theme = "vesper"\n', 'floe.toml')
+  assert.equal(crossed.config.appearance.lightTheme, 'floe', 'a dark palette is not a light theme')
+  assert.equal(crossed.errors.length, 1)
 })

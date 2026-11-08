@@ -72,13 +72,13 @@ import { FileIcon } from './FileIcon'
 import { commonDir, diffSides, parseUnifiedDiff } from './diff'
 import { buildChangeTree, countRepos, flattenChanges, isOpen, repoRef, type ChangeNode } from './changesTree'
 import { proseRows, READS_AS_PROSE } from './proseDiff'
-import { langForPath, tokenizeLines, type HlToken } from './lib/highlight'
+import { langForPath, resolveLang, tokenizeLines, type HlToken } from './lib/highlight'
 import { wordAt } from './definition'
 import { splitByHits } from './findHits.ts'
 import { markAll } from './findMark'
 import { usePlans } from './usePlans'
 import { useDrawings } from './useDrawings'
-import { useTaskFolder, useTaskFolders } from './useTaskFolders'
+import { useTaskFolder, useTaskFolders, useTaskIssues } from './useTaskFolders'
 import { TASKS_TOGGLE_DONE } from './taskEvents'
 import { useSkills } from './useSkills'
 import { useMcpServers } from './useMcpServers'
@@ -88,7 +88,7 @@ import { onMcpDraft } from './mcpDraft.ts'
 import { reason } from './ipcError.ts'
 import { editTarget } from './editorTarget.ts'
 import type { PluginPanelSection } from '../../main/plugins/types'
-import { describeRef, splitRefs } from './fileRefs'
+import { describeRef, fileTarget, splitRefs } from './fileRefs'
 import { hrefOf, splitLinks } from './links'
 import { describePaste, pastePreview, splitMessage } from './pastes'
 import { splitSkills } from '../../shared/skills'
@@ -109,6 +109,9 @@ import type { Commands } from './useCommands'
 import { useSessionActivity } from './useRunning'
 import { useRecap } from './useRecap'
 import { NewWorktreeForm, type NewWorktreeProps } from './NewWorktree'
+import { useIntegrations } from './useIntegrations'
+import type { IntegrationStatus } from '../../main/integrations'
+import { SOURCE_LABELS, sourceLabel, type SourceId } from '../../shared/worktreeSource'
 import type { Projects } from './useProjects'
 import { moveTargets } from './projectMove'
 import type { Worktrees } from './useWorktrees'
@@ -129,7 +132,7 @@ import {
   type ModelChoice
 } from './models'
 import type { FloeConfig } from '../../main/config/floe'
-import { HARNESSES, supportsMode } from '../../shared/modes'
+import { HARNESSES } from '../../shared/modes'
 // Who is in the channel and how you name them in a sentence — see mentions.ts.
 import { handleRows, routeAll, routeAt, splitMentions, rosterOf, unrouted } from './mentions'
 import { nickColor } from './nickColor'
@@ -151,7 +154,8 @@ import { useLocalAgents } from './useLocalAgents'
 import { useSettings } from './useSettings'
 import type { Usage } from './App'
 import { useTranscript, type PendingQuestion } from './useTranscript'
-import { PreviewInBrowser, RunInTerminal } from './runInTerminal'
+import { ChecklistStrip } from './ChecklistStrip'
+import { OpenFileRef, PreviewInBrowser, RunInTerminal } from './runInTerminal'
 import { inWorktree, previewTarget, previewUrl } from './previewTarget'
 import { SkillNames } from './skillNames'
 import { MergePanel } from './MergePanel'
@@ -170,6 +174,7 @@ import {
   CHAT_LAYOUTS,
   HOST_SITE_MODES,
   NOTIFY_SOUNDS,
+  ORCA_FONTS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
   TRANSPARENCY,
@@ -178,9 +183,11 @@ import {
   type PenguinHeadId
 } from '../../shared/types'
 import { previewSound } from './sounds'
-import { omarchyAvailable } from './appearance'
+import { applyConfig, omarchyAvailable, previewFont, type FontVariable } from './appearance'
+import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import type { ActiveSession, Attached, ChangedFile, ClaudeStats, Effort, FileContent, FileNode, HarnessUsage, LocalAgent, McpServerEntry, WorktreeStatus } from '../../shared/types'
 import { isConvertible, previewKind } from './previewKind'
+import { onSay } from './chatSay'
 import type { Skill, WritableScope } from '../../main/config/skills'
 
 // Loaded lazily: xterm (+3 addons) and react-markdown (the whole
@@ -733,6 +740,8 @@ export type OpenFn = (child: {
   focus?: boolean
   /** Read `sub` relative to this instead of the worktree. See Panel.root. */
   root?: string
+  /** For a file: the line to land on, 1-based. */
+  line?: number
   /** For a chat: which session it shows. */
   session?: { id: string; worktreePath: string }
   /** For a brand-new chat: the message that started it, sent on mount. */
@@ -785,6 +794,8 @@ export function PanelBody({
   onEnterProject,
   onEnterWorktree,
   newWorktree,
+  landingWorktree,
+  focused,
   cwd,
   root,
   session,
@@ -839,6 +850,10 @@ export function PanelBody({
    * inline at the top of the worktrees panel, not in a modal.
    */
   newWorktree?: NewWorktreeProps | null
+  /** Where a launcher belongs before anything is selected. See landingWorktree in App. */
+  landingWorktree?: string
+  /** Whether this is the panel the lane has focused. */
+  focused?: boolean
   /** The worktree the app is in — what the file tree lists. See cwd in App. */
   cwd?: string
   /** Overrides `cwd` for this panel — see Panel.root. */
@@ -936,13 +951,15 @@ export function PanelBody({
         onOpen={onOpen}
         onCommand={onCommand}
         menuItems={menuItems}
-        worktreePath={worktrees.currentPath}
+        worktreePath={worktrees.currentPath ?? landingWorktree}
         branch={
           worktrees.rows.find((r) => r.worktree.path === worktrees.currentPath)?.worktree.branch
         }
+        project={projects.current?.name}
         onCreated={worktrees.reload}
         noProjects={!projects.loading && projects.all.length === 0}
         onAddProject={onAddProject}
+        focused={focused}
       />
     )
   if (kind === 'chat')
@@ -953,6 +970,9 @@ export function PanelBody({
         firstPrompt={firstPrompt}
         firstChoice={firstChoice}
         firstAttached={firstAttached}
+        // Started from a launcher, you were mid-thought: the next line goes in
+        // the same box, so the caret comes along.
+        autoFocus={!!firstPrompt}
         onUsage={onUsage}
         onOpen={onOpen}
         onCommand={onCommand}
@@ -1113,6 +1133,7 @@ export function PanelBody({
     return (
       <FileDiff
         path={sub ?? ''}
+        root={cwd}
         changes={changes}
         onPatch={onPatch}
         find={find}
@@ -1168,15 +1189,8 @@ export function PanelBody({
 
 /* --- launcher ------------------------------------------------------------ */
 
-/**
- * Whether a harness can hold a query at all — the `plan` gate, read from the
- * one table that says what each runtime can honestly do.
- *
- * Duplicated on this side deliberately: the picker has to draw the refusal
- * BEFORE anything is sent, and main refuses again when it is (see
- * `canOpenQuery`). Both read `shared/modes.ts`, so they cannot disagree.
- */
-const canHoldQuery = (harness: string): boolean => supportsMode(harness, 'plan')
+/** Whether a harness is one of Floe's supported agent runtimes. */
+const canHoldQuery = (harness: string): boolean => HARNESSES.includes(harness)
 
 /** No conversation yet — a stable identity so the roster memo holds. */
 const NO_TRANSCRIPT: TranscriptItem[] = []
@@ -1265,9 +1279,11 @@ function Launcher({
   menuItems,
   worktreePath,
   branch,
+  project,
   onCreated,
   noProjects,
-  onAddProject
+  onAddProject,
+  focused
 }: {
   onOpen: OpenFn
   /** `/resume` is a command, not a first message — see isResume. */
@@ -1276,11 +1292,15 @@ function Launcher({
   worktreePath?: string
   /** The branch the session will be started on — absent when none is selected. */
   branch?: string
+  /** The project that branch belongs to, named beside it. */
+  project?: string
   /** Re-read the worktree list, so the new session shows up under its branch. */
   onCreated?: () => void
   /** Nothing has ever been added — not merely "none selected right now". */
   noProjects?: boolean
   onAddProject?: () => void
+  /** Whether this is the panel the lane has focused. */
+  focused?: boolean
 }) {
   // With no branch selected the launcher still works — it just starts the
   // session in the user's home directory, so a question that isn't about any
@@ -1439,6 +1459,7 @@ function Launcher({
           would be a lie. */}
       {branch && (
         <div className="greet-branch">
+          {project && <span className="greet-project">{project}</span>}
           <IconGitBranch size={13} stroke={1.6} />
           {branch}
         </div>
@@ -1452,7 +1473,9 @@ function Launcher({
         onSend={start}
         onChoice={setChoice}
         placeholder="Describe the task…"
-        autoFocus
+        // Only as the lane's focused panel: a launcher arriving behind the
+        // checklist of a removal must not take the keyboard away from it.
+        autoFocus={focused}
         // The card, not the footer: this composer is the only thing on an empty
         // screen, with nothing above it to be the bottom edge of. See `boxed`.
         boxed
@@ -1702,6 +1725,7 @@ function ChatPanel({
   firstPrompt,
   firstChoice,
   firstAttached,
+  autoFocus,
   onUsage,
   onOpen,
   onCommand
@@ -1711,6 +1735,8 @@ function ChatPanel({
   firstPrompt?: string
   firstChoice?: ModelChoice
   firstAttached?: Attached
+  /** Put the caret in the composer when the panel mounts. */
+  autoFocus?: boolean
   /** `/resume` is a command, not a message — see isResume. */
   onCommand?: (id: string) => void
   /**
@@ -1780,7 +1806,8 @@ function ChatPanel({
     question,
     answerActive,
     togglePick,
-    answering
+    answering,
+    checklist
   } = useTranscript(session?.worktreePath, session?.id)
   const chatRef = useRef<HTMLDivElement>(null)
 
@@ -1899,6 +1926,16 @@ function ChatPanel({
   // up to re-read something and being yanked back down by the next delta is the
   // worst thing a live transcript can do.
   const pinned = useRef(true)
+
+  // A command speaking into this chat (the top bar's commit) goes out the way a
+  // typed line would: this composer's model and mode, queued behind a busy turn.
+  useEffect(() => {
+    if (!session) return
+    return onSay(session.id, (said) => {
+      repin()
+      send(said, choice)
+    })
+  })
 
   // Nail the last line to the bottom edge. Every path below ends here.
   const stick = () => {
@@ -2068,6 +2105,17 @@ function ChatPanel({
         : null,
     [cwd]
   )
+  // A file chip in an answer opens the file it names, on its line.
+  const openFileRef = useMemo(
+    () =>
+      cwd
+        ? (ref: string) => {
+            const target = fileTarget(ref, cwd)
+            if (target) onOpenRef.current?.({ kind: 'file', ...target })
+          }
+        : null,
+    [cwd]
+  )
   // The names alone, so a message can tell `/deploy` (a skill this app expanded
   // into instructions) from `/usage` (the harness's own, sent as typed).
   const skillNamesList = useSkills(cwd).all
@@ -2102,6 +2150,7 @@ function ChatPanel({
         <SkillNames.Provider value={skillNames}>
           <RunInTerminal.Provider value={runInTerminal}>
           <PreviewInBrowser.Provider value={previewInBrowser}>
+          <OpenFileRef.Provider value={openFileRef}>
             <Log items={shown} cwd={cwd} base={cut} pending={pending} />
             {tail && (
               // The streaming tail lives outside the memoised Log: a delta flush
@@ -2111,6 +2160,7 @@ function ChatPanel({
                 isNew={lastSpeaker(shown, pending) !== speakerKey(whoOf(tail))}
               />
             )}
+          </OpenFileRef.Provider>
           </PreviewInBrowser.Provider>
           </RunInTerminal.Provider>
         </SkillNames.Provider>
@@ -2168,6 +2218,7 @@ function ChatPanel({
         ))}
       </div>
 
+      <ChecklistStrip items={checklist} running={running} />
       {asking && session && (
         <AllPicker
           own={choice.provider ?? 'claude'}
@@ -2187,6 +2238,7 @@ function ChatPanel({
         onChange={setText}
         draftKey={session?.id}
         historyKey={cwd}
+        autoFocus={autoFocus}
         onSend={(choice, attached, message) => {
           repin()
           // What the composer says is going out, which is not always what is in
@@ -2749,13 +2801,15 @@ function Head({
   const turn = cost && <TurnCost ms={cost.ms} tokens={cost.contextTokens} />
   // Both halves float, so both come before the words they ride beside — a
   // float placed after the line's text lands on whatever line the text ended
-  // on. The cost stays OUTSIDE the lead: a float nested in a float would be
-  // laid out inside it, at the left end of the line.
+  // on. The lead goes first: floats cannot be reordered by a stylesheet, and
+  // the `gutter` layout clears the cost under the nick, which only works with
+  // the nick already on the page. The cost stays OUTSIDE the lead: a float
+  // nested in a float would be laid out inside it, at the left end of the line.
   if (inline)
     return (
       <>
-        {turn}
         <span className="irc-lead">{said}</span>
+        {turn}
       </>
     )
   // --nick is inert in every layout but `rail`, where it colours the dot this
@@ -2883,7 +2937,9 @@ export function QuestionBlock({
 }) {
   const many = q.questions.length > 1
   return (
-    <div className="irc-entry">
+    // --nick, as on every entry: the `rail` layout colours its dot from it,
+    // and without it the question hangs on a grey bead.
+    <div className="irc-entry" style={{ '--nick': nickColor(typist) } as CSSProperties}>
       <div className="irc-head">
         <span className="irc-time">{clock(Date.now())}</span>
         <span className="irc-nick" style={{ color: nickColor(typist) }}>
@@ -3892,9 +3948,35 @@ function definitionClick(e: ReactMouseEvent, onDefinition?: OnDefinition): void 
   onDefinition(name, line > 0 ? line : undefined)
 }
 
+/**
+ * A change git has no lines for. An image is shown as it stands in the worktree
+ * — the picture is the change — and anything else keeps the plain note.
+ */
+function BinaryDiff({ root, path }: { root: string; path: string }) {
+  const [content, setContent] = useState<FileContent | null>(null)
+
+  useEffect(() => {
+    let live = true
+    setContent(null)
+    window.floe.files
+      .read(root, path)
+      .then((c) => live && setContent(c))
+      // A deleted file has nothing left to read.
+      .catch(() => live && setContent({ kind: 'binary' }))
+    return () => {
+      live = false
+    }
+  }, [root, path])
+
+  if (!content) return <p className="empty">Loading…</p>
+  if (content.kind === 'image') return <img className="file-image" src={content.dataUrl} alt={path} />
+  return <p className="empty">No textual diff.</p>
+}
+
 /** One file's diff, fetched on demand and highlighted once Shiki is ready. */
 function FileDiff({
   path,
+  root,
   changes,
   onPatch,
   find,
@@ -3902,6 +3984,8 @@ function FileDiff({
   onDefinition
 }: {
   path: string
+  /** The worktree, for reading the file itself when git has no text to show. */
+  root?: string
   changes: Changes
   onPatch?: (patch: string) => void
   find?: string
@@ -3977,7 +4061,7 @@ function FileDiff({
 
   if (failed) return <p className="empty error">{failed}</p>
   if (!patch) return <p className="empty">Loading…</p>
-  if (!rows.length) return <p className="empty">No textual diff.</p>
+  if (!rows.length) return root ? <BinaryDiff root={root} path={path} /> : <p className="empty">No textual diff.</p>
 
   if (prose)
     return (
@@ -4009,7 +4093,7 @@ function FileDiff({
     )
 
   return (
-    <div className="diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
+    <div className="diff patch-diff" data-path={path} onClick={(e) => definitionClick(e, onDefinition)}>
       {rows.map((r, i) => {
         if (r.kind === 'hunk') {
           return (
@@ -4408,6 +4492,37 @@ function FilesTree({
  */
 function MarkdownLines({ text }: { text: string }) {
   const lines = useMemo(() => renderMarkdown(text), [text])
+  // Fenced code, coloured: one tokenize per block, keyed by the block's rows.
+  const [hl, setHl] = useState<Map<number, HlToken[]>>(new Map())
+
+  useEffect(() => {
+    setHl(new Map())
+    let live = true
+    for (let i = 0; i < lines.length; i++) {
+      const lang = lines[i].kind === 'code' && lines[i].lang ? resolveLang(lines[i].lang!) : null
+      if (!lang) continue
+      let end = i
+      while (lines[end + 1]?.kind === 'code' && lines[end + 1].lang === lines[i].lang) end++
+      const start = i
+      const code = lines.slice(start, end + 1).map((l) => l.spans[0].text).join('\n')
+      void tokenizeLines(code, lang)
+        .then((rows) => {
+          if (!live) return
+          setHl((prev) => {
+            const next = new Map(prev)
+            rows.forEach((row, n) => next.set(start + n, row))
+            return next
+          })
+        })
+        .catch(() => {
+          /* no grammar for it — the plain row reads fine */
+        })
+      i = end
+    }
+    return () => {
+      live = false
+    }
+  }, [lines])
 
   return (
     <div className="diff md-lines">
@@ -4421,7 +4536,7 @@ function MarkdownLines({ text }: { text: string }) {
           tabIndex={-1}
         >
           <span className="diff-no">{i + 1}</span>
-          <MarkdownText line={line} />
+          <MarkdownText line={line} tokens={hl.get(i)} />
         </div>
       ))}
     </div>
@@ -4436,7 +4551,7 @@ function MarkdownLines({ text }: { text: string }) {
  * same whichever of the two is showing it, and that is only guaranteed while
  * there is one place that draws it.
  */
-function MarkdownText({ line }: { line: MdLine }): ReactNode {
+function MarkdownText({ line, tokens }: { line: MdLine; tokens?: HlToken[] }): ReactNode {
   return (
     // Not `.diff-code`: that class carries Shiki's `!important` colour
     // override for code tokens, which would repaint every bold, link
@@ -4455,13 +4570,19 @@ function MarkdownText({ line }: { line: MdLine }): ReactNode {
           // The block's shared marker column: "10." makes it 4ch and
           // every item of that list gets the same, so the numbers line up
           // on the period and all the text starts in one column.
-          style={{ minWidth: `${line.markerWidth ?? 2}ch` }}
+          style={{ minWidth: `${line.markerWidth ?? 3}ch` }}
         >
           {line.marker}
         </span>
       )}
       {line.kind === 'table' ? (
         <MarkdownRow line={line} />
+      ) : tokens?.length ? (
+        tokens.map((t, j) => (
+          <span style={t.style} key={j}>
+            {t.content}
+          </span>
+        ))
       ) : (
         line.spans.map((span, j) =>
           span.cls ? (
@@ -4493,9 +4614,10 @@ function MarkdownRow({ line }: { line: MdLine }): ReactNode {
       className="md-cells"
       data-head={line.head || undefined}
       style={{
-        // fr, not ch: the table fills the panel and splits it in proportion to
-        // its content, so a narrow panel shrinks columns instead of clipping.
-        gridTemplateColumns: (line.cols ?? []).map((w) => `minmax(0, ${w}fr)`).join(' ')
+        // ch, with minmax(0, …): a column is as wide as its widest cell (+2 for
+        // a code pill's padding) and no wider, and a narrow panel shrinks the
+        // columns instead of clipping them.
+        gridTemplateColumns: (line.cols ?? []).map((w) => `minmax(0, ${w + 2}ch)`).join(' ')
       }}
     >
       {(line.cells ?? []).map((cell, c) => (
@@ -4527,12 +4649,12 @@ function indentOf(line: MdLine): CSSProperties | undefined {
   // A lazily-indented line under an item is that item's paragraph, so it lines
   // up with the item's TEXT — not with its marker, and not back at the margin.
   if (line.cont)
-    return { paddingLeft: `calc(8px + ${(line.depth ?? 0) * 2 + (line.markerWidth ?? 2)}ch)` }
+    return { paddingLeft: `calc(8px + ${(line.depth ?? 0) * 2 + (line.markerWidth ?? 3)}ch)` }
   if (line.kind !== 'list') return undefined
   // The marker starts where a paragraph starts — a top-level item lines up with
   // the prose above it — and the item's own text sits one marker column further
   // in, where the negative text-indent leaves every wrapped line.
-  const width = line.markerWidth ?? 2
+  const width = line.markerWidth ?? 3
   const marker = (line.depth ?? 0) * 2
   return { paddingLeft: `calc(8px + ${marker + width}ch)`, textIndent: `-${width}ch` }
 }
@@ -4985,6 +5107,7 @@ function TaskList({
   find?: string
 }) {
   const { tasks, loading, error } = useTaskFolders(root)
+  const issues = useTaskIssues(root)
   const [showDone, setShowDone] = useState(() => localStorage.getItem(TASKS_DONE_KEY) === '1')
   const [menu, setMenu] = useState<{ x: number; y: number; row: HTMLElement } | null>(null)
 
@@ -5007,12 +5130,24 @@ function TaskList({
 
   if (error) return <p className="empty error">{error}</p>
   if (loading && !tasks.length) return <p className="empty">Loading…</p>
-  if (!tasks.length) return <p className="empty">No tasks yet. Press n to capture an idea.</p>
 
+  const openMenu = (e: ReactMouseEvent): void => {
+    e.preventDefault()
+    const row = e.currentTarget as HTMLElement
+    row.focus()
+    setMenu({ x: e.clientX, y: e.clientY, row })
+  }
+
+  // A GitHub or Jira row is not a folder, so the task's other actions do not apply.
+  const issueItems: MenuAction[] = [
+    { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
+    { label: 'Create worktree', keys: 'w', run: () => onCommand?.('tasks.worktree') }
+  ]
   const items: MenuAction[] = [
     { label: 'Open', keys: '⏎', run: () => menu?.row.click() },
     { label: 'Status up', keys: ']', run: () => onCommand?.('tasks.statusUp') },
     { label: 'Status down', keys: '[', run: () => onCommand?.('tasks.statusDown') },
+    { label: 'Create worktree', keys: 'w', run: () => onCommand?.('tasks.worktree') },
     { label: 'Send to colony', keys: '⌘⏎', run: () => onCommand?.('tasks.send') },
     { label: 'Delete…', keys: 'd', run: () => onCommand?.('tasks.delete') },
     { label: 'New task…', keys: 'n', run: () => onCommand?.('tasks.new') }
@@ -5020,6 +5155,8 @@ function TaskList({
 
   return (
     <>
+      <div className="task-source">LOCAL</div>
+      {!tasks.length && <p className="empty">No tasks yet. Press n to capture an idea.</p>}
       {TASK_GROUPS.map((status) => {
         const rows = tasks.filter((t) => t.status === status)
         if (!rows.length) return null
@@ -5043,12 +5180,7 @@ function TaskList({
                 data-task-status={t.status}
                 data-dim={t.status === 'done' || undefined}
                 onClick={() => onOpen({ kind: 'task', sub: t.name, root })}
-                onContextMenu={(e) => {
-                  e.preventDefault()
-                  const row = e.currentTarget as HTMLElement
-                  row.focus()
-                  setMenu({ x: e.clientX, y: e.clientY, row })
-                }}
+                onContextMenu={openMenu}
               >
                 <span className="task-no">{t.number}</span>
                 <span className="row-name">{markAll(t.title, find)}</span>
@@ -5064,7 +5196,31 @@ function TaskList({
           </Fragment>
         )
       })}
-      {menu && <RowMenu at={menu} items={items} onClose={closeMenu} />}
+      {/* Nothing to pick means no section. A source that cannot answer is not news
+          here: the new-worktree form says why, where you would act on it. */}
+      {issues.filter((section) => section.items.length).map(({ source, items: found }) => (
+        <Fragment key={source}>
+          <div className="task-source">
+            {SOURCE_LABELS[source].toUpperCase()} <span className="group-n">{found.length}</span>
+          </div>
+          {found.map((item) => (
+            <button
+              className="row task-row"
+              key={item.url}
+              title={item.url}
+              data-issue-source={item.source}
+              data-issue-ref={item.ref}
+              onClick={() => openTaskFile(onOpen, root ?? '', '', 'link', item.url)}
+              onContextMenu={openMenu}
+            >
+              <span className="task-no">{sourceLabel(item)}</span>
+              <span className="row-name">{markAll(item.title, find)}</span>
+              <span className="task-counts">{item.author}</span>
+            </button>
+          ))}
+        </Fragment>
+      ))}
+      {menu && <RowMenu at={menu} items={menu.row.dataset.issueRef ? issueItems : items} onClose={closeMenu} />}
     </>
   )
 }
@@ -5162,6 +5318,11 @@ function TaskItem({
         <button className="chip task-chat" onClick={() => onCommand?.('tasks.chat')}>
           chat about it <kbd>c</kbd>
         </button>
+        {!sent && (
+          <button className="chip task-chat" onClick={() => onCommand?.('tasks.worktree')}>
+            create worktree <kbd>w</kbd>
+          </button>
+        )}
       </div>
       <div className="task-ladder">
         {TASK_FOLDER_STATUSES.map((s, i) => (
@@ -7022,7 +7183,30 @@ type SettingRow =
       placeholder?: string
       hint?: string
     }
-  | { kind: 'text'; table: string; key: string; label: string; value: string; placeholder?: string; hint?: string }
+  | {
+      kind: 'text'
+      table: string
+      key: string
+      label: string
+      value: string
+      placeholder?: string
+      /** What the open box says, when that differs from the closed row's placeholder. */
+      prompt?: string
+      /** A key: the box opens empty and masked, because nothing can be read back. */
+      secret?: boolean
+      hint?: string
+    }
+  | {
+      kind: 'font'
+      table: string
+      key: string
+      label: string
+      value: string
+      placeholder: string
+      /** The variable the picker previews on — which part of the app this font dresses. */
+      variable: FontVariable
+      hint?: string
+    }
   | { kind: 'number'; table: string; key: string; label: string; value: number; suffix?: string; hint?: string }
   | {
       kind: 'slider'
@@ -7111,8 +7295,42 @@ function harnessRows(config: FloeConfig, agents: LocalAgent[]): SettingRow[] {
  * its documentation. Anything the panel does not cover is a row that opens the
  * file, rather than a setting the user cannot reach.
  */
+// Rows whose table starts with this write to the credentials store, not floe.toml.
+const INTEGRATION_TABLE = 'integrations.'
+
+const PASTE_TOKEN = 'Paste it. Leave empty to remove.'
+
+function integrationRow(
+  source: SourceId,
+  key: string,
+  label: string,
+  value: string,
+  prompt: string,
+  secret = false
+): SettingRow {
+  return { kind: 'text', table: `${INTEGRATION_TABLE}${source}`, key, label, value, placeholder: 'not set', prompt, secret }
+}
+
+/**
+ * GitHub, Bitbucket and Jira keys. A token's row only ever says whether one is
+ * saved. GitHub says `using gh` when gh answers, since that is what gets used.
+ */
+function integrationRows(status: IntegrationStatus | null): SettingRow[] {
+  const saved = (has: boolean | undefined): string => (has ? 'saved' : '')
+  const github = status?.github.gh ? 'using gh' : saved(status?.github.token)
+  return [
+    integrationRow('github', 'token', 'GitHub token', github, PASTE_TOKEN, true),
+    integrationRow('bitbucket', 'email', 'Bitbucket email', status?.bitbucket.email ?? '', 'Your Atlassian account email'),
+    integrationRow('bitbucket', 'token', 'Bitbucket API token', saved(status?.bitbucket.token), PASTE_TOKEN, true),
+    integrationRow('jira', 'site', 'Jira site', status?.jira.site ?? '', 'acme, or acme.atlassian.net'),
+    integrationRow('jira', 'email', 'Jira email', status?.jira.email ?? '', 'Your Atlassian account email'),
+    integrationRow('jira', 'token', 'Jira API token', saved(status?.jira.token), PASTE_TOKEN, true)
+  ]
+}
+
 function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   const settings = useSettings()
+  const integrations = useIntegrations()
   const { config } = settings
   // Only the harnesses this machine actually has get a row: a default model for
   // a CLI that is not installed is a setting for something that cannot answer.
@@ -7169,13 +7387,39 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
       title: 'Appearance',
       rows: [
         {
-          kind: 'text',
+          kind: 'font',
           table: 'appearance',
           key: 'font-family',
           label: 'Font family',
           value: config.appearance.fontFamily ?? '',
-          placeholder: 'system monospace'
+          placeholder: 'system monospace',
+          variable: '--mono',
+          hint: 'the fonts installed here, monospaced first — type to filter'
         },
+        {
+          kind: 'bool',
+          table: 'appearance',
+          key: 'split-font',
+          label: 'Split font',
+          value: config.appearance.splitFont,
+          hint: 'give the chat its own font — everything else keeps the one above'
+        },
+        // Only while split: off, the chat wears the app font and this row would
+        // set something that changes nothing on screen.
+        ...(config.appearance.splitFont
+          ? [
+              {
+                kind: 'font' as const,
+                table: 'appearance',
+                key: 'chat-font-family',
+                label: 'Chat font',
+                value: config.appearance.chatFontFamily ?? '',
+                placeholder: 'system monospace',
+                variable: '--chat-mono' as const,
+                hint: 'every chat — sessions and @codex side conversations'
+              }
+            ]
+          : []),
         {
           kind: 'stepper',
           table: 'appearance',
@@ -7202,6 +7446,24 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
                 hint: 'system follows the OS; omarchy follows the desktop theme; dark and light stay put'
               }
             : { options: ['dark', 'light', 'system'], hint: 'system follows the OS; dark and light stay put' })
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'dark-theme',
+          label: 'Dark theme',
+          value: config.appearance.darkTheme,
+          options: DARK_THEMES,
+          hint: 'the palette worn while dark — floe is the app’s own'
+        },
+        {
+          kind: 'choice',
+          table: 'appearance',
+          key: 'light-theme',
+          label: 'Light theme',
+          value: config.appearance.lightTheme,
+          options: LIGHT_THEMES,
+          hint: 'the palette worn while light — floe is the app’s own'
         },
         {
           kind: 'penguin',
@@ -7231,6 +7493,20 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           options: [...CHAT_LAYOUTS],
           hint: 'how a turn is arranged — classic is the log the app shipped with'
         },
+        // Only under its layout: anywhere else this row changes nothing on screen.
+        ...(config.appearance.chatLayout === 'orca'
+          ? [
+              {
+                kind: 'choice' as const,
+                table: 'appearance',
+                key: 'orca-font',
+                label: 'Orca font',
+                value: config.appearance.orcaFont,
+                options: [...ORCA_FONTS],
+                hint: 'orca is Geist with SF Mono for code — app is the font the rest of Floe wears'
+              }
+            ]
+          : []),
         {
           kind: 'choice',
           table: 'appearance',
@@ -7402,12 +7678,16 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
           suffix: 'h'
         }
       ]
-    }
+    },
+    { title: 'Integrations', rows: integrationRows(integrations.status) }
   ]
 
   // Hearing the pick is the only honest way to choose a sound, so cycling the
   // row plays what it just set.
   const setValue: typeof settings.set = (table, key, value) => {
+    if (table.startsWith(INTEGRATION_TABLE)) {
+      return integrations.set(table.slice(INTEGRATION_TABLE.length) as SourceId, key, String(value))
+    }
     settings.set(table, key, value)
     if (table === 'notifications' && key === 'sound') previewSound(value as NotifySoundId)
   }
@@ -7415,6 +7695,7 @@ function SettingsPanel({ onOpen }: { onOpen: OpenFn }) {
   return (
     <div className="settings">
       {settings.error && <p className="empty error">{settings.error}</p>}
+      {integrations.error && <p className="empty error">{integrations.error}</p>}
 
       {/* Problems first: a value you set that did not take is the one thing you
           need to know before reading anything below it. */}
@@ -7616,6 +7897,10 @@ function SettingRowView({
     )
   }
 
+  if (editing && row.kind === 'font') {
+    return <FontPicker row={row} onPick={pick} onCancel={leave} />
+  }
+
   if (editing && row.kind === 'slider') {
     return <SettingSlider row={row} onSet={onSet} onLeave={leave} />
   }
@@ -7631,13 +7916,20 @@ function SettingRowView({
         <input
           ref={box}
           className="dialog-input settings-input"
+          type={row.kind === 'text' && row.secret ? 'password' : undefined}
+          autoComplete={row.kind === 'text' && row.secret ? 'off' : undefined}
           value={draft}
-          placeholder={row.kind === 'text' ? row.placeholder : undefined}
+          placeholder={row.kind === 'text' ? (row.prompt ?? row.placeholder) : undefined}
           spellCheck={false}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation()
-            if (e.key === 'Enter') commit()
+            if (e.key === 'Enter') {
+              // Or the same Enter goes on to press the row focus just returned to,
+              // and the box opens again on what was only just saved.
+              e.preventDefault()
+              commit()
+            }
             if (e.key === 'Escape') leave()
           }}
         />
@@ -7653,9 +7945,15 @@ function SettingRowView({
       const next = row.options[(row.options.indexOf(row.value) + 1) % row.options.length]
       return onSet(row.table, row.key, next)
     }
-    if (row.kind === 'penguin' || row.kind === 'penguinColor' || row.kind === 'slider' || row.kind === 'stepper')
+    if (
+      row.kind === 'penguin' ||
+      row.kind === 'penguinColor' ||
+      row.kind === 'font' ||
+      row.kind === 'slider' ||
+      row.kind === 'stepper'
+    )
       return onEdit()
-    setDraft(row.kind === 'number' ? String(row.value) : row.value)
+    setDraft(row.kind === 'number' ? String(row.value) : row.secret ? '' : row.value)
     onEdit()
   }
 
@@ -7668,6 +7966,7 @@ function SettingRowView({
         {(row.kind === 'number' || row.kind === 'slider' || row.kind === 'stepper') &&
           `${row.value}${row.suffix ?? ''}`}
         {row.kind === 'text' && (row.value || row.placeholder || '—')}
+        {row.kind === 'font' && (row.value || row.placeholder)}
         {row.kind === 'penguin' && (
           <>
             <PenguinHead variant={row.value} size={14} className="settings-penguin" />
@@ -7949,6 +8248,148 @@ function SwatchPicker<T extends string>({
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * The font-family picker — every family installed on this machine, mono first.
+ *
+ * One box does both jobs: it filters the list, and when nothing installed
+ * matches, Enter writes what was typed — a font the OS could not list (or the
+ * browser build, which lists none) is still reachable. The first entry clears
+ * the setting back to the built-in face. Each name is drawn in its own font, so
+ * the list is also the preview.
+ */
+function FontPicker({
+  row,
+  onPick,
+  onCancel
+}: {
+  row: Extract<SettingRow, { kind: 'font' }>
+  onPick: (family: string) => void
+  onCancel: () => void
+}) {
+  const [fonts, setFonts] = useState<Array<{ family: string; mono: boolean }> | null>(null)
+  const [query, setQuery] = useState('')
+  const [cursor, setCursor] = useState(0)
+  const box = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    box.current?.focus()
+    let live = true
+    // Through a promise so a window older than the main process (no `fonts` on
+    // the bridge yet) lands on an empty list instead of a picker stuck loading.
+    void Promise.resolve()
+      .then(() => window.floe.fonts.list())
+      .catch(() => [])
+      .then((all) => {
+        if (!live) return
+        setFonts(all)
+        // Open on the font in force, so Enter on arrival changes nothing.
+        const at = all.findIndex((f) => f.family === row.value)
+        setCursor(at === -1 ? 0 : at + 1)
+      })
+    return () => {
+      live = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const needle = query.trim().toLowerCase()
+  const entries: Array<{ family: string; mono: boolean; label: string }> = [
+    ...(needle ? [] : [{ family: '', mono: true, label: row.placeholder }]),
+    ...(fonts ?? [])
+      .filter((f) => f.family.toLowerCase().includes(needle))
+      .map((f) => ({ ...f, label: f.family }))
+  ]
+  const at = Math.min(cursor, Math.max(0, entries.length - 1))
+  const highlighted = entries[at]?.family ?? query.trim()
+
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-index="${at}"]`)?.scrollIntoView({ block: 'nearest' })
+  }, [at, fonts])
+
+  // The whole app wears the highlighted font while the cursor walks the list.
+  // Waits for the list so opening the picker does not flash the default face.
+  useEffect(() => {
+    if (fonts !== null) previewFont(row.variable, highlighted)
+  }, [highlighted, fonts, row.variable])
+
+  // Leaving without a pick — Escape, or the panel closing under the picker —
+  // put nothing on disk, so the file's font comes back. After a pick the write's
+  // change event re-applies the file; restoring here would flash the old font.
+  const picked = useRef(false)
+  useEffect(
+    () => () => {
+      if (!picked.current) void applyConfig()
+    },
+    []
+  )
+  const choose = (family: string): void => {
+    picked.current = true
+    onPick(family)
+  }
+
+  const keys = (event: ReactKeyboardEvent): void => {
+    // The lane binds j/k/Escape too; inside the picker the keys are ours.
+    event.stopPropagation()
+    const ctrl = event.ctrlKey && !event.metaKey && !event.altKey
+    const down = event.key === 'ArrowDown' || (ctrl && event.key === 'n')
+    const up = event.key === 'ArrowUp' || (ctrl && event.key === 'p')
+    if (event.key === 'Escape') return onCancel()
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      return choose(highlighted)
+    }
+    if (!down && !up) return
+    event.preventDefault()
+    setCursor(Math.max(0, Math.min(entries.length - 1, at + (down ? 1 : -1))))
+  }
+
+  return (
+    <div className="row settings-row settings-editing font-pick">
+      <div className="font-pick-head">
+        <span className="row-name">{row.label}</span>
+        <input
+          ref={box}
+          className="dialog-input settings-input"
+          value={query}
+          placeholder={fonts === null ? 'reading installed fonts…' : 'filter, or type any font name'}
+          spellCheck={false}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setCursor(0)
+          }}
+          onKeyDown={keys}
+        />
+      </div>
+      {entries.length > 0 && (
+        <div className="font-list" ref={list} role="listbox" aria-label={row.label}>
+          {entries.map((f, index) => (
+            <Fragment key={f.family || '\0default'}>
+              {f.family && entries[index - 1]?.mono !== f.mono && (
+                <div className="font-group">{f.mono ? 'MONOSPACE' : 'PROPORTIONAL'}</div>
+              )}
+              <button
+                type="button"
+                tabIndex={-1}
+                data-index={index}
+                role="option"
+                aria-selected={index === at}
+                className={`font-option${index === at ? ' font-cursor' : ''}${f.family === row.value ? ' font-on' : ''}`}
+                style={f.family ? { fontFamily: `"${f.family}", var(--mono)` } : undefined}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setCursor(index)}
+                onClick={() => choose(f.family)}
+              >
+                {f.label}
+              </button>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

@@ -18,9 +18,16 @@ import {
   omarchyXtermTheme,
   type OmarchyPalette
 } from '../../shared/omarchyPalette'
+import { builtinPalette } from '../../shared/builtinThemes'
 import { setXtermMode, setXtermTheme } from './xtermTheme'
 
 type Theme = 'system' | 'dark' | 'light' | 'omarchy'
+
+// `[appearance] dark-theme` / `light-theme` — the palette each mode wears once
+// it resolves. Module state for the same reason `chosen` is: an OS flip has to
+// pick the other one without re-reading the file.
+let darkTheme = 'floe'
+let lightTheme = 'floe'
 
 // `[appearance] transparency` and its amount, kept for the same reason `chosen`
 // is: an OS flip has to re-decide whether THIS theme is glassed without
@@ -53,8 +60,8 @@ function applyGlass(dark: boolean): void {
 // config — and ignored when the config names a theme outright.
 let chosen: Theme = 'system'
 
-// The Omarchy palette being worn — null unless `omarchy` is chosen AND Omarchy
-// has a theme to read. `omarchyPresent` is only the second half, for Settings.
+// Omarchy's palette — null unless `omarchy` is chosen AND Omarchy has a theme
+// to read. `omarchyPresent` is only the second half, for Settings.
 let omarchy: OmarchyPalette | null = null
 let omarchyPresent = false
 
@@ -85,6 +92,8 @@ function paintOmarchy(palette: OmarchyPalette | null): void {
  * stays dark when the Mac flips at sunset, which is the whole reason to pin it.
  * `omarchy` takes the mode with the colours from the desktop's theme, and is
  * `system` on a machine without Omarchy — the same floe.toml has to work there.
+ * Without Omarchy, the resolved mode wears `dark-theme` or `light-theme` — a
+ * shipped palette (shared/builtinThemes.ts) goes on the same way Omarchy's does.
  */
 async function applyTheme(theme: Theme): Promise<void> {
   chosen = theme
@@ -100,7 +109,7 @@ async function applyTheme(theme: Theme): Promise<void> {
   // and setXtermMode must have already picked the base those fall back to
   // once the palette comes off.
   setXtermMode(dark)
-  paintOmarchy(omarchy)
+  paintOmarchy(omarchy ?? builtinPalette(dark ? darkTheme : lightTheme))
   document.documentElement.dataset.theme = dark ? 'dark' : 'light'
   applyGlass(dark)
 }
@@ -119,6 +128,20 @@ function fontStack(family: string | undefined): string {
 }
 
 /**
+ * Wear a font without writing it — the font picker's live preview.
+ *
+ * Nothing restores it on its own: a pick writes floe.toml and the change event
+ * re-applies the file, and a cancel calls `applyConfig` to put the file's font
+ * back.
+ */
+export function previewFont(variable: FontVariable, family: string): void {
+  document.documentElement.style.setProperty(variable, fontStack(family))
+}
+
+/** `--mono` is the app's face; `--chat-mono` is the chat's under `split-font`. */
+export type FontVariable = '--mono' | '--chat-mono'
+
+/**
  * Pull floe.toml into the renderer.
  *
  * Two settings, one fetch: the font face, and the model a new session starts on.
@@ -130,13 +153,20 @@ export async function applyConfig(): Promise<void> {
   try {
     const config = await window.floe.config.get()
     document.documentElement.style.setProperty('--mono', fontStack(config.appearance.fontFamily))
+    // A scope switch like chat-layout: the stylesheet re-points `--mono` at
+    // `--chat-mono` inside the chat panel only while this is on.
+    document.documentElement.style.setProperty('--chat-mono', fontStack(config.appearance.chatFontFamily))
+    document.documentElement.dataset.splitFont = config.appearance.splitFont ? 'on' : 'off'
     // Layout is a stylesheet switch, not a component one: every layout renders
     // the same transcript, and the rules keyed off this attribute are what move
     // the nick, the air and the surfaces. See CHAT_LAYOUTS in shared/types.
     document.documentElement.dataset.chatLayout = config.appearance.chatLayout
+    document.documentElement.dataset.orcaFont = config.appearance.orcaFont
     // Before applyTheme: it resolves dark/light and applies the glass with it.
     glass = config.appearance.transparency
     glassAmount = config.appearance.transparencyAmount
+    darkTheme = config.appearance.darkTheme
+    lightTheme = config.appearance.lightTheme
     await applyTheme(config.appearance.theme)
     // Harness blocks first: a default that names another harness reads its
     // model out of them, and installed the other way round it would read an

@@ -11,6 +11,8 @@
 
 import { open, type Lane, type Panel } from './lane.ts'
 import type { Commands } from './useCommands.ts'
+import type { NewWorktreeOpens } from './NewWorktree.tsx'
+import type { Worktree } from '../../shared/types.ts'
 
 export interface CommandContext {
   lane: Lane
@@ -43,6 +45,7 @@ export interface CommandContext {
     focus: () => void
     devtools: () => void
     screenshot: () => void
+    annotate: () => void
   }
   /** The unified diff for a path. Injected so the registry needs no demo data. */
   patchFor: (path: string) => string
@@ -119,6 +122,8 @@ export interface CommandContext {
   deleteGroup: () => void
   /** The worktree the app is currently in, if any. */
   worktree?: { path: string; branch: string }
+  /** Ask the worktree's chat to commit its changes, opening a chat if none is. */
+  commit: () => void
   /** The open project's repo root. */
   project?: string
   /**
@@ -236,8 +241,10 @@ export interface CommandContext {
     cancel: () => void
     openChat: () => void
   }
-  /** Show the new-worktree flow. */
-  newWorktree: () => void
+  /** Show the new-worktree flow, on the Name tab or on the first PR-and-issue tab. */
+  newWorktree: (opens?: NewWorktreeOpens) => void
+  /** Go to a worktree just made or found, and set it up if it is new. */
+  landOnWorktree: (made: { worktrees: Worktree[]; branch: string; existed: boolean }) => void
   /**
    * The open project's branches, in the sidebar's order. What `worktree.focusAt`
    * is judged against — ⌘4 on a project with three branches is a refusal with a

@@ -1,4 +1,4 @@
-import type { Attached } from '../../shared/types'
+import type { Attached, PermissionMode } from '../../shared/types'
 import type { ModelChoice } from './models'
 
 // The lane is the whole navigation model: panels side by side, in a fixed
@@ -54,8 +54,18 @@ export type Panel = {
    * not of the lane, so it travels with the panel through save and restore.
    */
   dock?: 'below'
+  /**
+   * Shrunk to its header. Only meaningful inside a sidebar stack (see
+   * `stackSidebar`), where it is what makes the column an accordion.
+   */
+  folded?: boolean
   /** For a chat panel: the session it shows. */
-  session?: { id: string; worktreePath: string }
+  session?: { id: string; worktreePath: string; permissionMode?: PermissionMode }
+  /**
+   * For a launcher ⌘T put up: the branch still remembers the chat this replaced.
+   * Asking for a new session closes nothing, so coming back finds that chat.
+   */
+  keepsChat?: boolean
   /** A brand-new chat's opening message, sent once when it mounts. */
   firstPrompt?: string
   /** The model that opening message was addressed to. */
@@ -132,6 +142,7 @@ function layoutOf(panel: Panel): Partial<Panel> {
   if (panel.width !== undefined) layout.width = panel.width
   if (panel.height !== undefined) layout.height = panel.height
   if (panel.dock !== undefined) layout.dock = panel.dock
+  if (panel.folded !== undefined) layout.folded = panel.folded
   return layout
 }
 
@@ -203,7 +214,37 @@ export function open(lane: Lane, panel: Panel): Lane {
   const before = panels.findIndex((p) => (p.order ?? 0) > rank)
   const at = besidePartner(panels, panel.kind) ?? (before === -1 ? panels.length : before)
   panels.splice(at, 0, panel)
-  return { panels, focus: at }
+  return { panels: stackLists(panels, at), focus: at }
+}
+
+/**
+ * Join the sidebar list that just landed at `at` to its neighbours. The lists
+ * are one column whenever two of them stand side by side, so ⌘E hiding and
+ * showing worktrees puts it back under active instead of beside it, and a lone
+ * list is never left to be crowded out. A new stack's head takes the stack
+ * width, as `stackSidebar` gives it.
+ */
+function stackLists(panels: Panel[], at: number): Panel[] {
+  const isList = (p?: Panel) => !!p && SIDEBAR_KINDS.includes(p.kind)
+  if (!isList(panels[at])) return panels
+  const set = (i: number, patch: Partial<Panel>) => {
+    const p = panels[i]
+    if (Object.entries(patch).some(([k, v]) => p[k as keyof Panel] !== v)) panels[i] = { ...p, ...patch }
+  }
+  const below = { dock: 'below' as const, width: undefined }
+  if (isList(panels[at - 1])) set(at, below)
+  const next = panels[at + 1]
+  if (isList(next) && next.dock !== 'below') set(at + 1, { ...below, height: undefined })
+  let head = at
+  while (head > 0 && panels[head].dock === 'below') head--
+  if (head !== at || isList(next)) set(head, { width: panels[head].width ?? SIDEBAR_WIDTH })
+  return panels
+}
+
+/** Every sidebar list joined to its neighbours — for a lane saved before the rule. */
+export function joinLists(lane: Lane): Lane {
+  const panels = lane.panels.reduce((acc, _, i) => stackLists(acc, i), [...lane.panels])
+  return panels.every((p, i) => p === lane.panels[i]) ? lane : { ...lane, panels }
 }
 
 /**
@@ -218,11 +259,19 @@ export function open(lane: Lane, panel: Panel): Lane {
  */
 export function close(lane: Lane, index: number): Lane {
   if (index < 0 || index >= lane.panels.length) return lane
+  // The head of a sidebar stack is pinned: projects is where you switch
+  // project, and it must not vanish from the screen.
+  if (headsSidebarStack(lane, index)) return lane
   const closing = lane.panels[index].kind
   const gone = new Set(
     lane.panels.flatMap((p, i) => (i === index || MARRIED_TO[p.kind] === closing ? [i] : []))
   )
   const panels = lane.panels.filter((_, i) => !gone.has(i))
+  // Closing the head of a column promotes the panel docked under it. Left
+  // docked, it would slide under whatever column stands to the left.
+  const heir = index - [...gone].filter((i) => i < index).length
+  if (!lane.panels[index].dock && panels[heir]?.dock === 'below')
+    panels[heir] = { ...panels[heir], dock: undefined, width: lane.panels[index].width, folded: undefined }
   // Closing a panel to the LEFT of the focused one shifts every index after it,
   // so the focus has to follow or it would silently jump to a different panel.
   const focus = lane.focus - [...gone].filter((i) => i < lane.focus).length
@@ -319,7 +368,11 @@ export function focusDir(lane: Lane, dx: -1 | 0 | 1, dy: -1 | 0 | 1): Lane {
   if (dx !== 0) {
     const col = columns[c + dx]
     if (!col) return lane // already the edge column — no wrap
-    return focusAt(lane, col[Math.min(r, col.length - 1)].index)
+    const row = col[Math.min(r, col.length - 1)]
+    // Into a sidebar stack you land on a list you can see: a folded one is a
+    // bare header, and focusing it would leave j/k walking hidden rows.
+    const shown = isSidebarStack(col) && row.panel.folded ? col.find((x) => !x.panel.folded) : row
+    return focusAt(lane, (shown ?? row).index)
   }
 
   const row = columns[c][r + dy]
@@ -337,6 +390,81 @@ export function toggleDock(lane: Lane, index: number): Lane {
   const panel = lane.panels[index]
   if (!panel || index === 0) return lane
   return patchPanel(lane, index, { dock: panel.dock === 'below' ? undefined : 'below' })
+}
+
+/** The three lists that say where the work lives — what a sidebar stack holds. */
+export const SIDEBAR_KINDS = ['projects', 'active', 'worktrees']
+
+/** Width of the column the sidebar stack makes: the three lists share it. */
+export const SIDEBAR_WIDTH = 300
+
+/** A column that is nothing but sidebar lists, two or more tall — an accordion. */
+export function isSidebarStack(column: { panel: Panel }[]): boolean {
+  return column.length > 1 && column.every((c) => SIDEBAR_KINDS.includes(c.panel.kind))
+}
+
+/** Whether panel `index` is the projects list at the head of a sidebar stack. */
+function headsSidebarStack(lane: Lane, index: number): boolean {
+  const column = columnsOf(lane).find((col) => col[0].index === index)
+  return !!column && lane.panels[index].kind === 'projects' && isSidebarStack(column)
+}
+
+/**
+ * Open projects, active and worktrees as one column: active and worktrees dock
+ * under projects, which takes the shared width. `make` builds a missing panel
+ * and returns undefined for one that cannot open (worktrees needs a project).
+ * The focused panel stays focused; if focus was elsewhere it lands on projects.
+ */
+export function stackSidebar(lane: Lane, make: (kind: string) => Panel | undefined): Lane {
+  let next = lane
+  const focused = lane.panels[lane.focus]?.id
+  for (const kind of SIDEBAR_KINDS) {
+    if (next.panels.some((p) => p.kind === kind)) continue
+    const panel = make(kind)
+    if (panel) next = open(next, panel)
+  }
+  const first = next.panels.findIndex((p) => p.kind === 'projects')
+  if (first === -1) return next
+  const panels = next.panels.map((p, i) => {
+    if (!SIDEBAR_KINDS.includes(p.kind)) return p
+    return i === first
+      ? { ...p, dock: undefined, width: SIDEBAR_WIDTH }
+      : { ...p, dock: 'below' as const, width: undefined, height: undefined }
+  })
+  const keep = panels.findIndex((p) => p.id === focused)
+  // Which list stays open: the focused one, else active (the chats you are
+  // working on), else the first. Focus itself goes back to where it was.
+  const inStack = keep !== -1 && SIDEBAR_KINDS.includes(panels[keep].kind)
+  const active = panels.findIndex((p) => p.kind === 'active')
+  const revealed = inStack ? keep : active === -1 ? first : active
+  const folded = foldAllBut({ panels, focus: revealed })
+  return { panels: folded.panels, focus: keep === -1 ? revealed : keep }
+}
+
+/**
+ * Fold the focused panel to its header, or open it again. In a sidebar stack
+ * the last open list never folds: one is always open and fills the column.
+ */
+export function toggleFold(lane: Lane, index: number): Lane {
+  const panel = lane.panels[index]
+  if (!panel) return lane
+  const column = columnsOf(lane).find((col) => col.some((c) => c.index === index))
+  // Folding only means something inside the stack.
+  if (!column || !isSidebarStack(column)) return lane
+  if (!panel.folded && column.filter((c) => !c.panel.folded).length === 1) return lane
+  return patchPanel(lane, index, { folded: panel.folded ? undefined : true })
+}
+
+/** Open the focused list of a sidebar stack and fold its siblings. Stacking only. */
+function foldAllBut(lane: Lane): Lane {
+  const column = columnsOf(lane).find((col) => col.some((c) => c.index === lane.focus))
+  if (!column || !isSidebarStack(column)) return lane
+  const panels = lane.panels.map((p, i) => {
+    if (!column.some((c) => c.index === i)) return p
+    const folded = i === lane.focus ? undefined : true
+    return folded === p.folded ? p : { ...p, folded }
+  })
+  return { ...lane, panels }
 }
 
 /**
@@ -406,7 +534,8 @@ export function crowdedOut(
   return new Set(
     columns
       .slice(0, session)
-      .filter((col) => !col.some((c) => c.index === focus))
+      // The sidebar stack is never crowded out: it is how you get around.
+      .filter((col) => !col.some((c) => c.index === focus) && !isSidebarStack(col))
       .map((col) => col[0].panel.id)
   )
 }

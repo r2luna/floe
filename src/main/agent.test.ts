@@ -695,6 +695,62 @@ test('handleLine: a permission with suggestions offers "don\'t ask again" and ke
   assert.deepEqual(conn.permSuggestions.get('r4'), suggestions)
 })
 
+// A conn whose stdin is captured, to read what Floe answered the CLI.
+function writableConn(optionsKey: string): { conn: Conn; written: string[] } {
+  const written: string[] = []
+  const conn = fakeConn({ optionsKey, child: { stdin: { write: (s: string) => written.push(s) } } } as unknown as Partial<Conn>)
+  return { conn, written }
+}
+
+const toolRequest = (requestId: string, toolName: string, extra: object = {}) => ({
+  type: 'control_request',
+  request_id: requestId,
+  request: { subtype: 'can_use_tool', tool_name: toolName, input: { command: 'cat x' } },
+  ...extra
+})
+
+test('handleLine: bypass answers a tool request itself, with no card', () => {
+  // The CLI asks once the model has called EnterPlanMode, even in bypass.
+  const { conn, written } = writableConn('skip|opus|high')
+  const { events } = run(toolRequest('r5', 'Bash'), conn)
+  assert.deepEqual(kinds(events), [])
+  assert.equal(conn.pendingPerms.size, 0, 'nothing is parked on the user')
+  assert.deepEqual(JSON.parse(written[0]), {
+    type: 'control_response',
+    response: { subtype: 'success', request_id: 'r5', response: { behavior: 'allow', updatedInput: { command: 'cat x' } } }
+  })
+})
+
+test('handleLine: bypass answers a request tagged to a subagent too', () => {
+  const { conn, written } = writableConn('skip|opus|high')
+  const { events } = run(toolRequest('r6', 'Bash', { parent_tool_use_id: 'task-1' }), conn)
+  assert.deepEqual(kinds(events), [])
+  assert.equal(JSON.parse(written[0]).response.response.behavior, 'allow')
+})
+
+test('handleLine: bypass answers a request with no input with an empty one', () => {
+  const { conn, written } = writableConn('skip||')
+  run({ type: 'control_request', request_id: 'r7', request: { subtype: 'can_use_tool', tool_name: 'Bash' } }, conn)
+  assert.deepEqual(JSON.parse(written[0]).response.response.updatedInput, {})
+})
+
+test('handleLine: bypass still shows the plan review and an unparsable question', () => {
+  const { conn, written } = writableConn('skip|opus|high')
+  assert.deepEqual(kinds(run(toolRequest('r8', 'ExitPlanMode'), conn).events), ['permission'])
+  assert.deepEqual(kinds(run(toolRequest('r11', 'AskUserQuestion'), conn).events), ['permission'])
+  assert.deepEqual(written, [])
+})
+
+test('handleLine: a mode switched to or from bypass decides the next request', () => {
+  const { conn, written } = writableConn('default|opus|high')
+  assert.deepEqual(kinds(run(toolRequest('r12', 'Bash'), conn).events), ['permission'], 'ask mode asks')
+  applyLiveMode(conn, 'skip')
+  assert.deepEqual(kinds(run(toolRequest('r13', 'Bash'), conn).events), [])
+  assert.equal(JSON.parse(written[1]).response.request_id, 'r13')
+  applyLiveMode(conn, 'acceptEdits')
+  assert.deepEqual(kinds(run(toolRequest('r14', 'Bash'), conn).events), ['permission'])
+})
+
 test('permissionResponse: deny, allow, and allow with the rules to save', () => {
   const input = { command: 'cat x' }
   const rules = [{ type: 'addRules' }]

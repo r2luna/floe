@@ -118,6 +118,8 @@ export function browserHandlers(
     // A browser cannot read the desk it runs on, and the daemon's Omarchy is
     // another machine's desktop — so `theme = "omarchy"` is `system` here.
     'omarchy:get': async () => null,
+    // The daemon's fonts are not the browser's: the row stays a box to type in.
+    'fonts:list': async () => [],
 
     // The desktop auto-updater installs a .app. A tab updates by reloading, and
     // the daemon it talks to is updated by a deploy — so there is nothing to

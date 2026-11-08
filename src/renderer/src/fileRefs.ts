@@ -75,3 +75,69 @@ export function describeRef(ref: string): { path: string; lines?: string; full: 
   const [, path = ref, lines] = REF.exec(ref) ?? []
   return { path, lines: lines?.slice(1), full: ref }
 }
+
+/**
+ * A reference the way an assistant message draws it: the file's name first,
+ * the folder it sits in after, the line last — `SKILL.md · universal/sol-loop
+ * · L123`. The name is what you scan for; the folder, cut to its last two
+ * steps, is enough to tell two `index.ts` apart, and the tooltip has the rest.
+ */
+export function chipLabel(ref: string): { name: string; dir?: string; lines?: string; full: string } {
+  const { path, lines, full } = describeRef(ref)
+  const parts = path.replace(/\/+$/, '').split('/')
+  const name = parts.pop() || path
+  const dir = parts.filter((p) => p && p !== '.').slice(-2).join('/') || undefined
+  return { name, dir, lines: lines && `L${lines}`, full }
+}
+
+/**
+ * The reference a markdown link points at, when it points at a file.
+ *
+ * `[SKILL.md](skills/sol-loop/SKILL.md#L123)` is how an agent cites a line:
+ * the href is the address, `#L123` or `#L12-L30` the range. A URL, a mailto or
+ * a bare anchor is a link, not a file, and gets null.
+ */
+export function refFromHref(href: string | undefined): string | null {
+  if (!href || /^[a-z][\w+.-]*:/i.test(href) || href.startsWith('#')) return null
+  let path = href
+  try {
+    path = decodeURI(href)
+  } catch {
+    // A stray `%` is not an escape — the href is read as written.
+  }
+  const m = /^([^#]+?)(?:#L(\d+)(?:-L?(\d+))?)?$/.exec(path)
+  if (!m || (!isFileRef(m[1]) && !m[2])) return null
+  return m[1] + (m[2] ? `:${m[2]}${m[3] ? `-${m[3]}` : ''}` : '')
+}
+
+/**
+ * Whether a reference's path names a file the reader can open: not a folder,
+ * and not a `~` path this side cannot spell.
+ */
+export function opensFile(path: string): boolean {
+  return !!path && !path.endsWith('/') && !path.startsWith('~')
+}
+
+/**
+ * Where a clicked reference opens: the folder the file reader is rooted at,
+ * the file inside it, and the line to land on.
+ *
+ * A path inside the session's worktree opens against the worktree, beside the
+ * tree it came from, and has no root of its own. An absolute path anywhere
+ * else is rooted at its own folder, the way a skill's file is. A path that
+ * does not open a file gets null.
+ */
+export function fileTarget(ref: string, cwd: string): { root?: string; sub: string; line?: number } | null {
+  const { path, lines } = describeRef(ref)
+  if (!cwd || !opensFile(path)) return null
+  const base = cwd.replace(/\/+$/, '')
+  const parts: string[] = []
+  for (const p of (path.startsWith('/') ? path : `${base}/${path}`).split('/')) {
+    if (p === '..') parts.pop()
+    else if (p && p !== '.') parts.push(p)
+  }
+  const abs = `/${parts.join('/')}`
+  const line = lines ? Number(lines.split('-')[0]) : undefined
+  if (abs.startsWith(`${base}/`)) return { sub: abs.slice(base.length + 1), line }
+  return { root: `/${parts.slice(0, -1).join('/')}`, sub: parts[parts.length - 1], line }
+}

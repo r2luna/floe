@@ -1,0 +1,257 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>New worktree from a PR or issue</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>
+  html, body { height: auto; overflow: auto; }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--text); }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, 470px); gap: 28px 20px; align-items: start; }
+  .state h2 { margin: 0 0 8px; color: var(--dim); font-size: 11px; font-weight: 400; }
+  .state .wt-new.dialog { position: static; width: 460px; border: 1px solid var(--line); }
+  #theme { position: fixed; top: 12px; right: 12px; z-index: 2; }
+</style>
+</head>
+<body>
+<button id="theme" class="btn" onclick="const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">Theme</button>
+
+<div class="states">
+
+  <section class="state">
+    <h2>S1. Name tab, as today. Typing # or pasting a GitHub URL jumps to S2.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="true">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <label class="chips-label">Name</label>
+          <input class="dialog-input" placeholder="Name it, pick a branch, or # for a PR or issue…">
+        </div>
+        <div class="wt-base"><button type="button" class="wt-base-button"><span class="wt-base-value">master</span><span class="wt-base-note">main</span><span class="wt-base-caret">▾</span></button></div>
+        <div>
+          <label class="chips-label">Premise</label>
+          <input class="dialog-input" placeholder="In one sentence, what does this worktree have to deliver? Optional.">
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary" disabled>Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S2. GitHub tab. ⌃⇥ switches tab, ↑↓ or ⌃N/⌃P walk, ⏎ picks, Backspace on empty goes back.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <input class="dialog-input" value="cycle" placeholder="Search r2luna/floe, #number, or paste a URL…">
+          <div class="gh-list">
+            <div class="gh-group">Pull requests</div>
+            <button type="button" class="wt-base-row" data-at><span class="gh-number">#7753</span><span class="wt-base-label">SUP2-1030: Issue cycle time - Include totals</span><span class="wt-base-note">ana</span></button>
+            <button type="button" class="wt-base-row"><span class="gh-number">#7741</span><span class="wt-base-label">Cycle time chart loads twice</span><span class="wt-base-note">draft · rui</span></button>
+            <div class="gh-group">Issues</div>
+            <button type="button" class="wt-base-row"><span class="gh-number">#7702</span><span class="wt-base-label">Cycle time ignores reopened issues</span><span class="wt-base-note">leo</span></button>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">↑↓ walk · ⏎ pick</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary" disabled>Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S3. PR picked. Focus is on Create, so ⏎ ⏎ from S2 is enough. Esc goes back to S2.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <div class="gh-picked"><span class="gh-number">#7753</span><span class="gh-picked-title">SUP2-1030: Issue cycle time - Include totals</span><button type="button" class="gh-clear">×</button></div>
+          <div class="gh-detail">Checks out the PR's branch. Merges into master.</div>
+        </div>
+        <div>
+          <label class="chips-label">Premise</label>
+          <input class="dialog-input" value="Pull request #7753: SUP2-1030: Issue cycle time - Include totals (https://github.com/acme/app/pull/7753)">
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">→ sup2-1030-cycle-time</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary">Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S4. Issue picked. A new branch, so the base picker stays.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <div class="gh-picked"><span class="gh-number">#7702</span><span class="gh-picked-title">Cycle time ignores reopened issues</span><button type="button" class="gh-clear">×</button></div>
+        </div>
+        <div class="wt-base"><button type="button" class="wt-base-button"><span class="wt-base-value">master</span><span class="wt-base-note">main</span><span class="wt-base-caret">▾</span></button></div>
+        <div>
+          <label class="chips-label">Premise</label>
+          <input class="dialog-input" value="Issue #7702: Cycle time ignores reopened issues (https://github.com/acme/app/issues/7702)">
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">→ 7702-Cycle-time-ignores-reopened-issues</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary">Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S5. PR from a fork. A local pr-N branch, and the form says pushes will not reach the fork.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <div class="gh-picked"><span class="gh-number">#7760</span><span class="gh-picked-title">Add a Portuguese locale</span><button type="button" class="gh-clear">×</button></div>
+          <div class="gh-detail">From a fork. A local copy: pushes will not reach the fork.</div>
+        </div>
+        <div>
+          <label class="chips-label">Premise</label>
+          <input class="dialog-input" value="Pull request #7760: Add a Portuguese locale (https://github.com/acme/app/pull/7760)">
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">→ pr-7760</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary">Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S6. PR already has a worktree. Create becomes Open, and nothing is provisioned again.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <div class="gh-picked"><span class="gh-number">#7753</span><span class="gh-picked-title">SUP2-1030: Issue cycle time - Include totals</span><button type="button" class="gh-clear">×</button></div>
+          <div class="gh-detail">Already has a worktree.</div>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">→ sup2-1030-cycle-time</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary">Open <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S8. Jira tab. Your open issues until you type. Tabs follow the remotes: a Bitbucket project shows Bitbucket here.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Bitbucket</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <input class="dialog-input" placeholder="Search, PROJ-123, or paste a URL…">
+          <div class="gh-list">
+            <div class="gh-group">Issues</div>
+            <button type="button" class="wt-base-row" data-at><span class="gh-number">SUP2-1030</span><span class="wt-base-label">Issue cycle time - Include totals</span><span class="wt-base-note">Ana</span></button>
+            <button type="button" class="wt-base-row"><span class="gh-number">SUP2-998</span><span class="wt-base-label">Reopened issues count twice</span><span class="wt-base-note">Rui</span></button>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint">↑↓ walk · ⏎ pick</span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary" disabled>Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="state">
+    <h2>S9. Settings, Integrations. ⏎ on a row opens the box, ⏎ saves, esc cancels. A key is never shown again.</h2>
+    <div class="settings" style="width:460px;border:1px solid var(--line)">
+      <div class="group">
+        <div class="group-label">INTEGRATIONS</div>
+        <button class="row settings-row"><span class="row-name">GitHub token</span><span class="settings-value">using gh</span></button>
+        <button class="row settings-row"><span class="row-name">Bitbucket email</span><span class="settings-value">me@acme.io</span></button>
+        <div class="row settings-row settings-editing"><span class="row-name">Bitbucket API token</span><input class="dialog-input settings-input" type="password" placeholder="Paste it. Leave empty to remove."></div>
+        <button class="row settings-row"><span class="row-name">Jira site</span><span class="settings-value">https://acme.atlassian.net</span></button>
+        <button class="row settings-row"><span class="row-name">Jira email</span><span class="settings-value">me@acme.io</span></button>
+        <button class="row settings-row"><span class="row-name">Jira API token</span><span class="settings-value">saved</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="state">
+    <h2>S7. A key is missing, or gh and the token both failed. The form says which, and where to fix it.</h2>
+    <form class="wt-new dialog">
+      <div class="dialog-head">New worktree</div>
+      <div class="dialog-body">
+        <div class="wt-new-tabs">
+          <button type="button" class="wt-new-tab" aria-selected="false">Name</button>
+          <button type="button" class="wt-new-tab" aria-selected="true">GitHub</button>
+          <button type="button" class="wt-new-tab" aria-selected="false">Jira</button>
+          <kbd class="wt-new-tabs-key">⌃⇥</kbd>
+        </div>
+        <div>
+          <input class="dialog-input" placeholder="Search, #number, or paste a URL…">
+          <div class="wt-new-error"><p class="wt-new-why">Add your Jira site, email and API token in Settings, under Integrations.</p></div>
+        </div>
+        <div class="dialog-actions">
+          <span class="dialog-hint"></span>
+          <button type="button" class="btn">Cancel <kbd>esc</kbd></button>
+          <button type="button" class="btn btn-primary" disabled>Create <kbd>⏎</kbd></button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+</div>
+</body>
+</html>

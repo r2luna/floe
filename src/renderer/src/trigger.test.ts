@@ -102,3 +102,13 @@ test('nothing before the caret is nothing to erase', () => {
   assert.equal(refBefore('', 0, isRef), null)
   assert.equal(refBefore('hi ', 3, isRef), null)
 })
+
+test('$ opens the project menu at the start of a word only', () => {
+  assert.deepEqual(triggerAt('$fl', 3), { char: '$', query: 'fl', start: 0 })
+  assert.deepEqual(triggerAt('look at $fl', 11), { char: '$', query: 'fl', start: 8 })
+  assert.equal(triggerAt('cost$5', 6), null)
+})
+
+test('backspace takes a $project reference as one thing', () => {
+  assert.deepEqual(refBefore('see $floe', 9, (t) => t === '$floe'), { start: 4, end: 9 })
+})

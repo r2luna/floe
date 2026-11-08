@@ -1,11 +1,12 @@
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { installHook } from './config/hook.test-helper.ts'
 import type { Worktree } from '../shared/types'
 import { waitFor } from './watch.test-helper.ts'
+import { makeGitRepo } from './gitFixture.test-helper.ts'
 
 // Hermetic boot of the real server: the loader hook stubs `electron` and
 // rewrites extensionless imports so the whole main-process graph loads under
@@ -79,6 +80,11 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'list_projects',
       'list_worktrees',
       'create_worktree',
+      'list_worktree_sources',
+      'search_worktree_source',
+      'create_worktree_from_source',
+      'integration_status',
+      'set_integration_credential',
       'remove_worktree',
       'merge_worktree',
       'worktree_status',
@@ -120,6 +126,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'promote_drawing',
       'open_drawing',
       'present_decision',
+      'set_checklist',
       'start_merge',
       'colony_board',
       'colony_add_task',
@@ -136,9 +143,12 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'task_attach',
       'task_detach',
       'task_send',
+      'task_create_worktree',
+      'task_issues',
       'task_delete',
       'open_task',
       'support_stack',
+      'list_fonts',
       'list_skills',
       'read_skill',
       'create_skill',
@@ -182,6 +192,7 @@ test('lists the floe tools over the token-routed HTTP transport', async () => {
       'browser_press',
       'browser_evaluate',
       'browser_screenshot',
+      'browser_annotate',
       'browser_history',
       'browser_devtools',
       'browser_screenshot_to_desk',
@@ -431,6 +442,80 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<Re
     await client.close()
   }
 }
+
+test('task_create_worktree opens a worktree for a task, then finds it again', async () => {
+  for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key]
+  const repo = makeGitRepo()
+  process.env.GIT_CEILING_DIRECTORIES = dirname(repo.dir)
+  try {
+    repo.write('a.txt', 'a\n')
+    repo.commit('init')
+    await callTool('add_project', { path: repo.dir })
+    const task = await callTool('task_add', { project: repo.dir, title: 'Ship it', idea: 'The idea.' })
+
+    const made = await callTool('task_create_worktree', { project: repo.dir, task: task.number })
+    const created = made.created as Worktree
+    assert.equal(created.branch, task.name)
+    assert.match(readFileSync(join(created.path, '.floe', 'premise.md'), 'utf8'), /Deliver task .*Ship it/)
+
+    const again = await callTool('task_create_worktree', { project: repo.dir, task: task.number })
+    assert.equal(again.existed, true)
+
+    const missing = await callTool('task_create_worktree', { project: repo.dir, task: '999' })
+    assert.ok(missing.error)
+  } finally {
+    await callTool('remove_project', { path: repo.dir })
+    repo.cleanup()
+  }
+})
+
+test('create_worktree_from_source opens an issue, seeds its brief, and reuses the worktree', async () => {
+  // git here is spawned by the code under test, so the walls go up on this process.
+  for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key]
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'floe-mcp-gh-')))
+  process.env.GIT_CEILING_DIRECTORIES = scratch
+  const repo = makeGitRepo()
+  const gh = join(scratch, 'gh')
+  const issue = { number: 34, title: 'Broken thing', url: 'https://github.com/acme/app/issues/34', author: { login: 'ana' } }
+  writeFileSync(
+    gh,
+    `#!/bin/sh\nif [ "$1 $2 $3" = "issue view 34" ]; then echo '${JSON.stringify(issue)}'; exit 0; fi\necho 'Could not resolve to an issue' >&2; exit 1\n`
+  )
+  chmodSync(gh, 0o755)
+  process.env.FLOE_GH_BIN = gh
+  try {
+    repo.write('a.txt', 'a\n')
+    repo.commit('init')
+    repo.git('remote', 'add', 'origin', 'git@github.com:acme/app.git')
+
+    const made = await callTool('create_worktree_from_source', { project: repo.dir, source: 'github', ref: '34' })
+    const created = made.created as Worktree
+    assert.equal(created.branch, '34-Broken-thing')
+    assert.match(readFileSync(join(created.path, '.floe', 'premise.md'), 'utf8'), /Deliver issue #34 from GitHub: "Broken thing"/)
+
+    const again = await callTool('create_worktree_from_source', { project: repo.dir, source: 'github', ref: '34' })
+    assert.equal(again.existed, true)
+
+    const missing = await callTool('create_worktree_from_source', { project: repo.dir, source: 'github', ref: '99' })
+    assert.match(String(missing.error), /#99 is not a pull request or issue in acme\/app/)
+    assert.equal(missing.git, undefined)
+
+    const listed = await callTool('search_worktree_source', { project: repo.dir, source: 'github', query: '#34' })
+    assert.deepEqual((listed.items as Array<{ ref: string }>).map((i) => i.ref), ['34'])
+
+    assert.deepEqual((await callTool('list_worktree_sources', { project: repo.dir })).sources, ['github', 'jira'])
+
+    const saved = await callTool('set_integration_credential', { source: 'jira', field: 'token', value: 'j_secret' })
+    assert.equal((saved.jira as { token: boolean }).token, true)
+    assert.ok(!JSON.stringify(await callTool('integration_status', {})).includes('j_secret'))
+    const refused = await callTool('set_integration_credential', { source: 'jira', field: 'nope', value: 'x' })
+    assert.match(String(refused.error), /no setting named nope/)
+  } finally {
+    delete process.env.FLOE_GH_BIN
+    repo.cleanup()
+    rmSync(scratch, { recursive: true, force: true })
+  }
+})
 
 test('create_session stores the session, and refuses a first prompt with no window', async () => {
   const made = await callTool('create_session', { worktree: '/tmp/floe-mcp-wt', title: 'From MCP' })

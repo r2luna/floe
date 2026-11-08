@@ -92,3 +92,33 @@ export function taskChatOpener(task: Pick<TaskFolder, 'number' | 'title' | 'dir'
       : 'When we change the task, edit those files directly — the tasks panel shows the changes live. Never set `status: ready`; marking it ready is mine.'
   ].join('\n\n')
 }
+
+// A premise reaches every session in the worktree, so the idea is quoted only up
+// to here. The rest is one read away, at the path the premise gives.
+const PREMISE_IDEA_LIMIT = 800
+
+/**
+ * The premise of a worktree opened for a task: a reference to the task, plus what
+ * it says. The paths are absolute because a task lives in the main checkout, often
+ * uncommitted, so the worktree's own copy of the folder may not exist at all.
+ */
+export function taskPremise(
+  task: Pick<TaskFolderDetail, 'number' | 'title' | 'kind' | 'dir' | 'idea' | 'plan' | 'files'>,
+  root: string
+): string {
+  const folder = `${root}/${task.dir}`
+  const idea = task.idea.trim()
+  const clipped = idea.length > PREMISE_IDEA_LIMIT ? `${idea.slice(0, PREMISE_IDEA_LIMIT).trimEnd()}…` : idea
+  const files = task.files.map((f) => `- ${f.type === 'link' ? f.path : `${folder}/${f.path}`}`)
+  return [
+    '## Goal',
+    `Deliver task ${task.number}, "${task.title}" (${task.kind}).`,
+    '',
+    '## Task',
+    'The task is the source of truth. Its files are in the main checkout, not in this worktree, so read them there:',
+    `- Idea: ${folder}/task.md`,
+    task.plan === null ? '- Plan: none yet' : `- Plan: ${folder}/plan.md`,
+    ...files,
+    ...(clipped ? ['', '## Idea', clipped] : [])
+  ].join('\n')
+}

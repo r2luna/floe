@@ -62,6 +62,14 @@ test("createWorktree's own throws are already the sentence — no raw line under
   assert.equal(failure.raw, '')
 })
 
+test("a source's failure is the sentence, and never blames git", () => {
+  const failure = diagnoseWorktreeFailure(
+    '#9',
+    "Error invoking remote method 'sources:createWorktree': Error: Source: gh is not logged in."
+  )
+  assert.deepEqual(failure, { why: 'gh is not logged in.', raw: '' })
+})
+
 test('an unrecognised failure still shows git, never nothing', () => {
   const failure = diagnoseWorktreeFailure('x', ipc('fatal: could not read Username for https://x'))
   assert.equal(failure.why, 'git refused to create the worktree.')

@@ -6,6 +6,10 @@ import type { Skill } from '../../main/config/skills.ts'
 // The slug rule is shared with main, which resolves it back to the session:
 // two spellings of the same rule would write tokens that name nothing.
 import { sessionSlug } from '../../shared/sessionRefs.ts'
+import type { Project } from '../../shared/types.ts'
+import { projectSlug, type ProjectRef } from '../../shared/projectRefs.ts'
+import { backendLabel, backendOf, currentBackend } from './backends.ts'
+import { setRemoteProjects } from './remoteProjects.ts'
 import type { TaskFolder } from '../../shared/taskFolders.ts'
 import { useTaskFolders } from './useTaskFolders.ts'
 
@@ -43,6 +47,56 @@ export function taskMentions(tasks: TaskFolder[]): PaletteItem[] {
   return tasks.map((t) => ({ id: `#${t.number}`, title: `${t.number} ${t.title}`, detail: t.status, group: 'tasks' }))
 }
 
+/** Where a project is being named from: the machine answering, and what to call the others. */
+export interface Machines {
+  current: string
+  label: (id: string) => string
+}
+
+/** The token a project is named by: bare on this window's machine, `name@machine` elsewhere. */
+function projectToken(p: Project, at: Machines): string {
+  const slug = projectSlug(p.name)
+  const backend = backendOf(p)
+  return backend === at.current ? slug : `${slug}@${at.label(backend)}`
+}
+
+/**
+ * Every project on every attached machine, as `$name`. The ones on another
+ * machine than the one answering carry it — `$name@machine` — because two
+ * machines can hold a project of the same name, and because main can only
+ * resolve its own: those are expanded by the renderer (see remoteProjects.ts).
+ * The synthetic Home is left out.
+ */
+export function projectMentions(projects: Project[], at: Machines): PaletteItem[] {
+  const seen = new Set<string>()
+  const out: PaletteItem[] = []
+  for (const p of projects) {
+    if (p.home) continue
+    const token = projectToken(p, at)
+    const id = `$${token}`
+    if (seen.has(id)) continue
+    seen.add(id)
+    const remote = backendOf(p) !== at.current
+    out.push({
+      id,
+      title: p.name,
+      detail: remote ? `${at.label(backendOf(p))} · ${p.path}` : p.path,
+      group: 'projects'
+    })
+  }
+  return out
+}
+
+/** The projects main cannot resolve, keyed by the token that names them. */
+export function remoteProjectRefs(projects: Project[], at: Machines): Map<string, ProjectRef> {
+  const out = new Map<string, ProjectRef>()
+  for (const p of projects) {
+    if (p.home || backendOf(p) === at.current) continue
+    out.set(projectToken(p, at), { name: p.name, path: p.path, machine: at.label(backendOf(p)) })
+  }
+  return out
+}
+
 /**
  * Every folder that holds a file in the list, once each, with a trailing `/`.
  *
@@ -77,13 +131,16 @@ export function folderMentions(files: string[]): PaletteItem[] {
  * skills follow, read from the CLI itself so the list is what that worktree
  * actually has rather than a copy to keep in step.
  *
+ * `$` is the projects Floe knows on every attached machine, by name.
+ *
  * `#` is sessions of the project you are in, its tasks, then the worktree's
  * folders and files.
  */
 export function useMenuItems(
   worktreePath: string | undefined,
   worktrees: Worktrees,
-  projectRoot?: string
+  projectRoot?: string,
+  projects: Project[] = []
 ): (trigger: Trigger) => PaletteItem[] {
   const [skills, setSkills] = useState<string[]>([])
   const [floeSkills, setFloeSkills] = useState<Skill[]>([])
@@ -123,6 +180,13 @@ export function useMenuItems(
   // Tasks live in the project's main checkout, not the worktree you are in.
   const { tasks } = useTaskFolders(projectRoot)
   const taskRows = useMemo(() => taskMentions(tasks), [tasks])
+  const machines = { current: currentBackend(), label: backendLabel }
+  const projectRows = useMemo(() => projectMentions(projects, machines), [projects, machines.current])
+  // Main resolves `$name` for its own machine's projects; the rest are expanded
+  // on the way out of the renderer, from this list.
+  useEffect(() => {
+    setRemoteProjects(remoteProjectRefs(projects, machines))
+  }, [projects, machines.current])
 
   // Sessions first: there are a handful of them and hundreds of files, and the
   // fuzzy filter keeps the order it is given.
@@ -169,7 +233,9 @@ export function useMenuItems(
               .filter((name) => !floeSkills.some((s) => s.name === name))
               .map((name) => ({ id: `/${name}`, title: name, detail: 'harness', group: 'harness' }))
           ]
-        : [...mentions, ...taskRows, ...paths],
-    [skills, floeSkills, mentions, taskRows, paths]
+        : trigger.char === '$'
+          ? projectRows
+          : [...mentions, ...taskRows, ...paths],
+    [skills, floeSkills, mentions, taskRows, paths, projectRows]
   )
 }

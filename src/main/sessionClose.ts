@@ -5,6 +5,7 @@
 // than being written twice and drifting.
 
 import type { BrowserWindow } from 'electron'
+import { saveChecklist } from './checklistStore'
 import { closeSession } from './sessionStore'
 import { stopAgentFor } from './agent'
 import { forgetQueriesOf } from './queries'
@@ -34,6 +35,11 @@ export function closeSessionFully(win: BrowserWindow | null, opts: CloseSessionO
     forgetThread(key)
     forgetSeen(key)
   }
+  // Imported on demand, as the MCP server's browser tools do: `browser` needs
+  // Electron's window classes, which this module's other callers may not have.
+  void import('./browser').then((browser) => browser.closeBrowserPages(sessionKeys(opts))).catch(() => {})
+  // Before the record goes: the record is what resolves a claudeId to the list's file.
+  saveChecklist(opts.id, [])
   closeSession(opts)
 }
 

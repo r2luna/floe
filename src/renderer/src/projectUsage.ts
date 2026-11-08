@@ -1,10 +1,12 @@
-// How many times you have switched to each project, so "Switch project…" can
-// put the ones you use most at the top.
+// When you last switched to each project, so "Switch project…" can put the
+// ones you used most recently at the top.
 //
 // Kept in localStorage, beside the unread marks: the order is only useful if it
 // survives a restart. Keyed by project path, which is the id the palette uses.
+// The value is a sequence number, not a clock reading: higher means more
+// recent, and two switches in the same millisecond still order correctly.
 
-const KEY = 'floe.projectUsage'
+const KEY = 'floe.projectRecent'
 
 function load(): Record<string, number> {
   try {
@@ -21,13 +23,13 @@ function load(): Record<string, number> {
 
 // Lazy, for the same reason as unreadStore.ts: a `node --test` process has no
 // localStorage at import time.
-let counts: Record<string, number> | null = null
+let seen: Record<string, number> | null = null
 
-/** One more switch to this project. */
+/** This project is now the most recently used one. */
 export function noteProjectUse(path: string): void {
-  const next = { ...(counts ??= load()) }
-  next[path] = (next[path] ?? 0) + 1
-  counts = next
+  const prev = (seen ??= load())
+  const next = { ...prev, [path]: Math.max(0, ...Object.values(prev)) + 1 }
+  seen = next
   try {
     localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
@@ -36,15 +38,15 @@ export function noteProjectUse(path: string): void {
 }
 
 /**
- * Most used first. Stable, so projects with the same count keep the order they
- * were given in — the user's own arrangement from projects.json.
+ * Most recently used first. Stable, so projects never switched to keep the
+ * order they were given in — the user's own arrangement from projects.json.
  */
 export function byUsage<T>(items: readonly T[], pathOf: (item: T) => string): T[] {
-  const c = (counts ??= load())
-  return [...items].sort((a, b) => (c[pathOf(b)] ?? 0) - (c[pathOf(a)] ?? 0))
+  const s = (seen ??= load())
+  return [...items].sort((a, b) => (s[pathOf(b)] ?? 0) - (s[pathOf(a)] ?? 0))
 }
 
-/** For tests: forget every count. */
+/** For tests: forget every switch. */
 export function resetProjectUsage(): void {
-  counts = {}
+  seen = {}
 }

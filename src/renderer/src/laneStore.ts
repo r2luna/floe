@@ -186,6 +186,37 @@ export function sessionOf(lane: Lane): Panel['session'] | undefined {
   return lane.panels.find((p) => p.session && !sessionOwns(p) && !PROJECT_RAIL.has(p.kind))?.session
 }
 
+/**
+ * What the lane says about the chat its branch is left on.
+ *
+ * The session id while a chat is up, and `null` once a launcher has replaced it
+ * for good. `undefined` means the lane has no answer and the memory stands: a
+ * launcher ⌘T put over a chat (see Panel.keepsChat), or no launcher at all,
+ * which is what closing that one leaves behind. Neither closed the chat.
+ */
+export function chatToRemember(lane: Lane): string | null | undefined {
+  const chat = sessionOf(lane)
+  if (chat) return chat.id
+  const launcher = lane.panels.find((p) => p.kind === 'branch')
+  return launcher && !launcher.keepsChat ? null : undefined
+}
+
+/**
+ * The session a worktree remembers, among the ones it still has.
+ *
+ * The memory holds whatever id the panel opened with, and a chat started from
+ * the launcher opens with the store's id before it has a `claudeId`. Matching
+ * only `claudeId ?? id` would lose that chat as soon as the list learned its
+ * `claudeId`, so either id answers.
+ */
+export function rememberedSession<S extends { id: string; claudeId?: string }>(
+  sessions: S[] | undefined,
+  want: string | null | undefined
+): S | undefined {
+  if (!want) return undefined
+  return sessions?.find((s) => s.id === want || s.claudeId === want)
+}
+
 /** The panels the session opened: everything to the right of the session slot,
  *  minus the project's own checklists — see PROJECT_PANELS. */
 export function scopedOf(lane: Lane): Panel[] {

@@ -1,0 +1,59 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Tasks panel, grouped by source</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css">
+<style>
+  html, body { height: auto; overflow: auto; }
+  body { margin: 0; padding: 20px; background: var(--bg); color: var(--text); }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, 400px); gap: 28px 20px; align-items: start; }
+  .state h2 { margin: 0 0 8px; color: var(--dim); font-size: 11px; font-weight: 400; }
+  .panel { width: 390px; border: 1px solid var(--line); background: var(--panel); }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .panel-body { padding: 0 8px 8px; }
+  .panel-name { font-size: 12px; }
+  #theme { position: fixed; top: 12px; right: 12px; z-index: 2; }
+</style>
+</head>
+<body>
+<button id="theme" class="btn" onclick="const r=document.documentElement;r.dataset.theme=r.dataset.theme==='dark'?'light':'dark'">Theme</button>
+<div class="states">
+
+  <section class="state">
+    <h2>T1. A GitHub project with Jira keys saved. j/k walks all three. w creates the worktree, ⏎ opens the issue.</h2>
+    <div class="panel" data-focused data-kind="tasks">
+      <header class="panel-head"><span class="panel-name">Tasks</span></header>
+      <div class="panel-body">
+        <div class="task-source">LOCAL</div>
+        <div class="group-label">IDEA <span class="group-n">2</span></div>
+        <button class="row task-row"><span class="task-no">018</span><span class="row-name">Export the cycle time report</span><span class="task-counts">plan · 1 html</span></button>
+        <button class="row task-row"><span class="task-no">017</span><span class="row-name">Sidebar density setting</span><span class="task-counts"></span></button>
+        <div class="group-label">READY <span class="group-n">1</span></div>
+        <button class="row task-row"><span class="task-no">015</span><span class="row-name">Retry a failed provision step</span><span class="task-counts">plan</span></button>
+        <div class="group-label">DONE <span class="group-n">4 · z to show</span></div>
+        <div class="task-source">GITHUB <span class="group-n">2</span></div>
+        <button class="row task-row" data-issue-ref="7702" data-cursor><span class="task-no">#7702</span><span class="row-name">Cycle time ignores reopened issues</span><span class="task-counts">leo</span></button>
+        <button class="row task-row" data-issue-ref="1"><span class="task-no">#7691</span><span class="row-name">Wrong totals on the squad page</span><span class="task-counts">ana</span></button>
+        <div class="task-source">JIRA <span class="group-n">2</span></div>
+        <button class="row task-row" data-issue-ref="1"><span class="task-no">SUP2-1030</span><span class="row-name">Issue cycle time - Include totals</span><span class="task-counts">Ana</span></button>
+        <button class="row task-row" data-issue-ref="1"><span class="task-no">SUP2-998</span><span class="row-name">Reopened issues count twice</span><span class="task-counts">Rui</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="state">
+    <h2>T2. No local tasks yet. A source with no issues, no remote, no keys, or no answer is not drawn.</h2>
+    <div class="panel" data-focused data-kind="tasks">
+      <header class="panel-head"><span class="panel-name">Tasks</span></header>
+      <div class="panel-body">
+        <div class="task-source">LOCAL</div>
+        <p class="empty">No tasks yet. Press n to capture an idea.</p>
+      </div>
+    </div>
+  </section>
+
+
+</div>
+</body>
+</html>

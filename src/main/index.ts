@@ -44,6 +44,15 @@ import { dataDir, setSharedDataDir } from './dataDir'
 import { installCli, openNameFromArgv, openPathFromArgv, openProject, refreshCli, type CliPaths } from './cli'
 import { log } from './log'
 import { worktreeStatus } from './gitStatus'
+import {
+  availableSources,
+  createWorktreeFromSource,
+  integrationStatus,
+  listTaskIssues,
+  searchSource
+} from './integrations/index'
+import { setCredential } from './integrations/credentials'
+import type { SourceId } from '../shared/worktreeSource'
 import { findDefinitions } from './definitions'
 import {
   changedFiles,
@@ -67,6 +76,7 @@ import {
   removeWorktreeGuided,
   deleteBranch,
   mergePreflight,
+  mergeTargetOf,
   mergeStash,
   mergeBase,
   mergeResolveCheck,
@@ -106,6 +116,7 @@ import {
 import { mcpRebind } from './mcpHarness'
 import { initAutoUpdate } from './autoUpdate'
 import { getSystemPrompt, setSystemPrompt } from './appSettings'
+import { publishChecklist } from './agent'
 import { listHarnessSessions, resumeHarnessSession, type HistoryHarness } from './harnessHistory'
 import { listClaudeSessions, listResumableSessions, readAiTitle, firstUserTitle, generateSessionTitle, generateWorktreeDesc, setImageCacheDir } from './claudeSessions'
 import {
@@ -192,6 +203,7 @@ import {
 import { setSandboxEnabled } from './sandbox'
 import { floeConfig, setFloeValue } from './config/floe'
 import { readOmarchyPalette, watchOmarchyTheme } from './omarchyTheme'
+import { listSystemFonts } from './systemFonts'
 import { recapSession } from './recap'
 import { handle } from './plugins/handleMap'
 import { backendById, loadPlugins, pluginWindowCreated, shutdownPlugins } from './plugins/host'
@@ -210,6 +222,7 @@ import {
 import {
   BROWSER_PARTITION,
   browserBack,
+  captureBrowser,
   browserForward,
   browserReload,
   browserState,
@@ -266,6 +279,7 @@ import {
   type NewTaskFolder
 } from './taskFolders'
 import { cardLookup, sendDeps } from './taskFolderDeps'
+import { createTaskWorktree } from './taskWorktree'
 import type { TaskFolderPatch } from '../shared/taskFolders'
 import {
   boardFor,
@@ -568,7 +582,9 @@ export async function listWorktreesFor(win: BrowserWindow | null, repoPath: stri
 // worktrees run in parallel, and a clean one is left out entirely.
 export async function worktreeStatuses(paths: string[]): Promise<Record<string, unknown>> {
   const entries = await Promise.all(
-    paths.filter((path) => !isHomePath(path)).map(async (path) => [path, await worktreeStatus(path)] as const)
+    paths
+      .filter((path) => !isHomePath(path))
+      .map(async (path) => [path, await worktreeStatus(path, await mergeTargetOf(path))] as const)
   )
   return Object.fromEntries(entries.filter(([, status]) => status))
 }
@@ -772,6 +788,9 @@ export function registerAgentIpc(): void {
   // an event that lands under the session's other name — or a window that
   // reloaded while a card was up — left the mark on with nothing to turn it off.
   handle('agent:waiting', () => [...new Set([...waitingKeys(), ...codexWaitingKeys()])])
+  handle('agent:clearChecklist', (event, key: string) => {
+    publishChecklist(BrowserWindow.fromWebContents(event.sender) ?? undefined, key, [])
+  })
   handle('agent:stop', (event, key: string) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win) stopAgent(win, key)
@@ -1066,6 +1085,8 @@ const browserFocusIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, focusBrowser)
 const browserDevToolsIpc = (event: IpcMainInvokeEvent): void | null =>
   withBrowserWindow(event, openBrowserDevTools)
+const browserCaptureIpc = (event: IpcMainInvokeEvent): ReturnType<typeof captureBrowser> | null =>
+  withBrowserWindow(event, (win) => captureBrowser(win))
 const browserScreenshotIpc = (event: IpcMainInvokeEvent): ReturnType<typeof screenshotPageToDesk> | null =>
   withBrowserWindow(event, (win) => screenshotPageToDesk(win))
 
@@ -1084,6 +1105,7 @@ export function registerBrowserIpc(): void {
   handle('browser:focus', browserFocusIpc)
   handle('browser:devtools', browserDevToolsIpc)
   handle('browser:screenshot', browserScreenshotIpc)
+  handle('browser:capture', browserCaptureIpc)
 }
 
 // The file tree, media probes and the review diff.
@@ -1244,6 +1266,7 @@ export function registerTaskFoldersIpc(): void {
   handle('tasks:attach', (_event, root: string, ref: string, what: Attachment) => attachToTask(root, ref, what))
   handle('tasks:detach', (_event, root: string, ref: string, target: string) => detachFromTask(root, ref, target))
   handle('tasks:send', (event, root: string, ref: string) => sendTaskFolder(root, ref, sendDeps(winOf(event))))
+  handle('tasks:createWorktree', (_event, root: string, ref: string) => createTaskWorktree(root, ref))
   handle('tasks:delete', (_event, root: string, ref: string) => deleteTaskFolder(root, ref))
   handle('tasks:watch', (event, root: string) => watchTaskFolders(event.sender, root))
 }
@@ -1411,6 +1434,21 @@ export function registerWorktreeIpc(): void {
   handle('worktrees:create', (_event, root: string, branch: string, options: CreateWorktreeOptions) =>
     createWorktree(root, branch, options)
   )
+  handle('sources:available', (_event, root: string) => availableSources(root))
+  handle('sources:search', (_event, root: string, source: SourceId, query?: string) =>
+    searchSource(root, source, query)
+  )
+  handle(
+    'sources:createWorktree',
+    (_event, root: string, source: SourceId, ref: string, options?: { base?: string; writePremise?: boolean }) =>
+      createWorktreeFromSource(root, source, ref, options)
+  )
+  handle('tasks:issues', (_event, root: string) => listTaskIssues(root))
+  handle('integrations:status', () => integrationStatus())
+  handle('integrations:set', (_event, source: SourceId, field: string, value: string) => {
+    setCredential(source, field, value)
+    return integrationStatus()
+  })
   handle('worktrees:remove', (_event, root: string, target: string) => removeWorktree(root, target))
   handle('worktrees:reorder', (_event, root: string, orderedPaths: string[]) =>
     reorderWorktrees(root, orderedPaths)
@@ -1564,6 +1602,9 @@ export function registerSettingsIpc(): void {
 
   // The Omarchy desktop's palette, for `theme = "omarchy"` — null off Omarchy.
   handle('omarchy:get', () => readOmarchyPalette())
+
+  // Installed font families, mono first — Settings → Font family's picker.
+  handle('fonts:list', () => listSystemFonts())
 
   // Open-at-login (Settings → General → Launch at login). Backed by the OS login
   // items list, so it survives reinstalls and shows up in System Settings.

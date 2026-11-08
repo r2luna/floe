@@ -39,7 +39,8 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       stop: () => {},
       focus: () => {},
       devtools: () => {},
-      screenshot: () => {}
+      screenshot: () => {},
+      annotate: () => {}
     },
     patchFor: () => '',
     openPalette: () => {},
@@ -60,6 +61,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
     movingProject: false,
     deleteGroup: () => {},
     newWorktree: () => {},
+    landOnWorktree: () => {},
     worktreeNames: [],
     gotoTargets: ['projects', 'worktrees', 'files'],
     confirm: async () => true,
@@ -91,6 +93,7 @@ function context(lane: Lane = laneOf(panel('projects'))): CommandContext & { lan
       remove: async () => {},
       setScope: async () => {}
     },
+    commit: () => {},
     merge: {
       active: false,
       failed: false,

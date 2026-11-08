@@ -8,6 +8,8 @@ import type {
   MergeFfResult,
   LastCommit
 } from '../main/git'
+import type { IntegrationStatus, SourceWorktree, TaskIssues } from '../main/integrations'
+import type { SourceId, SourceSearch } from '../shared/worktreeSource'
 import type { ClaudeSessionMeta, ResumableSession, TranscriptItem } from '../main/claudeSessions'
 import type { HarnessSession, HistoryHarness } from '../main/harnessHistory'
 import type { ViewState, WorktreeView, ProjectUiState, WorktreeUiState } from '../main/sessionStore'
@@ -18,6 +20,7 @@ import type { TerminalEvent } from '../main/terminal'
 import type { KeybindingsConfig } from '../main/keybindings'
 import type { Skill, SkillImport, WritableScope } from '../main/config/skills'
 import type { Attachment, NewTaskFolder } from '../main/taskFolders'
+import type { TaskWorktree } from '../main/taskWorktree'
 import type { TaskFolder, TaskFolderDetail, TaskFolderPatch } from '../shared/taskFolders'
 import type { FloeConfig } from '../main/config/floe'
 import type { PluginCommandMeta, PluginInfo } from '../main/plugins/host'
@@ -26,6 +29,7 @@ import type { ConfigError } from '../main/config/errors'
 import type { Board, BoardEvent, ColonyTask, TaskKind } from '../shared/colony'
 import type { Route } from '../shared/mentions'
 import type { OmarchyPalette } from '../shared/omarchyPalette'
+import type { SystemFont } from '../main/systemFonts'
 import type { TomlValue } from '../main/config/toml'
 import type {
   AgentEventEnvelope,
@@ -51,6 +55,7 @@ import type {
   McpServerEntry,
   MediaFile,
   AuthStatus,
+  BrowserCapture,
   BrowserState,
   ClaudeAuthEvent,
   ClaudeStats,
@@ -180,6 +185,8 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
       /** Full-page PNG, handed to CleanShot or copied and opened in Preview. */
       screenshot: (): Promise<{ path: string; openedIn: 'cleanshot' | 'preview' } | null> =>
         ipcRenderer.invoke('browser:screenshot'),
+      /** The viewport as an image with what was where on it, for annotate. */
+      capture: (): Promise<BrowserCapture | null> => ipcRenderer.invoke('browser:capture'),
       onState: (cb: (state: BrowserState) => void): (() => void) => {
         const listener = (_event: IpcRendererEvent, state: BrowserState): void => cb(state)
         ipcRenderer.on('browser:state', listener)
@@ -304,6 +311,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         return () => ipcRenderer.removeListener('omarchy:changed', listener)
       }
     },
+    // Installed font families, mono first. Empty where the OS cannot be asked.
+    fonts: {
+      list: (): Promise<SystemFont[]> => ipcRenderer.invoke('fonts:list')
+    },
     // User keybinding overrides. `load` returns the parsed config (overrides +
     // any parse errors); `reveal` opens the file to edit; `onChange` fires when
     // the file is saved so the renderer can hot-reload the merged keymap.
@@ -412,6 +423,24 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
     // Codex models offered in the picker, read from codex's own model cache.
     codex: {
       models: (): Promise<CodexModel[]> => ipcRenderer.invoke('codex:models')
+    },
+    // Worktrees opened from a pull request or an issue.
+    sources: {
+      available: (root: string): Promise<SourceId[]> => ipcRenderer.invoke('sources:available', root),
+      search: (root: string, source: SourceId, query?: string): Promise<SourceSearch> =>
+        ipcRenderer.invoke('sources:search', root, source, query),
+      createWorktree: (
+        root: string,
+        source: SourceId,
+        ref: string,
+        options?: { base?: string; writePremise?: boolean }
+      ): Promise<SourceWorktree> => ipcRenderer.invoke('sources:createWorktree', root, source, ref, options)
+    },
+    // The keys behind them. Write-only: `status` says what is saved, never the value.
+    integrations: {
+      status: (): Promise<IntegrationStatus> => ipcRenderer.invoke('integrations:status'),
+      set: (source: SourceId, field: string, value: string): Promise<IntegrationStatus> =>
+        ipcRenderer.invoke('integrations:set', source, field, value)
     },
     worktrees: {
       list: (repoPath: string): Promise<Worktree[]> => ipcRenderer.invoke('worktrees:list', repoPath),
@@ -531,6 +560,7 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('agent:recap', key, worktreePath, awayMs),
       // The turn in flight, for a panel that mounts mid-turn (see AgentReplay).
       replay: (key: string): Promise<AgentReplay> => ipcRenderer.invoke('agent:replay', key),
+      clearChecklist: (key: string): Promise<void> => ipcRenderer.invoke('agent:clearChecklist', key),
       // Every session working right now, for useSessionActivity to reconcile
       // its event-driven set against.
       active: (): Promise<string[]> => ipcRenderer.invoke('agent:active'),
@@ -541,6 +571,13 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         const listener = (_event: IpcRendererEvent, payload: AgentEventEnvelope): void => cb(payload)
         ipcRenderer.on('agent:event', listener)
         return () => ipcRenderer.removeListener('agent:event', listener)
+      },
+      // A socket to a backend came back (see socketIpc.ts). Every event sent
+      // while it was down is gone, so a panel has to read its session again.
+      onReconnected: (cb: () => void): (() => void) => {
+        const listener = (): void => cb()
+        ipcRenderer.on('backend:reconnected', listener)
+        return () => ipcRenderer.removeListener('backend:reconnected', listener)
       }
     },
     // Side conversations opened off a session — see docs/queries.md.
@@ -1091,6 +1128,10 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('tasks:detach', root, ref, target),
       // Move to specs/, commit on main, start the colony card.
       send: (root: string, ref: string): Promise<TaskFolderDetail> => ipcRenderer.invoke('tasks:send', root, ref),
+      createWorktree: (root: string, ref: string): Promise<TaskWorktree> =>
+        ipcRenderer.invoke('tasks:createWorktree', root, ref),
+      // The GitHub and Jira issues listed under the local tasks.
+      issues: (root: string): Promise<TaskIssues[]> => ipcRenderer.invoke('tasks:issues', root),
       // Removes the folder. Refuses a task already sent to the colony.
       delete: (root: string, ref: string): Promise<{ deleted: string }> => ipcRenderer.invoke('tasks:delete', root, ref),
       watch: (root: string): Promise<void> => ipcRenderer.invoke('tasks:watch', root),

@@ -17,12 +17,15 @@ import {
   patchPanel,
   resizePanel,
   setCursor,
+  stackSidebar,
   toggleDock,
+  toggleFold,
   toggleKind
 } from './lane.ts'
 import { READS_AS_PROSE } from './proseDiff.ts'
 import { appendComment, fileRef, parseUnifiedDiff, quoteSelection, selRange } from './diff.ts'
 import type { Command, CommandContext } from './commands.ts'
+import { toggleChecklistFold } from './checklistFold.ts'
 import type { Panel } from './lane.ts'
 import { editSub } from './editorTarget.ts'
 import { sendToTerminal } from './terminalBus.ts'
@@ -37,10 +40,11 @@ import { clear, leave, toggleFavorite, updateActive } from './activeStore.ts'
 import { reason } from './ipcError.ts'
 import { TASKS_TOGGLE_DONE } from './taskEvents.ts'
 import { taskChatOpener, type TaskFolderKind } from '../../shared/taskFolders.ts'
+import type { SourceId } from '../../shared/worktreeSource.ts'
 import { colonyTab, setColonyTab, stepTab, type ColonyTab } from './colonyTab.ts'
 import { downloadAndOpen, downloadFile } from './download.ts'
 import { identifiersOf } from './definition.ts'
-import { CHAT_LAYOUTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
+import { CHAT_LAYOUTS, ORCA_FONTS, TRANSPARENCY, type FileOp } from '../../shared/types.ts'
 
 /**
  * The layout after this one, wrapping — what `chat.layout` steps through.
@@ -375,6 +379,16 @@ function taskFileRow(c: CommandContext): HTMLElement | null {
   if (c.lane.panels[c.lane.focus]?.kind !== 'task') return null
   const row = fileRow(c)
   return row?.dataset.taskFile ? row : null
+}
+
+/** The GitHub or Jira row under the tasks cursor. They are not task folders. */
+function issueRowAt(c: CommandContext): { root: string; source: SourceId; ref: string } | null {
+  const root = c.project
+  if (!root || c.lane.panels[c.lane.focus]?.kind !== 'tasks') return null
+  const row = fileRow(c)
+  const source = row?.dataset.issueSource as SourceId | undefined
+  const ref = row?.dataset.issueRef
+  return source && ref ? { root, source, ref } : null
 }
 
 function stepTask(c: CommandContext, delta: 1 | -1): void {
@@ -743,6 +757,26 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.setLane((l) => toggleDock(l, l.focus))
       },
       {
+        // The accordion half of a sidebar stack: fold the focused list to its
+        // header, or open it again. Folding is a property of the panel, so the
+        // palette, the key and MCP all flip the same field.
+        id: 'panel.fold',
+        title: 'Fold or unfold panel',
+        group: 'Panels',
+        enabled: (c) => !!c.lane.panels[c.lane.focus],
+        run: (c) => c.setLane((l) => toggleFold(l, l.focus))
+      },
+      {
+        // Projects, active and worktrees in ONE column instead of three. The
+        // layout is built from `dock`, so ⌘K / still undoes it one panel at a
+        // time.
+        id: 'sidebar.stack',
+        title: 'Stack projects, active and worktrees in one column',
+        group: 'Panels',
+        run: (c) =>
+          c.setLane((l) => stackSidebar(l, (kind) => (c.canOpen(kind) ? c.makePanel(kind) : undefined)))
+      },
+      {
         // The keyboard half of dragging a splitter. Same lane field, so a drag
         // and a keypress cannot disagree about how wide a panel is.
         id: 'panel.grow',
@@ -856,6 +890,15 @@ export const REGISTRY: Map<string, Command> = new Map(
         group: 'Browser',
         enabled: (c) => c.lane.panels[c.lane.focus]?.kind === 'browser',
         run: (c) => c.browser.screenshot()
+      },
+      {
+        id: 'browser.annotate',
+        title: 'Annotate browser page',
+        group: 'Browser',
+        // Not the focused panel: a click inside the native page never reaches the
+        // lane, so the chat you just sent from still counts as focused there.
+        enabled: (c) => c.lane.panels.some((panel) => panel.kind === 'browser'),
+        run: (c) => c.browser.annotate()
       },
       {
         id: 'cursor.down',
@@ -1947,6 +1990,22 @@ export const REGISTRY: Map<string, Command> = new Map(
         // is showing — docked under the task. The same task gets the same chat
         // back while that session exists; the first press opens it on a message
         // that has the agent read the task before you type.
+        id: 'tasks.worktree',
+        title: 'Create a worktree for the task',
+        group: 'Tasks',
+        enabled: (c) => !!taskFolderAt(c) || !!issueRowAt(c),
+        unavailable: () => 'put the cursor on a task first',
+        run: (c) => {
+          const issue = issueRowAt(c)
+          const at = taskFolderAt(c)
+          const creating = issue
+            ? window.floe.sources.createWorktree(issue.root, issue.source, issue.ref, { writePremise: true })
+            : at && window.floe.tasks.createWorktree(at.root, at.ref)
+          if (!creating) return
+          void creating.then((made) => c.landOnWorktree(made)).catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
         id: 'tasks.chat',
         title: 'Chat about the task',
         group: 'Tasks',
@@ -2393,6 +2452,23 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.setLane((l) => toggleKind(l, 'settings', () => c.makePanel('settings')))
       },
       {
+        id: 'chat.checklistFold',
+        title: 'Fold or open the agent checklist',
+        group: 'App',
+        run: (c) => c.say(toggleChecklistFold() ? 'Checklist folded' : 'Checklist open')
+      },
+      {
+        id: 'chat.checklistClear',
+        title: 'Clear the agent checklist',
+        group: 'Sessions',
+        enabled: (c) => !!chatOf(c)?.session,
+        unavailable: () => 'open a chat first',
+        run: async (c) => {
+          const session = chatOf(c)?.session
+          if (session) await window.floe.agent.clearChecklist(session.id)
+        }
+      },
+      {
         // Settings has a row for this, but a layout is judged by reading a real
         // transcript in it — so there has to be a way to step through them from
         // the chat itself, without a panel covering the thing being looked at.
@@ -2407,6 +2483,26 @@ export const REGISTRY: Map<string, Command> = new Map(
           void window.floe.config
             .set('appearance', 'chat-layout', next)
             .then(() => c.say(`Chat layout: ${next}`))
+            .catch((err: unknown) => c.say(reason(err)))
+        }
+      },
+      {
+        // Like the layout: the two faces are compared by reading a real
+        // transcript, so the switch has to work with the chat in view.
+        id: 'chat.orcaFont',
+        title: 'Next Orca layout font',
+        group: 'App',
+        run: (c) => {
+          void window.floe.config
+            .get()
+            .then(async (config) => {
+              const at = ORCA_FONTS.indexOf(config.appearance.orcaFont)
+              const next = ORCA_FONTS[(at + 1) % ORCA_FONTS.length] as string
+              // The write comes back as a `config:changed`, which is what moves
+              // the attribute — see appearance.ts.
+              await window.floe.config.set('appearance', 'orca-font', next)
+              c.say(`Orca font: ${next}`)
+            })
             .catch((err: unknown) => c.say(reason(err)))
         }
       },
@@ -2533,7 +2629,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.worktree,
         run: (c) =>
           c.setLane((l) =>
-            open(l, c.makePanel('branch', c.worktree?.branch))
+            open(l, { ...c.makePanel('branch', c.worktree?.branch), keepsChat: true })
           )
       },
       {
@@ -2750,7 +2846,7 @@ export const REGISTRY: Map<string, Command> = new Map(
                   (lane, q) =>
                     open(lane, {
                       ...c.makePanel('query', q.harness),
-                      session: { id: q.id, worktreePath }
+                      session: { id: q.id, worktreePath, permissionMode: q.mode }
                     }),
                   l
                 )
@@ -2920,6 +3016,12 @@ export const REGISTRY: Map<string, Command> = new Map(
         run: (c) => c.newWorktree()
       },
       {
+        id: 'worktree.newFromSource',
+        title: 'New worktree from a PR or issue',
+        group: 'Worktrees',
+        run: (c) => c.newWorktree('source')
+      },
+      {
         // By POSITION in the sidebar, not by name: the number you press is the
         // row you can see. Landing is the sidebar's own — the chat the branch
         // was left on, or its launcher — so ⌘2 and clicking row two agree.
@@ -2934,6 +3036,16 @@ export const REGISTRY: Map<string, Command> = new Map(
         unavailable: (c, arg) =>
           `no worktree ${Number(arg ?? 0) + 1} — this project has ${c.worktreeNames.length}`,
         run: (c, arg) => c.enterWorktreeAt(Number(arg ?? 0))
+      },
+      {
+        // The top bar's commit chip. The agent writes the message, so this asks
+        // the branch's chat rather than committing behind its back.
+        id: 'worktree.commit',
+        title: 'Ask the chat to commit this worktree',
+        group: 'Worktrees',
+        enabled: (c) => !!c.worktree,
+        unavailable: () => 'no worktree to commit — open one first',
+        run: (c) => c.commit()
       },
       // --- guided merge ---------------------------------------------------
       // Everything the checklist offers is a command: its chips dispatch these

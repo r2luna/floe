@@ -8,16 +8,19 @@ import {
   useSyncExternalStore
 } from 'react'
 import type { TranscriptItem } from '../../main/claudeSessions'
+import type { ChecklistItem } from '../../shared/checklist'
 import type {
   AgentEvent,
   AgentEventEnvelope,
   AgentPermission,
   AgentQuestion,
+  AgentReplay,
   Effort,
   FileAttachment,
   ImageAttachment,
   PermissionMode
 } from '../../shared/types'
+import { expandRemoteProjects } from './remoteProjects.ts'
 import type { Route } from '../../shared/mentions.ts'
 import { defaultChoice, type ModelChoice } from './models'
 import { DEFAULT_MODE } from '../../shared/modes.ts'
@@ -97,6 +100,8 @@ export interface Transcript {
   startedAt?: number
   /** Why nothing is streaming, when the CLI has said: a retry, a long tool. '' otherwise. */
   status: string
+  /** The agent's to-do list for this session, empty when it has none. */
+  checklist: ChecklistItem[]
   /**
    * Typed while a ONE-SHOT runtime (codex, opencode…) was busy, not sent yet;
    * drains one entry per turn boundary. Claude never queues — a mid-turn send
@@ -152,6 +157,11 @@ export interface Transcript {
  * mount it asks main for the replay snapshot (the turn so far), buffers the
  * live events that race in meanwhile, and drops the buffered ones the snapshot
  * already folded in (by seq). Only then does the stream go straight through.
+ *
+ * A socket that drops breaks "the stream is the record": the gate keeps no
+ * backlog, so a reply sent into the gap never arrives. A reconnect therefore runs
+ * the open sequence again, the file and the snapshot together, and is the one
+ * time the file is re-read while the panel is alive.
  */
 export function useTranscript(worktreePath?: string, sessionId?: string): Transcript {
   const [{ base, live, tail }, dispatch] = useReducer(liveReducer, { base: [], live: [], tail: null })
@@ -161,6 +171,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // What the CLI is doing while nothing streams — an API retry, a tool that
   // has run for a while. Shown after the typing meter; '' is nothing to show.
   const [status, setStatus] = useState('')
+  const [checklist, setChecklist] = useState<ChecklistItem[]>([])
   // `apply` is built once — its identity must not change mid-turn — so the two
   // numbers the turn footer needs are mirrored here for it to read on `done`.
   const startedRef = useRef<number | undefined>(undefined)
@@ -231,6 +242,9 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
   // The session this panel has already been cleared for; see the subscribe
   // effect below.
   const clearedFor = useRef<string | null>(null)
+  // For the reconnect handler, which outlives any one render of this path.
+  const pathRef = useRef(worktreePath)
+  pathRef.current = worktreePath
   // Every name this session's events can arrive under, from the replay
   // snapshot. Seeded with the key the panel was opened with, which is the only
   // one it knows before main answers.
@@ -293,6 +307,10 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
 
   /** Fold one streamed event into the panel. Also used for the replay events. */
   const apply = useCallback((event: AgentEvent) => {
+    if (event.kind === 'checklist') {
+      setChecklist(event.items)
+      return
+    }
     // A status stands until the next thing that IS the turn moving — a delta,
     // a tool row, a question, the end. The token gauge and a subagent's own
     // progress are not that: they arrive beside a retry, not instead of it.
@@ -524,49 +542,58 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       apply(payload.event)
     })
     let alive = true
+    const drain = (): void => {
+      for (const payload of pending ?? []) if (names.current.has(payload.key)) apply(payload.event)
+    }
+    const adopt = (replay: AgentReplay): void => {
+      // Every name this session answers to. A turn started before the CLI
+      // reported its id runs under Floe's, while the panel may be keyed by
+      // the claudeId — listening for one name alone is how a chat went silent
+      // mid-turn and then kept "is typing" up with no `done` on the way.
+      if (replay.names?.length) names.current = new Set([key, ...replay.names])
+      setChecklist(replay.checklist ?? [])
+      if (replay.running) {
+        if (replay.model) runModel.current = replay.model
+        // Whoever is answering RIGHT NOW, which the picker cannot say: this
+        // panel may have opened onto a turn that was handed to another
+        // harness. Without it the replayed text is stamped with the default
+        // and codex's answer appears under Claude's name.
+        if (replay.choice)
+          setAnsweringChoice({ ...replay.choice, model: replay.model ?? replay.choice.model })
+        // The events below are this turn from its start, and the CLI has
+        // already written part of it to the JSONL — a panel that opens
+        // mid-turn reads that part and then replays it again. The snapshot's
+        // mark is what tells the two apart.
+        dispatch({ type: 'live-since', at: replay.startedAt ?? Date.now() })
+        // Without `panel`, so a steer typed here comes back too: after a
+        // reconnect the optimistic copy is gone, and it may not be on disk yet.
+        for (const event of replay.events)
+          apply(event.kind === 'steer' ? { ...event, panel: undefined } : event)
+        setRunning(true)
+        // The turn started before this panel existed: time it from main's
+        // mark, not from now, or a session you open late reads "0s".
+        startedRef.current = replay.startedAt ?? Date.now()
+        setStartedAt(startedRef.current)
+        // The seeded turn must still produce a true→false edge for the queue.
+        wasRunning.current = true
+      } else if (queueOf(key).length) {
+        // Idle, with something still queued: the turn it was waiting on
+        // ended while this session had no panel open. That boundary went by
+        // unseen, so it is owed here — the drainer treats it as the edge.
+        setOwed(true)
+      }
+      for (const payload of pending ?? [])
+        if (names.current.has(payload.key) && payload.seq > replay.lastSeq) apply(payload.event)
+    }
     void window.floe.agent
       .replay(key)
       .then((replay) => {
         if (!alive || !pending) return
-        // Every name this session answers to. A turn started before the CLI
-        // reported its id runs under Floe's, while the panel may be keyed by
-        // the claudeId — listening for one name alone is how a chat went silent
-        // mid-turn and then kept "is typing" up with no `done` on the way.
-        if (replay.names?.length) names.current = new Set([key, ...replay.names])
-        if (replay.running) {
-          if (replay.model) runModel.current = replay.model
-          // Whoever is answering RIGHT NOW, which the picker cannot say: this
-          // panel may have opened onto a turn that was handed to another
-          // harness. Without it the replayed text is stamped with the default
-          // and codex's answer appears under Claude's name.
-          if (replay.choice)
-            setAnsweringChoice({ ...replay.choice, model: replay.model ?? replay.choice.model })
-          // The events below are this turn from its start, and the CLI has
-          // already written part of it to the JSONL — a panel that opens
-          // mid-turn reads that part and then replays it again. The snapshot's
-          // mark is what tells the two apart.
-          dispatch({ type: 'live-since', at: replay.startedAt ?? Date.now() })
-          for (const event of replay.events) apply(event)
-          setRunning(true)
-          // The turn started before this panel existed: time it from main's
-          // mark, not from now, or a session you open late reads "0s".
-          startedRef.current = replay.startedAt ?? Date.now()
-          setStartedAt(startedRef.current)
-          // The seeded turn must still produce a true→false edge for the queue.
-          wasRunning.current = true
-        } else if (queueOf(key).length) {
-          // Idle, with something still queued: the turn it was waiting on
-          // ended while this session had no panel open. That boundary went by
-          // unseen, so it is owed here — the drainer treats it as the edge.
-          setOwed(true)
-        }
-        for (const payload of pending)
-          if (names.current.has(payload.key) && payload.seq > replay.lastSeq) apply(payload.event)
+        adopt(replay)
       })
       .catch(() => {
         // No snapshot is only a colder start: drain what buffered and go live.
-        if (alive && pending)
-          for (const payload of pending) if (names.current.has(payload.key)) apply(payload.event)
+        if (alive) drain()
         // And nothing says a turn is in flight, so a queue left here is owed
         // its boundary the same as above. If a turn IS running after all, the
         // drainer's guard on `running` holds it until the real edge.
@@ -575,10 +602,40 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       .finally(() => {
         pending = null
       })
+    // The latest reconnect wins: a second drop while one read is out makes that
+    // read's answer older than the stream it would be merged with.
+    let resyncs = 0
+    const offReconnected = window.floe.agent.onReconnected(() => {
+      const path = pathRef.current
+      if (!path) return
+      const mine = ++resyncs
+      pending ??= []
+      void Promise.all([window.floe.claude.transcript(path, key), window.floe.agent.replay(key)])
+        .then(([list, replay]) => {
+          if (!alive || mine !== resyncs) return
+          const said = replay.events.flatMap((e) => (e.kind === 'steer' ? [e.text] : []))
+          dispatch({ type: 'resync', items: list, said, now: Date.now() })
+          setQuestion(null)
+          setStatus('')
+          adopt(replay)
+          // The turn ended in the gap and its `done` went with it. Main is
+          // believed unless this panel only just sent, as in the correction below.
+          if (!replay.running && Date.now() - (startedRef.current ?? 0) >= IDLE_GRACE_MS)
+            setRunning(false)
+        })
+        // Dropped again before the answer. The next reconnect reads it all.
+        .catch(() => {
+          if (alive && mine === resyncs) drain()
+        })
+        .finally(() => {
+          if (mine === resyncs) pending = null
+        })
+    })
     return () => {
       alive = false
       pending = null
       off()
+      offReconnected()
     }
   }, [key, apply])
 
@@ -669,7 +726,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
         .start(
           key,
           worktreePath,
-          prompt,
+          expandRemoteProjects(prompt),
           // `optionsKey` in the main process is built from these, so changing
           // the picker restarts the CLI rather than silently keeping the old
           // model — or the old mode — for the rest of the session. `panel` is
@@ -784,7 +841,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
       // dispatchTurn).
       if (addressed?.route) {
         void window.floe.agent
-          .start(key, worktreePath, prompt, { ...(choice ?? choiceRef.current), permissionMode: (choice ?? choiceRef.current).mode ?? DEFAULT_MODE }, images ?? [], files ?? [], addressed.route)
+          .start(key, worktreePath, expandRemoteProjects(prompt), { ...(choice ?? choiceRef.current), permissionMode: (choice ?? choiceRef.current).mode ?? DEFAULT_MODE }, images ?? [], files ?? [], addressed.route)
           .catch((e: unknown) => setError(String(e)))
         return
       }
@@ -899,6 +956,7 @@ export function useTranscript(worktreePath?: string, sessionId?: string): Transc
     tokens,
     startedAt,
     status,
+    checklist,
     queued,
     send,
     unqueue,

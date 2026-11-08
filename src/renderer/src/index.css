@@ -31,6 +31,14 @@
   font-display: swap;
   src: url("./assets/fonts/MapleMono-NF-Bold.woff2") format("woff2");
 }
+/* The `orca` chat layout's face, and nothing else's. */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/Geist-Variable.woff2") format("woff2");
+}
 
 :root {
   /* Prose leading — looser than the app's 1.55, which is set for rows and code.
@@ -267,6 +275,150 @@ button {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* --- top bar (TopBar.tsx) ------------------------------------------------- */
+
+/* Where you are, and what is left before merge. The window is frameless, so the
+   strip is also its drag handle; the chips opt back out to stay clickable. */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 30px;
+  flex: none;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.topbar-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topbar-project {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.topbar-branch {
+  color: var(--accent);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-faint {
+  color: var(--faint);
+}
+
+.topbar-tag {
+  color: var(--faint);
+  border: 1px solid var(--edge);
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.topbar-gap {
+  flex: 1;
+}
+
+/* Groups are split by a hairline, so "to commit" and "to push" never read as
+   one number. The first one after the gap has nothing to its left to split. */
+.topbar-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 16px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line-soft);
+}
+
+.topbar-gap + .topbar-group {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.topbar-group .wt-add,
+.topbar-group .wt-mod,
+.topbar-group .wt-del,
+.topbar-group .wt-sync {
+  font-weight: 700;
+}
+
+.topbar-ok {
+  color: var(--live);
+}
+
+.topbar-warn {
+  color: #c9a05f;
+}
+
+:root[data-theme='light'] .topbar-warn {
+  color: #8a6314;
+}
+
+/* The outline chip, in the mode-chip tones: amber for commit, green for merge. */
+.topbar-chip {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.topbar-chip kbd {
+  font: inherit;
+  font-size: 10px;
+  color: var(--faint);
+  border: 0;
+  background: none;
+  padding: 0;
+}
+
+.topbar-chip[data-tone='commit'] {
+  color: #c9a05f;
+  border-color: #3a3226;
+  background: #211d17;
+}
+
+.topbar-chip[data-tone='merge'] {
+  color: #93b8a1;
+  border-color: #283129;
+  background: #1b201d;
+}
+
+:root[data-theme='light'] .topbar-chip[data-tone='commit'] {
+  color: #8a6314;
+  border-color: #e6d3ae;
+  background: #fbf5ea;
+}
+
+:root[data-theme='light'] .topbar-chip[data-tone='merge'] {
+  color: #2f7d52;
+  border-color: #b6d9c3;
+  background: #eef6f1;
+}
+
+.topbar-chip:hover,
+.topbar-chip:focus-visible {
+  border-color: currentColor;
 }
 
 /* --- lane ---------------------------------------------------------------- */
@@ -734,6 +886,7 @@ button {
 }
 
 .browser-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -828,6 +981,194 @@ button {
 
 :root[data-theme='light'] .browser-viewport {
   background: #fcfdfe;
+}
+
+/* Annotate: a frozen capture with marks on it, over the whole panel. The native
+   view is hidden while this is up, because it paints above all of this HTML. */
+.browser-annotate {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+  outline: none;
+}
+
+.annotate-bar,
+.annotate-tools,
+.annotate-foot {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 6px;
+  background: var(--panel);
+  border-top: 1px solid var(--line-soft);
+}
+
+.annotate-bar,
+.annotate-tools {
+  flex-wrap: wrap;
+}
+
+.annotate-bar-label {
+  padding: 0 4px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.annotate-chip {
+  flex: none;
+  padding: 4px 8px;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.annotate-chip kbd {
+  margin-right: 5px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+
+.annotate-chip[data-on] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: var(--accent);
+}
+
+.annotate-chip[data-on] kbd {
+  color: var(--accent);
+}
+
+.annotate-url {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.annotate-frozen {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.annotate-stage {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  background: var(--bg);
+  touch-action: none;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.annotate-mark rect,
+.annotate-mark line,
+.annotate-mark polyline {
+  fill: none;
+  stroke: #e5484d;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.annotate-mark circle {
+  fill: #e5484d;
+}
+
+.annotate-text {
+  fill: #e5484d;
+  font: 700 14px ui-sans-serif, system-ui, sans-serif;
+}
+
+.annotate-num {
+  fill: #ffffff;
+  font: 700 11px var(--mono);
+  text-anchor: middle;
+}
+
+.annotate-hint rect {
+  fill: #f5d90a;
+  stroke: #1b1e25;
+}
+
+.annotate-hint text {
+  fill: #1b1e25;
+  font: 700 10px var(--mono);
+  text-anchor: middle;
+}
+
+.annotate-notes {
+  flex: none;
+  max-height: 30%;
+  margin: 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  font-size: 11.5px;
+  list-style: none;
+  border-top: 1px solid var(--line-soft);
+}
+
+.annotate-notes li {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 2fr) minmax(0, 3fr);
+  gap: 6px;
+  padding: 2px 10px;
+  border-left: 2px solid transparent;
+}
+
+.annotate-notes li[data-current] {
+  background: var(--bg);
+  border-left-color: var(--accent);
+}
+
+.annotate-note-n {
+  color: #e5484d;
+  font-weight: 700;
+}
+
+.annotate-note-el {
+  overflow: hidden;
+  color: var(--dim);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.annotate-note-text {
+  overflow: hidden;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.annotate-notes input {
+  min-width: 0;
+  padding: 0;
+  color: var(--text-strong);
+  font: inherit;
+  background: transparent;
+  border: 0;
+  outline: none;
+  caret-color: var(--accent);
+}
+
+:root[data-theme='light'] .annotate-note-n {
+  color: #b1454a;
 }
 
 .browser-status {
@@ -1286,6 +1627,13 @@ button {
   font-size: 12px;
 }
 
+/* The gap to the branch is wider than the icon's, so the two read as a pair of
+   names rather than one icon-prefixed string. */
+.greet-project {
+  margin-right: 6px;
+  color: var(--text);
+}
+
 /* On a phone the greeting is two lines whatever you do — "Good afternoon," and
    a name will not fit in 390px at 21px — so it stops pretending to be a row:
    the mark goes above the words and the whole block centres under it, instead
@@ -1409,6 +1757,164 @@ button {
    would read as a different kind of thing sitting at the bottom.
    A bordered card around one line of text also spent a ring of pixels saying
    "an input is here", which the caret already says. */
+/* The agent's to-do list, pinned above the composer. Sizes come from the transcript:
+   hierarchy is bold and colour. Done is a tinted outline and a drawn tick, never a fill. */
+.cl {
+  --cl-done: #93b8a1;
+  flex: none;
+  border-top: 1px solid var(--line-soft);
+  padding: 6px 14px;
+}
+
+:root[data-theme='light'] .cl {
+  --cl-done: #2f7d52;
+}
+
+.cl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cl-mark {
+  flex: none;
+  width: 10px;
+  color: var(--dim);
+}
+
+.cl-count {
+  flex: none;
+  color: var(--text-strong);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cl-now {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cl-segs {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 50%;
+}
+
+.cl-seg {
+  width: 12px;
+  height: 4px;
+  background: var(--edge);
+  transition: background 0.3s;
+}
+
+.cl-seg[data-status='completed'] {
+  background: var(--cl-done);
+}
+
+.cl-seg[data-status='in_progress'] {
+  background: var(--working);
+  animation: cl-pulse 1.4s ease-in-out infinite;
+}
+
+.cl-seg[data-status='cancelled'] {
+  background: transparent;
+  outline: 1px solid var(--edge);
+  outline-offset: -1px;
+}
+
+@keyframes cl-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.cl-list {
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+}
+
+.cl-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: var(--dim);
+  transition: color 0.3s;
+}
+
+.cl-item[data-status='in_progress'] {
+  color: var(--text-strong);
+  font-weight: 700;
+}
+
+.cl-item[data-status='cancelled'] .cl-text {
+  text-decoration: line-through;
+}
+
+.cl-more {
+  padding: 2px 0 2px 21px;
+  color: var(--dim);
+}
+
+.cl-box {
+  flex: none;
+  position: relative;
+  top: 2px;
+  display: grid;
+  place-items: center;
+  width: 13px;
+  height: 13px;
+  border: 1px solid var(--edge);
+  transition: border-color 0.3s;
+}
+
+.cl-box[data-status='completed'] {
+  border-color: var(--cl-done);
+}
+
+.cl-box svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: var(--cl-done);
+  stroke-width: 2;
+  stroke-dasharray: 16;
+  animation: cl-tick 0.35s ease-out;
+}
+
+@keyframes cl-tick {
+  from {
+    stroke-dashoffset: 16;
+  }
+}
+
+.cl-dash {
+  width: 7px;
+  height: 1px;
+  background: var(--dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-seg[data-status='in_progress'],
+  .cl-box svg {
+    animation: none;
+  }
+}
+
 .composer {
   border-top: 1px solid var(--line-soft);
   padding-inline: 0;
@@ -3030,6 +3536,23 @@ button {
   overflow-anchor: none;
 }
 
+/* A chat left on its own fills the window, but a transcript should not. Keep
+   its reading column centred while leaving the panel frame and its footer as
+   full-width edges. The same inset on the composer keeps what you write lined
+   up with what you read. */
+.lane[data-solo-chat] .panel[data-kind='chat'] {
+  --chat-reading-inset: max(24px, calc((100% - 900px) / 2));
+}
+
+.lane[data-solo-chat] .panel[data-kind='chat'] .chat {
+  padding-inline: var(--chat-reading-inset);
+}
+
+.lane[data-solo-chat] .panel[data-kind='chat'] .composer-bar,
+.lane[data-solo-chat] .panel[data-kind='chat'] .composer > .attachments {
+  padding-inline: var(--chat-reading-inset);
+}
+
 /* Nothing between messages: the log is one column of lines, and a gap that
    groups a run would be air the transcript reads slower for. What separates
    two speakers is the time and the nick at the head of the line. */
@@ -3132,9 +3655,10 @@ button {
    padding as two little pills above and below the code. */
 .irc-body .md-code,
 .irc-sys code {
-  padding: 1px 5px;
+  padding: 0 5px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: var(--wash-4);
+  background: none;
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
@@ -4853,6 +5377,17 @@ button {
   scrollbar-width: none;
 }
 
+/* A patch is read line-by-line, but a single long line must not turn the whole
+   panel into a horizontal scroller. Keep its indentation and wrap unbroken
+   values when they reach the code column's edge. Files retain their scrollable
+   source view. */
+.patch-diff .diff-code,
+.patch-diff .diff-hunk {
+  overflow-x: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .diff-row[data-kind="add"] {
   background: #22371f4d;
 }
@@ -5192,14 +5727,15 @@ button {
   background: var(--wash-4);
 }
 
-/* As wide as the hanging indent reserves (set inline, per list block). A number
-   is right-aligned in it with a character of air before the text, so 9. and 10.
-   line up on the period. */
+/* As wide as the hanging indent reserves (set inline, per list block). The
+   marker, whatever it is — a number, a disc or a checkbox — is right-aligned in
+   it with the SAME air before the text, so 9. and 10. line up on the period and
+   every kind of list reads with one gap. */
 .md-bullet {
   display: inline-block;
   /* The done-task tick is positioned against this box. */
   position: relative;
-  padding-right: 1ch;
+  padding-right: 1.5ch;
   /* text-indent inherits, and the item's hanging indent would drag the drawn
      marker out of its own column. The indent is the line's, not the marker's. */
   text-indent: 0;
@@ -5215,19 +5751,9 @@ button {
 /* The unordered marker is drawn, not typed: a disc centred in its column and on
    the text's x-height. A font's bullet glyph is whatever size the face decided,
    sits on the baseline, and is a hollow box when the face has no bullet. */
-/* A disc has no period to line up on, so it sits in the middle of its column
-   instead of against the text. */
-.md-bullet[data-dot] {
-  padding-right: 0;
-  text-align: center;
-}
-
-/* A checkbox starts where the text of the lines around it starts, and the
-   rest of its column is the gap before the words. Centred, it floated a
-   little in from the edge with no air on the text side. */
-.md-bullet[data-task] {
-  padding-right: 0;
-  text-align: left;
+/* A checkbox keeps the dim ink of a control you have not used yet. */
+.md-bullet[data-task],
+:root[data-theme='light'] .md-bullet[data-task] {
   color: var(--dim);
 }
 
@@ -5258,17 +5784,17 @@ button {
   background: currentColor;
 }
 
-/* Centred on the box, which is the first 11px of the column, not the column. */
+/* Centred on the box, which is the 11px before the gap, not the column. */
 .md-bullet[data-task="done"]::after {
   content: "";
   position: absolute;
   top: 50%;
-  left: 5.5px;
+  right: calc(1.5ch + 5.5px);
   width: 3px;
   height: 6px;
   border: solid var(--bg);
   border-width: 0 1.5px 1.5px 0;
-  transform: translate(-50%, -65%) rotate(45deg);
+  transform: translate(50%, -65%) rotate(45deg);
 }
 
 /* Everything a document says but does not mean for you to read as prose: front
@@ -5384,6 +5910,12 @@ button {
   font-size: 11px;
 }
 
+/* Shiki's colours, dark side: same swap as .diff-code above. Light keeps the
+   inline github-light colour. */
+:root[data-theme='dark'] .md-row[data-md="code"] .md-text span[style] {
+  color: var(--shiki-dark, currentColor) !important;
+}
+
 /* A table row is a grid, not a line of pipes: every row of a block shares one
    template (set inline from the block's widest cells), so the columns line up
    while each row stays its own numbered, navigable line. */
@@ -5398,8 +5930,13 @@ button {
 
 .md-cells {
   display: grid;
-  gap: 0 14px;
-  padding: 1px 0;
+  gap: 0 24px;
+  padding: 3px 0;
+}
+
+/* A thin rule between body rows, so a row reads across its columns. */
+.md-row[data-md="table"] .md-cells:not([data-head]) {
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .md-cell {
@@ -6411,6 +6948,134 @@ kbd {
   font-size: 12px;
 }
 
+/* The tasks panel's top level: where a task lives. mocks/tasks-by-source.html is
+   the design. Text and a hairline only, so it needs no light-theme override. */
+.task-source {
+  margin: 10px -8px 0;
+  padding: 6px 12px 5px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--text-strong);
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+
+.task-source:first-child {
+  margin-top: 0;
+}
+
+/* Where the worktree comes from. mocks/worktree-from-sources.html is the design.
+   Text and a hairline only, so it needs no light-theme override. */
+.wt-new-tabs {
+  display: flex;
+  gap: 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.wt-new-tab {
+  margin-bottom: -1px;
+  padding: 0 0 6px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+}
+
+.wt-new-tab:hover {
+  color: var(--text);
+}
+
+.wt-new-tabs-key {
+  align-self: flex-start;
+  margin-left: auto;
+}
+
+.wt-new-tab[aria-selected='true'] {
+  border-bottom-color: var(--accent);
+  color: var(--text-strong);
+}
+
+.wt-new-tab:focus-visible {
+  outline: none;
+  color: var(--accent);
+}
+
+/* PRs and issues, in the row style of the base dropdown. The list is in the
+   form, not hanging off it, so it scrolls instead of growing the dialog. */
+.gh-list {
+  max-height: 240px;
+  margin-top: 6px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+}
+
+.gh-group {
+  padding: 6px 8px 2px;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.gh-list .wt-base-note {
+  text-transform: none;
+}
+
+.gh-number {
+  flex: none;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-status {
+  padding: 8px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.gh-picked {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-focused);
+  font-size: 12px;
+}
+
+.gh-picked-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-clear {
+  flex: none;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+}
+
+.gh-clear:hover,
+.gh-clear:focus-visible {
+  outline: none;
+  color: var(--accent);
+}
+
+.gh-detail {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
 /* The base dropdown. Hand-rolled rather than a native <select> so the closed
    row matches .dialog-input exactly and the open list reads like every other
    list in the app. Relative, because the menu hangs off it. */
@@ -6774,12 +7439,56 @@ kbd {
    class for the SOURCE, and padding there would shift its glyphs off the
    textarea's — the one thing that file's header says must never happen. */
 .md .md-code {
-  padding: 1px 5px;
+  padding: 0 5px;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
-  background: var(--wash-4);
+  background: none;
   font: inherit;
   color: var(--text-strong);
   overflow-wrap: anywhere;
+}
+
+/* A file the model pointed at: type icon, name, folder, line — one chip, the
+   name strongest and the rest stepping down. Outline only, like .file-ref,
+   with a faint blue edge so a file reads apart from a code pill. */
+.msg-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 0 6px;
+  border: 1px solid #282f3a;
+  border-radius: var(--radius);
+  background: #1b1e25;
+  color: var(--text-strong);
+  vertical-align: baseline;
+}
+
+.msg-ref .file-mark {
+  align-self: center;
+  flex: none;
+}
+
+.msg-ref-name {
+  overflow-wrap: anywhere;
+}
+
+.msg-ref-dir,
+.msg-ref-lines {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.msg-ref-dir::before,
+.msg-ref-lines::before {
+  content: '\00b7';
+  margin-right: 6px;
+  color: var(--dimmest);
+}
+
+:root[data-theme='light'] .msg-ref {
+  border-color: #c2d4ef;
+  background: #eef2f9;
 }
 
 /* An inline code pill that names a page: still code, and now an address. The
@@ -7614,6 +8323,76 @@ kbd {
   background: color-mix(in srgb, var(--accent) 6%, #fff);
 }
 
+/* `split-font`: every chat — the session's panel and a query's side
+   conversation, transcript and composer — re-points the app face at the
+   chat's own. The variable moves every rule inside that names
+   `--mono`; the family moves the text that only inherits it from <body>,
+   which arrives already resolved to the app face. */
+:root[data-split-font='on'] .chat-panel,
+:root[data-split-font='on'] .query-panel {
+  --mono: var(--chat-mono);
+  font-family: var(--chat-mono);
+}
+
+/* The font picker: the filter box on the row's line, the list under it. Each
+   option is drawn in its own face, so the list is the preview. */
+.font-pick {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.font-pick-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.font-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.font-group {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+
+.font-option {
+  flex: none;
+  padding: 3px 8px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.font-option:hover {
+  border-color: var(--line);
+}
+
+.font-cursor {
+  border-color: var(--edge);
+  color: var(--text-strong);
+}
+
+.font-on {
+  color: var(--accent);
+}
+
 /* A problem is the one row that has to pull the eye — the muted danger outline
    from the mode chips, never a fill. */
 .settings-problem .row-name {
@@ -8037,7 +8816,7 @@ kbd {
 .skill-ref {
   display: inline-block;
   padding: 0 5px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   background: var(--panel);
   color: var(--accent);
@@ -8046,7 +8825,7 @@ kbd {
 }
 
 :root[data-theme='light'] .skill-ref {
-  border-color: var(--edge);
+  border-color: var(--line-soft);
   background: var(--well);
 }
 
@@ -9185,7 +9964,8 @@ kbd {
 }
 
 /* `@opus-5` takes its own line rather than blowing the column open. */
-:root[data-chat-layout='gutter'] .irc-lead .irc-host {
+:root[data-chat-layout='gutter'] .irc-lead .irc-host,
+:root[data-chat-layout='gutter'] .irc-head .irc-host {
   display: block;
   font-size: 10px;
 }
@@ -9194,19 +9974,60 @@ kbd {
   margin-left: 0;
 }
 
-/* A run that OPENS with work has no words to sit in front of, so its head is a
-   row rather than a float — it gets the column by padding, not by pulling. */
-:root[data-chat-layout='gutter'] .chat > .irc-head {
-  display: block;
+/* What the turn cost goes in the column too, under the nick: the column is
+   where everything ABOUT the turn lives, and a float at the right end of line
+   one would cut that line short of every line under it. A second float,
+   cleared under the lead and pulled into the same padding, so it never
+   shortens a line box either. Stacked, so the column stays narrow. */
+:root[data-chat-layout='gutter'] .irc-body > .irc-cost {
+  float: left;
+  clear: left;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
   width: var(--chat-gutter);
-  margin-top: 15px;
+  margin: 1px 0 0 calc(-1 * (var(--chat-gutter) + var(--chat-gutter-gap)));
+  padding-left: 0;
+  font-size: 10px;
+  line-height: 1.35;
   text-align: right;
 }
 
-:root[data-chat-layout='gutter'] .chat > .irc-head .irc-time,
-:root[data-chat-layout='gutter'] .chat > .irc-head .irc-nick {
-  display: block;
+:root[data-chat-layout='gutter'] .irc-body > .irc-cost .irc-cost-sep {
+  display: none;
+}
+
+/* A run that OPENS with work has no words to sit in front of, so its head is a
+   row rather than a float — and a question's head is one too. Both take the
+   same two columns the message has: who spoke stacked in the first, the cost
+   at the far end of the second, so a head never leaves the grid the rest of
+   the log is set on. */
+:root[data-chat-layout='gutter'] .chat > .irc-head,
+:root[data-chat-layout='gutter'] .irc-entry > .irc-head {
+  display: grid;
+  grid-template-columns: var(--chat-gutter) minmax(0, 1fr);
+  gap: 0 var(--chat-gutter-gap);
+  align-items: start;
+  text-align: right;
+}
+
+:root[data-chat-layout='gutter'] .chat > .irc-head {
+  margin-top: 15px;
+}
+
+:root[data-chat-layout='gutter'] .irc-head > .irc-time,
+:root[data-chat-layout='gutter'] .irc-head > .irc-nick,
+:root[data-chat-layout='gutter'] .irc-head > .irc-peer {
+  grid-column: 1;
+  justify-self: end;
   line-height: 1.35;
+}
+
+:root[data-chat-layout='gutter'] .irc-head > .irc-cost {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  padding-left: 0;
 }
 
 /* Everything that is not a message lines up with the words, not with the nick:
@@ -9252,6 +10073,14 @@ kbd {
 :root[data-chat-layout='surfaces'] .chat > .irc-entry:not([data-me]) > .irc-body {
   padding: 0 11px;
   border-left: 2px solid transparent;
+}
+
+/* A head on its own row (a turn that opens with work, the question block)
+   starts where the words in a body start — 11px of padding plus the 2px edge —
+   or it sits 13px proud of every nick around it. */
+:root[data-chat-layout='surfaces'] .chat > .irc-head,
+:root[data-chat-layout='surfaces'] .irc-entry > .irc-head {
+  padding-left: 13px;
 }
 
 /* Work hangs off the turn that ran it, behind a hairline. */
@@ -9419,6 +10248,9 @@ kbd {
 :root[data-chat-layout='split'] .chat > .ag-group:has(+ .ag-group),
 :root[data-chat-layout='split'] .chat > .ag-group:has(+ .tool-run),
 :root[data-chat-layout='split'] .chat > .query-fold:has(+ .query-fold) {
+  /* Its own bottom margin too, or the pair still sits 9px apart: zeroing only
+     the next block's top margin leaves this one's to hold the gap open. */
+  margin-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -9460,10 +10292,70 @@ kbd {
 }
 
 /* A measure rather than the panel's full width, and leaded to match. This is
-   the one layout that changes how the words themselves are set. */
-:root[data-chat-layout='labels'] .irc-body {
+   the one layout that changes how the words themselves are set.
+
+   The measure is the COLUMN's, not the paragraph's: words stopped at 80ch over
+   a tool run that spans the panel are two right edges, and the eye reads the
+   ragged one as a mistake. So every child of the chat stops at the same line,
+   and only the words are leaded. (`.irc-earlier` is a button set smaller, and
+   its 80ch would fall short of everyone else's. The fanout is three answers
+   side by side — the one thing wider than a column — and capping it folds the
+   third under the first two.) */
+:root[data-chat-layout='labels'] .chat > :not(.irc-earlier, .fanout) {
   max-width: 80ch;
+}
+
+/* A head on its own row (a turn that opens with work, the question block) is
+   set like the label it stands in for, or a run that starts with a grep wears
+   a bigger nick than one that starts with a sentence. */
+:root[data-chat-layout='labels'] .chat > .irc-head,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head {
+  gap: 7px;
+  line-height: 1.4;
+}
+
+:root[data-chat-layout='labels'] .irc-entry > .irc-head {
+  margin-bottom: 2px;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-head .irc-nick,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head .irc-nick {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-head .irc-time,
+:root[data-chat-layout='labels'] .irc-entry > .irc-head .irc-time {
+  font-size: 10px;
+}
+
+:root[data-chat-layout='labels'] .chat > .irc-entry > .irc-body {
   line-height: 1.8;
+}
+
+/* The cost ends the label line rather than floating into the words: the body
+   becomes a wrapping row, the label and the cost share the first line and
+   everything else takes a full line below — the same move `convo` makes. */
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 12px;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) > .irc-lead {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body > .irc-cost {
+  float: none;
+  margin: 0 0 2px;
+  padding-left: 0;
+}
+
+:root[data-chat-layout='labels'] .chat .irc-body:has(> .irc-cost) > :not(.irc-lead, .irc-cost) {
+  flex: 1 0 100%;
 }
 
 /* --- convo: a head line per turn, the words under it, yours on the right ---
@@ -9492,17 +10384,12 @@ kbd {
   margin-top: 0;
 }
 
-/* Words sit under the nick, not beside it. */
+/* Words sit under the nick, not beside it. At the app's own size: the 14px
+   this layout was mocked with belonged to a sans face it never shipped, and
+   in the mono face it read as a third size between the 13px head and the
+   12px clock — and it leaked into the subagent rows, which share the class. */
 :root[data-chat-layout='convo'] .chat .irc-body {
   padding-left: var(--convo-indent);
-  font-size: 14px;
-}
-
-:root[data-chat-layout='convo'] .chat .irc-body .md-code,
-:root[data-chat-layout='convo'] .chat .irc-body .file-ref,
-:root[data-chat-layout='convo'] .chat .irc-body .md-block,
-:root[data-chat-layout='convo'] .chat .irc-body .chat-paste {
-  font-size: 13px;
 }
 
 /* The head is a row of its own, pulled back into the indent so the mark sits
@@ -9537,7 +10424,6 @@ kbd {
 :root[data-chat-layout='convo'] .irc-head .irc-time {
   order: 2;
   margin-right: 0;
-  font-size: 12px;
   color: var(--dim);
 }
 
@@ -9551,6 +10437,16 @@ kbd {
   display: inline-flex;
   align-items: center;
   font-weight: 600;
+}
+
+/* On a head row the cost comes after the rule, at the far right — where the
+   message body puts it (below). Without an order it would land between the
+   nick and the clock, in front of the rule. */
+:root[data-chat-layout='convo'] .chat > .irc-head .irc-cost,
+:root[data-chat-layout='convo'] .irc-entry > .irc-head .irc-cost {
+  order: 10;
+  margin-left: 0;
+  padding-left: 8px;
 }
 
 :root[data-chat-layout='convo'] .irc-lead .irc-host,
@@ -9636,20 +10532,30 @@ kbd {
   flex: 1 0 100%;
 }
 
-/* Your own turns, mirrored: the block hugs the right edge, the mark sits in a
-   right-hand column, and the words stay left-aligned inside the block. */
+/* Your own turns, mirrored: the block hugs the right edge, the mark sits at
+   the right end of its head, and the words stay left-aligned inside. The block
+   is a surface — recessed and outlined, never a fill — because a block that
+   merely starts further right reads as a paragraph that slipped, and a surface
+   reads as the other side of a conversation. The agents stay in the open, as
+   on every other agent desk (T3 Code, the Codex and Claude apps all set the
+   user's turn on a surface and the model's as plain prose). */
 :root[data-chat-layout='convo'] .chat > .irc-entry[data-me] > .irc-body {
   width: fit-content;
   max-width: 75%;
   margin-left: auto;
-  padding-left: 0;
-  padding-right: var(--convo-indent);
+  padding: 6px 11px 8px;
+  border: 1px solid var(--line);
+  background: var(--well);
 }
 
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead {
   flex-direction: row-reverse;
-  margin-left: 0;
-  margin-right: calc(-1 * var(--convo-indent));
+  margin: 0 0 3px;
+}
+
+/* The surface's edge is the separator, so the head draws no rule of its own. */
+:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead::after {
+  content: none;
 }
 
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick {
@@ -9659,18 +10565,6 @@ kbd {
 :root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead .irc-nick::before {
   margin-right: 0;
   margin-left: var(--convo-gap);
-}
-
-/* Your block ends short of the left edge, so its rule would too. It overshoots
-   instead, and the entry clips it at the panel's content edge — the same edge
-   the agents' rules end on at the right. */
-:root[data-chat-layout='convo'] .irc-entry[data-me] .irc-lead::after {
-  margin-left: -100vw;
-  margin-right: 4px;
-}
-
-:root[data-chat-layout='convo'] .chat > .irc-entry[data-me] {
-  overflow-x: clip;
 }
 
 /* Everything that is not a message lines up with the words. */
@@ -9692,6 +10586,208 @@ kbd {
 
 :root[data-chat-layout='convo'] .chat > .tool-run {
   margin-top: 4px;
+}
+
+/* --- orca: your turns on a surface to the right, the agent as plain prose ---
+   The shape of Orca's chat (mocks/orca-chat.html) in Floe's colours and corners.
+   One size throughout, the app's own, so `font-size` in floe.toml moves it like
+   everything else: hierarchy comes from weight and colour. `orca-font` only
+   decides the face, and the composer sits outside `.chat`, so it never changes. */
+
+/* Re-pointing `--mono` moves every rule in here that names it to the code face;
+   the family moves the text that only inherits the app's from <body>. */
+:root[data-chat-layout='orca'][data-orca-font='orca'] .chat {
+  --mono:
+    "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas, "Liberation Mono",
+    "Maple Mono NF", monospace;
+  font-family: Geist, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+:root[data-chat-layout='orca'] .chat * {
+  font-size: inherit;
+}
+
+/* `font: inherit` on these would otherwise set code in the prose face. */
+:root[data-chat-layout='orca'] .chat :is(code, pre, .md-code, .md-pre) {
+  font-family: var(--mono);
+}
+
+/* Air above a turn; the work under a message stays close to it. */
+:root[data-chat-layout='orca'] .chat > :is(.irc-entry, .irc-head, .tool-run, .ag-group, .query-fold, .fanout, .irc-sys, .irc-typing) {
+  margin-top: 20px;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-cont] {
+  margin-top: 10px;
+}
+
+:root[data-chat-layout='orca'] .chat > :is(.irc-entry, .tool-run) + .tool-run {
+  margin-top: 8px;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-head + .tool-run {
+  margin-top: 2px;
+}
+
+:root[data-chat-layout='orca'] .chat > :first-child {
+  margin-top: 0;
+}
+
+/* The clock stays on screen at the right edge: a message cannot take focus, so
+   Orca's hover reveal would leave it out of reach from the keyboard. Only another
+   session or a subagent names itself; the agent you are talking to does not. */
+:root[data-chat-layout='orca'] .irc-lead {
+  float: right;
+  margin: 0 0 0 12px;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.irc-lead, .irc-head) .irc-time {
+  order: 2;
+  margin-right: 0;
+}
+
+:root[data-chat-layout='orca'] .irc-lead:not(:has(.irc-peer)) .irc-nick,
+:root[data-chat-layout='orca'] .irc-head:not(:has(.irc-peer)) > .irc-nick {
+  display: none;
+}
+
+:root[data-chat-layout='orca'] .irc-head {
+  justify-content: flex-end;
+}
+
+:root[data-chat-layout='orca'] .irc-head .irc-cost {
+  order: 1;
+  margin-left: 0;
+}
+
+:root[data-chat-layout='orca'] .irc-body > .irc-cost {
+  padding-left: 12px;
+}
+
+:root[data-chat-layout='orca'] .irc-lead:has(.irc-peer) {
+  float: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 2px;
+}
+
+:root[data-chat-layout='orca'] .irc-head:has(.irc-peer) {
+  justify-content: flex-start;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.irc-lead, .irc-head) .irc-peer {
+  margin: 0 auto 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+}
+
+/* Your own turn: recessed and outlined, with its clock under the surface. */
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] {
+  position: relative;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me]:has(.irc-lead) {
+  padding-bottom: 1.6em;
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] > .irc-body {
+  width: fit-content;
+  max-width: 80%;
+  margin-left: auto;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  color: var(--text-strong);
+}
+
+:root[data-chat-layout='orca'] .chat > .irc-entry[data-me] .irc-lead {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  float: none;
+  margin: 0;
+}
+
+/* The words. The head floats right here, so a block has to clear that side too
+   or the clock narrows a code slab that opens the message. */
+:root[data-chat-layout='orca'] .chat .irc-body .md > :not(p) {
+  clear: both;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md p {
+  margin-bottom: 10px;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md > :last-child {
+  margin-bottom: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .md :is(h1, h2, h3, h4, h5, h6) {
+  margin: 16px 0 8px;
+  color: var(--text-strong);
+  font-weight: 700;
+  line-height: inherit;
+}
+
+:root[data-chat-layout='orca'] .chat .md > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .irc-body .md-code {
+  padding: 1px 5px;
+  border-color: var(--line);
+  background: var(--well);
+  color: var(--text);
+}
+
+:root[data-chat-layout='orca'] .chat .md-block {
+  margin: 12px 0;
+  border-color: var(--line);
+  background: var(--well);
+}
+
+:root[data-chat-layout='orca'] .chat .md-block-head {
+  padding: 4px 8px 0 14px;
+  border-bottom: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .md-pre {
+  padding: 2px 14px 12px;
+}
+
+/* The work: rows, not a tree. A verb in grey and its target in the text colour. */
+:root[data-chat-layout='orca'] .chat .run-fold {
+  padding: 2px 0;
+  line-height: var(--prose-line);
+  opacity: 1;
+}
+
+:root[data-chat-layout='orca'] .chat .run-fold-body {
+  margin: 2px 0 6px;
+  padding-left: 0;
+  border-left: 0;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.tool-row, .bash-row) {
+  align-items: center;
+  min-height: 26px;
+}
+
+:root[data-chat-layout='orca'] .chat .tool-mark {
+  margin-top: 0;
+}
+
+:root[data-chat-layout='orca'] .chat .tool-verb {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+:root[data-chat-layout='orca'] .chat :is(.tool-arg, .tool-base) {
+  color: var(--text);
 }
 
 /* --- the nanny: the board's log, and the board's session under it ---------
@@ -10514,9 +11610,12 @@ button.cv-row2:hover {
    mocks/task-panel.html is the design. Colour only where it means something:
    ready (you can act) is the accept green, in dev (an agent is on it) the plan
    blue. Everything else stays grey. */
+/* A floor, not a width: 3ch lines up local numbers, and a reference like
+   SUP2-1030 needs more. The title is the one that gives way. */
 .task-no {
   flex: none;
-  width: 3ch;
+  min-width: 3ch;
+  white-space: nowrap;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
 }
@@ -10745,5 +11844,43 @@ button.cv-row2:hover {
   margin-left: 6px;
   font: inherit;
   font-size: 10px;
+  color: var(--dim);
+}
+
+/* A file chip the chat can open: it says so on hover, nothing more. */
+.msg-ref-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.msg-ref-link:hover .msg-ref-name {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* --- sidebar stack: projects, active and worktrees in one column ---------- */
+
+/* An accordion: every list shares the column's height, and a folded one is
+   nothing but its header. Overrides the 40% a plain docked panel takes. */
+.lane-col[data-stack] > .panel {
+  flex: 1 1 0;
+}
+
+.lane-col[data-stack] > .panel[data-folded] {
+  flex: 0 0 auto;
+}
+
+.panel[data-folded] > .panel-body {
+  display: none;
+}
+
+.panel[data-folded] > .panel-head {
+  border-bottom-color: transparent;
+}
+
+.fold-caret {
+  flex: none;
+  width: 10px;
   color: var(--dim);
 }

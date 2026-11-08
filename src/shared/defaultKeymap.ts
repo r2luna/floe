@@ -110,6 +110,7 @@ for the card under the cursor now and opens it.`,
       { key: 'a', command: 'tasks.attach', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'd', command: 'tasks.delete', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'c', command: 'tasks.chat', when: 'panel == "colony" and tab == "ideas"' },
+      { key: 'w', command: 'tasks.worktree', when: 'panel == "colony" and tab == "ideas"' },
       { key: 't', command: 'tasks.cycleKind', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'shift+>', command: 'tasks.statusUp', when: 'panel == "colony" and tab == "ideas"' },
       { key: 'shift+<', command: 'tasks.statusDown', when: 'panel == "colony" and tab == "ideas"' },
@@ -138,7 +139,11 @@ scroll where there isn't — two entries sharing a chord, split by \`when\`, wit
 the narrower one first. \`⌃1\`–\`⌃9\` jump straight to a panel by position, on the
 same modifier as everything else here — \`⌘1\`–\`⌘9\` are the worktrees now. \`⌘K /\`
 flips the focused panel between docked beside and docked below. \`⌃=\` and \`⌃-\`
-make the focused panel bigger and smaller: wider in the lane, taller docked.`,
+make the focused panel bigger and smaller: wider in the lane, taller docked.
+
+\`sidebar.stack\` (palette) puts projects, active and worktrees in one column. Moving
+onto one of them opens it and folds the others. Bare \`z\` folds or unfolds the
+focused list.`,
     binds: [
       { key: 'ctrl+h', command: 'panel.left' },
       { key: 'ctrl+l', command: 'panel.right' },
@@ -152,7 +157,12 @@ make the focused panel bigger and smaller: wider in the lane, taller docked.`,
       { key: 'ctrl+=', command: 'panel.grow' },
       { key: 'ctrl+-', command: 'panel.shrink' },
       { key: 'super+w', command: 'panel.close' },
-      { key: 'super+k /', command: 'panel.dock' }
+      { key: 'super+k /', command: 'panel.dock' },
+      {
+        key: 'z',
+        command: 'panel.fold',
+        when: 'panel == "projects" or panel == "active" or panel == "worktrees"'
+      }
     ]
   },
   {
@@ -193,6 +203,7 @@ key applies in, so a key never points at the panel it is pressed in — which is
       { key: 'super+]', command: 'browser.forward', when: 'panel == "browser"' },
       { key: 'super+alt+i', command: 'browser.devtools', when: 'panel == "browser"' },
       { key: 'super+shift+s', command: 'browser.screenshot', when: 'panel == "browser"' },
+      { key: 'super+shift+n', command: 'browser.annotate', when: 'panel == "browser"' },
       { key: 'l', command: 'panel.goto', arg: 'active', when: 'panel == "projects"' },
       { key: 'h', command: 'panel.goto', arg: 'projects', when: 'panel == "active"' },
       { key: 'l', command: 'panel.goto', arg: 'worktrees', when: 'panel == "active"' },
@@ -378,7 +389,8 @@ canvas, the rest in the reader.
 on the main branch, and its colony card starts. \`b\` shows the board, \`z\`
 shows or hides done tasks. \`c\` opens a chat about the task, docked under it:
 the agent reads the task first, and its edits show in the panel above as it
-works.`,
+works. \`w\` creates a worktree for the task, with the task as its premise, or
+goes to the one it already has.`,
     binds: [
       { key: 'n', command: 'tasks.new', when: 'panel in ["tasks", "task"]' },
       { key: ']', command: 'tasks.statusUp', when: 'panel in ["tasks", "task"]' },
@@ -390,6 +402,7 @@ works.`,
       { key: 'd', command: 'tasks.delete', when: 'panel in ["tasks", "task"]' },
       { key: 'super+enter', command: 'tasks.send', when: 'panel in ["tasks", "task"]' },
       { key: 'c', command: 'tasks.chat', when: 'panel in ["tasks", "task"]' },
+      { key: 'w', command: 'tasks.worktree', when: 'panel in ["tasks", "task"]' },
       { key: 't', command: 'tasks.cycleKind', when: 'panel in ["tasks", "task"]' },
       { key: 'b', command: 'tasks.openCard', when: 'panel == "task"' },
       { key: 'z', command: 'tasks.toggleDone', when: 'panel == "tasks"' }
@@ -436,6 +449,14 @@ adds a project rather than repeating a search — \`/\` still searches it, and
       { key: 'enter', command: 'project.move.commit', when: 'moving' },
       { key: 'escape', command: 'project.move.cancel', when: 'moving' }
     ]
+  },
+  {
+    title: 'Top bar',
+    doc: `The strip across the top says where you are (project, branch, the base it
+merges into) and what is left: files to commit, commits to push, and whether the
+branch is ready to merge. \`⌘⇧C\` asks this branch's chat to commit, so the
+agent writes the message; with no chat open it starts one. \`⌘K M\` is the merge.`,
+    binds: [{ key: 'super+shift+c', command: 'worktree.commit' }]
   },
   {
     title: 'Guided merge',

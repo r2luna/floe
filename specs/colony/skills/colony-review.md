@@ -35,12 +35,15 @@ goes in the report as one, not as a defect.
 
 ## 3. Get the second opinion
 
-Ask another harness, from Bash. Codex is the default:
+Ask another harness, from Bash. Codex is the default; if it is not installed,
+use whichever other harness CLI is, in its non-interactive mode. Close stdin
+(`< /dev/null`) — `codex exec` blocks forever on an open stdin — and never pipe its
+output into `tail`.
 
 ```bash
 codex exec "You are a senior engineer reviewing this change adversarially. <the
 diff, the spec's requirements, and your own findings>. Where am I wrong, and
-what did I miss?"
+what did I miss?" < /dev/null
 ```
 
 Hand over the full context: what the change was meant to do, the diff, and your
@@ -66,14 +69,6 @@ A finding that needs a design decision, or that reaches beyond the files this
 task touched, goes back: write it into `specs/<dir>/review.md` and hand off
 `return coder` with the one-line reason. Do not redesign someone else's change
 inside a review turn.
-
-## No questions
-
-You do not ask the user anything — see the lane contract. Everything you need was
-decided before you started and is on disk. When something is genuinely undecided,
-take the sensible default and record it, or hand the card back to the lane that
-owns the decision with `COLONY: return <lane>`. A turn that ends in a question
-stalls the task and holds a spot for nothing.
 
 ## Report
 

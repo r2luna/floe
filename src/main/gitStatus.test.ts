@@ -1,6 +1,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseStatus } from './gitStatus.ts'
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { headBranch, parseDistance, parseStatus, worktreeStatus } from './gitStatus.ts'
+import { makeGitRepo } from './gitFixture.test-helper.ts'
+
+// worktreeStatus spawns its own git with THIS process's environment, so the
+// walls go up here too: no inherited GIT_DIR, no walking up past the fixtures.
+for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key]
+process.env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir())
+process.env.GIT_CONFIG_GLOBAL = '/dev/null'
+process.env.GIT_CONFIG_SYSTEM = '/dev/null'
 
 test('parseStatus counts files by what happened to them, not by staging', () => {
   const out = [
@@ -44,4 +54,45 @@ test('parseStatus reports a clean, in-sync worktree as all zeroes', () => {
     behind: 0,
     upstream: true
   })
+})
+
+test('headBranch reads the branch off the status header', () => {
+  assert.equal(headBranch('## feat/x...origin/feat/x [ahead 2]\n M a.ts\n'), 'feat/x')
+  assert.equal(headBranch('## feat/local\n'), 'feat/local')
+  assert.equal(headBranch('## No commits yet on main\n'), 'main')
+  assert.equal(headBranch('## HEAD (no branch)\n'), undefined)
+  assert.equal(headBranch(''), undefined)
+})
+
+test('parseDistance reads rev-list --left-right as behind, then ahead', () => {
+  assert.deepEqual(parseDistance('4\t3\n'), { behind: 4, ahead: 3 })
+  assert.equal(parseDistance('fatal: bad revision'), undefined)
+})
+
+test('worktreeStatus measures a branch against the base it merges into', async () => {
+  const repo = makeGitRepo()
+  try {
+    repo.write('a.txt', 'a')
+    repo.commit('base')
+    repo.git('checkout', '-q', '-b', 'feat')
+    repo.write('b.txt', 'b')
+    repo.commit('one')
+    repo.write('c.txt', 'c')
+    repo.commit('two')
+    const base = 'main'
+
+    const status = await worktreeStatus(repo.dir, base)
+    assert.deepEqual(status?.base, { name: base, ahead: 2, behind: 0 })
+
+    // On its own base there is nothing to merge into, and no field to say so.
+    repo.git('checkout', '-q', base)
+    assert.equal((await worktreeStatus(repo.dir, base))?.base, undefined)
+
+    // A base git cannot resolve leaves the field out, not the whole row.
+    const unknown = await worktreeStatus(repo.dir, 'no-such-branch')
+    assert.equal(unknown?.base, undefined)
+    assert.equal(unknown?.added, 0)
+  } finally {
+    repo.cleanup()
+  }
 })

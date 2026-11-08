@@ -23,17 +23,22 @@ import {
   DEFAULT_GROUP,
   HOST_SITE_MODES,
   NOTIFY_SOUNDS,
+  ORCA_FONTS,
   PENGUIN_COLORS,
   PENGUIN_HEADS,
   TRANSPARENCY
 } from '../../shared/types'
 import { HARNESSES } from '../../shared/modes'
+import { DARK_THEMES, LIGHT_THEMES } from '../../shared/builtinThemes'
 import { EFFORTS } from '../../shared/types'
 
 export const MODELS = ['fable', 'opus', 'sonnet', 'haiku'] as const
 export { EFFORTS } from '../../shared/types'
-// `omarchy` follows the Omarchy desktop's theme — see main/omarchyTheme.ts.
+// The mode. `omarchy` follows the Omarchy desktop's theme — see
+// main/omarchyTheme.ts. Which palette dark and light wear is `dark-theme` and
+// `light-theme` — see shared/builtinThemes.ts.
 export const THEMES = ['system', 'dark', 'light', 'omarchy'] as const
+export { DARK_THEMES, LIGHT_THEMES }
 
 export const PROVIDERS = ['claude', 'codex', 'opencode', 'gemini', 'lmstudio', 'ollama'] as const
 // Who can run the premise interview. A subset of PROVIDERS on purpose: the flow
@@ -60,12 +65,21 @@ export interface HarnessDefault {
 export interface FloeConfig {
   appearance: {
     fontFamily?: string
+    /** The chat panel wears `chatFontFamily` instead of `fontFamily`. */
+    splitFont: boolean
+    chatFontFamily?: string
     fontSize: number
     theme: (typeof THEMES)[number]
+    /** The palette worn while dark — `floe` or a shipped dark theme. */
+    darkTheme: (typeof DARK_THEMES)[number]
+    /** The palette worn while light — `floe` or a shipped light theme. */
+    lightTheme: (typeof LIGHT_THEMES)[number]
     penguin: (typeof PENGUIN_HEADS)[number]
     penguinColor: (typeof PENGUIN_COLORS)[number]
     /** How the transcript arranges a turn. Pure CSS — see CHAT_LAYOUTS. */
     chatLayout: (typeof CHAT_LAYOUTS)[number]
+    /** The face the `orca` layout wears — see ORCA_FONTS. */
+    orcaFont: (typeof ORCA_FONTS)[number]
     /** Which themes get the translucent window — see TRANSPARENCY. macOS only. */
     transparency: (typeof TRANSPARENCY)[number]
     /**
@@ -143,13 +157,20 @@ export const DEFAULTS: FloeConfig = {
   // user into light on the next launch without them asking for it.
   appearance: {
     fontFamily: undefined,
+    // One face for the whole app until asked: a second font is a choice, and
+    // nobody's chat should change face on an update.
+    splitFont: false,
+    chatFontFamily: undefined,
     fontSize: 13,
     theme: 'system',
+    darkTheme: 'floe',
+    lightTheme: 'floe',
     penguin: 'classic',
     penguinColor: 'accent',
     // The log the app shipped with. A layout is a matter of taste, so nobody
     // gets moved off the one they already know by installing an update.
     chatLayout: 'classic',
+    orcaFont: 'orca',
     // Opaque until asked: the glass is a choice about the desktop behind the
     // window, and nobody's app should turn see-through on an update.
     transparency: 'off',
@@ -351,8 +372,13 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
     config: {
       appearance: {
         fontFamily: appearance?.optStr('font-family'),
+        splitFont: appearance?.bool('split-font', d.appearance.splitFont) ?? d.appearance.splitFont,
+        chatFontFamily: appearance?.optStr('chat-font-family'),
         fontSize: appearance?.num('font-size', d.appearance.fontSize, { min: 6, max: 48 }) ?? d.appearance.fontSize,
         theme: appearance?.oneOf('theme', THEMES, d.appearance.theme) ?? d.appearance.theme,
+        darkTheme: appearance?.oneOf('dark-theme', DARK_THEMES, d.appearance.darkTheme) ?? d.appearance.darkTheme,
+        lightTheme:
+          appearance?.oneOf('light-theme', LIGHT_THEMES, d.appearance.lightTheme) ?? d.appearance.lightTheme,
         penguin: appearance?.oneOf('penguin', PENGUIN_HEADS, d.appearance.penguin) ?? d.appearance.penguin,
         penguinColor:
           appearance?.oneOf('penguin-color', PENGUIN_COLORS, d.appearance.penguinColor) ??
@@ -360,6 +386,7 @@ export function parseFloeConfig(raw: string, file: string): FloeConfigResult {
         chatLayout:
           appearance?.oneOf('chat-layout', CHAT_LAYOUTS, d.appearance.chatLayout) ??
           d.appearance.chatLayout,
+        orcaFont: appearance?.oneOf('orca-font', ORCA_FONTS, d.appearance.orcaFont) ?? d.appearance.orcaFont,
         transparency:
           appearance?.oneOf('transparency', TRANSPARENCY, d.appearance.transparency) ??
           d.appearance.transparency,

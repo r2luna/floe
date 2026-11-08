@@ -1,0 +1,75 @@
+[
+  {
+    "at": "0.0",
+    "strip": null
+  },
+  {
+    "at": "14.7",
+    "strip": {
+      "count": "0/4",
+      "now": "",
+      "items": [
+        "in_progress | Read package.json and note the version",
+        "pending | Count .ts files directly inside src/main",
+        "pending | Identify the gate script",
+        "pending | Find the first exported function in checklist.ts"
+      ]
+    }
+  },
+  {
+    "at": "19.2",
+    "strip": {
+      "count": "1/4",
+      "now": "",
+      "items": [
+        "completed | Read package.json and note the version",
+        "in_progress | Count .ts files directly inside src/main",
+        "pending | Identify the gate script",
+        "pending | Find the first exported function in checklist.ts"
+      ]
+    }
+  },
+  {
+    "at": "24.2",
+    "strip": {
+      "count": "2/4",
+      "now": "",
+      "items": [
+        "completed | Read package.json and note the version",
+        "completed | Count .ts files directly inside src/main",
+        "in_progress | Identify the gate script",
+        "pending | Find the first exported function in checklist.ts"
+      ]
+    }
+  },
+  {
+    "at": "34.2",
+    "strip": {
+      "count": "3/4",
+      "now": "",
+      "items": [
+        "completed | Read package.json and note the version",
+        "completed | Count .ts files directly inside src/main",
+        "completed | Identify the gate script",
+        "in_progress | Find the first exported function in checklist.ts"
+      ]
+    }
+  },
+  {
+    "at": "39.2",
+    "strip": {
+      "count": "4/4",
+      "now": "",
+      "items": [
+        "completed | Read package.json and note the version",
+        "completed | Count .ts files directly inside src/main",
+        "completed | Identify the gate script",
+        "completed | Find the first exported function in checklist.ts"
+      ]
+    }
+  },
+  {
+    "at": "44.1",
+    "strip": null
+  }
+]

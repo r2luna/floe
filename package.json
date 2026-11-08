@@ -1,6 +1,6 @@
 {
   "name": "floe",
-  "version": "0.63.0",
+  "version": "0.68.1",
   "description": "A keyboard-first desktop workspace orchestrating Claude Code across parallel git worktrees.",
   "author": "Rafael Lunardelli",
   "license": "SEE LICENSE IN LICENSE",
@@ -25,6 +25,7 @@
     "gate": "node scripts/gate.mjs",
     "hooks:install": "git config core.hooksPath .githooks && echo 'pre-commit gate active. Bypass once with: git commit --no-verify'",
     "crap": "node scripts/crap.mjs",
+    "colony:eval": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/colony-eval/run.mjs",
     "build:mac": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac",
     "build:linux": "electron-vite build && node scripts/build-server.mjs && electron-builder --linux",
     "release": "electron-vite build && node scripts/build-server.mjs && electron-builder --mac --publish always",

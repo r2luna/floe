@@ -16,6 +16,28 @@ let opened: FakeSocket[] = []
 /** The `change` handlers `matchMedia(...).addEventListener` collected. */
 let mediaHandlers: Array<(e: { matches: boolean }) => void> = []
 let prefersDark = false
+/** What the page's `visibilitychange` and `online` listeners would be told. */
+const pageListeners = new Map<string, Set<() => void>>()
+const listenToPage = (name: string, fn: () => void): void => {
+  if (!pageListeners.has(name)) pageListeners.set(name, new Set())
+  pageListeners.get(name)!.add(fn)
+}
+const stopListeningToPage = (name: string, fn: () => void): void => void pageListeners.get(name)?.delete(fn)
+const pageFires = (name: string): void => {
+  for (const fn of pageListeners.get(name) ?? []) fn()
+}
+const fakeDocument = {
+  hidden: false,
+  addEventListener: listenToPage,
+  removeEventListener: stopListeningToPage,
+  createElement: () => ({
+    href: '',
+    download: '',
+    click(this: { download: string }) {
+      downloaded.push({ name: this.download, bytes: lastBlobSize })
+    }
+  })
+}
 
 class FakeSocket {
   static readonly OPEN = 1
@@ -88,21 +110,15 @@ Object.assign(globalThis, {
     }
   },
   atob: (b64: string) => Buffer.from(b64, 'base64').toString('binary'),
-  document: {
-    createElement: () => ({
-      href: '',
-      download: '',
-      click(this: { download: string }) {
-        downloaded.push({ name: this.download, bytes: lastBlobSize })
-      }
-    })
-  },
+  document: fakeDocument,
   location: { protocol: 'https:', host: 'floe.pinguim.io' },
   matchMedia: () => ({
     matches: prefersDark,
     addEventListener: (_: string, fn: (e: { matches: boolean }) => void) => mediaHandlers.push(fn)
   }),
   window: {
+    addEventListener: listenToPage,
+    removeEventListener: stopListeningToPage,
     focus: () => {},
     open: (url: string, target: string, features: string) =>
       openedCalls.push(`${url} ${target} ${features}`)
@@ -130,6 +146,52 @@ beforeEach(() => {
   lastBlobSize = 0
   openedCalls.length = 0
   prefersDark = false
+  pageListeners.clear()
+  fakeDocument.hidden = false
+})
+
+const settled = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+test('coming back to the page checks a socket that still looks open', async () => {
+  createWebBridge(boot)
+  await settled()
+  opened[0].invokes.length = 0
+  pageFires('visibilitychange')
+  assert.deepEqual(opened[0].invokes.map((i) => i.channel), ['backends:get'])
+})
+
+test('a page going into the background checks nothing', async () => {
+  createWebBridge(boot)
+  await settled()
+  opened[0].invokes.length = 0
+  fakeDocument.hidden = true
+  pageFires('visibilitychange')
+  assert.deepEqual(opened[0].invokes, [])
+})
+
+test('coming back to the page reconnects now, without waiting out the backoff', async () => {
+  const { socket } = createWebBridge(boot)
+  await settled()
+  opened[0].close()
+  assert.equal(opened.length, 1, 'the retry is still waiting')
+  pageFires('visibilitychange')
+  await settled()
+  assert.equal(opened.length, 2)
+  assert.equal(socket.state(), 'open')
+  socket.close()
+})
+
+test('the network coming back reconnects too, and a closed socket stops listening', async () => {
+  const { socket } = createWebBridge(boot)
+  await settled()
+  opened[0].close()
+  pageFires('online')
+  await settled()
+  assert.equal(opened.length, 2)
+  socket.close()
+  pageFires('online')
+  await settled()
+  assert.equal(opened.length, 2, 'closed on purpose stays closed')
 })
 
 /** A SocketIpc that records instead of connecting — for the table-level tests. */

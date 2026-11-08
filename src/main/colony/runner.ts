@@ -25,6 +25,7 @@ import {
   deleteBranch,
   dirtySnapshot,
   isMergedInto,
+  mergeBaseOf,
   mergeWorktree,
   readBase,
   repoRoot,
@@ -1013,9 +1014,28 @@ export const AUTONOMOUS_BOARD =
   'recommended option (the brief\'s Decisions and Still open sections first), record it as (assumed) in your ' +
   'artifact, and keep going.'
 
+/** The branch a task was cut from: the one on record, else what its tree says. */
+function laneBase(task: Pick<ColonyTask, 'base' | 'worktreePath'>): string | undefined {
+  return task.base ?? (task.worktreePath ? readBase(task.worktreePath) : undefined)
+}
+
+/**
+ * The commit this task's tree forked from its base, or undefined when it cannot
+ * be told (no base on record, git refuses) — in which case the prompt carries no
+ * line for it and the lane falls back to the contract's own instruction.
+ *
+ * Resolved here so LANE-CONTRACT's "the merge-base" is a fact in the prompt, not
+ * a command every lane retypes.
+ */
+function laneMergeBase(task: Pick<ColonyTask, 'base' | 'worktreePath'>): string | undefined {
+  const base = laneBase(task)
+  return base && task.worktreePath ? mergeBaseOf(task.worktreePath, base) : undefined
+}
+
 /** What a lane is dispatched with: the skill, where the task is, and the brief. */
 function lanePrompt(task: ColonyTask, stage: ColonyStage): string {
   const autonomous = resolveFlag(task, colonyConfig(task.project), 'autonomous')
+  const mergeBase = laneMergeBase(task)
   return [
     `/${stage.skill}`,
     '',
@@ -1023,7 +1043,8 @@ function lanePrompt(task: ColonyTask, stage: ColonyStage): string {
     `Artifacts: ${specDirOf(task)}/`,
     // LANE-CONTRACT diffs against this. Without it a lane on a feature's parent
     // branch reviews the whole feature as if this task wrote it.
-    `Base: ${task.base ?? 'the default branch'}`,
+    `Base: ${laneBase(task) ?? 'the default branch'}`,
+    ...(mergeBase ? [`Merge-base: ${mergeBase}`, `Diff: git diff ${mergeBase}`] : []),
     ...(autonomous ? ['', AUTONOMOUS_BOARD] : []),
     '',
     task.brief.trim()

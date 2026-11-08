@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { TaskFolder, TaskFolderDetail } from '../../shared/taskFolders.ts'
+import type { TaskIssues } from '../../main/integrations/index.ts'
 import { reason } from './ipcError.ts'
 
 /**
@@ -27,6 +28,27 @@ function useTaskReload(root?: string): [number, () => void] {
     }
   }, [root, reload])
   return [n, reload]
+}
+
+/**
+ * The GitHub and Jira sections of the tasks panel. Asked once per project and
+ * panel: unlike a folder they cost a network call, so the local list's reload on
+ * every window focus is not one to share, and the panel never waits on them.
+ */
+export function useTaskIssues(root?: string): TaskIssues[] {
+  const [issues, setIssues] = useState<TaskIssues[]>([])
+  useEffect(() => {
+    setIssues([])
+    if (!root) return
+    let current = true
+    void window.floe.tasks.issues(root).then((found) => {
+      if (current) setIssues(found)
+    })
+    return () => {
+      current = false
+    }
+  }, [root])
+  return issues
 }
 
 /** Every task of a project — the tasks panel's list. */

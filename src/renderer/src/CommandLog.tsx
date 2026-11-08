@@ -1,6 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal as Xterm } from '@xterm/xterm'
+import { disposeTerminal } from './xtermDispose'
 import { loadRenderer } from './xtermRenderer'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef } from 'react'
@@ -73,7 +74,7 @@ export function CommandLog({ cmdKey }: { cmdKey: string }): JSX.Element {
       off()
       offTheme()
       ro.disconnect()
-      term.dispose()
+      disposeTerminal(term)
     }
   }, [cmdKey, MONO])
 

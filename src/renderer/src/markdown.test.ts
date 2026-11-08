@@ -160,7 +160,7 @@ test('an ordered list is renumbered, and its block shares one marker column', ()
   // gets the wider column so the numbers line up on the period.
   const long = renderMarkdown(Array.from({ length: 10 }, () => '1. item').join('\n'))
   assert.equal(long[9].marker, '10.')
-  assert.deepEqual(new Set(long.map((l) => l.markerWidth)), new Set([4]))
+  assert.deepEqual(new Set(long.map((l) => l.markerWidth)), new Set([4.5]))
 
   // Prose between two lists ends the first one: the second starts at 1 again.
   const split = renderMarkdown('1. um\nprosa\n1. um de novo')
@@ -194,12 +194,25 @@ test('a task item carries its checkbox, and the brackets are not its text', () =
   assert.equal(renderMarkdown('- [nota] resto')[0].task, undefined)
 })
 
+test('every list kind reserves the same column, so the gap before the text is one gap', () => {
+  const tasks = renderMarkdown('- [ ] abrir\n- plain')
+  assert.deepEqual(tasks.map((l) => l.markerWidth), [3, 3])
+  assert.equal(renderMarkdown('- plain')[0].markerWidth, 3)
+  // "1." plus the 1.5ch gap a disc and a checkbox get.
+  assert.equal(renderMarkdown('1. um')[0].markerWidth, 3.5)
+})
+
+test('a fenced code line carries the language its fence named', () => {
+  const lines = renderMarkdown('```ts title="a"\nconst a = 1\n```\n```\nplain\n```')
+  assert.deepEqual(lines.filter((l) => l.kind === 'code').map((l) => l.lang), ['ts', undefined])
+})
+
 test('an indented line under an item continues it; on its own it is code', () => {
   const [item, cont] = renderMarkdown('- item\n  resto do item')
   assert.equal(item.kind, 'list')
   // Continuations line up with the item's TEXT, so they carry its depth and the
   // block's marker column.
-  assert.deepEqual([cont.kind, cont.cont, cont.depth, cont.markerWidth], ['text', true, 0, 2])
+  assert.deepEqual([cont.kind, cont.cont, cont.depth, cont.markerWidth], ['text', true, 0, 3])
 
   // With no list open, four spaces after a blank line are a code block, and the
   // indent that made it code is not part of the code.

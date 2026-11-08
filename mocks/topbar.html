@@ -1,0 +1,171 @@
+<!doctype html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>Floe top bar: where am I, what is left to do</title>
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+body{ margin:0; background:var(--bg); color:var(--text); font:400 12.5px/1.5 var(--mono); padding:24px 28px 90px; overflow-x:auto; }
+h1{ font-size:14px; font-weight:700; color:var(--text-strong); margin:0 0 4px; }
+h2{ font-size:13px; font-weight:700; color:var(--text-strong); margin:0 0 4px; display:flex; align-items:center; gap:8px; }
+.lede,.why{ color:var(--dim); font-size:12px; margin:0 0 14px; max-width:100ch; }
+.lede code,.why code{ color:var(--text-strong); }
+.frame{ margin:0 0 36px; padding:0 0 28px; border-bottom:1px solid var(--line-soft); }
+.tag{ border:1px solid var(--edge); padding:1px 7px; color:var(--dim); font-size:10px; font-weight:400; }
+button.theme{ position:fixed; top:14px; right:18px; background:transparent; color:var(--dim); border:1px solid var(--edge);
+  font:inherit; font-size:12px; padding:3px 10px; cursor:pointer; z-index:200; }
+
+/* ---- the bar ------------------------------------------------------------ */
+.tb{ height:30px; display:flex; align-items:center; gap:14px; padding:0 12px; border-bottom:1px solid var(--line); flex:none;
+  font-size:11px; color:var(--dim); background:var(--bg); -webkit-app-region:drag; white-space:nowrap; }
+.tb-where{ display:flex; align-items:center; gap:6px; min-width:0; }
+.tb-proj{ color:var(--text-strong); font-weight:700; }
+.tb-sep{ color:var(--faint); }
+.tb-branch{ color:var(--accent); font-weight:700; }
+.tb-base{ color:var(--faint); }
+.tb-host{ color:var(--faint); border:1px solid var(--edge); padding:0 5px; font-size:10px; }
+.tb-main{ color:var(--faint); border:1px solid var(--edge); padding:0 5px; font-size:10px; text-transform:uppercase; letter-spacing:1px; }
+.tb-gap{ flex:1; }
+.tb-grp{ display:flex; align-items:center; gap:7px; padding-left:14px; border-left:1px solid var(--line-soft); height:16px; }
+.tb-gap + .tb-grp{ border-left:0; padding-left:0; }
+.tb-lbl{ color:var(--faint); }
+.tb-ok{ color:var(--live); }
+.tb-warn{ color:#c9a05f; }
+:root[data-theme='light'] .tb-warn{ color:#9a6a17; }
+.tb-off{ color:var(--faint); }
+.wt-add,.wt-mod,.wt-del,.wt-sync{ font-weight:700; }
+
+/* outline chips, the .mode tones */
+.tb-chip{ -webkit-app-region:no-drag; font:inherit; font-size:11px; padding:1px 8px; border:1px solid var(--edge); background:transparent; color:var(--text); cursor:pointer; display:inline-flex; gap:6px; align-items:center; }
+.tb-chip kbd{ font:inherit; font-size:10px; color:var(--faint); border:0; background:none; padding:0; box-shadow:none; }
+.tb-chip[data-tone=commit]{ color:#c9a05f; border-color:#3a3226; background:#211d17; }
+.tb-chip[data-tone=merge]{ color:#93b8a1; border-color:#283129; background:#1b201d; }
+.tb-chip[data-tone=sync]{ color:#95a6c0; border-color:#282f3a; background:#1b1e25; }
+:root[data-theme='light'] .tb-chip[data-tone=commit]{ color:#9a6a17; border-color:#e6d3ae; background:#fbf5ea; }
+:root[data-theme='light'] .tb-chip[data-tone=merge]{ color:#2f7d52; border-color:#b6d9c3; background:#eef6f1; }
+:root[data-theme='light'] .tb-chip[data-tone=sync]{ color:#3a64a8; border-color:#c2d4ef; background:#eef2f9; }
+
+/* ---- a window around it, for scale --------------------------------------- */
+.win{ min-width:1180px; border:1px solid var(--line); background:var(--bg); display:flex; flex-direction:column; height:360px; overflow:hidden; }
+.ws{ display:flex; flex:1; min-height:0; gap:6px; padding:6px; }
+.pn{ background:var(--panel); border:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+.pn-h{ height:30px; display:flex; align-items:center; gap:7px; padding:0 11px; border-bottom:1px solid var(--line-soft); font-size:11px; color:var(--text-strong); }
+.pn-h .d{ color:var(--faint); }
+.side{ flex:0 0 250px; }
+.chatp{ flex:1; }
+.mrow{ padding:5px 12px; font-size:11px; color:var(--dim); }
+.mrow[data-cur]{ color:var(--accent); box-shadow:inset 2px 0 var(--accent); background:var(--bg); }
+.msg{ padding:10px 14px; font-size:12px; color:var(--text); }
+.msg .who{ color:var(--accent); font-weight:700; margin-right:8px; }
+.msg .me{ color:var(--working); }
+
+/* ---- the states list ------------------------------------------------------ */
+.states{ min-width:1180px; border:1px solid var(--line); }
+.state{ border-bottom:1px solid var(--line-soft); }
+.state:last-child{ border-bottom:0; }
+.state .note{ padding:6px 12px 10px; color:var(--dim); font-size:11.5px; background:var(--panel); }
+.state .note b{ color:var(--text-strong); }
+</style>
+</head>
+<body>
+<button class="theme" onclick="const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark'">theme</button>
+
+<h1>Top bar: project, branch, and what is left before merge</h1>
+<p class="lede">One 30px strip across the top of the window, above the lane. Left side answers <b>where am I</b>: project, branch, the base it merges into, and the machine when it is not this one. Right side answers <b>what is left</b>: uncommitted files, unpushed commits, and whether the branch is ready to merge. It follows the worktree of the focused panel, so switching chats with <code>⌘1</code>… updates it. It is also the window's drag handle, which the frameless window does not have today. The numbers are the sidebar's existing <code>+ ~ − ⇡ ⇣</code> counts plus one new one: commits ahead of the base.</p>
+
+<section class="frame">
+  <h2>F1 — in the window <span class="tag">dirty feature branch</span></h2>
+  <p class="why">The bar spans sidebar and lane. Nothing else in the window moves.</p>
+  <div class="win">
+    <div class="tb">
+      <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">topbar</span><span class="tb-base">from master</span></span>
+      <span class="tb-gap"></span>
+      <span class="tb-grp"><span class="wt-add">+2</span><span class="wt-mod">~5</span><span class="wt-del">−1</span><span class="tb-lbl">uncommitted</span><button class="tb-chip" data-tone="commit">commit <kbd>⌘⇧C</kbd></button></span>
+      <span class="tb-grp"><span class="wt-sync">⇡1</span><span class="tb-lbl">to push</span></span>
+      <span class="tb-grp"><span class="tb-off">merge after commit</span></span>
+    </div>
+    <div class="ws">
+      <div class="pn side">
+        <div class="pn-h">floe <span class="d">· 4 worktrees</span></div>
+        <div class="mrow">master</div>
+        <div class="mrow" data-cur>topbar <span class="wt-add">+2</span> <span class="wt-mod">~5</span> <span class="wt-del">−1</span></div>
+        <div class="mrow">browser-annotate</div>
+        <div class="mrow">orbs</div>
+      </div>
+      <div class="pn chatp">
+        <div class="pn-h">Top bar <span class="d">· claude · opus 5.5</span></div>
+        <div class="msg"><span class="who me">you</span>add the top bar</div>
+        <div class="msg"><span class="who">claude</span>Done. 8 files changed, gate green.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="frame">
+  <h2>F2 — the states</h2>
+  <p class="why">Groups with nothing to say drop out. The rightmost group is the one you act on, and its chip is the next step.</p>
+  <div class="states">
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">topbar</span><span class="tb-base">from master</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="wt-add">+2</span><span class="wt-mod">~5</span><span class="wt-del">−1</span><span class="tb-lbl">uncommitted</span><button class="tb-chip" data-tone="commit">commit <kbd>⌘⇧C</kbd></button></span>
+        <span class="tb-grp"><span class="tb-off">merge after commit</span></span>
+      </div>
+      <div class="note"><b>S1 uncommitted.</b> Commit sends "commit these changes" to the focused chat of this worktree, so the agent writes the message. No chat open: it opens one.</div>
+    </div>
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">topbar</span><span class="tb-base">from master</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="tb-ok">clean</span></span>
+        <span class="tb-grp"><span class="tb-ok">ready to merge</span><span class="tb-lbl">3 commits</span><button class="tb-chip" data-tone="merge">merge <kbd>⌘⇧M</kbd></button></span>
+      </div>
+      <div class="note"><b>S2 ready to merge.</b> Clean tree, commits ahead of master. Merge runs the existing <code>worktree.merge</code> flow (the merge panel), nothing new.</div>
+    </div>
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">topbar</span><span class="tb-base">from master</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="tb-ok">clean</span></span>
+        <span class="tb-grp"><span class="tb-warn">master ⇣4</span><span class="tb-lbl">3 commits</span><button class="tb-chip" data-tone="merge">merge <kbd>⌘⇧M</kbd></button></span>
+      </div>
+      <div class="note"><b>S3 base moved.</b> Still mergeable, but master has 4 commits this branch lacks. Amber, so you know the merge may conflict.</div>
+    </div>
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">topbar</span><span class="tb-base">from master</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="tb-off">clean · nothing to merge</span></span>
+      </div>
+      <div class="note"><b>S4 nothing yet.</b> Fresh worktree, or already merged.</div>
+    </div>
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">floe</span><span class="tb-sep">/</span><span class="tb-branch">master</span><span class="tb-main">main</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="tb-ok">clean</span></span>
+        <span class="tb-grp"><span class="wt-sync">⇡2</span><span class="tb-lbl">to push</span><button class="tb-chip" data-tone="sync">push</button></span>
+      </div>
+      <div class="note"><b>S5 main worktree.</b> No merge group, since there is nothing to merge into. Push status vs origin instead.</div>
+    </div>
+
+    <div class="state">
+      <div class="tb">
+        <span class="tb-where"><span class="tb-proj">tide</span><span class="tb-sep">/</span><span class="tb-branch">inbox-sync</span><span class="tb-base">from main</span><span class="tb-host">gtt</span></span>
+        <span class="tb-gap"></span>
+        <span class="tb-grp"><span class="wt-mod">~1</span><span class="tb-lbl">uncommitted</span><button class="tb-chip" data-tone="commit">commit <kbd>⌘⇧C</kbd></button></span>
+        <span class="tb-grp"><span class="tb-off">merge blocked</span></span>
+      </div>
+      <div class="note"><b>S6 remote + blocked.</b> Machine tag only when the worktree is not on this Mac. <code>.gw-nomerge</code> worktrees say "merge blocked" instead of offering merge.</div>
+    </div>
+
+  </div>
+</section>
+</body>
+</html>

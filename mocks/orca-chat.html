@@ -1,0 +1,162 @@
+<!doctype html><html lang="en" data-chat-layout="classic"><head><meta charset="utf-8" />
+<title>Floe — Orca chat theme</title>
+<!-- Left: Floe's real transcript DOM under the real stylesheet.
+     Right: Orca's native chat shapes, spacing and fonts (components/native-chat/*
+     in stablyai/orca), worn in Floe's own colour tokens. Same conversation in both. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&display=swap" />
+<link rel="stylesheet" href="../src/renderer/src/index.css" />
+<style>
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+  .oc-page { padding: 16px 18px 40px; }
+  .oc-title { margin: 0 0 12px; font-size: 13px; color: var(--text-strong); }
+  .oc-theme { position: fixed; top: 12px; right: 18px; z-index: 5; padding: 4px 10px; border: 1px solid var(--edge); border-radius: var(--radius); background: var(--panel); color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+  .oc-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; align-items: stretch; }
+  .oc-col { display: flex; flex-direction: column; min-width: 0; }
+  .oc-lbl { margin: 0 0 6px; font-size: 11px; color: var(--dim); }
+  .oc-lbl b { color: var(--text-strong); }
+
+  /* Floe today: the harness's framing around the real .chat */
+  .oc-floe { flex: 1; border: 1px solid var(--line); background: var(--panel); }
+  .oc-floe .chat { height: auto; overflow: visible; padding: 12px 14px; }
+
+  /* Floe's own tokens and font, so light and every theme follow without an override */
+  .oc {
+    --canvas: var(--panel); --fg: var(--text); --strong: var(--text-strong); --faint: var(--dim);
+    --user: var(--well); --user-line: var(--line);
+    --code-fg: var(--text); --code: var(--well); --code-line: var(--line);
+    --inline: var(--well); --inline-line: var(--line);
+    --box: var(--well); --box-line: var(--line);
+    --primary: var(--text-strong); --primary-fg: var(--bg); --hover: var(--wash-4);
+  }
+  .oc { flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--canvas); color: var(--fg); border: 1px solid var(--line); font: 14px/1.625 Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+  .oc code, .oc pre { font-family: 'SF Mono', SFMono-Regular, ui-monospace, Menlo, Consolas, monospace; }
+  .oc svg { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .oc-list { flex: 1; width: 100%; max-width: 736px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+
+  .oc-me { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+  .oc-bubble { max-width: 80%; padding: 10px 14px; border: 1px solid var(--user-line); border-radius: var(--radius); background: var(--user); color: var(--strong); }
+  .oc-meta { display: flex; align-items: center; gap: 4px; color: var(--faint); opacity: 0; transition: opacity .15s; }
+  .oc-me:hover .oc-meta, .oc-me:focus-within .oc-meta { opacity: 1; }
+  .oc-icon { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--radius); background: none; color: inherit; cursor: pointer; }
+  .oc-icon:hover { background: var(--hover); color: var(--strong); }
+
+  /* One size in the transcript: hierarchy comes from weight and colour. */
+  .oc-who { margin-bottom: 2px; color: var(--faint); }
+  .oc-who b { font-weight: 700; color: var(--strong); }
+  .oc-text p { margin: 0 0 10px; }
+  .oc-text p:last-child { margin-bottom: 0; }
+  .oc-text h2 { margin: 16px 0 8px; font-size: 1em; font-weight: 700; line-height: inherit; color: var(--strong); }
+  .oc-text strong { color: var(--strong); font-weight: 700; }
+  .oc-text ul { margin: 0 0 10px; padding-left: 20px; }
+  .oc-text li { margin: 2px 0; }
+  .oc-text a { color: var(--strong); text-decoration: underline; text-decoration-color: color-mix(in srgb, currentColor 40%, transparent); }
+  .oc-text code { padding: 1px 5px; border: 1px solid var(--inline-line); border-radius: var(--radius); background: var(--inline); color: var(--code-fg); font-size: 1em; }
+
+  .oc-run { margin-top: 8px; }
+  .oc-run-head { display: flex; align-items: flex-start; gap: 6px; min-height: 24px; padding: 2px 0; color: var(--faint); cursor: pointer; }
+  .oc-run-head svg { margin-top: 4px; }
+  .oc-run-head:hover { color: var(--fg); }
+  .oc-row { display: flex; align-items: center; gap: 8px; min-height: 26px; color: var(--faint); cursor: pointer; }
+  .oc-row .oc-arg { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--fg); }
+  .oc-row:hover { color: var(--fg); }
+  .oc-row:hover .oc-arg { color: var(--strong); }
+  .oc-row .oc-end { display: flex; align-items: center; gap: 6px; margin-left: auto; padding-left: 8px; }
+  .oc-out { margin: 2px 0 6px 24px; padding: 8px; max-height: 256px; overflow: auto; border: 1px solid var(--code-line); border-radius: var(--radius); background: var(--code); color: var(--fg); font-size: inherit; line-height: 1.55; white-space: pre-wrap; }
+
+  .oc-code { margin: 12px 0; overflow: hidden; border: 1px solid var(--code-line); border-radius: var(--radius); background: var(--code); }
+  .oc-code-head { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 8px 0 14px; color: var(--faint); }
+  .oc-code pre { margin: 0; padding: 2px 14px 12px; overflow: auto; color: var(--code-fg); font-size: inherit; line-height: 1.55; }
+  .oc-text .oc-code code { padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: inherit; }
+
+  .oc-thought { display: flex; align-items: center; gap: 6px; color: var(--faint); }
+
+</style></head><body>
+<button class="oc-theme" onclick="toggleTheme()">theme</button>
+<script>
+function toggleTheme() {
+  document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? '' : 'light';
+}
+if (new URLSearchParams(location.search).get('theme') === 'light') toggleTheme();
+</script>
+<svg width="0" height="0" style="position:absolute"><defs>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="14" height="14" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6"/><path d="M12 19h8"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5a3 3 0 0 0-5.9-.6A4 4 0 0 0 4 12a4 4 0 0 0 2 7 3 3 0 0 0 6 0z"/><path d="M12 5a3 3 0 0 1 5.9-.6A4 4 0 0 1 20 12a4 4 0 0 1-2 7 3 3 0 0 1-6 0"/></symbol>
+</defs></svg>
+
+<div class="oc-page">
+  <p class="oc-title">Orca chat theme, side by side</p>
+  <div class="oc-grid">
+
+    <div class="oc-col">
+      <p class="oc-lbl"><b>Floe today</b>: classic layout, real stylesheet, transcript only</p>
+      <div class="oc-floe"><div class="chat">
+        <div class="irc-entry" data-me style="--nick:var(--nick-you)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-you)">rafael</span></span>the composer eats the first keystroke after the palette closes. It only happens when the palette was opened with ⌘K, not from the row menu</div></div>
+        <div class="irc-entry" style="--nick:var(--nick-claude)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:02</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><p>Looking. <code class="md-code">Palette.tsx</code> restores focus on unmount, but the composer's <code class="md-code">onFocus</code> guard drops the event that arrives in the same tick.</p></div></div></div>
+        <div class="tool-run"><div class="run-fold" role="button"><span class="bash-mark">▸</span><span class="run-fold-line"><span class="run-fold-count">3 calls</span><span class="run-fold-verbs"> · read ×2, grep</span></span></div></div>
+        <div class="tool-run"><div class="run-fold" data-open role="button"><span class="bash-mark">▾</span><span class="run-fold-line"><span class="run-fold-count">3 calls</span><span class="run-fold-verbs"> · edit, read, bash</span></span></div><div class="run-fold-body"><div class="tool-row"><span class="tool-mark">▸</span><span class="tool-line"><span class="tool-verb">edit</span><span class="tool-arg"> src/renderer/src/<span class="tool-base">Palette.tsx</span></span></span></div><div class="tool-row"><span class="tool-mark">▸</span><span class="tool-line"><span class="tool-verb">read</span><span class="tool-arg"> src/renderer/src/<span class="tool-base">Terminal.tsx</span></span></span></div><div class="bash-row" role="button"><span class="bash-mark">▸</span><span class="bash-code">pnpm test</span><span class="bash-acts"><span class="bash-act">copy</span><span class="bash-act">run</span></span></div></div></div>
+        <div class="irc-entry" style="--nick:var(--nick-claude)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:04</span><span class="irc-nick" style="color:var(--nick-claude)">claude</span></span><div class="md"><h2>The fix</h2><p>Defer the restore by one microtask, so <strong>both</strong> paths reach the composer after the guard clears:</p><ul><li><code class="md-code">Palette.tsx</code> queues the focus call</li><li><code class="md-code">Terminal.tsx</code> needs the same guard</li></ul><div class="md-block"><div class="md-block-head"><span class="md-lang">ts</span><button class="md-copy">Copy</button></div><pre class="md-pre"><code><span class="md-line">queueMicrotask(() =&gt; composerRef.current?.focus())</span></code></pre></div><p>All 14 palette tests pass.</p></div></div></div>
+        <div class="irc-entry" style="--nick:var(--nick-codex)"><div class="irc-body"><span class="irc-lead"><span class="irc-time">14:05</span><span class="irc-nick" style="color:var(--nick-codex)">codex</span><span class="irc-peer">session</span></span><div class="md"><p>Confirmed from the other worktree. The row menu path never hits the guard.</p></div></div></div>
+      </div></div>
+    </div>
+
+    <div class="oc-col">
+      <p class="oc-lbl"><b>Orca layout</b>: transcript only, Orca's fonts in Floe's colours</p>
+      <div class="oc">
+        <div class="oc-list">
+          <div class="oc-me">
+            <div class="oc-bubble">the composer eats the first keystroke after the palette closes. It only happens when the palette was opened with ⌘K, not from the row menu</div>
+            <div class="oc-meta"><button class="oc-icon" aria-label="Copy"><svg width="14" height="14"><use href="#i-copy"/></svg></button>14:02</div>
+          </div>
+
+          <div class="oc-text">
+            <p>Looking. <code>Palette.tsx</code> restores focus on unmount, but the composer's <code>onFocus</code> guard drops the event that arrives in the same tick.</p>
+            <div class="oc-run">
+              <div class="oc-run-head"><svg width="16" height="16"><use href="#i-search"/></svg><span>Read 2 files and searched 1 time</span><svg width="12" height="12"><use href="#i-check"/></svg></div>
+            </div>
+          </div>
+
+          <div class="oc-text">
+            <div class="oc-run" style="margin-top:0">
+              <div class="oc-run-head"><svg width="16" height="16"><use href="#i-edit"/></svg><span>Edited 1 file, read 1 file, and ran 1 command</span><svg width="12" height="12"><use href="#i-check"/></svg></div>
+              <div class="oc-row"><svg width="16" height="16"><use href="#i-edit"/></svg><span>Edited</span><span class="oc-arg">src/renderer/src/Palette.tsx</span><span class="oc-end"><svg width="14" height="14"><use href="#i-right"/></svg></span></div>
+              <div class="oc-row"><svg width="16" height="16"><use href="#i-file"/></svg><span>Read</span><span class="oc-arg">src/renderer/src/Terminal.tsx</span></div>
+              <div class="oc-row"><svg width="16" height="16"><use href="#i-term"/></svg><span class="oc-arg">pnpm test</span><span class="oc-end"><svg width="14" height="14" style="transform:rotate(90deg)"><use href="#i-right"/></svg></span></div>
+              <pre class="oc-out">✔ palette restores focus (14 tests)
+ℹ pass 14  ℹ fail 0</pre>
+            </div>
+          </div>
+
+          <div class="oc-text">
+            <h2 style="margin-top:0">The fix</h2>
+            <p>Defer the restore by one microtask, so <strong>both</strong> paths reach the composer after the guard clears:</p>
+            <ul><li><code>Palette.tsx</code> queues the focus call</li><li><code>Terminal.tsx</code> needs the same guard</li></ul>
+            <div class="oc-code">
+              <div class="oc-code-head"><span>ts</span><button class="oc-icon" aria-label="Copy"><svg width="14" height="14"><use href="#i-copy"/></svg></button></div>
+              <pre><code>queueMicrotask(() =&gt; composerRef.current?.focus())</code></pre>
+            </div>
+            <p>All 14 palette tests pass.</p>
+          </div>
+
+          <!-- Floe adaptation: Orca has one agent per chat, so a peer needs a name. -->
+          <div class="oc-text">
+            <div class="oc-who"><b>codex</b> · session</div>
+            <p>Confirmed from the other worktree. The row menu path never hits the guard.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body></html>

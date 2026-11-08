@@ -26,6 +26,7 @@ import {
   readAttachment,
   renumberImageRefs
 } from './attachments'
+import { addAnnotation, composerInbox, type Delivery } from './annotate'
 import { bangTokens, isBang } from './bang'
 import { isFileRef } from './fileRefs'
 import {
@@ -154,12 +155,8 @@ export function Composer({
       this one's. Held blank rather than swapped mid-flight. */
   pinPending?: boolean
   /**
-   * The pinned MODE is not the user's to change — a query is read-only by
-   * construction, and the mode is the whole of that guarantee (docs/queries.md).
-   *
-   * Without this the mode you last used travels into the query and the chip
-   * says `bypass` over a turn that runs at `plan`: not merely wrong, but the
-   * one lie this composer must not tell.
+   * The pinned mode belongs to the parent chat. Query turns use that same mode,
+   * mapped to what their harness supports.
    */
   modeLocked?: boolean
   /**
@@ -319,9 +316,8 @@ export function Composer({
   // Which modes this harness can honestly do. Empty for a runtime with no tools
   // (LM Studio, Ollama) — the row is then not rendered at all.
   const modes = modesFor(choice.provider)
-  // Offered, as opposed to merely true. A locked mode is still SHOWN on the
-  // chip — it is the one thing the chip is for — but it is not something to
-  // walk, cycle or pick: a query runs read-only or it is not a query.
+  // Offered, as opposed to merely true. A locked mode is shown on the chip but
+  // cannot be changed inside this panel.
   const modeOptions = modeLocked ? [] : modes
   const mode = choice.mode ?? DEFAULT_MODE
   const claude = !choice.provider || choice.provider === 'claude'
@@ -532,7 +528,8 @@ export function Composer({
   const syncTrigger = (el: HTMLTextAreaElement) => {
     if (!menuItems) return
     const found = triggerAt(el.value, el.selectionStart)
-    setTrigger(found)
+    // `$` in a shell line is a variable, not a project.
+    setTrigger(found?.char === '$' && shell && isBang(el.value) ? null : found)
     setMenuAt(0)
     setDrill([])
   }
@@ -561,7 +558,7 @@ export function Composer({
         if (item.variants) walk(item.variants)
       }
     }
-    for (const char of ['#', '@'] as const) walk(menuItems?.({ char, query: '', start: 0 }) ?? [])
+    for (const char of ['#', '@', '$'] as const) walk(menuItems?.({ char, query: '', start: 0 }) ?? [])
     return ids
   }, [menuItems])
 
@@ -587,6 +584,20 @@ export function Composer({
   // Kept beside the text under the same key, so leaving the panel with a
   // pasted screenshot and coming back finds it still attached.
   const { images, files, pastes, setImages, setFiles, setPastes } = usePending(draftKey)
+  // A browser annotation arrives from another panel. The ref is what keeps it
+  // from landing on the draft as it stood when this composer mounted.
+  const takeAnnotation = useRef<(delivery: Delivery) => void>(() => {})
+  takeAnnotation.current = ({ image, summary }) => {
+    setImages((prev) => [...prev, image])
+    const next = addAnnotation(value, images.length + 1, summary)
+    onChange(next.text)
+    setCaret(next.caret)
+    input.current?.focus()
+  }
+  useEffect(() => {
+    if (!draftKey) return
+    return composerInbox.open(draftKey, (delivery) => takeAnnotation.current(delivery))
+  }, [draftKey])
   // Which collapsed paste the caret is sitting in, if any — the rail is two
   // lines on screen and this is how you see what is under them.
   const [peek, setPeek] = useState<number | null>(null)

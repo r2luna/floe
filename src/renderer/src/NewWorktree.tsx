@@ -1,7 +1,21 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { slugifyBranch } from '../../shared/slug'
+import {
+  SOURCE_LABELS,
+  sourceBranch,
+  sourceForInput,
+  sourceLabel,
+  sourcePremise,
+  type SourceId,
+  type SourceItem
+} from '../../shared/worktreeSource'
 import type { WorktreeFailure } from '../../shared/worktreeError'
+import { SourcePicker } from './SourcePicker'
+
+/** The tab it opens on: the name box, or the project's first PR-and-issue source. */
+export type NewWorktreeOpens = 'name' | 'source'
+type Tab = 'name' | SourceId
 
 /** What the caller needs to actually create it. */
 export interface NewWorktreeResult {
@@ -11,10 +25,17 @@ export interface NewWorktreeResult {
   resetBranch?: boolean
   /** The one interview sentence, answered up front. Empty means: ask later. */
   premise?: string
+  /** It comes from this PR or issue. Main resolves the branch from its reference. */
+  item?: SourceItem
 }
 
 /** Everything the inline form needs — built in App, threaded through PanelBody. */
 export interface NewWorktreeProps {
+  /** The project, for asking which sources it has and what they hold. */
+  root: string
+  opens?: NewWorktreeOpens
+  /** Changes on every ⌘N: pressed with the form already up, it refocuses the name. */
+  focusRequest?: number
   /** Local branches that have no worktree yet — checking one out is a valid answer. */
   branches: string[]
   /** The project's main branch — the default base to fork from. */
@@ -50,8 +71,14 @@ const KEEP = ' keep'
  * A refused create keeps the form: the name and the base are still in it, git's
  * refusal is under the box that caused it, and a failure with a way out offers
  * that way out as one key (⌥⏎) rather than as advice.
+ *
+ * A source tab answers the name for you: pick a PR or issue and the form shows
+ * the branch it will use, what the base means for it, and a premise you can edit.
+ * Picking leaves focus on Create, so a PR is ⏎ to pick and ⏎ to create.
  */
 export function NewWorktreeForm({
+  root,
+  opens = 'name',
   branches,
   mainBase,
   defaultBase,
@@ -60,7 +87,8 @@ export function NewWorktreeForm({
   busy = false,
   onClearError,
   onCreate,
-  onCancel
+  onCancel,
+  focusRequest
 }: NewWorktreeProps) {
   const [name, setName] = useState('')
   // null until touched: the default tracks what you TYPE (keep for an existing
@@ -69,10 +97,52 @@ export function NewWorktreeForm({
   const [base, setBase] = useState<string | null>(null)
   const [premise, setPremise] = useState('')
   const [lower, setLower] = useState(false)
+  const [tab, setTab] = useState<Tab>('name')
+  const [sources, setSources] = useState<SourceId[]>([])
+  const [seed, setSeed] = useState('')
+  const [item, setItem] = useState<SourceItem | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  const submit = useRef<HTMLButtonElement>(null)
+
+  // Which tabs there are depends on the project's remotes, so the one it opens on
+  // can only be chosen once they are known.
+  useEffect(() => {
+    void window.floe.sources.available(root).then((available) => {
+      setSources(available)
+      if (opens === 'source') setTab(available[0])
+    })
+  }, [root, opens])
+
+  const pickItem = (next: SourceItem): void => {
+    setItem(next)
+    setPremise(sourcePremise(next))
+    onClearError?.()
+    requestAnimationFrame(() => submit.current?.focus())
+  }
+
+  const clearItem = (): void => {
+    setItem(null)
+    setPremise('')
+    setSeed('')
+    onClearError?.()
+  }
+
+  const switchTo = (next: Tab): void => {
+    if (next === tab) return
+    clearItem()
+    setTab(next)
+    if (next === 'name') requestAnimationFrame(() => input.current?.focus())
+  }
+
+  const tabs: Tab[] = ['name', ...sources]
+  const stepTab = (delta: number): void =>
+    switchTo(tabs[(tabs.indexOf(tab) + delta + tabs.length) % tabs.length])
 
   useEffect(() => {
     requestAnimationFrame(() => input.current?.focus())
+  }, [focusRequest])
+
+  useEffect(() => {
     void window.floe.config.get().then((c) => setLower(c.worktree.lowercase))
   }, [])
 
@@ -88,8 +158,13 @@ export function NewWorktreeForm({
   // like `feat/DOS_219` into a name git does not have. Only a NEW name is
   // slugged into a valid ref.
   const typed = name.trim()
-  const exists = branches.includes(typed)
-  const branch = exists ? typed : slugifyBranch(name, { preserveCase: !lower })
+  const fromSource = tab !== 'name'
+  const itemBranch = item ? sourceBranch(item, { lowercase: lower }) : ''
+  const exists = branches.includes(fromSource ? itemBranch : typed)
+  const named = exists ? typed : slugifyBranch(name, { preserveCase: !lower })
+  const branch = fromSource ? itemBranch : named
+  // Not in `branches`, which only holds branches without a worktree.
+  const opened = fromSource && worktreeBases.includes(branch)
   // Main first, then the worktree you are in, then Floe's other worktrees —
   // and nothing else. A branch with no worktree is not somewhere you were
   // working, so offering it as a base is noise in a list you scan by eye.
@@ -109,14 +184,20 @@ export function NewWorktreeForm({
 
   // The base travels with whichever name is being created — the typed one or
   // the suggested one — so taking the suggestion never quietly re-bases it.
-  const create = (named: string): void => {
-    if (!named || busy) return
+  const create = (target: string): void => {
+    if (!target || busy) return
     const brief = premise.trim() || undefined
-    if (picked === KEEP) return onCreate({ branch: named, premise: brief })
-    onCreate({ branch: named, base: picked || undefined, resetBranch: exists, premise: brief })
+    if (item) {
+      const base = item.kind === 'issue' && !exists ? picked || undefined : undefined
+      return onCreate({ branch: target, base, premise: brief, item })
+    }
+    if (picked === KEEP) return onCreate({ branch: target, premise: brief })
+    onCreate({ branch: target, base: picked || undefined, resetBranch: exists, premise: brief })
   }
 
   const commit = (): void => create(branch)
+  // A PR or issue names its own branch, so another name is no way out for it.
+  const suggestion = item ? undefined : error?.suggestion
 
   const options: BaseOption[] = [
     ...(exists ? [{ value: KEEP, label: 'Keep the branch as it is' }] : []),
@@ -149,14 +230,22 @@ export function NewWorktreeForm({
       }}
       onKeyDown={(e) => {
         // ⌥⏎ takes the way out the failure offered, from anywhere in the form.
-        if (e.key === 'Enter' && e.altKey && error?.suggestion) {
+        if (e.key === 'Enter' && e.altKey && suggestion) {
           e.preventDefault()
           e.stopPropagation()
-          return create(error.suggestion)
+          return create(suggestion)
         }
+        if (e.key === 'Tab' && e.ctrlKey) {
+          e.preventDefault()
+          e.stopPropagation()
+          return stepTab(e.shiftKey ? -1 : 1)
+        }
+        if (e.key === 'Tab') return wrapTab(e)
         if (e.key !== 'Escape') return
         e.preventDefault()
         e.stopPropagation()
+        // One step back first: a pick is what Escape undoes, then the form.
+        if (item) return clearItem()
         onCancel()
       }}
     >
@@ -164,6 +253,47 @@ export function NewWorktreeForm({
         New worktree
       </div>
       <div className="dialog-body">
+      <div
+        className="wt-new-tabs"
+        role="tablist"
+        aria-label="Create from"
+        onKeyDown={(e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+          e.preventDefault()
+          stepTab(e.key === 'ArrowLeft' ? -1 : 1)
+        }}
+      >
+        {tabs.map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            className="wt-new-tab"
+            aria-selected={t === tab}
+            onClick={() => switchTo(t)}
+          >
+            {t === 'name' ? 'Name' : SOURCE_LABELS[t]}
+          </button>
+        ))}
+        <kbd className="wt-new-tabs-key" title="Switch tab">⌃⇥</kbd>
+      </div>
+      {tab !== 'name' && !item && (
+        <SourcePicker key={tab} root={root} source={tab} seed={seed} onPick={pickItem} onLeave={() => switchTo('name')} />
+      )}
+      {item && (
+        <div>
+          <div className="gh-picked">
+            <span className="gh-number">{sourceLabel(item)}</span>
+            <span className="gh-picked-title">{item.title}</span>
+            <button type="button" className="gh-clear" aria-label="Pick another" onClick={clearItem}>
+              ×
+            </button>
+          </div>
+          <SourceDetail item={item} opened={opened} />
+        </div>
+      )}
+      {!fromSource && (
+      <>
       <label className="chips-label" htmlFor="wt-new-name">
         Name
       </label>
@@ -172,13 +302,19 @@ export function NewWorktreeForm({
         ref={input}
         className="dialog-input"
         list="wt-new-branches"
-        placeholder="Name it, or pick a branch…"
+        placeholder="Name it, pick a branch, or # for a PR or issue…"
         value={name}
         spellCheck={false}
         autoComplete="off"
         onChange={(e) => {
-          setName(e.target.value)
           if (error) onClearError?.()
+          const jump = sourceForInput(e.target.value, sources)
+          if (jump) {
+            setSeed(e.target.value)
+            setTab(jump)
+            return
+          }
+          setName(e.target.value)
         }}
       />
       {/* A native datalist: the OS popup already does keyboard navigation and
@@ -188,13 +324,15 @@ export function NewWorktreeForm({
           <option key={b} value={b} />
         ))}
       </datalist>
+      </>
+      )}
       {/* Why git said no, under the box that holds the name it said no to. */}
       {error && (
         <div className="wt-new-error" role="alert">
           <p className="wt-new-why">{error.why}</p>
-          {error.suggestion && (
-            <button type="button" className="wt-new-fix" onClick={() => create(error.suggestion!)}>
-              Create {error.suggestion} instead ⌥⏎
+          {suggestion && (
+            <button type="button" className="wt-new-fix" onClick={() => create(suggestion)}>
+              Create {suggestion} instead ⌥⏎
             </button>
           )}
           {/* Git's own words: not the explanation, but the string you search
@@ -202,37 +340,46 @@ export function NewWorktreeForm({
           {error.raw && <p className="wt-new-raw">{error.raw}</p>}
         </div>
       )}
-      <BasePicker
-        label={`Base for ${branch || 'the new branch'}`}
-        options={options}
-        value={picked}
-        onChange={setBase}
-      />
+      {/* A PR's base is the PR's, and an existing branch already has one. */}
+      {(!fromSource || (item?.kind === 'issue' && !exists && !opened)) && (
+        <BasePicker
+          label={`Base for ${branch || 'the new branch'}`}
+          options={options}
+          value={picked}
+          onChange={setBase}
+        />
+      )}
       {/* The setup interview's one question, asked here instead: leave it
           empty and the checklist asks it later, as before. */}
-      <label className="chips-label" htmlFor="wt-new-premise">
-        Premise
-      </label>
-      <input
-        id="wt-new-premise"
-        className="dialog-input"
-        placeholder="In one sentence, what does this worktree have to deliver? Optional."
-        value={premise}
-        spellCheck={false}
-        autoComplete="off"
-        onChange={(e) => setPremise(e.target.value)}
-      />
+      {(!fromSource || (item && !opened)) && (
+        <>
+          <label className="chips-label" htmlFor="wt-new-premise">
+            Premise
+          </label>
+          <input
+            id="wt-new-premise"
+            className="dialog-input"
+            placeholder="In one sentence, what does this worktree have to deliver? Optional."
+            value={premise}
+            spellCheck={false}
+            autoComplete="off"
+            onChange={(e) => setPremise(e.target.value)}
+          />
+        </>
+      )}
       <div className="dialog-actions">
         {/* What Enter will actually create, when the slug is not what you
             typed — a surprise rename explained before it happens. */}
         <span className="dialog-hint">
-          {branch && branch !== typed ? `→ ${branch}` : ''}
+          {branch && branch !== typed ? `→ ${branch}` : fromSource ? '↑↓ walk · ⏎ pick' : ''}
         </span>
         <button type="button" className="btn" onClick={onCancel}>
           Cancel <kbd>esc</kbd>
         </button>
-        <button type="submit" className="btn btn-primary" disabled={!branch || busy}>
-          {busy ? 'Creating…' : exists ? 'Check out' : 'Create'} <kbd>⏎</kbd>
+        {/* Not `disabled` while busy: that would drop focus out of the dialog for
+            as long as the fetch takes. `create` already refuses a second go. */}
+        <button ref={submit} type="submit" className="btn btn-primary" disabled={!branch} aria-busy={busy}>
+          {busy ? 'Creating…' : opened ? 'Open' : exists ? 'Check out' : 'Create'} <kbd>⏎</kbd>
         </button>
       </div>
       </div>
@@ -240,6 +387,28 @@ export function NewWorktreeForm({
     </div>,
     document.body
   )
+}
+
+/**
+ * Keep Tab inside the dialog. The lane behind it is still in the page, so without
+ * this the next Tab after Create lands on a control you cannot see.
+ */
+function wrapTab(e: KeyboardEvent<HTMLFormElement>): void {
+  const stops = [...e.currentTarget.querySelectorAll<HTMLElement>('input, button:not(:disabled)')].filter(
+    (el) => el.tabIndex >= 0
+  )
+  const edge = e.shiftKey ? stops[0] : stops[stops.length - 1]
+  if (document.activeElement !== edge) return
+  e.preventDefault()
+  ;(e.shiftKey ? stops[stops.length - 1] : stops[0])?.focus()
+}
+
+/** What picking this item will do, when that is not obvious from the branch name. */
+function SourceDetail({ item, opened }: { item: SourceItem; opened: boolean }) {
+  if (opened) return <div className="gh-detail">Already has a worktree.</div>
+  if (item.kind === 'issue') return null
+  if (item.fork) return <div className="gh-detail">From a fork. A local copy: pushes will not reach the fork.</div>
+  return <div className="gh-detail">Checks out the PR's branch. Merges into {item.base}.</div>
 }
 
 interface BaseOption {

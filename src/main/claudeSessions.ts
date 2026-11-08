@@ -1,3 +1,4 @@
+import { checklistRow } from '../shared/checklist'
 import { execFile } from 'node:child_process'
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -11,6 +12,7 @@ import { contextTokens } from '../shared/types'
 import { collapseSkills, hasSkill } from '../shared/skills'
 import { collapseSessionRefs, hasSessionRef } from '../shared/sessionRefs'
 import { collapseTaskRefs, hasTaskRef } from '../shared/taskRefs'
+import { collapseProjectRefs, hasProjectRef } from '../shared/projectRefs'
 import { hasPremise, premiseIn, stripPremise } from '../shared/premise'
 import { agentNick } from '../shared/nicks'
 import type { Effort, PermissionMode, ProjectActivity, ProjectActivityStatus } from '../shared/types'
@@ -757,6 +759,7 @@ export function collapseFloe(text: string): string {
   if (hasSkill(out)) out = collapseSkills(out)
   if (hasSessionRef(out)) out = collapseSessionRefs(out)
   if (hasTaskRef(out)) out = collapseTaskRefs(out)
+  if (hasProjectRef(out)) out = collapseProjectRefs(out)
   return out
 }
 
@@ -1114,7 +1117,7 @@ function pushToolUse(ctx: TranscriptCtx, block: Record<string, unknown>, at: num
     return
   }
   if (block.name === 'SendMessage' && typeof block.id === 'string') ctx.sends.add(block.id)
-  ctx.items.push({ role: 'tool', name: String(block.name ?? 'tool'), summary: summarizeTool(block.input) })
+  ctx.items.push({ role: 'tool', name: String(block.name ?? 'tool'), summary: checklistRow(block.name, block.input) ?? summarizeTool(block.input) })
 }
 
 // The tool_result of a Task/Agent call: it closes the row that call opened.

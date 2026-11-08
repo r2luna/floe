@@ -19,13 +19,16 @@ import {
   columnsOf,
   crowdedOut,
   focusAt,
+  isSidebarStack,
+  joinLists,
   laneOf,
   open,
   patchPanel,
   resizePanel,
   setCursor,
   slotOf,
-  toggleDock
+  toggleDock,
+  toggleFold
 } from './lane'
 import { dragAnchor, selRange } from './diff'
 import { pickDefinition } from './definition'
@@ -35,6 +38,8 @@ import { editTarget } from './editorTarget'
 import { resolveKey } from './keys'
 import { useNarrow, useTouch } from './useNarrow'
 import { RailMenu } from './RailMenu'
+import { TopBar } from './TopBar'
+import { sayTo } from './chatSay'
 import { installPluginCommands, runCommand, type CommandContext, type CommandRow } from './commands'
 import { keyHint, panelKeys } from './keyHints'
 import { useNeedsYouNotifier } from './useNotify'
@@ -42,11 +47,13 @@ import { REGISTRY } from './registry'
 import { ALL, Palette } from './Palette'
 import {
   carrySizes,
+  chatToRemember,
   fileIntoSession,
   load as loadLane,
   projectRailOf,
   remember,
   rememberRail,
+  rememberedSession,
   rememberSession,
   rememberWorktree,
   save as saveLane,
@@ -82,7 +89,9 @@ import {
   type ChatRow,
   type FinderChat
 } from './finderChats'
-import type { NewWorktreeProps } from './NewWorktree'
+import type { NewWorktreeProps, NewWorktreeOpens } from './NewWorktree'
+import type { PermissionMode, Worktree } from '../../shared/types'
+import { modeLabel } from '../../shared/modes'
 import { diagnoseWorktreeFailure, type WorktreeFailure } from '../../shared/worktreeError'
 import { useProjects } from './useProjects'
 import { moveTargets, stepGroup } from './projectMove'
@@ -98,6 +107,7 @@ import { usePendingUpdate } from './useUpdate'
 import type { PaletteItem } from './fuzzy'
 import { nickColor } from './nickColor'
 import { useBrowserCovered } from './browserCover'
+import { requestAnnotate } from './annotate'
 import { CommandPreview, FilePreview, ProjectPreview, SessionPreview } from './palettePreview'
 import { byUsage, noteProjectUse } from './projectUsage'
 import { colonyTab } from './colonyTab'
@@ -146,7 +156,7 @@ function matchingRows(rows: HTMLElement[], q: string): number[] {
 const panelOf = (
   kind: PanelKind,
   sub?: string,
-  session?: { id: string; worktreePath: string },
+  session?: { id: string; worktreePath: string; permissionMode?: PermissionMode },
   firstPrompt?: string,
   firstChoice?: ModelChoice
 ): Panel => ({
@@ -387,7 +397,11 @@ export default function App() {
   // parses) starts at the worktrees of the current project — the projects panel
   // is one ⌘⇧E away and does not need to be in the way every launch.
   const restored = useRef(loadLane())
-  const [lane, setLaneRaw] = useState(() => restored.current?.lane ?? laneOf(panelOf('worktrees')))
+  // Joined on the way in: a lane saved with the lists side by side comes back
+  // stacked, as every list opened since lands.
+  const [lane, setLaneRaw] = useState(() =>
+    restored.current ? joinLists(restored.current.lane) : laneOf(panelOf('worktrees'))
+  )
 
   // --- lane memory ---------------------------------------------------------
   // What each session had open. See laneStore.ts.
@@ -524,7 +538,7 @@ export default function App() {
   // `here`, not the sidebar's selection: at the launcher nothing is selected
   // yet, and a `#` menu that offered sessions but no files was reading a
   // worktree the app already knew how to name.
-  const menuItems = useMenuItems(here, worktrees, projects.current?.path)
+  const menuItems = useMenuItems(here, worktrees, projects.current?.path, projects.all)
   // After a turn ends, adopt Claude's auto-generated title (or a Haiku-written
   // one for headless runs) so a session stops reading "Session N". The main
   // process only applies it while the title is still a placeholder and the
@@ -684,6 +698,10 @@ export default function App() {
   const markAnchor = useRef<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [newWt, setNewWt] = useState(false)
+  const [newWtOpens, setNewWtOpens] = useState<NewWorktreeOpens>('name')
+  // Bumped by every ⌘N, so one pressed with the form already up can put the
+  // keyboard back in it. See NewWorktreeProps.focusRequest.
+  const [newWtFocus, setNewWtFocus] = useState(0)
   // Why the last create was refused, and whether one is in flight — both belong
   // to the form, which stays open across a failure so it can show them.
   const [newWtError, setNewWtError] = useState<WorktreeFailure | null>(null)
@@ -822,19 +840,20 @@ export default function App() {
     // project's, or a switch would tell the project you just left that it holds
     // the board you are about to open in the new one.
     if (project) railByProject.current = rememberRail(railByProject.current, project, projectRailOf(lane))
-    // Which chat this branch is showing — `null` when it is showing none, which
-    // is a thing to remember rather than an absence of one. Keyed off the OPEN
-    // CHAT's own worktree, not the sidebar selection: for one render after a
+    // Which chat this branch is showing — `null` when it closed the one it had,
+    // which is a thing to remember rather than an absence of one. Keyed off the
+    // OPEN CHAT's own worktree, not the sidebar selection: for one render after a
     // switch the two disagree, and that render would file a session under the
     // wrong branch.
     const chat = sessionOf(lane)
+    const left = chatToRemember(lane)
     // A chat names its own branch, so it is always safe to file. Without one,
     // the selection is only trustworthy while the lists agree: a project switch
     // closes the chat a render before the worktree selection catches up, and
     // filing then would tell the branch you just left that it holds no chat.
     const worktree = chat?.worktreePath ?? worktrees.currentPath
-    if (worktree && (chat || project))
-      byWorktree.current = rememberSession(byWorktree.current, worktree, chat?.id ?? null)
+    if (worktree && left !== undefined && (chat || project))
+      byWorktree.current = rememberSession(byWorktree.current, worktree, left)
     saveLane({
       lane,
       bySession: by,
@@ -1214,10 +1233,11 @@ export default function App() {
     const want = byWorktree.current[path]
     // Only a session that is still there: a transcript deleted behind the app
     // would otherwise restore a chat with nothing in it.
-    const session = want ? row?.sessions.find((s) => (s.claudeId ?? s.id) === want) : undefined
-    if (session) {
-      const id = session.claudeId ?? session.id
-      setLane((l) => open(l, mkPanel('chat', session.title, { id, worktreePath: path })))
+    const session = rememberedSession(row?.sessions, want)
+    if (session && want) {
+      // Under the id it was filed with, because that is also the key its panels
+      // were filed under: a different id would bring the chat back without them.
+      setLane((l) => open(l, mkPanel('chat', session.title, { id: want, worktreePath: path })))
       return 'chat'
     }
     if (!launcher) return 'none'
@@ -1279,8 +1299,12 @@ export default function App() {
    * already in should do. Everything else is the jump the `active` panel makes.
    */
   const openFinderChat = (chat: FinderChat): void => {
-    if (chat.backend === currentBackend() && chat.projectPath === projects.current?.path)
+    if (chat.backend === currentBackend() && chat.projectPath === projects.current?.path) {
+      // The sidebar comes along: ⌘T and ⌘W read the selection, and would greet
+      // you on the branch you left instead of the one this chat is on.
+      worktrees.select(chat.worktreePath)
       return ctxRef.current.openChat({ id: chat.id, worktreePath: chat.worktreePath })
+    }
     jumpToSession({
       projectPath: chat.projectPath,
       projectName: chat.projectName,
@@ -1314,7 +1338,7 @@ export default function App() {
     // own back (withoutProject). Re-entering the project you are already in is
     // not a switch and takes nothing away.
     const leaving = !!projects.current && projects.current.path !== path
-    // Counted for the "Switch project…" order, most used first.
+    // Noted for the "Switch project…" order, most recently used first.
     if (projects.current?.path !== path) noteProjectUse(path)
     // Going somewhere on purpose ends the boot restore, which may still be
     // waiting on a remote list and would pull the selection back when it lands.
@@ -1368,6 +1392,29 @@ export default function App() {
     }
     enterWorktree((row ?? worktrees.rows[0]).worktree.path)
   }, [worktrees.rows, worktrees.repo, worktrees.loading, projects.current?.path])
+
+  // The selected worktree left the list — a guided removal, a merge, an agent
+  // over MCP. Staying selected would leave a launcher with no branch, starting
+  // sessions in a folder that is gone, so the app moves to the project's main
+  // worktree. "Was listed and is not any more", rather than "is not listed": a
+  // worktree just created is selected before the list that contains it arrives.
+  const listed = useRef<{ repo?: string; rows: WorktreeRow[] }>({ rows: [] })
+  useEffect(() => {
+    const before = listed.current
+    listed.current = { repo: worktrees.repo, rows: worktrees.rows }
+    const path = worktrees.currentPath
+    const has = (rows: WorktreeRow[]): boolean => rows.some((r) => r.worktree.path === path)
+    if (before.repo !== worktrees.repo || !has(before.rows) || has(worktrees.rows)) return
+    const main = worktrees.rows.find((r) => r.worktree.isMain) ?? worktrees.rows[0]
+    if (!main) return
+    const focused = lane.panels[lane.focus]
+    const inSlot = (p?: Panel): boolean => (p?.slot ?? p?.kind) === 'session'
+    if (!lane.panels.some(inSlot)) return worktrees.select(main.worktree.path)
+    enterWorktree(main.worktree.path)
+    // The checklist that did the removal keeps the keyboard: it is still reporting.
+    if (focused && !inSlot(focused))
+      setLane((l) => focusAt(l, l.panels.findIndex((p) => p.id === focused.id)))
+  }, [worktrees.rows])
 
   // ⌃I / ⌃O walk every session in the sidebar, in the order it lists them:
   // down a branch's chats, then on into the next branch's. The list you see is
@@ -1653,6 +1700,9 @@ export default function App() {
       })
       return
     }
+    // Back across a branch takes the sidebar along, as cycleSession does. Only to
+    // a row that is still listed: this chat's worktree may have been removed.
+    if (worktrees.rows.some((r) => r.worktree.path === s.worktreePath)) worktrees.select(s.worktreePath)
     setLane((l) => open(l, mkPanel('chat', a.panel.sub, s)))
   }
 
@@ -1928,6 +1978,15 @@ export default function App() {
     requestAnimationFrame(step)
   }
 
+  /** Open `panel`, focused, with its cursor on row `at`, and scroll that row in. */
+  const openAt = (panel: Panel, at: number, patch?: Partial<Panel>): void => {
+    setLane((l) => {
+      const next = open(l, panel)
+      return patchPanel(next, next.focus, { cursor: at, selection: null, ...patch })
+    })
+    revealRow(panel.id, panel.sub ?? '', at)
+  }
+
   /**
    * Open the file defining the first of `names` that has a definition, on its
    * line, and remember where this left from. Always the file reader, even out
@@ -1941,14 +2000,8 @@ export default function App() {
       const defs = await window.floe.files.definition(root, name, path).catch(() => [])
       const target = pickDefinition(defs, { path, line })
       if (!target) continue
-      const panel = mkPanel('file', target.path, undefined, undefined, undefined, from.root)
-      const at = target.line - 1
       setJumps((prev) => [...prev.slice(-49), from])
-      setLane((l) => {
-        const next = open(l, panel)
-        return patchPanel(next, next.focus, { cursor: at, selection: null })
-      })
-      revealRow(panel.id, target.path, at)
+      openAt(mkPanel('file', target.path, undefined, undefined, undefined, from.root), target.line - 1)
       return
     }
     say(names.length === 1 ? `no definition found for ${names[0]}` : 'no definition found on this line')
@@ -1962,12 +2015,7 @@ export default function App() {
     // Rebuilt from what it showed, not reinserted as it was: its old width and
     // dock belong to a box the lane may have rearranged since.
     const panel = { ...mkPanel(spot.kind as PanelKind, spot.sub, undefined, undefined, undefined, spot.root), view: spot.view }
-    const at = spot.cursor ?? 0
-    setLane((l) => {
-      const next = open(l, panel)
-      return patchPanel(next, next.focus, { cursor: at, selection: null, view: spot.view })
-    })
-    revealRow(panel.id, spot.sub ?? '', at)
+    openAt(panel, spot.cursor ?? 0, { view: spot.view })
   }
 
   /**
@@ -2208,6 +2256,30 @@ export default function App() {
   // The registry reads state through this, so a command written once works the
   // same whether a key, the palette or an MCP tool called it.
   const ctxRef = useRef<CommandContext>(null as unknown as CommandContext)
+  /**
+   * Land in a worktree just made or found. Creating one and then having to go find
+   * it is a step the app can take for you. The path comes from what create
+   * returned, not from guessing where git put it.
+   */
+  const landOnWorktree = (
+    { worktrees: list, branch, existed }: { worktrees: Worktree[]; branch: string; existed: boolean },
+    premise?: string
+  ): void => {
+    worktrees.reload()
+    const made = list.find((wt) => wt.branch === branch)
+    if (made) worktrees.select(made.path)
+    // The environment, right after the tree: `.env`, dependencies, the site and
+    // this branch's own database. Without it the worktree is a checkout you cannot
+    // run, and the site you open is still serving the main checkout.
+    if (made && !existed)
+      provision.start(
+        { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
+        premise ? { premiseAnswer: premise } : undefined
+      )
+    // Last, so the launcher takes the focus and the checklist reports beside it.
+    setLane((l) => open(l, panelOf('branch', branch)))
+  }
+
   ctxRef.current = {
     lane,
     setLane,
@@ -2255,7 +2327,8 @@ export default function App() {
       stop: () => void window.floe.browser.stop(),
       focus: () => void window.floe.browser.focus(),
       devtools: () => void window.floe.browser.devtools(),
-      screenshot: () => void window.floe.browser.screenshot().catch((e) => console.error('browser screenshot', e))
+      screenshot: () => void window.floe.browser.screenshot().catch((e) => console.error('browser screenshot', e)),
+      annotate: requestAnnotate
     },
     commands,
     // The registry quotes from the same patch the panel is showing; reading it
@@ -2403,6 +2476,18 @@ export default function App() {
     // listing — and reading the selection instead left `e`, `r`, `m` and `d`
     // silently refusing on a tree the user can see. Same answer as `here`, so
     // the commands and the panels cannot disagree about which tree they mean.
+    commit: () => {
+      if (!here) return
+      const prompt = 'Commit the uncommitted changes in this worktree.'
+      const chat = sessionOf(lane)
+      if (chat?.worktreePath === here) return sayTo(chat.id, prompt)
+      const id = crypto.randomUUID()
+      const session = { id, worktreePath: here }
+      void window.floe.claude
+        .createSession({ ...session, title: 'Commit' })
+        .then(() => ctxRef.current.openChat(session, prompt))
+        .catch((e: Error) => say(`Could not start a chat to commit: ${e.message}`))
+    },
     worktree: here
       ? {
           path: here,
@@ -2524,8 +2609,10 @@ export default function App() {
     },
     jumpBack: jumps.length ? jumpBack : undefined,
     pendingUpdate: pendingUpdate?.version,
-    newWorktree: () => {
+    landOnWorktree: (made) => landOnWorktree(made),
+    newWorktree: (opens = 'name') => {
       if (!projects.current) return
+      setNewWtOpens(opens)
       // Branches with no worktree yet: checking one out is a valid answer, and
       // offering one that is already open would create a worktree git refuses.
       void window.floe.worktrees
@@ -2538,6 +2625,7 @@ export default function App() {
       setNewWtError(null)
       setNewWtBusy(false)
       setNewWt(true)
+      setNewWtFocus((n) => n + 1)
       // The form lives at the top of the worktrees panel, so the panel has to
       // be up — and focused, so the input's own focus lands inside the panel
       // the lane already calls current.
@@ -2586,7 +2674,7 @@ export default function App() {
   >(() => {})
   useEffect(() => window.floe.query.onOpened((p) => openQueryRef.current(p)), [])
   openQueryRef.current = ({ query, worktreePath, parentKeys }): void => {
-    const session = { id: query.id, worktreePath }
+    const session = { id: query.id, worktreePath, permissionMode: query.mode }
     setLane((l) => {
       // Only into the chat it belongs to. An agent can open a query off ANY
       // session — over `send_message`, on a followup timer — and the lane is
@@ -2988,11 +3076,23 @@ export default function App() {
       })
     })
 
+  // Where a launcher belongs while the worktree list is still a fetch away: the
+  // branch this project was left on, or its root. The saved project counts until
+  // boot has settled on one. Without this it would sit in the home folder for
+  // that moment, and what you typed there would be filed under the wrong place.
+  const landingProject = landedProject.current
+    ? projects.current?.path
+    : (restored.current?.project ?? projects.current?.path)
+  const landingWorktree = landingProject && (byProject.current[landingProject] ?? landingProject)
+
   // The inline new-worktree form's wiring, handed to the worktrees panel while
   // ⌘N has one open — the flow that used to be a modal.
   const newWorktreeProps: NewWorktreeProps | undefined =
     newWt && projects.current
       ? {
+          root: projects.current.path,
+          opens: newWtOpens,
+          focusRequest: newWtFocus,
           branches,
           mainBase: worktrees.rows.find((r) => r.worktree.isMain)?.worktree.branch,
           defaultBase: current?.worktree.branch,
@@ -3009,34 +3109,23 @@ export default function App() {
             // would hand focus to a button about to disappear.
             requestAnimationFrame(backToLane)
           },
-          onCreate: ({ branch, base, resetBranch, premise }) => {
+          onCreate: ({ branch, base, resetBranch, premise, item }) => {
             // The form stays up until git agrees. Closing it first is what used
             // to send a refusal to the console and leave the panel looking as
             // if nothing had been asked for.
             setNewWtError(null)
             setNewWtBusy(true)
-            void window.floe.worktrees
-              .create(projects.current!.path, branch, { base, resetBranch })
-              .then((list) => {
+            const root = projects.current!.path
+            const creating = item
+              ? window.floe.sources.createWorktree(root, item.source, item.ref, { base })
+              : window.floe.worktrees
+                  .create(root, branch, { base, resetBranch })
+                  .then((list) => ({ worktrees: list, existed: false }))
+            void creating
+              .then(({ worktrees: list, existed }) => {
                 setNewWtBusy(false)
                 setNewWt(false)
-                worktrees.reload()
-                // Land in what you just made — creating a worktree and then
-                // having to go find it is a step the app can take for you. The
-                // path comes from what create returned, not from guessing where
-                // git put it.
-                const made = list.find((wt) => wt.branch === branch)
-                if (made) worktrees.select(made.path)
-                setLane((l) => open(l, panelOf('branch', branch)))
-                // The environment, right after the tree: `.env`, dependencies,
-                // the site and this branch's own database. Without it the
-                // worktree is a checkout you cannot run, and the site you open
-                // is still serving the main checkout.
-                if (made)
-                  provision.start(
-                    { root: projects.current!.path, worktreePath: made.path, branch: made.branch },
-                    premise ? { premiseAnswer: premise } : undefined
-                  )
+                landOnWorktree({ worktrees: list, branch, existed }, premise)
               })
               .catch((e: Error) => {
                 setNewWtBusy(false)
@@ -3276,8 +3365,31 @@ export default function App() {
           }}
         />
       )}
+      {/* Wide only: on a phone the lane bar owns the top, and a second strip
+          would leave the panel no room. */}
+      {!narrow && (
+        <TopBar
+          project={projects.current?.name}
+          machine={
+            projects.current?.backend && projects.current.backend !== 'local'
+              ? projects.current.backend
+              : undefined
+          }
+          worktree={worktrees.rows.find((r) => r.worktree.path === here)?.worktree}
+          status={here ? worktrees.status[here] : undefined}
+          keys={{ commit: chordLabels['worktree.commit'], merge: chordLabels['worktree.merge'] }}
+          onCommit={() => runCommand(REGISTRY, ctxRef.current, 'worktree.commit')}
+          onMerge={() => runCommand(REGISTRY, ctxRef.current, 'worktree.merge')}
+        />
+      )}
       <div className="workspace">
-        <div className="lane" ref={laneRef}>
+        <div
+          className="lane"
+          ref={laneRef}
+          data-solo-chat={
+            (columns.length === 1 && columns[0].length === 1 && columns[0][0].panel.kind === 'chat') || undefined
+          }
+        >
           {/* Columns, not panels: a docked panel shares its neighbour's column
               instead of taking one of its own. The column carries the width and
               the pinning, so a stacked pair is sized and pinned as one thing. */}
@@ -3328,6 +3440,7 @@ export default function App() {
                 // A width you dragged to is a width you asked for: it wins over
                 // growing, or the lane would take it straight back.
                 data-sized={head.width !== undefined || undefined}
+                data-stack={isSidebarStack(column) || undefined}
                 data-fill={fill || undefined}
                 data-grow={
                   (head.width === undefined && 'grow' in headSpec && headSpec.grow) || undefined
@@ -3402,7 +3515,7 @@ export default function App() {
                 className="panel"
                 data-kind={panel.kind}
                 style={
-                  panel.dock
+                  panel.dock && !isSidebarStack(column)
                     ? {
                         // A height you dragged wins; otherwise the kind's own
                         // share, and 40% for a kind with no opinion.
@@ -3419,6 +3532,7 @@ export default function App() {
                 data-focused={i === lane.focus || undefined}
                 data-bare={bare || undefined}
                 data-docked={panel.dock || undefined}
+                data-folded={(panel.folded && isSidebarStack(column)) || undefined}
                 onMouseDown={(e) => {
                   setLane((l) => focusAt(l, i))
                   startLineDrag(e, i)
@@ -3434,7 +3548,7 @@ export default function App() {
                   if (at !== -1) setLane((l) => setCursor(l, i, at))
                 }}
               >
-                {panel.dock === 'below' && (
+                {panel.dock === 'below' && !isSidebarStack(column) && (
                   <Splitter
                     axis="y"
                     invert
@@ -3451,7 +3565,24 @@ export default function App() {
                   />
                 )}
                 {!bare && (
-                  <header className="panel-head">
+                  <header
+                    className="panel-head"
+                    // In a sidebar stack the header is the fold switch, like `z`.
+                    // Only by hand: nothing else folds or unfolds a list.
+                    onClick={
+                      isSidebarStack(column)
+                        ? (e) => {
+                            if ((e.target as HTMLElement).closest('button')) return
+                            setLane((l) => toggleFold(l, i))
+                          }
+                        : undefined
+                    }
+                  >
+                    {isSidebarStack(column) && (
+                      <span className="fold-caret" aria-hidden="true">
+                        {panel.folded ? '▸' : '▾'}
+                      </span>
+                    )}
                     <Icon size={14} stroke={1.6} className="panel-icon" />
                     {/* A query is titled by who answers in it, in that
                         harness's own nick colour — the same colour its lines
@@ -3467,8 +3598,8 @@ export default function App() {
                         and a panel that looks exactly like the chat beside it
                         has to say how it differs. */}
                     {kind === 'query' && (
-                      <span className="badge" title="Read-only — a query never writes">
-                        ro
+                      <span className="badge" title="Permission mode inherited from the parent session">
+                        {modeLabel(panel.session?.permissionMode ?? 'default')}
                       </span>
                     )}
                     {/* The tree can be pointed at a directory inside the worktree
@@ -3652,6 +3783,8 @@ export default function App() {
                     // place — see jumpToSession.
                     onJumpSession={jumpToSession}
                     newWorktree={newWorktreeProps}
+                    landingWorktree={landingWorktree}
+                    focused={i === lane.focus}
                     cwd={cwd}
                     root={panel.root}
                     onPatch={(patch) => (lastPatch.current = patch)}
@@ -3700,7 +3833,11 @@ export default function App() {
                     // Where it lands is the lane's business, not the opener's:
                     // every panel has an order, so nothing needs to say "after
                     // me".
-                    onOpen={(child) =>
+                    onOpen={(child) => {
+                      if (child.line && child.sub) {
+                        openAt(mkPanel('file', child.sub, undefined, undefined, undefined, child.root), child.line - 1)
+                        return
+                      }
                       setLane((l) => {
                         const next = open(l, {
                           ...mkPanel(
@@ -3729,7 +3866,7 @@ export default function App() {
                         const back = next.panels.findIndex((p) => p.id === panel.id)
                         return back === -1 ? next : focusAt(next, back)
                       })
-                    }
+                    }}
                   />
                 </div>
                 {keyHintsOn && !bare && <PanelKeys binds={binds} kind={kind} />}

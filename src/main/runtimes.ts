@@ -10,8 +10,8 @@ import { logTurn } from './runtimeLog'
 import { markTurnStart, sendAgentEvent } from './agent'
 import { seedFor } from './handoff'
 import { lmStudioServerModels } from './localAgents'
-import { harnessMcp, mcpRebind } from './mcpHarness'
-import { forgetHouseRules, houseRulesFor } from './houseRules'
+import { harnessMcp, holdsFloeTools, mcpRebind } from './mcpHarness'
+import { CHECKLIST_RULE, forgetHouseRules, houseRulesFor } from './houseRules'
 import { forgetThreads, rememberThread, threadFor } from './threads'
 import { addUsage, cliRunUsage } from './usageLedger'
 import { isQuotaError, scheduleUsageResume } from './usageResume'
@@ -312,6 +312,10 @@ export function textFromJson(raw: string): { text: string; sessionId?: string } 
   throw new Error(stripped || 'no answer')
 }
 
+/** Floe's own standing rule, for a harness that holds the tool it talks about. */
+const floeRuleFor = (runtime: string, key: string): string =>
+  holdsFloeTools(runtime, key) ? CHECKLIST_RULE : ''
+
 export async function runRuntime(
   win: BrowserWindow,
   key: string,
@@ -351,7 +355,7 @@ export async function runRuntime(
   // The user's standing instructions, once per thread. Above the packet on
   // purpose: the packet is data this turn is about, and an instruction placed
   // under the data it governs is read as part of it (see handoff.ts).
-  const rules = houseRulesFor(key, runtime)
+  const rules = houseRulesFor(key, runtime, floeRuleFor(runtime, key))
   if (seed) prompt = seed + prompt
   if (rules) prompt = rules + prompt
   // Codex already has a home: the app-server session (codexServer.ts), which

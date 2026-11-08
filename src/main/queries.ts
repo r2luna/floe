@@ -12,8 +12,8 @@
 
 import { randomUUID } from 'node:crypto'
 import type { BrowserWindow } from 'electron'
-import type { AgentRunOptions, PermissionMode, Query, QueryMark } from '../shared/types'
-import { supportsMode } from '../shared/modes'
+import type { AgentRunOptions, Query, QueryMark } from '../shared/types'
+import { HARNESSES } from '../shared/modes'
 import { parseQueryKey, queryKey } from '../shared/queries'
 import {
   addQuery,
@@ -27,42 +27,25 @@ import {
 import { activeTurnKeys, onceTurnDone, sendAgentEvent, stopAgent } from './agent'
 import { dropRuntimeTranscript, logTurn } from './runtimeLog'
 import { forgetRead, forgetSeen, packetFrom, sessionTranscript } from './handoff'
-import { parseRecapResult, runForked } from './recap'
-import { summaryInstruction, summaryPacket } from '../shared/queryContext'
 import { forgetThread } from './runtimes'
 import { forgetPeers } from './peer'
 import { queryPrompt, relayMark } from '../shared/relay'
 // Circular with turn.ts (it opens the queries this starts turns for) — safe on
 // the same terms as relay↔turn: neither side runs the other at import.
 import { optionsForRoute, optionsForSession, startTurn } from './turn'
-import { agentIdentityNames, agentResumeId } from './identity'
+import { agentIdentityNames } from './identity'
 import { log } from './log'
 
 /**
- * What a query is allowed to do. Not a setting: a query is a second agent
- * pointed at a worktree that somebody else is already writing in, and two
- * writers in one checkout is the failure this is here to prevent (R5).
- */
-export const QUERY_MODE: PermissionMode = 'plan'
-
-/**
  * Whether this harness can hold a query at all.
- *
- * `plan` is the barrier, and it has to be a real one. `nearestMode` would
- * happily snap the mode to something the harness CAN do — gemini has no
- * read-only setting, so it would land on `default` and start asking permission
- * to edit. And a query gets no Floe MCP token (D8), which also means the
- * managed hooks stop recognising it: the second layer of protection goes with
- * the first. A harness that cannot do `plan` is refused rather than promised a
- * read-only that does not exist.
  */
 export function canOpenQuery(harness: string): boolean {
-  return supportsMode(harness, QUERY_MODE)
+  return HARNESSES.includes(harness)
 }
 
 /** Why this harness cannot hold one, in words the chat can print. */
 export function refuseReason(harness: string): string {
-  return `${harness} has no read-only mode, so it cannot hold a query. A query never writes — open the harness in the chat instead if that is what you want.`
+  return `${harness} is not a supported query runtime.`
 }
 
 /**
@@ -81,7 +64,12 @@ export function parentIdOf(parentKey: string): string {
 
 /** Every query opened off this session, whichever of its names you ask by. */
 export function queriesFor(parentKey: string): Query[] {
-  return getQueries(parentIdOf(parentKey))
+  const sessionId = parentIdOf(parentKey)
+  return getQueries(sessionId).map((query) => ({
+    ...query,
+    mode: optionsForRoute({ harness: query.harness, model: query.model, effort: query.effort, prompt: '' }, sessionId)
+      .permissionMode
+  }))
 }
 
 /** The query on this harness, if the session has one. */
@@ -138,7 +126,7 @@ const opening = new Set<string>()
  * in its own thread, and a reopened one has its transcript back.
  *
  * `start` gets the prefix ('' when there is none) so the caller keeps deciding
- * what the turn runs on. See shared/queryContext.ts for what the prefix is.
+ * what the turn runs on.
  */
 export function withOpeningContext(
   win: BrowserWindow | null,
@@ -149,11 +137,13 @@ export function withOpeningContext(
   prompt: string,
   start: (prefix: string) => void
 ): void {
+  // The opening prompt is appended after the full transcript packet.
+  void prompt
   if (sessionTranscript(worktreePath, qkey).length) return start('')
   opening.add(qkey)
   if (win && !win.isDestroyed())
-    sendAgentEvent(win, qkey, { kind: 'tool', name: 'query', summary: 'summarizing the chat…' })
-  void chatContext(worktreePath, parentKey, qkey, harness, prompt)
+    sendAgentEvent(win, qkey, { kind: 'tool', name: 'query', summary: 'reading the chat…' })
+  void chatContext(worktreePath, parentKey, qkey, harness)
     .catch(() => '')
     .then((prefix) => {
       opening.delete(qkey)
@@ -164,27 +154,17 @@ export function withOpeningContext(
 /**
  * The chat, for a query about to answer about it.
  *
- * A summary when the chat has a Claude session to fork — written by its own
- * model, from the whole conversation, without touching its transcript (see
- * recap.ts). Otherwise, or when that run fails or times out, the raw tail of
- * the conversation, the same packet a harness switch sends: every harness gets
- * a query that knows what the chat was about, not only Claude's.
+ * The complete recorded conversation, without the limits used for ordinary
+ * harness handoffs. A query must be able to continue from the session even if
+ * its original model has stopped or reached its session limit.
  */
 export async function chatContext(
   worktreePath: string,
   parentKey: string,
   qkey: string,
-  harness: string,
-  prompt: string
+  harness: string
 ): Promise<string> {
-  const resumeId = agentResumeId(parentKey)
-  if (resumeId) {
-    const out = await runForked(worktreePath, resumeId, summaryInstruction(harness, prompt))
-    const summary = parseRecapResult(out)
-    log('query-summary', { key: qkey, chars: summary.length })
-    if (summary.trim()) return summaryPacket(summary)
-  }
-  return packetFrom(worktreePath, parentKey, qkey, { since: 'all', to: harness })?.packet ?? ''
+  return packetFrom(worktreePath, parentKey, qkey, { since: 'all', to: harness, complete: true })?.packet ?? ''
 }
 
 export interface OpenedQuery {
@@ -215,7 +195,8 @@ export function openQueryFor(
     harness: spec.harness,
     model: spec.model,
     effort: spec.effort,
-    mode: QUERY_MODE,
+    mode: optionsForRoute({ harness: spec.harness, model: spec.model, effort: spec.effort, prompt: '' }, parentKey)
+      .permissionMode,
     openedBy: spec.openedBy ?? 'user'
   })
   if (!query) return null
@@ -286,15 +267,9 @@ export function refuse(win: BrowserWindow | null, parentKey: string, reason: str
     sendAgentEvent(win, parentKey, { kind: 'tool', name: 'query', summary: reason })
 }
 
-/**
- * What a query's turn runs on: the route's own model and effort, at `plan`.
- *
- * The mode is not negotiable and is not read from the parent — the parent may
- * well be on bypass, and inheriting that is the one thing a read-only side
- * conversation must never do.
- */
+/** Keep the permission mode selected by `optionsForRoute`. */
 export function queryOptions(base: AgentRunOptions): AgentRunOptions {
-  return { ...base, permissionMode: QUERY_MODE }
+  return base
 }
 
 /** The harness a query key answers as — for the panel head and the log. */
@@ -533,7 +508,7 @@ export function reopenQuery(win: BrowserWindow | null, qkey: string): OpenedQuer
  * Ask several harnesses the same thing at once, and bring the answers back into
  * the chat side by side.
  *
- * Each target is an ordinary query — same key, same panel, same read-only, same
+ * Each target is an ordinary query — same key, same panel, same permission mode, same
  * three actions — so nothing here is a second mechanism. What the fan-out adds
  * is only the comparison: every answer is ALSO mirrored into the chat under one
  * `fanoutId`, which is what lets the transcript draw them as columns instead of
@@ -584,7 +559,7 @@ export function fanOut(
     )
   }
   if (refused.length)
-    refuse(win, parentKey, `${refused.join(', ')} cannot hold a query: no read-only mode.`)
+    refuse(win, parentKey, `${refused.join(', ')} cannot hold a query: unsupported runtime.`)
   log('query-fanout', { key: parentKey, to: keys.length, refused: refused.length, busy: busy.length })
   noteAsked(win, parentKey, fanoutId, keys.length)
   return { fanoutId, keys, refused, busy }

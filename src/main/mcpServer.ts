@@ -47,6 +47,7 @@ import {
   type Attachment
 } from './taskFolders'
 import { cardLookup, sendDeps } from './taskFolderDeps'
+import { createTaskWorktree } from './taskWorktree'
 import {
   addTask,
   boardOf,
@@ -66,6 +67,7 @@ import {
   fileDiff,
   listBranches,
   listWorktrees,
+  mergeTargetOf,
   mergeWorktree,
   removeWorktree,
   worktreeDiffStat
@@ -74,6 +76,7 @@ import { worktreeStatus } from './gitStatus'
 import { findDefinitions } from './definitions'
 import { provisionWorktree } from './provision'
 import { supportStack } from './support'
+import { listSystemFonts } from './systemFonts'
 import { PREMISE_REL, readPremise, writePremise } from './premise'
 import { listPlans, readPlan } from './plans'
 // `./draw/index`, not `./draw`: the MCP test loads this graph under a plain
@@ -95,6 +98,8 @@ import {
   type CreatedSession
 } from './sessionStore'
 import { agentIdentityNames, resolveAgentIdentity } from './identity'
+import { checklistSummary } from '../shared/checklist'
+import { publishChecklist } from './agent'
 import { readSessionBuffer, sessionRuntime, setAgentPermissionMode, stopAgent, waitForTurn } from './agent'
 // One turn, one door: the same dispatcher the composer's `agent:start` uses, so
 // an agent gets the harness, the skills and the handle exactly as a person does.
@@ -157,6 +162,15 @@ import { claudeMcpConfig, clearHarnessConfigs, mcpUrlFor, serversFor, setMcpPort
 import { HARNESSES, MODES, nearestMode } from '../shared/modes'
 import { EFFORTS, type Effort } from '../shared/types'
 import { diagnoseWorktreeFailure } from '../shared/worktreeError'
+import { sourceWorktreePremise, type SourceId } from '../shared/worktreeSource'
+import {
+  availableSources,
+  createWorktreeFromSource,
+  integrationStatus,
+  listTaskIssues,
+  searchSource
+} from './integrations/index'
+import { setCredential } from './integrations/credentials'
 import {
   createSkill,
   deleteSkill,
@@ -502,6 +516,7 @@ function registerTools(server: McpServer, token: string): void {
   registerPlanTools(server, token)
   registerDrawingTools(server, token)
   registerDecisionTools(server)
+  registerChecklistTools(server, token)
   registerColonyTools(server)
   registerColonyLandingTools(server)
   registerColonyReportTools(server)
@@ -565,6 +580,28 @@ async function createWorktreeTool(
   }
 }
 
+async function createWorktreeFromSourceTool(
+  project: string,
+  source: SourceId,
+  ref: string,
+  base?: string,
+  premise?: string
+): Promise<ToolResult> {
+  try {
+    const made = await createWorktreeFromSource(project, source, ref, { base })
+    const created = made.worktrees.find((w) => w.branch === made.branch)
+    if (made.existed) return textResult({ created, existed: true, item: made.item })
+    pushWorktrees(project, made.worktrees)
+    seedPremise(created, premise ?? sourceWorktreePremise(made.item))
+    const win = getWindow()
+    if (win && created) void provisionWorktree(win, project, created.path, created.branch)
+    return textResult({ created, item: made.item, worktrees: made.worktrees })
+  } catch (e) {
+    const failure = diagnoseWorktreeFailure(ref, (e as Error).message)
+    return textResult({ error: failure.why, git: failure.raw || undefined })
+  }
+}
+
 async function mergeWorktreeTool(project: string, worktree: string): Promise<ToolResult> {
   try {
     const result = await mergeWorktree(project, worktree)
@@ -595,6 +632,8 @@ async function startMergeTool(token: string, worktree: string): Promise<ToolResu
     return textResult({ error: (e as Error).message })
   }
 }
+
+const SOURCE_ID = z.enum(['github', 'bitbucket', 'jira']).describe('The service to ask.')
 
 // Projects, worktrees and the review pair: everything that runs straight
 // against git in main.
@@ -651,6 +690,62 @@ function registerWorktreeTools(server: McpServer, token: string): void {
         )
     },
     async (a) => createWorktreeTool(a.project, a.branch, a.base, a.note, a.premise)
+  )
+
+  server.tool(
+    'list_worktree_sources',
+    'Which services can open a worktree in this project: github or bitbucket when a remote points there, and always jira.',
+    { project: z.string().describe('The repo root path of the project.') },
+    async (a) => textResult({ sources: await availableSources(a.project) })
+  )
+
+  server.tool(
+    'search_worktree_source',
+    "List open pull requests and issues from github, bitbucket or jira, for create_worktree_from_source. With no query jira lists the user's own open issues. A query searches; #123, PROJ-123 or a URL looks up that one, in any state. A missing key comes back as `error`.",
+    {
+      project: z.string().describe('The repo root path of the project.'),
+      source: SOURCE_ID,
+      query: z.string().optional().describe('Search text, a #number, a Jira key, or a URL.')
+    },
+    async (a) => textResult(await searchSource(a.project, a.source, a.query))
+  )
+
+  server.tool(
+    'create_worktree_from_source',
+    'Open a worktree for a pull request or issue. A PR checks out its head branch; an issue forks a new branch named after it. Provisioning runs as in the in-app flow. An item that already has a worktree returns that one with existed: true.',
+    {
+      project: z.string().describe('The repo root path of the project.'),
+      source: SOURCE_ID,
+      ref: z.string().describe('The number, or the Jira key: `123`, `PROJ-123`.'),
+      base: z.string().optional().describe('The base branch for an issue (defaults to the main branch). A PR uses its own.'),
+      premise: z.string().optional().describe("The worktree's standing brief. Defaults to the item's reference, title and URL.")
+    },
+    async (a) => createWorktreeFromSourceTool(a.project, a.source, a.ref, a.base, a.premise)
+  )
+
+  server.tool(
+    'integration_status',
+    'What is saved in Settings for GitHub, Bitbucket and Jira, and whether gh is logged in. Says whether a key exists, and never returns one.',
+    {},
+    async () => textResult(await integrationStatus())
+  )
+
+  server.tool(
+    'set_integration_credential',
+    "Save one Settings value for an integration: github token, bitbucket email or token, jira site, email or token. An empty value removes it. Write-only. A key passed here is also in this session's transcript, so prefer asking the user to paste it in Settings, under Integrations.",
+    {
+      source: SOURCE_ID,
+      field: z.string().describe('token, email or site.'),
+      value: z.string().describe('The value. Empty removes it.')
+    },
+    async (a) => {
+      try {
+        setCredential(a.source, a.field, a.value.trim())
+        return textResult(await integrationStatus())
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
   )
 
   server.tool(
@@ -713,11 +808,14 @@ function registerWorktreeTools(server: McpServer, token: string): void {
 
   server.tool(
     'worktree_status',
-    'Git status of a worktree: dirty files plus the diff stat against its review base.',
+    'Git status of a worktree: dirty files, commits to push, how far it is ahead of and behind the branch it merges into (status.base), plus the diff stat against its review base.',
     { worktree: z.string().describe('The worktree path.') },
     async ({ worktree }) => {
       try {
-        const [status, stat] = await Promise.all([worktreeStatus(worktree), worktreeDiffStat(worktree)])
+        const [status, stat] = await Promise.all([
+          mergeTargetOf(worktree).then((base) => worktreeStatus(worktree, base)),
+          worktreeDiffStat(worktree)
+        ])
         return textResult({ status, diffStat: stat })
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -1228,18 +1326,18 @@ function listQueriesTool(sessionId: string): ToolResult {
 
 function registerQueryTools(server: McpServer): void {
   // --- Queries -------------------------------------------------------------
-  // A query is a side conversation running beside a session, read-only, in its
+  // A query is a side conversation running beside a session in its
   // own panel. An agent gets the same five verbs a person does — see
   // docs/queries.md. (An agent running INSIDE a query has no Floe token at all
   // and reaches none of this; that is D8.)
   server.tool(
     'open_query',
-    'Open a read-only side conversation with another harness beside a session, in its own panel, running in parallel. The same thing typing `@codex …` in the composer does. If that harness already has a query open on the session, this continues it: the prompt goes into the existing conversation.',
+    'Open a side conversation with another harness beside a session, in its own panel, running in parallel with the parent session permission mode. The same thing typing `@codex …` in the composer does. If that harness already has a query open on the session, this continues it: the prompt goes into the existing conversation.',
     {
       session_id: z.string().describe('The Floe session to open it beside.'),
       harness: z
         .enum(HARNESSES as [string, ...string[]])
-        .describe('Who answers in it. Must be a harness with a read-only mode — codex, claude or opencode.'),
+        .describe('Who answers in it.'),
       prompt: z.string().optional().describe('A message for the query: the first one if it opens now, the next one if it is already open.'),
       model: z.string().optional().describe("That harness's own slug."),
       effort: z.enum(EFFORTS).optional().describe('How hard to think.')
@@ -1249,13 +1347,13 @@ function registerQueryTools(server: McpServer): void {
 
   server.tool(
     'ask_all',
-    'Ask several harnesses the same thing at once. Each answers in its own read-only query, and the replies come back into the session side by side for comparison. The harnesses are the ones you name — this never fans out to everything installed.',
+    'Ask several harnesses the same thing at once. Each answers in its own query using the parent session permission mode, and the replies come back into the session side by side for comparison. The harnesses are the ones you name — this never fans out to everything installed.',
     {
       session_id: z.string().describe('The Floe session to ask from.'),
       harnesses: z
         .array(z.enum(HARNESSES as [string, ...string[]]))
         .min(1)
-        .describe('Who to ask. Only harnesses with a read-only mode can hold a query.'),
+        .describe('Who to ask.'),
       prompt: z.string().describe('The message every one of them gets.'),
       effort: z.enum(EFFORTS).optional().describe('One effort for all of them.')
     },
@@ -1824,6 +1922,30 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
   )
 
   server.tool(
+    'task_issues',
+    "The GitHub and Jira issues the tasks panel lists under the local tasks: open issues from the project's GitHub repository, and the user's own open Jira issues once Jira's keys are saved. Open one with create_worktree_from_source.",
+    { project: TASK_PROJECT },
+    ({ project }) => taskToolResult(() => listTaskIssues(projectRoot(project)))
+  )
+
+  server.tool(
+    'task_create_worktree',
+    "Create a worktree for a task, on a branch named after its folder, clipped to keep its number, with a premise that references the task's files and quotes its idea. Provisioning runs as in the in-app flow. A task that already has one returns it with existed: true. Refuses a task already sent to the colony.",
+    { project: TASK_PROJECT, task: TASK_REF },
+    ({ project, task }) =>
+      taskToolResult(async () => {
+        const root = projectRoot(project)
+        const made = await createTaskWorktree(root, task)
+        const created = made.worktrees.find((w) => w.branch === made.branch)
+        if (made.existed) return { created, existed: true }
+        pushWorktrees(root, made.worktrees)
+        const win = getWindow()
+        if (win && created) void provisionWorktree(win, root, created.path, created.branch)
+        return { created, worktrees: made.worktrees }
+      })
+  )
+
+  server.tool(
     'open_task',
     'Show a task in the tasks panel of the chat that asked, so the user sees it.',
     { project: TASK_PROJECT, task: TASK_REF },
@@ -1834,6 +1956,36 @@ function registerTaskFolderTools(server: McpServer, token: string): void {
         pushCommand({ kind: 'open_task', callerKey: token, root, ref: found.name })
         return { ok: true, task: found.name }
       })
+  )
+}
+
+function registerChecklistTools(server: McpServer, token: string): void {
+  server.tool(
+    'set_checklist',
+    [
+      "Show the user your to-do list for the work in hand, pinned above the chat's composer.",
+      'Use it when a request takes three or more distinct steps. Send the WHOLE list every time:',
+      'once before you start, then whenever a step starts or finishes. Keep exactly one step',
+      'in_progress. Send it in the same message as your next tool call when you can, so it costs',
+      'no extra round trip. An empty list takes it down.'
+    ].join(' '),
+    {
+      items: z
+        .array(
+          z.object({
+            text: z.string().min(1).describe('The step, imperative: "Run the gate".'),
+            active: z.string().optional().describe('Shown while it runs: "Running the gate".'),
+            status: z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
+          })
+        )
+        .max(100)
+        .describe('The complete list, in order. Replaces the previous one.')
+    },
+    async ({ items }) => {
+      if (token === GLOBAL_TOKEN) return textResult({ error: 'A checklist belongs to a Floe session, and this caller is not one.' })
+      publishChecklist(getWindow(), token, items)
+      return textResult({ ok: true, progress: checklistSummary(items) })
+    }
   )
 }
 
@@ -2356,6 +2508,13 @@ function registerSupportTools(server: McpServer): void {
     // supportStack owns the dispatch AND the error-to-text conversion, so the
     // palette command and this tool cannot drift apart.
     async ({ action }) => textResult(await supportStack(action))
+  )
+
+  server.tool(
+    'list_fonts',
+    "The font families installed on this machine, monospaced first — the names `[appearance] font-family` in floe.toml accepts. Empty where the OS cannot be asked.",
+    {},
+    async () => textResult(await listSystemFonts())
   )
 }
 
@@ -3062,6 +3221,40 @@ function registerBrowserTools(server: McpServer, token: string): void {
     }
   })
   server.tool(
+    'browser_annotate',
+    'Mark elements on the current page and capture it: numbered boxes burned into a viewport PNG, plus a numbered list of what each mark landed on. The tool form of the annotate surface a person uses (⌘⇧N).',
+    {
+      marks: z
+        .array(
+          z.object({
+            target: z.string().describe('A ref from browser_snapshot, or a CSS selector.'),
+            note: z.string().optional().describe('What this mark is about.')
+          })
+        )
+        .min(1)
+        .describe('What to mark, in order. The first is scrolled into view.')
+    },
+    async ({ marks }) => {
+      try {
+        // Answers an image, so like browser_screenshot it builds its own result.
+        const headless = noBrowserHere()
+        if (headless) return textResult({ error: headless })
+        const win = getWindow()
+        if (!win) return textResult({ error: 'No Floe window is open.' })
+        const browser = await import('./browser')
+        const shot = await browser.annotateBrowser(win, marks, browser.browserKeyFor(win, browserNames(token)))
+        return {
+          content: [
+            { type: 'image' as const, data: shot.data, mimeType: shot.mimeType },
+            { type: 'text' as const, text: shot.report }
+          ]
+        }
+      } catch (e) {
+        return textResult({ error: (e as Error).message })
+      }
+    }
+  )
+  server.tool(
     'browser_history',
     'Move through or control the current page load.',
     { action: z.enum(['back', 'forward', 'reload', 'stop']).describe('Browser action to run.') },
@@ -3516,9 +3709,7 @@ export function mcpConfigFor(key: string, worktreePath?: string): string {
  * A query gets no Floe token (D8). The token IS the session id (`/mcp/<key>`),
  * and a query key resolves to no session — so a query would carry a token
  * `findSessionAny` cannot resolve and every tool that depends on it would break
- * in silence. Mating that with the read-only promise, the honest answer is that
- * a conversation which only reads should not be opening panels, creating
- * sessions or running commands in the app either.
+ * in silence. The query therefore receives no Floe control tools.
  *
  * But not minting the token is not enough on its own: without a config of its
  * own the CLI falls back to the Floe server registered GLOBALLY and comes back

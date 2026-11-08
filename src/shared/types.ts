@@ -1,6 +1,7 @@
 // Types shared across the main, preload, and renderer processes.
 
 import type { ArtifactSpec } from './artifact'
+import type { ChecklistItem } from './checklist'
 export type { ArtifactSpec } from './artifact'
 
 /**
@@ -72,10 +73,10 @@ export type PenguinColorId = (typeof PENGUIN_COLORS)[number]
  * change rather than a component change.
  *
  * `classic` is the IRC log the app shipped with — one column, no air between
- * turns. The other seven each pull one lever on it: a nick gutter, a surface per
+ * turns. The others each pull one lever on it: a nick gutter, a surface per
  * turn, a rule between turns, a timeline rail, work banded away from speech,
- * the nick as a label line above the words, and a head line per turn with
- * your own turns on the right.
+ * the nick as a label line above the words, a head line per turn with your own
+ * turns on the right, and Orca's chat, where only other speakers are named.
  */
 export const CHAT_LAYOUTS = [
   'classic',
@@ -85,10 +86,20 @@ export const CHAT_LAYOUTS = [
   'rail',
   'split',
   'labels',
-  'convo'
+  'convo',
+  'orca'
 ] as const
 
 export type ChatLayoutId = (typeof CHAT_LAYOUTS)[number]
+
+/**
+ * The face the `orca` chat layout wears — `[appearance] orca-font`. `orca` is
+ * Geist with SF Mono for code; `app` is the face the rest of Floe wears. Neither
+ * changes the size, which is always `font-size`'s. A stylesheet switch like the layout itself: `data-orca-font` on <html>.
+ */
+export const ORCA_FONTS = ['orca', 'app'] as const
+
+export type OrcaFontId = (typeof ORCA_FONTS)[number]
 
 /**
  * Which themes get the translucent window — `[appearance] transparency`.
@@ -227,6 +238,10 @@ export interface WorktreeStatus {
   ahead: number // commits to push
   behind: number // commits to pull
   upstream: boolean // has a tracking branch at all
+  // Where this branch stands against the branch it merges into: `ahead` is what
+  // a merge would bring, `behind` is what the base gained since. Absent on the
+  // main worktree, and when git cannot tell.
+  base?: { name: string; ahead: number; behind: number }
 }
 
 // The live status the projects rail shows for a project the user worked today:
@@ -522,6 +537,30 @@ export interface BrowserTarget {
 }
 
 /** The readable and interactive page surface returned to an agent. */
+/** An element on screen when the page was captured, in the page's CSS pixels. */
+export interface BrowserElement {
+  selector: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** Worth a keyboard hint: what you would otherwise have to aim a mouse at. */
+  interactive: boolean
+}
+
+/** The viewport as an image, and what was where on it at that moment. */
+export interface BrowserCapture {
+  data: string
+  mimeType: 'image/png'
+  url: string
+  title: string
+  width: number
+  height: number
+  capturedAt: number
+  elements: BrowserElement[]
+}
+
 export interface BrowserSnapshot {
   url: string
   title: string
@@ -844,7 +883,8 @@ export interface ThreadComment {
 
 // `@codex analisa isso` with Claude mid-turn opens a QUERY: its own panel, its
 // own transcript, running in parallel instead of queueing behind the turn in
-// flight. It is read-only by construction, and three actions close the cycle —
+// flight. It inherits the parent's permission mode, and three actions close
+// the cycle —
 // merge (the conversation becomes the session's context), peek (the session
 // reads it with nothing closing) and discard.
 //
@@ -1134,6 +1174,8 @@ export type AgentEvent =
   // moving (a delta, a tool row, the end) takes it down too. Without it a
   // rate-limited turn reads exactly like a hung one, for as long as it lasts.
   | { kind: 'status'; text: string; at: number }
+  // The agent's to-do list, whole, every time it changes (shared/checklist.ts).
+  | { kind: 'checklist'; items: ChecklistItem[] }
   | { kind: 'tokens'; tokens: number }
   // Parallel subagent lifecycle — start (launched), progress (live tokens / current
   // tool), done (its result returned). Multiple may run concurrently in one turn.
@@ -1213,6 +1255,8 @@ export interface AgentReplay {
    * key goes deaf mid-turn: no text, and no `done` to take "is typing" back off.
    */
   names?: string[]
+  /** The session's to-do list. Outlives the turn, so it is sent whether one is running or not. */
+  checklist?: ChecklistItem[]
 }
 
 // --- Provisioning (setup checklist for a freshly created worktree) ---------
