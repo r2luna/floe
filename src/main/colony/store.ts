@@ -1,4 +1,6 @@
-// Where a task's state lives: `<dataDir>/colony.json`, keyed by project root.
+// Where a task's state lives: `<dataDir>/colony.json`, keyed by board — the
+// worktree path the board was opened in. The project root is the main
+// checkout's board, so a record from before boards were split lands there.
 //
 // Spec Q3, answered. It goes beside `sessions.json` and not in `configDir()`
 // because the two directories mean different things (see dataDir.ts): config is
@@ -82,8 +84,10 @@ export interface TaskReport {
 
 export interface ColonyTask {
   id: string
-  /** Repo root. The board is project-scoped, so this is what partitions it. */
+  /** Repo root: where its config, worktree and git calls live. */
   project: string
+  /** The worktree path of the board it is on. Unset is `project` — the main checkout's board. */
+  board?: string
   /** The card's name, and the branch's last segment. */
   name: string
   kind: TaskKind
@@ -176,7 +180,7 @@ export interface ColonyTask {
 interface Store {
   tasks: ColonyTask[]
   /**
-   * The board's own session, one per project (D7).
+   * The board's own session, one per board (D7), keyed by board path.
    *
    * Here rather than derived from the session list because "the nanny" is an
    * identity, not a title: a session the user renamed is still the nanny, and a
@@ -236,9 +240,27 @@ export function allTasks(): ColonyTask[] {
   return read().tasks
 }
 
-/** Every task on one project's board, oldest first. */
-export function listTasks(project: string): ColonyTask[] {
+/** The board a task or event is on. Records from before boards were split have no `board`. */
+export const boardOf = (t: { board?: string; project: string }): string => t.board ?? t.project
+
+/** Every task on one board, oldest first. */
+export function listTasks(board: string): ColonyTask[] {
+  return read().tasks.filter((t) => boardOf(t) === board)
+}
+
+/** Every task of a project, on every one of its boards. */
+export function projectTasks(project: string): ColonyTask[] {
   return read().tasks.filter((t) => t.project === project)
+}
+
+/**
+ * The board a worktree top-level path opens. A card's own worktree is never a
+ * board: it is the board the card is on, so a lane (or the user opening the
+ * card's chat) lands back where the card lives.
+ */
+export function boardKeyFor(top: string): string {
+  const owner = read().tasks.find((t) => t.worktreePath === top)
+  return owner ? boardOf(owner) : top
 }
 
 export function getTask(id: string): ColonyTask | undefined {
@@ -275,7 +297,7 @@ export function colonySessionIds(): Set<string> {
 }
 
 /**
- * A name no other task on this board has.
+ * A name no other task of this project has, on any of its boards.
  *
  * The name is the branch's last segment, so a collision would be two tasks
  * pointing at one worktree — which is the one thing "one task = one worktree"
@@ -290,13 +312,15 @@ export function freeName(project: string, wanted: string, exceptId?: string): st
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 48) || 'task'
-  const taken = new Set(listTasks(project).filter((t) => t.id !== exceptId).map((t) => t.name))
+  const taken = new Set(projectTasks(project).filter((t) => t.id !== exceptId).map((t) => t.name))
   if (!taken.has(base)) return base
   for (let n = 2; ; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`
 }
 
 export interface NewTask {
   project: string
+  /** The board's worktree path. Unset is the project root's board. */
+  board?: string
   name: string
   kind?: TaskKind
   brief: string
@@ -325,6 +349,7 @@ export function addTask(task: NewTask): ColonyTask {
   const created: ColonyTask = {
     id: `task_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     project: task.project,
+    board: task.board ?? task.project,
     name: freeName(task.project, task.name),
     kind: task.kind ?? 'feat',
     brief: task.brief,
@@ -376,8 +401,8 @@ export interface TaskEdit {
  * to say why. `id` is undefined for a card that does not exist yet, which
  * cannot be in a cycle — nothing can depend on it.
  */
-export function dependencyProblem(project: string, id: string | undefined, dependsOn: string[]): string | null {
-  const tasks = new Map(listTasks(project).map((t) => [t.id, t]))
+export function dependencyProblem(board: string, id: string | undefined, dependsOn: string[]): string | null {
+  const tasks = new Map(listTasks(board).map((t) => [t.id, t]))
   const unknown = dependsOn.filter((d) => !tasks.has(d))
   if (unknown.length) return `No task on this board has these ids: ${unknown.join(', ')}`
   if (!id) return null
@@ -407,7 +432,7 @@ export function updateTask(id: string, edit: TaskEdit): ColonyTask {
     throw new Error(`"${task.name}" has left the backlog — only a card that has not been released can be edited`)
   }
   if (edit.dependsOn) {
-    const problem = dependencyProblem(task.project, id, edit.dependsOn)
+    const problem = dependencyProblem(boardOf(task), id, edit.dependsOn)
     if (problem) throw new Error(problem)
   }
   const patch: Partial<ColonyTask> = {
@@ -435,14 +460,14 @@ export function removeTask(id: string): void {
   if (tasks.length !== store.tasks.length) write({ ...store, tasks })
 }
 
-/** The project's nanny session, if one has been opened. */
-export function getNanny(project: string): string | undefined {
-  return read().nannies[project]
+/** The board's nanny session, if one has been opened. */
+export function getNanny(board: string): string | undefined {
+  return read().nannies[board]
 }
 
-export function setNanny(project: string, sessionId: string): void {
+export function setNanny(board: string, sessionId: string): void {
   const store = read()
-  write({ ...store, nannies: { ...store.nannies, [project]: sessionId } })
+  write({ ...store, nannies: { ...store.nannies, [board]: sessionId } })
 }
 
 /** Drop the cache — for the tests, which repoint dataDir mid-process. */

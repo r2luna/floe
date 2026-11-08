@@ -1063,23 +1063,25 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('threadComments:markSent', sessionKey, ids)
     },
     // The colony board. One read, so the panel repaints from a single shape.
+    // Every `path` is a worktree (or the project root): main resolves it to the
+    // board it opens — a card's own worktree opens the board the card is on.
     colony: {
-      board: (project: string): Promise<Board> => ipcRenderer.invoke('colony:board', project),
+      board: (path: string): Promise<Board> => ipcRenderer.invoke('colony:board', path),
       add: (task: { project: string; name: string; kind?: TaskKind; brief: string }): Promise<ColonyTask> =>
         ipcRenderer.invoke('colony:add', task),
       // Cuts the worktree and puts the card at the first stage's door.
       release: (id: string): Promise<ColonyTask> => ipcRenderer.invoke('colony:release', id),
-      remove: (id: string, project: string): Promise<void> => ipcRenderer.invoke('colony:remove', id, project),
+      remove: (id: string): Promise<void> => ipcRenderer.invoke('colony:remove', id),
       // `fresh` says she was just minted, so the caller opens her with `opener`
       // as the chat's first message — a nanny who has not read her own skill is
       // just a chat in the project root.
       nanny: (
-        project: string
+        path: string
       ): Promise<{ sessionId: string; worktreePath: string; fresh: boolean; opener: string }> =>
-        ipcRenderer.invoke('colony:nanny', project),
+        ipcRenderer.invoke('colony:nanny', path),
       // What the board did without being asked. A different question from
       // `board` — that one is now, this one is what happened.
-      events: (project: string): Promise<BoardEvent[]> => ipcRenderer.invoke('colony:events', project),
+      events: (path: string): Promise<BoardEvent[]> => ipcRenderer.invoke('colony:events', path),
       // Put base back where it was before one of those merges. Refuses when
       // base has moved on since, which is the only thing that makes it safe.
       undoMerge: (eventId: string): Promise<{ ok: boolean; message?: string }> =>
@@ -1088,20 +1090,20 @@ export function buildFloeApi(ipcRenderer: IpcLike, host: FloeHost) {
         ipcRenderer.invoke('colony:mergeTask', id),
       // The one config value Floe writes for you — the switch that decides
       // whether the board changes your base branch unasked.
-      setAutomerge: (project: string, on: boolean): Promise<string> =>
-        ipcRenderer.invoke('colony:setAutomerge', project, on),
+      setAutomerge: (path: string, on: boolean): Promise<string> =>
+        ipcRenderer.invoke('colony:setAutomerge', path, on),
       // The step report: measure every card that enters the first stage from now on.
-      setReport: (project: string, on: boolean): Promise<string> =>
-        ipcRenderer.invoke('colony:setReport', project, on),
+      setReport: (path: string, on: boolean): Promise<string> =>
+        ipcRenderer.invoke('colony:setReport', path, on),
       // Take every merged card off `done`. Resolves to the cards it cleared.
-      clearDone: (project: string): Promise<ColonyTask[]> => ipcRenderer.invoke('colony:clearDone', project),
+      clearDone: (path: string): Promise<ColonyTask[]> => ipcRenderer.invoke('colony:clearDone', path),
       // Write a tracked card's report now and open it. Resolves to the file.
       openReport: (id: string): Promise<string> => ipcRenderer.invoke('colony:openReport', id),
       // Park a card back in the backlog, worktree intact — the way out of an
       // automatic release.
       hold: (id: string): Promise<ColonyTask | undefined> => ipcRenderer.invoke('colony:hold', id),
-      onEvent: (cb: (event: { project: string }) => void): (() => void) => {
-        const listener = (_event: IpcRendererEvent, event: { project: string }): void => cb(event)
+      onEvent: (cb: (event: { project: string; board: string }) => void): (() => void) => {
+        const listener = (_event: IpcRendererEvent, event: { project: string; board: string }): void => cb(event)
         ipcRenderer.on('colony:event', listener)
         return () => ipcRenderer.removeListener('colony:event', listener)
       }

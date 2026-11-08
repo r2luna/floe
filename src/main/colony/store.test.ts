@@ -118,3 +118,35 @@ test('a dependency list may not name unknown ids or wait on itself', async () =>
   assert.throws(() => updateTask(a.id, { dependsOn: [b.id] }), /wait on itself/)
   assert.throws(() => updateTask(a.id, { dependsOn: [a.id] }), /wait on itself/)
 })
+
+test('each worktree of a project is its own board — neither sees the other', async () => {
+  const { boardKeyFor, dependencyProblem, getNanny } = await import('./store.ts')
+  const { writeFileSync, readFileSync } = await import('node:fs')
+  const a = addTask({ project: '/wt', board: '/wt/.worktrees/a', name: 'on-a', brief: '' })
+  const b = addTask({ project: '/wt', board: '/wt/.worktrees/b', name: 'on-b', brief: '' })
+  const root = addTask({ project: '/wt', name: 'on-root', brief: '' })
+  assert.deepEqual(listTasks('/wt/.worktrees/a').map((t) => t.id), [a.id])
+  assert.deepEqual(listTasks('/wt/.worktrees/b').map((t) => t.id), [b.id])
+  // No board named is the project root's board, and it is always written down.
+  assert.equal(root.board, '/wt')
+  assert.deepEqual(listTasks('/wt').map((t) => t.id), [root.id])
+  // A record from before boards were split has no `board` — it is the root's.
+  const file = join(dir, 'colony.json')
+  const store = JSON.parse(readFileSync(file, 'utf8'))
+  store.tasks.push({ ...root, id: 'task_old', name: 'old', board: undefined })
+  writeFileSync(file, JSON.stringify(store))
+  assert.deepEqual(listTasks('/wt').map((t) => t.id), [root.id, 'task_old'])
+  // Names are branches, and branches are project-wide.
+  assert.equal(freeName('/wt', 'on-a'), 'on-a-2')
+  // A dependency is on the same board or nowhere.
+  assert.match(String(dependencyProblem('/wt/.worktrees/a', undefined, [b.id])), new RegExp(b.id))
+  // One nanny per board; the root's key is the one that was always there.
+  setNanny('/wt', 'nanny-root')
+  setNanny('/wt/.worktrees/a', 'nanny-a')
+  assert.equal(getNanny('/wt'), 'nanny-root')
+  assert.equal(getNanny('/wt/.worktrees/a'), 'nanny-a')
+  // A card's own worktree is never a board: it resolves to the board the card is on.
+  patchTask(a.id, { worktreePath: '/wt/.worktrees/on-a' })
+  assert.equal(boardKeyFor('/wt/.worktrees/on-a'), '/wt/.worktrees/a')
+  assert.equal(boardKeyFor('/wt/.worktrees/c'), '/wt/.worktrees/c')
+})

@@ -1241,7 +1241,20 @@ export default function App() {
       return 'chat'
     }
     if (!launcher) return 'none'
-    setLane((l) => open(l, panelOf('branch', row?.worktree.branch)))
+    setLane((l) => {
+      const next = open(l, panelOf('branch', row?.worktree.branch))
+      // launcher → launcher is no session switch, so the lane keeps the terminal
+      // it had — still `term:<previous branch>`. Re-aim it at this worktree,
+      // keeping its size and dock, so the shell follows the branch you picked.
+      return {
+        ...next,
+        panels: next.panels.map((p) =>
+          p.kind === 'terminal' && p.sub !== path
+            ? { ...mkPanel('terminal', path), width: p.width, height: p.height, dock: p.dock }
+            : p
+        )
+      }
+    })
     return 'launcher'
   }
 
@@ -2275,6 +2288,7 @@ export default function App() {
     panelEl: panelAt,
     rowsOf,
     project: projects.current?.path,
+    board: worktrees.currentPath ?? projects.current?.path,
     openChat: (session, firstPrompt) => setLane((l) => open(l, mkPanel('chat', undefined, session, firstPrompt))),
     openTaskChat: (task, session, firstPrompt) =>
       setLane((l) =>

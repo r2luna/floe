@@ -293,13 +293,14 @@ import {
   reconcileColony,
   holdTask,
   releaseTask,
+  resolveBoard,
   tick,
   undoTaskMerge,
   writeTaskReport
 } from './colony/runner'
 import { listEvents } from './colony/events'
 import { setProjectAutomerge, setProjectReport } from './config/colony'
-import { addTask, removeTask, type NewTask } from './colony/store'
+import { addTask, allTasks, boardOf, getTask, removeTask, type NewTask } from './colony/store'
 import { applyDelta, createDrawing, listDrawings, promoteDrawing, readDrawing, watchDraw } from './draw/index'
 import { watchChanges } from './reviewWatch'
 import { ensurePremiseFile, PREMISE_REL } from './premise'
@@ -1272,20 +1273,25 @@ export function registerTaskFoldersIpc(): void {
 
 // The colony board.
 export function registerColonyIpc(): void {
+  // Every `path` below is whatever worktree the renderer has selected (or the
+  // project root): `resolveBoard` turns it into the board it opens.
+  //
   // `colony:board` is the only read — the panel repaints from one shape, so a
   // card and the column counting it can never disagree.
-  handle('colony:board', async (event, project: string) => {
+  handle('colony:board', async (event, path: string) => {
+    const { board } = await resolveBoard(path)
     // A finished card merged outside the board is noticed on the read, so the
     // panel never shows as waiting what has already landed.
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
-    await reconcileMerged(win, project)
-    await reconcileLanded(win, project)
-    return boardFor(project)
+    await reconcileMerged(win, board)
+    await reconcileLanded(win, board)
+    return boardFor(board)
   })
-  handle('colony:clearDone', (event, project: string) => clearDone(winOf(event), project))
-  handle('colony:add', (event, task: NewTask) => {
-    const created = addTask(task)
-    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, task.project)
+  handle('colony:clearDone', async (event, path: string) => clearDone(winOf(event), (await resolveBoard(path)).board))
+  handle('colony:add', async (event, task: NewTask) => {
+    const { board, project } = await resolveBoard(task.project)
+    const created = addTask({ ...task, project, board })
+    pushBoard(winOf(event), board)
     return created
   })
   // Releasing cuts the worktree, which is why this one is async and `add` is not:
@@ -1294,34 +1300,37 @@ export function registerColonyIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win) throw new Error('No window to run the lane in.')
     const task = await releaseTask(win, id)
-    pushBoard(win, task.project)
+    pushBoard(win, boardOf(task))
     return task
   })
-  handle('colony:remove', (event, id: string, project: string) => {
+  handle('colony:remove', (event, id: string) => {
+    const task = getTask(id)
     removeTask(id)
-    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    if (task) pushBoard(winOf(event), boardOf(task))
   })
   // The board's own record of what it did unasked. Separate from `colony:board`
   // because it is a different question with a different lifetime: the board is
   // now, the log is what happened — and a merge that landed an hour ago is still
   // the thing you want to see when you come back to the machine.
-  handle('colony:events', (_event, project: string) => listEvents(project))
+  handle('colony:events', async (_event, path: string) => listEvents((await resolveBoard(path)).board))
   handle('colony:undoMerge', async (event, eventId: string) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
     return undoTaskMerge(win, eventId)
   })
   // The only config value Floe writes for you. See setProjectAutomerge: a kill
   // switch you have to find in a TOML file is not a kill switch.
-  handle('colony:setAutomerge', (event, project: string, on: boolean) => {
+  handle('colony:setAutomerge', async (event, path: string, on: boolean) => {
+    const { board, project } = await resolveBoard(path)
     const file = setProjectAutomerge(project, on)
-    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    pushBoard(winOf(event), board)
     return file
   })
   // The step report's switch. Same writer and the same reason as automerge: it is
   // flipped at the moment you decide to measure a run, not hunted for in a file.
-  handle('colony:setReport', (event, project: string, on: boolean) => {
+  handle('colony:setReport', async (event, path: string, on: boolean) => {
+    const { board, project } = await resolveBoard(path)
     const file = setProjectReport(project, on)
-    pushBoard(BrowserWindow.fromWebContents(event.sender) ?? undefined, project)
+    pushBoard(winOf(event), board)
     return file
   })
   // Written fresh every time, then opened: a card still running is exactly the
@@ -1339,13 +1348,16 @@ export function registerColonyIpc(): void {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined
     return mergeTask(win, id)
   })
-  handle('colony:nanny', (_event, project: string) => ({
-    ...nannyFor(project),
-    // The renderer sends it as the chat's opening message rather than main
-    // firing a turn here: a fresh nanny must not start talking to a panel that
-    // is not on screen yet.
-    opener: nannyOpener(project)
-  }))
+  handle('colony:nanny', async (_event, path: string) => {
+    const { board } = await resolveBoard(path)
+    return {
+      ...nannyFor(board),
+      // The renderer sends it as the chat's opening message rather than main
+      // firing a turn here: a fresh nanny must not start talking to a panel that
+      // is not on screen yet.
+      opener: nannyOpener(board)
+    }
+  })
 }
 
 // Live PTYs: terminals and command runs.
@@ -1673,9 +1685,11 @@ export function onConfigChanged(file: string): void {
 export function reconcileBoards(): void {
   const win = localWindow ?? BrowserWindow.getAllWindows()[0]
   if (!win || win.isDestroyed()) return
-  for (const project of projectScan().projects) {
-    tick(win, project.path)
-    pushBoard(win, project.path)
+  // Every board, not only the roots: a worktree's board reads the same config.
+  const boards = new Set([...projectScan().projects.map((p) => p.path), ...allTasks().map(boardOf)])
+  for (const board of boards) {
+    tick(win, board)
+    pushBoard(win, board)
   }
 }
 

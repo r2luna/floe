@@ -37,17 +37,21 @@ import type { OpenFn } from './panels'
  */
 export function ColonyBoard({
   project,
+  board: path,
   onOpen,
   onCommand
 }: {
+  /** The repo root: the ideas tab and the tab strip are per project. */
   project?: string
+  /** The worktree whose board this is — the project root for the main checkout's. */
+  board?: string
   onOpen: OpenFn
   onCommand?: (id: string) => void
 }) {
   const tab = useColonyTab(project)
-  const { board, loading, error } = useColony(project)
+  const { board, loading, error } = useColony(path)
   const { tasks } = useTaskFolders(project)
-  const events = useBoardEvents(tab === 'overview' ? project : undefined)
+  const events = useBoardEvents(tab === 'overview' ? board?.board : undefined)
 
   // The head's tab strip prints these. Written from here because this is the
   // one place that already has the board and the ideas loaded.
@@ -191,21 +195,21 @@ function ColonyKeys({ tab }: { tab: ColonyTab }) {
 }
 
 /** The board's log, for the overview's "landed today". Only loaded while that tab is up. */
-function useBoardEvents(project?: string): BoardEvent[] {
+function useBoardEvents(board?: string): BoardEvent[] {
   const [events, setEvents] = useState<BoardEvent[]>([])
   useEffect(() => {
-    if (!project) return setEvents([])
+    if (!board) return setEvents([])
     const load = (): void => {
       window.floe.colony
-        .events(project)
+        .events(board)
         .then(setEvents)
         .catch(() => setEvents([]))
     }
     load()
     return window.floe.colony.onEvent((e) => {
-      if (e.project === project) load()
+      if (e.board === board) load()
     })
-  }, [project])
+  }, [board])
   return events
 }
 

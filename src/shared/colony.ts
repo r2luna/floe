@@ -86,7 +86,10 @@ export interface BoardColumn {
 }
 
 export interface Board {
+  /** Repo root: where the board's config lives. */
   project: string
+  /** The worktree path this board belongs to. The project root is the main checkout's board. */
+  board: string
   columns: BoardColumn[]
   /**
    * Whether a card reaching `done` merges itself.

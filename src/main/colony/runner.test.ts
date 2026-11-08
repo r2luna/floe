@@ -72,6 +72,10 @@ interface Stubs {
   mergeBases: Map<string, string>
   /** Every `snapshotTree` call, in order. The Nth returns `treeN`. */
   snapshots: string[]
+  /** worktree path → the branch `checkedOutBranch` reports. Absent is a detached HEAD. */
+  branches: Map<string, string>
+  /** path → the top-level `repoRoot` reports. Absent is the path itself. */
+  roots: Map<string, string>
 }
 
 /**
@@ -108,7 +112,9 @@ const stubs: Stubs = {
   restoredBranches: [],
   bases: new Map(),
   mergeBases: new Map(),
-  snapshots: []
+  snapshots: [],
+  branches: new Map(),
+  roots: new Map()
 }
 ;(globalThis as unknown as { __colonyStubs: Stubs }).__colonyStubs = stubs
 
@@ -160,6 +166,8 @@ const SOURCES = {
     '  return s.undoResult(root, base)',
     '}',
     'const s = () => globalThis.__colonyStubs',
+    'export async function checkedOutBranch(path) { return s().branches.get(path) ?? null }',
+    'export async function repoRoot(path) { return s().roots.get(path) ?? path }',
     'export async function commitPaths(worktree, paths, message) { s().commits.push({ worktree, paths, message, turnsBefore: s().turns.length }); return true }',
     'export async function defaultBranch() { return "main" }',
     'export async function deleteBranch(root, branch) { s().deletedBranches.push(branch); return { ok: true } }',
@@ -242,7 +250,9 @@ const {
   overlappingTasks,
   reconcileColony,
   releaseTask,
+  resolveBoard,
   holdTask,
+  laneBranch,
   taskDirFor,
   tick,
   undoTaskMerge,
@@ -320,8 +330,8 @@ const lastListener = (): ((text: string) => void) => {
 }
 
 /** A card already in a stage, holding at its door with a tree behind it. */
-function holdingAt(root: string, stage: string, name: string): string {
-  const task = addTask({ project: root, name, brief: `do ${name}` })
+function holdingAt(root: string, stage: string, name: string, board?: string): string {
+  const task = addTask({ project: root, board, name, brief: `do ${name}` })
   patchTask(task.id, { stage, status: 'holding', worktreePath: tree(name), branch: `feat/${name}` })
   return task.id
 }
@@ -332,6 +342,14 @@ test('a lane reads and writes specs/<branch with slashes flattened>/', () => {
   assert.equal(taskDirFor('feature/DOS-12'), 'specs/feature-DOS-12')
   assert.equal(taskDirFor('fix/backgrounded-polling'), 'specs/fix-backgrounded-polling')
   assert.equal(taskDirFor('plain'), 'specs/plain')
+})
+
+test('a lane branch keeps its base prefix, except off a stable branch', () => {
+  const t = { kind: 'feat', name: 'login' } as const
+  assert.equal(laneBranch(t, undefined, 'main'), 'feat/login')
+  assert.equal(laneBranch(t, 'develop', 'main'), 'feat/login')
+  assert.equal(laneBranch(t, 'trunk', 'trunk'), 'feat/login')
+  assert.equal(laneBranch(t, 'enhancement/STP-123', 'main'), 'enhancement/STP-123-login')
 })
 
 // ---------------------------------------------------------------------------
@@ -594,7 +612,7 @@ test('COLONY: pass moves the card on, with the verdict recorded as one visit', (
   // `qa` is capped at 0 here, so the card is drawn at ITS door rather than in a
   // "done" pile back in coder — and nothing was dispatched.
   assert.equal(stubs.turns.length, turns)
-  assert.deepEqual(sent.at(-1), { channel: 'colony:event', payload: { project: root } })
+  assert.deepEqual(sent.at(-1), { channel: 'colony:event', payload: { project: root, board: root } })
 })
 
 test('passing the last stage settles the card in done', () => {
@@ -822,7 +840,7 @@ test('the nanny is one session per project, in the project root, minted once', (
 
 /** Run the microtasks a floated `settleDone` / `sweepReleases` leaves behind. */
 const settle = async (): Promise<void> => {
-  for (let i = 0; i < 8; i++) await Promise.resolve()
+  for (let i = 0; i < 16; i++) await Promise.resolve()
 }
 
 test('a card with an unmet dependency stays in the backlog instead of cutting a tree', async () => {
@@ -1297,7 +1315,7 @@ test('the prompt carries the resolved merge-base and the exact diff command, and
 
   await releaseTask(win, task.id)
   const prompt = stubs.turns.at(-1)?.prompt ?? ''
-  assert.match(prompt, /^Artifacts: specs\/feat-with-merge-base\/$/m)
+  assert.match(prompt, /^Artifacts: specs\/feat-parent-with-merge-base\/$/m)
   assert.match(prompt, /^Base: feat\/parent$/m)
   assert.match(prompt, /^Merge-base: abc1234def5678$/m)
   assert.match(prompt, /^Diff: git diff abc1234def5678$/m)
@@ -1398,7 +1416,7 @@ test('cleanup after a merge removes the tree and deletes the branch, and the car
   assert.ok(after?.archivedAt, 'archived, not deleted — dependents and the log point at it')
   assert.equal(after?.worktreePath, undefined)
   assert.deepEqual(stubs.teardowns.at(-1), { root, target: worktree })
-  assert.equal(stubs.deletedBranches.at(-1), 'feat/cleaned')
+  assert.equal(stubs.deletedBranches.at(-1), 'feat/parent-cleaned')
   assert.ok(listEvents(root).some((e) => e.kind === 'cleaned' && e.task === task.id))
   const onBoard = boardFor(root).columns.flatMap((c) => [...c.settled, ...c.holding, ...c.working, ...c.blocked])
   assert.equal(onBoard.some((t) => t.id === task.id), true, 'still in done until its base lands or you clear it')
@@ -1410,7 +1428,7 @@ test('cleanup after a merge removes the tree and deletes the branch, and the car
   assert.ok(merged)
   const undone = await undoTaskMerge(win, merged.id)
   assert.equal(undone.ok, true)
-  assert.deepEqual(stubs.restoredBranches.at(-1), { branch: 'feat/cleaned', sha: 'bbb2222' })
+  assert.deepEqual(stubs.restoredBranches.at(-1), { branch: 'feat/parent-cleaned', sha: 'bbb2222' })
   assert.equal(getTask(task.id)?.archivedAt, undefined)
   assert.match(getTask(task.id)?.line ?? '', /branch restored/)
 })
@@ -1602,4 +1620,114 @@ test('a card already past the first stage when the report went on is never measu
   assert.equal(getTask(id)?.report, undefined)
   assert.equal(stubs.turns.at(-1)?.prompt.includes('STEP REPORT'), false)
   assert.equal(stubs.snapshots.length, snapshots, 'no snapshot for an untracked step')
+})
+
+// ---------------------------------------------------------------------------
+// One board per worktree
+// ---------------------------------------------------------------------------
+
+test('a worktree board forks from the branch checked out there, unless the card names one', async () => {
+  const root = project(QA_CLOSED)
+  const board = join(root, '.worktrees', 'feat-x')
+  stubs.branches.set(board, 'feat/x')
+  stubs.worktreeFor = (_root, branch) => [{ path: tree(branch.replace(/\//g, '-')), branch }]
+
+  const forked = addTask({ project: root, board, name: 'from-x', brief: 'x' })
+  await releaseTask(win, forked.id)
+  // Cut in the project's repo, from the board's branch — and merged back there.
+  assert.equal(stubs.created.at(-1)?.root, root)
+  assert.equal(stubs.createOptions.at(-1)?.base, 'feat/x')
+  assert.equal(getTask(forked.id)?.base, 'feat/x')
+
+  const named = addTask({ project: root, board, name: 'named', brief: 'x', base: 'feat/other' })
+  await releaseTask(win, named.id)
+  assert.equal(stubs.createOptions.at(-1)?.base, 'feat/other')
+
+  // The main checkout's board leaves it to the project's main branch, as before.
+  const main = addTask({ project: root, name: 'on-main', brief: 'x' })
+  await releaseTask(win, main.id)
+  assert.equal(stubs.createOptions.at(-1)?.base, undefined)
+
+  // A detached board has no branch to land on — refuse rather than land on main.
+  const detached = join(root, '.worktrees', 'detached')
+  const lost = addTask({ project: root, board: detached, name: 'lost', brief: 'x' })
+  const cut = stubs.created.length
+  await assert.rejects(() => releaseTask(win, lost.id), /detached HEAD — name a base for "lost"/)
+  assert.equal(stubs.created.length, cut)
+  assert.match(getTask(lost.id)?.warn ?? '', /detached HEAD/)
+})
+
+test('each worktree board admits, shows and caps its own cards only', () => {
+  const root = project(QA_CLOSED)
+  const a = join(root, '.worktrees', 'a')
+  const b = join(root, '.worktrees', 'b')
+  const onA = holdingAt(root, 'coder', 'cap-a', a)
+  const onB = holdingAt(root, 'coder', 'cap-b', b)
+  const onRoot = holdingAt(root, 'coder', 'cap-root')
+
+  tick(win, a)
+  assert.equal(getTask(onA)?.status, 'working')
+  assert.equal(getTask(onB)?.status, 'holding')
+  assert.equal(getTask(onRoot)?.status, 'holding')
+  // Caps are per board: A's full coder is no reason for B's to wait.
+  tick(win, b)
+  assert.equal(getTask(onB)?.status, 'working')
+
+  const shown = boardFor(a)
+  assert.equal(shown.board, a)
+  assert.equal(shown.project, root)
+  const ids = shown.columns.flatMap((c) => [...c.blocked, ...c.working, ...c.holding, ...c.settled]).map((t) => t.id)
+  assert.deepEqual(ids, [onA])
+  assert.equal(compactBoard(a).board, a)
+})
+
+test('each board has its own nanny, living in its own tree', () => {
+  const root = project()
+  const a = join(root, '.worktrees', 'a')
+  const main = nannyFor(root)
+  const onA = nannyFor(a)
+  assert.notEqual(onA.sessionId, main.sessionId)
+  assert.equal(onA.worktreePath, a)
+  assert.equal(nannyFor(a).sessionId, onA.sessionId)
+  assert.equal(nannyFor(root).sessionId, main.sessionId)
+})
+
+test('a merge on a worktree board is logged, pushed and told on that board only', async () => {
+  const root = project(ONE_STAGE)
+  const a = join(root, '.worktrees', 'a')
+  stubs.branches.set(a, 'feat/a')
+  stubs.worktreeFor = (_root, branch) => [{ path: tree(branch.replace(/\//g, '-')), branch }]
+  const mainNanny = nannyFor(root)
+  const aNanny = nannyFor(a)
+  const task = addTask({ project: root, board: a, name: 'lands-on-a', brief: 'x' })
+  await releaseTask(win, task.id)
+  const before = stubs.turns.length
+  sent.length = 0
+
+  lastListener()('COLONY: pass')
+  await settle()
+  await new Promise((r) => setTimeout(r, 400))
+
+  assert.ok(getTask(task.id)?.mergedAt)
+  assert.ok(listEvents(a).some((e) => e.kind === 'merged' && e.task === task.id))
+  assert.equal(listEvents(root).some((e) => e.task === task.id), false)
+  assert.deepEqual(sent.at(-1), { channel: 'colony:event', payload: { project: root, board: a } })
+  const woken = stubs.turns.slice(before).map((t) => t.key)
+  assert.ok(woken.includes(aNanny.sessionId))
+  assert.equal(woken.includes(mainNanny.sessionId), false)
+})
+
+test('any path resolves to its board — a card\'s own tree to the board the card is on', async () => {
+  const root = project()
+  const a = join(root, '.worktrees', 'a')
+  assert.deepEqual(await resolveBoard(root), { board: root, project: root })
+  assert.deepEqual(await resolveBoard(a), { board: a, project: root })
+  // Inside a worktree is that worktree.
+  stubs.roots.set(join(a, 'src'), a)
+  assert.deepEqual(await resolveBoard(join(a, 'src')), { board: a, project: root })
+  // A lane calling with its own cwd lands on its card's board, not a new one.
+  const cardTree = join(root, '.worktrees', 'feat-card')
+  const id = holdingAt(root, 'coder', 'card', a)
+  patchTask(id, { worktreePath: cardTree })
+  assert.deepEqual(await resolveBoard(cardTree), { board: a, project: root })
 })

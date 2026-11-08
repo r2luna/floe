@@ -30,6 +30,7 @@ import {
   reconcileLanded,
   clearDone,
   releaseTask,
+  resolveBoard,
   unmetDeps,
   writeTaskReport
 } from './colony/runner'
@@ -49,6 +50,7 @@ import { cardLookup, sendDeps } from './taskFolderDeps'
 import { createTaskWorktree } from './taskWorktree'
 import {
   addTask,
+  boardOf,
   dependencyProblem,
   getTask,
   listTasks,
@@ -2050,13 +2052,17 @@ function registerDecisionTools(server: McpServer): void {
   )
 }
 
+/** What a colony tool's `project` argument selects. */
+const BOARD_PATH =
+  "The repo root (the main checkout's board) or a worktree path (that worktree's board). A card's own worktree resolves to the board the card is on."
+
 /** The per-task settings `colony_add_task` and `colony_update_task` share. */
 const TASK_SETTINGS = {
   base: z
     .string()
     .optional()
     .describe(
-      "The branch to cut this task from and merge it back into — a feature's parent branch, say. Must exist. Defaults to the project's main branch. It may be checked out in another worktree: the merge lands there."
+      "The branch to cut this task from and merge it back into — a feature's parent branch, say. Must exist. Defaults to the board's branch: the project's main branch on the main checkout's board, the worktree's branch on a worktree's board. It may be checked out in another worktree: the merge lands there."
     ),
   autonomous: z
     .boolean()
@@ -2094,16 +2100,16 @@ async function colonyAddTaskTool(a: TaskSettingsArgs & {
   start?: boolean
 }): Promise<ToolResult> {
   try {
-    const root = projectRoot(a.project)
+    const { board, project: root } = await resolveBoard(a.project)
     // Checked before the card exists: a typo'd id would silently become a
     // dependency on nothing, which reads on the board as "released, so it
     // must have been fine" — the one failure this whole field exists to stop.
-    const problem = dependencyProblem(root, undefined, a.dependsOn ?? []) ?? (await baseProblem(root, a.base))
+    const problem = dependencyProblem(board, undefined, a.dependsOn ?? []) ?? (await baseProblem(root, a.base))
     if (problem) return textResult({ error: problem })
-    const task = addTask({ ...a, project: root, kind: a.kind as TaskKind | undefined })
+    const task = addTask({ ...a, project: root, board, kind: a.kind as TaskKind | undefined })
     const win = getWindow()
     const out = a.start && win ? await releaseTask(win, task.id) : task
-    pushBoard(win, root)
+    pushBoard(win, board)
     return textResult(out)
   } catch (e) {
     return textResult({ error: (e as Error).message })
@@ -2123,7 +2129,7 @@ async function colonyUpdateTaskTool(a: TaskSettingsArgs & {
     const problem = await baseProblem(found.project, a.base)
     if (problem) return textResult({ error: problem })
     const updated = updateTask(a.task, { ...a, kind: a.kind as TaskKind | undefined })
-    pushBoard(getWindow(), found.project)
+    pushBoard(getWindow(), boardOf(found))
     return textResult(updated)
   } catch (e) {
     return textResult({ error: (e as Error).message })
@@ -2139,9 +2145,9 @@ function registerColonyTools(server: McpServer): void {
 
   server.tool(
     'colony_board',
-    "The project's colony board: every column with its skill, model and cap, and every task in it. Read this before answering anything about the board — the lanes move cards while you are idle, so a remembered board is a wrong one.",
+    "A colony board: every column with its skill, model and cap, and every task in it. Read this before answering anything about the board — the lanes move cards while you are idle, so a remembered board is a wrong one.",
     {
-      project: z.string().describe('The repo root path of the project (a worktree path works too).'),
+      project: z.string().describe(BOARD_PATH),
       compact: z
         .boolean()
         .optional()
@@ -2151,12 +2157,12 @@ function registerColonyTools(server: McpServer): void {
     },
     async ({ project, compact }) => {
       try {
-        const root = projectRoot(project)
+        const { board } = await resolveBoard(project)
         // A finished card merged by hand is merged: noticed here, where the board
         // is read on request, so its dependents are already released in this answer.
-        await reconcileMerged(getWindow(), root)
-        await reconcileLanded(getWindow(), root)
-        return textResult(compact ? compactBoard(root) : boardFor(root))
+        await reconcileMerged(getWindow(), board)
+        await reconcileLanded(getWindow(), board)
+        return textResult(compact ? compactBoard(board) : boardFor(board))
       } catch (e) {
         return textResult({ error: (e as Error).message })
       }
@@ -2167,7 +2173,7 @@ function registerColonyTools(server: McpServer): void {
     'colony_add_task',
     'Put a task on the board. With start=true it is released straight away: its worktree and branch are cut, its brief is written to specs/<branch>/task.md, and it goes to the first stage. Without it, it waits in the backlog and costs nothing.',
     {
-      project: z.string().describe('The repo root path of the project.'),
+      project: z.string().describe(BOARD_PATH),
       name: z
         .string()
         .describe("Short kebab-case name — the branch's last segment. What the change IS, not what it fixes."),
@@ -2211,7 +2217,7 @@ function registerColonyTools(server: McpServer): void {
         const win = getWindow()
         if (!win) return textResult({ error: 'No window available to cut a worktree in.' })
         const released = await releaseTask(win, task)
-        pushBoard(win, released.project)
+        pushBoard(win, boardOf(released))
         return textResult(released)
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -2228,7 +2234,7 @@ function registerColonyTools(server: McpServer): void {
         const found = getTask(task)
         if (!found) return textResult({ error: `Unknown task: ${task}` })
         removeTask(task)
-        pushBoard(getWindow(), found.project)
+        pushBoard(getWindow(), boardOf(found))
         return textResult({ ok: true, removed: found.name })
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -2239,10 +2245,10 @@ function registerColonyTools(server: McpServer): void {
   server.tool(
     'colony_clear_done',
     "Clear every merged card off `done`. Merged cards otherwise stay there, worktree cleaned up or not, until their base branch lands on the project's main branch. A card in `done` that did not merge stays. Nothing in git is touched.",
-    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    { project: z.string().describe(BOARD_PATH) },
     async ({ project }) => {
       try {
-        const cleared = clearDone(getWindow(), projectRoot(project))
+        const cleared = clearDone(getWindow(), (await resolveBoard(project)).board)
         return textResult({ ok: true, cleared: cleared.map((t) => t.name) })
       } catch (e) {
         return textResult({ error: (e as Error).message })
@@ -2272,11 +2278,10 @@ function registerColonyLandingTools(server: McpServer): void {
   server.tool(
     'colony_conflicts',
     "Live tasks whose worktrees are changing the SAME files, grouped by the tasks that share them. Read this before starting parallel work and before deciding a merge order: two cards in this list will conflict at the second merge, and the fix is to merge one first or to have declared dependsOn in the first place. Runs git in every worktree, so ask for it when the order matters — not on every board read.",
-    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    { project: z.string().describe(BOARD_PATH) },
     async ({ project }) => {
       try {
-        const root = projectRoot(project)
-        const overlaps = await overlappingTasks(root)
+        const overlaps = await overlappingTasks((await resolveBoard(project)).board)
         return textResult({
           overlaps,
           note: overlaps.length
@@ -2292,12 +2297,12 @@ function registerColonyLandingTools(server: McpServer): void {
   server.tool(
     'colony_pending',
     "What the board is waiting on: every task that is done but not merged, and every task queued behind a dependency that has not landed. This is the manager's own worklist — read it when you are asked what to do next, or after anything merges.",
-    { project: z.string().describe('The repo root path of the project (a worktree path works too).') },
+    { project: z.string().describe(BOARD_PATH) },
     async ({ project }) => {
       try {
-        const root = projectRoot(project)
-        await reconcileMerged(getWindow(), root)
-        const tasks = listTasks(root)
+        const { board } = await resolveBoard(project)
+        await reconcileMerged(getWindow(), board)
+        const tasks = listTasks(board)
         return textResult({
           mergeable: tasks
             .filter((t) => t.stage === DONE && !t.mergedAt)
@@ -2329,9 +2334,9 @@ function registerColonyReportTools(server: McpServer): void {
     },
     async ({ project, on }) => {
       try {
-        const root = projectRoot(project)
+        const { board, project: root } = await resolveBoard(project)
         const file = setProjectReport(root, on)
-        pushBoard(getWindow(), root)
+        pushBoard(getWindow(), board)
         return textResult({ ok: true, report: on, file })
       } catch (e) {
         return textResult({ error: (e as Error).message })

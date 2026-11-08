@@ -124,8 +124,13 @@ export interface CommandContext {
   worktree?: { path: string; branch: string }
   /** Ask the worktree's chat to commit its changes, opening a chat if none is. */
   commit: () => void
-  /** The open project's repo root. The colony board is scoped to it. */
+  /** The open project's repo root. */
   project?: string
+  /**
+   * The colony board's path: the worktree picked in the sidebar, else the
+   * project root. Main resolves it — a card's own worktree is its card's board.
+   */
+  board?: string
   /**
    * Put a session in the lane's session slot.
    *

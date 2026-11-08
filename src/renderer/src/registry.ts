@@ -2146,7 +2146,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.project,
         unavailable: () => 'the nanny belongs to a project — open one first',
         run: (c) => {
-          const project = c.project
+          const project = c.board ?? c.project
           if (!project) return
           void window.floe.colony
             .nanny(project)
@@ -2166,7 +2166,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.project,
         unavailable: () => 'automerge belongs to a project board — open one first',
         run: (c) => {
-          const project = c.project
+          const project = c.board ?? c.project
           if (!project) return
           // Read the board rather than tracking the value here: it is three
           // config layers deep, and a toggle that flipped a remembered value
@@ -2187,7 +2187,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.project,
         unavailable: () => 'the step report belongs to a project board — open one first',
         run: (c) => {
-          const project = c.project
+          const project = c.board ?? c.project
           if (!project) return
           void window.floe.colony
             .board(project)
@@ -2215,7 +2215,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.project,
         unavailable: () => 'done belongs to a project board — open one first',
         run: (c) => {
-          const project = c.project
+          const project = c.board ?? c.project
           if (!project) return
           void window.floe.colony
             .clearDone(project)
@@ -2251,7 +2251,7 @@ export const REGISTRY: Map<string, Command> = new Map(
         enabled: (c) => !!c.project,
         unavailable: () => 'a task belongs to a project — open one first',
         run: (c) => {
-          const project = c.project
+          const project = c.board ?? c.project
           if (!project) return
           void window.floe.colony
             .nanny(project)
@@ -2342,12 +2342,11 @@ export const REGISTRY: Map<string, Command> = new Map(
         unavailable: () => 'put the cursor on a task first',
         run: (c) => {
           const id = taskRow(c)?.dataset.task
-          const project = c.project
-          if (!id || !project) return
+          if (!id) return
           // The worktree is deliberately left standing. A card leaving the board
           // is a bookkeeping change; deleting a branch with work on it is not,
           // and the removal flow is where that question gets asked properly.
-          void window.floe.colony.remove(id, project).catch((err: unknown) => c.say(reason(err)))
+          void window.floe.colony.remove(id).catch((err: unknown) => c.say(reason(err)))
         }
       },
       {

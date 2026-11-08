@@ -47,11 +47,12 @@ const clock = (at: number): string =>
   new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
 export function ColonyLog({
-  project,
+  board,
   onEnterWorktree,
   onOpen
 }: {
-  project?: string
+  /** The board's path — the nanny's own tree. */
+  board?: string
   /** How a row goes to the branch it is about. */
   onEnterWorktree?: (path: string, launcher?: boolean) => 'chat' | 'launcher' | 'none'
   /** The panel opener every panel body gets — how a row puts the diff on screen. */
@@ -65,21 +66,21 @@ export function ColonyLog({
   const [failed, setFailed] = useState<{ id: string; message: string } | null>(null)
 
   const load = useCallback((): void => {
-    if (!project) return setEvents([])
+    if (!board) return setEvents([])
     void window.floe.colony
-      .events(project)
+      .events(board)
       .then(setEvents)
       .catch(() => setEvents([]))
-  }, [project])
+  }, [board])
 
   useEffect(() => {
     load()
     // The board moves while nobody is looking at it — that is the entire point
     // of this panel — so the same push that repaints the board reloads the log.
     return window.floe.colony.onEvent((e) => {
-      if (e.project === project) load()
+      if (e.board === board) load()
     })
-  }, [project, load])
+  }, [board, load])
 
   const act = (id: string, run: () => Promise<{ ok: boolean; message?: string }>): void => {
     setBusy(id)
@@ -110,7 +111,7 @@ export function ColonyLog({
     if (alsoChanges) setTimeout(() => onOpen?.({ kind: 'changes' }), 80)
   }
 
-  if (!project) return null
+  if (!board) return null
   const shown = events.slice(Math.max(0, events.length - SHOWN))
 
   return (

@@ -7,13 +7,14 @@
 // order, and her turn can fail. An event is a fact with a timestamp.
 //
 // Beside `colony.json` and read the same way: one JSON file through an
-// mtime-checked cache, written temp-then-rename. Capped per project, because a
+// mtime-checked cache, written temp-then-rename. Capped per board, because a
 // board that has been running for months is not a board whose first merge
 // anybody is scrolling back to.
 
 import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { dataDir } from '../dataDir'
+import { boardOf } from './store'
 
 /**
  * What the board did. Each is something that happened WITHOUT the user asking,
@@ -37,7 +38,10 @@ export type BoardEventKind =
 
 export interface BoardEvent {
   id: string
+  /** Repo root — what the git calls (undo) run in. */
   project: string
+  /** The board it happened on. Unset is `project`, for events from before boards were split. */
+  board?: string
   at: number
   kind: BoardEventKind
   /** The task id, so a row can act on the card it is about. */
@@ -66,7 +70,7 @@ interface Store {
   events: BoardEvent[]
 }
 
-/** Per project. A long-running board should not push another one's history out. */
+/** Per board. A long-running board should not push another one's history out. */
 const KEEP = 200
 
 const storeFile = (): string => join(dataDir(), 'colony-events.json')
@@ -122,18 +126,19 @@ export function recordEvent(event: Omit<BoardEvent, 'id' | 'at'> & { at?: number
     at,
     id: `ev_${at.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   }
-  // Trim this project only, and by age. `events` stays in arrival order across
-  // projects, which is what makes the whole file readable when something is
+  // Trim this board only, and by age. `events` stays in arrival order across
+  // boards, which is what makes the whole file readable when something is
   // wrong with it.
-  const mine = store.events.filter((e) => e.project === event.project)
+  const board = boardOf(event)
+  const mine = store.events.filter((e) => boardOf(e) === board)
   const drop = new Set(mine.slice(0, Math.max(0, mine.length + 1 - KEEP)).map((e) => e.id))
   write({ events: [...store.events.filter((e) => !drop.has(e.id)), created] })
   return created
 }
 
-/** One project's log, oldest first — the order the panel draws it in. */
-export function listEvents(project: string, limit = KEEP): BoardEvent[] {
-  const mine = read().events.filter((e) => e.project === project)
+/** One board's log, oldest first — the order the panel draws it in. */
+export function listEvents(board: string, limit = KEEP): BoardEvent[] {
+  const mine = read().events.filter((e) => boardOf(e) === board)
   return mine.slice(Math.max(0, mine.length - limit))
 }
 

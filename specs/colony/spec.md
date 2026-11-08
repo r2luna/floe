@@ -1,7 +1,8 @@
-# Colony — the agent board, one per project
+# Colony — the agent board, one per worktree
 
 A kanban board where every column is an **agent profile** and every card is a **task
-that owns its own worktree**. The board is project-scoped: switching projects switches
+that owns its own worktree**. The board is worktree-scoped (D38): the main checkout
+has one, every feature worktree has its own, and switching worktrees switches
 boards. The tasks are created by talking to the **nanny**, the board's own session,
 which is also who answers "what is holding" across every column.
 
@@ -200,6 +201,7 @@ Three things the manual toolkit did not have to solve, and this one does:
 | **D35** | A `merged` event carries the base branch and where it pointed **before and after**, and its row offers an undo that **refuses once base has moved on** | Both commits, not just the old one: resetting past whatever landed after the merge is not an undo, it is a second accident — and the board merges on its own, so the gap between the merge and the undo is exactly the gap another lane can finish in. The branch is moved, not reverted, so the work stays on the task branch: this un-lands it rather than deleting it. |
 | **D36** | `automerge` is stated on the board and switchable from it — the one config value Floe writes for you | A kill switch you have to find in a TOML file is not a kill switch. It is also the only setting whose value has to be *visible*: cards landing on your base branch by themselves is not something you can have agreed to without being told. The strip says it in prose rather than wearing an icon, because "automerge" as a glyph tells you nothing. The key is written ABOVE the first `[[stage]]` header — TOML scopes a bare key to the table above it, so the same line at the bottom of a file with stages silently becomes `stage.automerge`: a value nothing reads, on a board that carries on merging. |
 | **D37** | Every log row offers only actions that are REAL, and `show what is uncommitted` is offered on a refusal but never on a merge | A dead affordance in the one panel whose job is being trustworthy costs more than a missing one. After a merge the branch and base agree, so the changes panel would open empty and read as "nothing landed" — the honest place for it is the refusal, where uncommitted work in the lane's tree is usually the reason. `hold it again` on an auto-release parks the card and KEEPS its worktree: cutting it was the expensive part and a lane may already have run in it. |
+| **D38** | **One board per worktree path**: cards, the nanny and the log each belong to exactly one worktree; `colony.toml` stays per project | A board opened in a feature worktree showed — and fought with — the work started from the main checkout. The key is the PATH, not the branch: a branch can move between trees, a tree is where the nanny lives. The main checkout is the project root's board and keeps every existing card. A worktree's board starts empty, and a card on it with no `base` is cut from — and merged back into — that worktree's branch (a detached HEAD refuses rather than falling back to main); an explicit `base` still wins. A card's own worktree is never a board: a path inside it resolves to the board the card is on. Caps count per board. |
 
 ## Still open
 
@@ -207,4 +209,7 @@ Three things the manual toolkit did not have to solve, and this one does:
 - **Q2** — ~~what advances a card~~ → the `COLONY:` hand-off line above. Still open:
   what happens when a lane's turn dies without one, beyond "pass with a warning".
 - **Q3** — where per-task state lives (which stage, how many passes, its history).
+  Answered: `<dataDir>/colony.json` (see `colony/store.ts`), each task keyed by its
+  **board** — the worktree path the board was opened in. The project root is the
+  main checkout's board, so a record with no board is on it (D38).
 - **Q4** — does a task ever move backwards, and does the board show that it did.
