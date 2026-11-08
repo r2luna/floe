@@ -248,6 +248,7 @@ const {
   releaseTask,
   resolveBoard,
   holdTask,
+  laneBranch,
   taskDirFor,
   tick,
   undoTaskMerge,
@@ -337,6 +338,14 @@ test('a lane reads and writes specs/<branch with slashes flattened>/', () => {
   assert.equal(taskDirFor('feature/DOS-12'), 'specs/feature-DOS-12')
   assert.equal(taskDirFor('fix/backgrounded-polling'), 'specs/fix-backgrounded-polling')
   assert.equal(taskDirFor('plain'), 'specs/plain')
+})
+
+test('a lane branch keeps its base prefix, except off a stable branch', () => {
+  const t = { kind: 'feat', name: 'login' } as const
+  assert.equal(laneBranch(t, undefined, 'main'), 'feat/login')
+  assert.equal(laneBranch(t, 'develop', 'main'), 'feat/login')
+  assert.equal(laneBranch(t, 'trunk', 'trunk'), 'feat/login')
+  assert.equal(laneBranch(t, 'enhancement/STP-123', 'main'), 'enhancement/STP-123-login')
 })
 
 // ---------------------------------------------------------------------------
@@ -1368,7 +1377,7 @@ test('cleanup after a merge removes the tree and deletes the branch, and the car
   assert.ok(after?.archivedAt, 'archived, not deleted — dependents and the log point at it')
   assert.equal(after?.worktreePath, undefined)
   assert.deepEqual(stubs.teardowns.at(-1), { root, target: worktree })
-  assert.equal(stubs.deletedBranches.at(-1), 'feat/cleaned')
+  assert.equal(stubs.deletedBranches.at(-1), 'feat/parent-cleaned')
   assert.ok(listEvents(root).some((e) => e.kind === 'cleaned' && e.task === task.id))
   const onBoard = boardFor(root).columns.flatMap((c) => [...c.settled, ...c.holding, ...c.working, ...c.blocked])
   assert.equal(onBoard.some((t) => t.id === task.id), true, 'still in done until its base lands or you clear it')
@@ -1380,7 +1389,7 @@ test('cleanup after a merge removes the tree and deletes the branch, and the car
   assert.ok(merged)
   const undone = await undoTaskMerge(win, merged.id)
   assert.equal(undone.ok, true)
-  assert.deepEqual(stubs.restoredBranches.at(-1), { branch: 'feat/cleaned', sha: 'bbb2222' })
+  assert.deepEqual(stubs.restoredBranches.at(-1), { branch: 'feat/parent-cleaned', sha: 'bbb2222' })
   assert.equal(getTask(task.id)?.archivedAt, undefined)
   assert.match(getTask(task.id)?.line ?? '', /branch restored/)
 })

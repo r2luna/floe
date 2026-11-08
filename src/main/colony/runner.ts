@@ -289,8 +289,7 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
       pushBoard(win, boardOf(task))
       throw err
     })
-    // `<kind>/<name>` — the branch says what the change IS before you read it.
-    const worktrees = await createWorktree(task.project, `${task.kind}/${task.name}`, {
+    const worktrees = await createWorktree(task.project, laneBranch(task, base, await defaultBranch(task.project)), {
       note: task.brief.slice(0, 80),
       base
     })
@@ -329,6 +328,19 @@ export async function releaseTask(win: BrowserWindow, id: string): Promise<Colon
   })
   tick(win, boardOf(task))
   return moved ?? task
+}
+
+const STABLE_BRANCHES = new Set(['main', 'master', 'develop', 'development', 'stable', 'trunk'])
+
+/**
+ * The branch a card gets. Cut from a stable branch it is `<kind>/<name>` — the
+ * branch says what the change IS before you read it. Cut from a feature branch
+ * it is `<base>-<name>`, so `enhancement/STP-123` forks into
+ * `enhancement/STP-123-<name>` and the family stays together.
+ */
+export function laneBranch(task: Pick<ColonyTask, 'kind' | 'name'>, base: string | undefined, main: string): string {
+  if (!base || base === main || STABLE_BRANCHES.has(base)) return `${task.kind}/${task.name}`
+  return `${base}-${task.name}`
 }
 
 /**
