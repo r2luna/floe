@@ -1315,7 +1315,7 @@ test('the prompt carries the resolved merge-base and the exact diff command, and
 
   await releaseTask(win, task.id)
   const prompt = stubs.turns.at(-1)?.prompt ?? ''
-  assert.match(prompt, /^Artifacts: specs\/feat-with-merge-base\/$/m)
+  assert.match(prompt, /^Artifacts: specs\/feat-parent-with-merge-base\/$/m)
   assert.match(prompt, /^Base: feat\/parent$/m)
   assert.match(prompt, /^Merge-base: abc1234def5678$/m)
   assert.match(prompt, /^Diff: git diff abc1234def5678$/m)
